@@ -48,6 +48,7 @@ fn AppInner() -> impl IntoView {
                 <ParentRoute path=path!("/components") view=Layout>
                     <Route path=path!("/") view=AccordionDemo />
                     <Route path=path!("/accordion") view=AccordionDemo />
+                    <Route path=path!("/app-shell") view=AppShellDemo />
                     <Route path=path!("/alert") view=AlertDemo />
                     <Route path=path!("/auto-complete") view=AutoCompleteDemo />
                     <Route path=path!("/avatar") view=AvatarDemo />

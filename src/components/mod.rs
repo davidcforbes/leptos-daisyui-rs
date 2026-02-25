@@ -1,5 +1,6 @@
 //! daisyUI components
 
+mod app_shell;
 mod accordion;
 mod alert;
 mod auto_complete;
@@ -93,6 +94,7 @@ mod tooltip;
 mod upload_file;
 mod validator;
 
+pub use app_shell::*;
 pub use accordion::*;
 pub use alert::*;
 pub use auto_complete::*;

@@ -533,6 +533,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
             title: "Layout",
             items: vec![
                 ComponentItem {
+                    name: "AppShell",
+                    href: "/components/app-shell",
+                    value: "app-shell",
+                },
+                ComponentItem {
                     name: "Divider",
                     href: "/components/divider",
                     value: "divider",

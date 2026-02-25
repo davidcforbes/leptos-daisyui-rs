@@ -1,3 +1,4 @@
+pub mod app_shell;
 pub mod accordion;
 pub mod alert;
 pub mod auto_complete;
@@ -75,6 +76,7 @@ pub mod toggle;
 pub mod tooltip;
 pub mod validator;
 
+pub use app_shell::*;
 pub use accordion::*;
 pub use alert::*;
 pub use auto_complete::*;
