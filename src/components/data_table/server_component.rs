@@ -356,7 +356,7 @@ fn ServerPaginationControls(
 }
 
 /// Represents a page number or ellipsis in pagination
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum PageItem {
     Page(i64),
     Ellipsis,
@@ -406,4 +406,154 @@ fn build_page_range(current: i64, total: i64) -> Vec<PageItem> {
     }
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper: extract page numbers from PageItem vec, using -1 for Ellipsis
+    fn to_nums(items: &[PageItem]) -> Vec<i64> {
+        items
+            .iter()
+            .map(|item| match item {
+                PageItem::Page(n) => *n,
+                PageItem::Ellipsis => -1,
+            })
+            .collect()
+    }
+
+    // ── Single page ──
+
+    #[test]
+    fn one_total_page() {
+        let result = build_page_range(1, 1);
+        assert_eq!(to_nums(&result), vec![1]);
+    }
+
+    // ── Small ranges (total <= 7, no ellipsis) ──
+
+    #[test]
+    fn five_pages_current_1() {
+        let result = build_page_range(1, 5);
+        assert_eq!(to_nums(&result), vec![1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn five_pages_current_3() {
+        let result = build_page_range(3, 5);
+        assert_eq!(to_nums(&result), vec![1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn five_pages_current_5() {
+        let result = build_page_range(5, 5);
+        assert_eq!(to_nums(&result), vec![1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn seven_pages_all_shown() {
+        let result = build_page_range(4, 7);
+        assert_eq!(to_nums(&result), vec![1, 2, 3, 4, 5, 6, 7]);
+    }
+
+    // ── Large ranges with ellipsis (total > 7) ──
+
+    #[test]
+    fn ten_pages_current_1() {
+        // current=1, neighbors=[1,2], always first=1 last=10
+        // pages: [1, 2, 10] -> [1, 2, ..., 10]
+        let result = build_page_range(1, 10);
+        assert_eq!(to_nums(&result), vec![1, 2, -1, 10]);
+    }
+
+    #[test]
+    fn ten_pages_current_5() {
+        // current=5, neighbors=[4,5,6], always first=1 last=10
+        // pages: [1, 4, 5, 6, 10] -> [1, ..., 4, 5, 6, ..., 10]
+        let result = build_page_range(5, 10);
+        assert_eq!(to_nums(&result), vec![1, -1, 4, 5, 6, -1, 10]);
+    }
+
+    #[test]
+    fn ten_pages_current_10() {
+        // current=10, neighbors=[9,10], always first=1 last=10
+        // pages: [1, 9, 10] -> [1, ..., 9, 10]
+        let result = build_page_range(10, 10);
+        assert_eq!(to_nums(&result), vec![1, -1, 9, 10]);
+    }
+
+    #[test]
+    fn ten_pages_current_2() {
+        // current=2, neighbors=[1,2,3], always first=1 last=10
+        // pages: [1, 2, 3, 10] -> [1, 2, 3, ..., 10]
+        let result = build_page_range(2, 10);
+        assert_eq!(to_nums(&result), vec![1, 2, 3, -1, 10]);
+    }
+
+    #[test]
+    fn ten_pages_current_9() {
+        // current=9, neighbors=[8,9,10], always first=1 last=10
+        // pages: [1, 8, 9, 10] -> [1, ..., 8, 9, 10]
+        let result = build_page_range(9, 10);
+        assert_eq!(to_nums(&result), vec![1, -1, 8, 9, 10]);
+    }
+
+    #[test]
+    fn twenty_pages_current_10() {
+        // current=10, neighbors=[9,10,11], always first=1 last=20
+        // pages: [1, 9, 10, 11, 20] -> [1, ..., 9, 10, 11, ..., 20]
+        let result = build_page_range(10, 20);
+        assert_eq!(to_nums(&result), vec![1, -1, 9, 10, 11, -1, 20]);
+    }
+
+    // ── Edge: current near first or last with gap of exactly 1 ──
+
+    #[test]
+    fn ten_pages_current_3_no_left_ellipsis() {
+        // current=3, neighbors=[2,3,4], always first=1 last=10
+        // pages: [1, 2, 3, 4, 10] -> [1, 2, 3, 4, ..., 10]
+        let result = build_page_range(3, 10);
+        assert_eq!(to_nums(&result), vec![1, 2, 3, 4, -1, 10]);
+    }
+
+    #[test]
+    fn ten_pages_current_8_no_right_ellipsis() {
+        // current=8, neighbors=[7,8,9], always first=1 last=10
+        // pages: [1, 7, 8, 9, 10] -> [1, ..., 7, 8, 9, 10]
+        let result = build_page_range(8, 10);
+        assert_eq!(to_nums(&result), vec![1, -1, 7, 8, 9, 10]);
+    }
+
+    // ── Two pages ──
+
+    #[test]
+    fn two_pages_current_1() {
+        let result = build_page_range(1, 2);
+        assert_eq!(to_nums(&result), vec![1, 2]);
+    }
+
+    #[test]
+    fn two_pages_current_2() {
+        let result = build_page_range(2, 2);
+        assert_eq!(to_nums(&result), vec![1, 2]);
+    }
+
+    // ── PageItem PartialEq ──
+
+    #[test]
+    fn page_item_page_equality() {
+        assert_eq!(PageItem::Page(5), PageItem::Page(5));
+        assert_ne!(PageItem::Page(5), PageItem::Page(6));
+    }
+
+    #[test]
+    fn page_item_ellipsis_equality() {
+        assert_eq!(PageItem::Ellipsis, PageItem::Ellipsis);
+    }
+
+    #[test]
+    fn page_item_page_ne_ellipsis() {
+        assert_ne!(PageItem::Page(1), PageItem::Ellipsis);
+    }
 }
