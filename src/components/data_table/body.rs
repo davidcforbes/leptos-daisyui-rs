@@ -68,12 +68,32 @@ pub fn DataTableBody(
                         view! {
                             <tr class=row_class>
                                 {cols.iter().map(|col| {
-                                    let cell_value = row.get(col.id).map(|s| s.as_str()).unwrap_or("");
+                                    let cell_value = row.get(col.id).cloned().unwrap_or_default();
                                     let cell_class = merge_classes!(body_cell_class, col.class.unwrap_or(""));
 
+                                    // Build truncation style if enabled
+                                    let truncate_style = if col.truncate {
+                                        let max_w = col.max_width.map(|w| format!("max-width: {}px; ", w)).unwrap_or_default();
+                                        Some(format!("{}overflow: hidden; text-overflow: ellipsis; white-space: nowrap;", max_w))
+                                    } else {
+                                        None
+                                    };
+
+                                    // Title attribute for native tooltip when truncated
+                                    let title_attr = if col.truncate {
+                                        Some(cell_value.clone())
+                                    } else {
+                                        None
+                                    };
+
+                                    let content = {
+                                        let v = cell_value.clone();
+                                        view! { {v} }
+                                    };
+
                                     view! {
-                                        <td class=cell_class>
-                                            {cell_value}
+                                        <td class=cell_class style=truncate_style title=title_attr>
+                                            {content}
                                         </td>
                                     }
                                 }).collect_view()}

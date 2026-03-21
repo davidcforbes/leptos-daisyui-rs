@@ -13,6 +13,12 @@ pub struct Column {
     pub min_width: Option<u32>,
     /// Additional CSS classes for this column
     pub class: Option<&'static str>,
+    /// Whether to truncate text with ellipsis
+    pub truncate: bool,
+    /// Maximum width in pixels (used with truncate)
+    pub max_width: Option<u32>,
+    /// Index into the cell_renderers vec (None = plain text)
+    pub renderer_index: Option<usize>,
 }
 
 impl Column {
@@ -24,6 +30,9 @@ impl Column {
             sortable: true,
             min_width: None,
             class: None,
+            truncate: false,
+            max_width: None,
+            renderer_index: None,
         }
     }
 
@@ -35,6 +44,9 @@ impl Column {
             sortable: false,
             min_width: None,
             class: None,
+            truncate: false,
+            max_width: None,
+            renderer_index: None,
         }
     }
 
@@ -47,6 +59,24 @@ impl Column {
     /// Set CSS class
     pub fn with_class(mut self, class: &'static str) -> Self {
         self.class = Some(class);
+        self
+    }
+
+    /// Enable text truncation with ellipsis
+    pub fn with_truncate(mut self) -> Self {
+        self.truncate = true;
+        self
+    }
+
+    /// Set maximum width in pixels (used with truncate)
+    pub fn with_max_width(mut self, width: u32) -> Self {
+        self.max_width = Some(width);
+        self
+    }
+
+    /// Set the renderer index (indexes into a separate cell_renderers vec)
+    pub fn with_renderer(mut self, index: usize) -> Self {
+        self.renderer_index = Some(index);
         self
     }
 }
@@ -139,6 +169,8 @@ pub struct DataTableTexts {
     pub next: &'static str,
     /// Page indicator format (use {current} and {total} placeholders)
     pub page_indicator: &'static str,
+    /// Search input placeholder text
+    pub search_placeholder: &'static str,
 }
 
 impl Default for DataTableTexts {
@@ -149,6 +181,7 @@ impl Default for DataTableTexts {
             previous: "Previous",
             next: "Next",
             page_indicator: "Page {current} of {total}",
+            search_placeholder: "Search...",
         }
     }
 }

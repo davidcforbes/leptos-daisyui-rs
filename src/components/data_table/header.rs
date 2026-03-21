@@ -50,6 +50,7 @@ pub fn DataTableHeader(
                         view! {
                             <th
                                 class=cell_class
+                                role="columnheader"
                                 aria-sort=aria_sort
                                 style=min_width_style
                                 on:click=move |_| {

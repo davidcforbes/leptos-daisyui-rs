@@ -7,6 +7,7 @@ use crate::components::data_table::types::{
 use crate::components::table::{Table, TableSize};
 use crate::merge_classes;
 use leptos::{html::Div, prelude::*};
+use web_sys::wasm_bindgen::JsCast;
 
 /// # DataTable Component
 ///
@@ -110,6 +111,14 @@ pub fn DataTable(
     #[prop(optional, into)]
     pin_cols: Signal<bool>,
 
+    /// Maximum height for viewport-constrained scrolling (e.g. "calc(100vh - 260px)")
+    #[prop(optional, into)]
+    max_height: Option<String>,
+
+    /// Enable client-side search filtering
+    #[prop(optional, into)]
+    searchable: Signal<bool>,
+
     /// Node reference to container element
     #[prop(optional)]
     node_ref: NodeRef<Div>,
@@ -133,14 +142,63 @@ pub fn DataTable(
     let (sort_column, set_sort_column) = signal(Option::<&'static str>::None);
     let (sort_order, set_sort_order) = signal(SortOrder::default());
 
+    // Search state with debounce
+    let (search_query, set_search_query) = signal(String::new());
+    let (debounced_search, set_debounced_search) = signal(String::new());
+    let (debounce_handle, set_debounce_handle) = signal(Option::<i32>::None);
+
+    let on_search_input = move |ev: leptos::ev::Event| {
+        let target = ev.target().unwrap();
+        let input: web_sys::HtmlInputElement = target.unchecked_into();
+        let value = input.value();
+        set_search_query.set(value.clone());
+
+        // Clear previous timer
+        if let Some(handle) = debounce_handle.get_untracked() {
+            let window = web_sys::window().unwrap();
+            window.clear_timeout_with_handle(handle);
+        }
+
+        // Set new 300ms debounce timer
+        let cb = wasm_bindgen::closure::Closure::once_into_js(move || {
+            set_debounced_search.set(value);
+            set_current_page.set(0);
+        });
+        let window = web_sys::window().unwrap();
+        let handle = window
+            .set_timeout_with_callback_and_timeout_and_arguments_0(
+                cb.as_ref().unchecked_ref(),
+                300,
+            )
+            .unwrap();
+        set_debounce_handle.set(Some(handle));
+    };
+
     // Reset to page 1 when data changes
     Effect::new(move |_| {
         let _ = data.get();
         set_current_page.set(0);
     });
 
-    // Filtered indices (all rows for now - placeholder for future filtering)
-    let filtered_indices = Memo::new(move |_| (0..data.get().len()).collect::<Vec<usize>>());
+    // Filtered indices — applies search filter when searchable
+    let filtered_indices = Memo::new(move |_| {
+        let all_data = data.get();
+        let query = debounced_search.get();
+        if query.is_empty() {
+            (0..all_data.len()).collect::<Vec<usize>>()
+        } else {
+            let q = query.to_lowercase();
+            (0..all_data.len())
+                .filter(|&i| {
+                    if let Some(row) = all_data.get(i) {
+                        row.values().any(|v| v.to_lowercase().contains(&q))
+                    } else {
+                        false
+                    }
+                })
+                .collect::<Vec<usize>>()
+        }
+    });
 
     // Sorted indices
     let sorted_indices = Memo::new(move |_| {
@@ -214,46 +272,88 @@ pub fn DataTable(
     let container_class = merge_classes!(classes.container, class);
     let texts_for_body = texts.clone();
     let texts_for_controls = texts.clone();
+    let search_placeholder = texts.search_placeholder;
+
+    // Container style for viewport-constrained scrolling
+    let container_style = max_height.map(|h| {
+        format!("display: flex; flex-direction: column; max-height: {}", h)
+    });
+
+    // Table wrapper style when max_height is set
+    let has_max_height = container_style.is_some();
+    let table_wrapper_style = if has_max_height {
+        Some("flex: 1; overflow-y: auto; min-height: 0")
+    } else {
+        None
+    };
+    let controls_style = if has_max_height {
+        Some("flex-shrink: 0; padding: 12px 0")
+    } else {
+        None
+    };
 
     view! {
-        <div class=container_class node_ref=node_ref>
-            <Table
-                size=table_size
-                zebra=zebra
-                pin_rows=pin_rows
-                pin_cols=pin_cols
-            >
-                <DataTableHeader
-                    columns=columns
-                    sort_column=Signal::derive(move || sort_column.get())
-                    sort_order=Signal::derive(move || sort_order.get())
-                    on_sort=on_sort
-                    header_cell_class=classes.header_cell
-                />
-                <DataTableBody
-                    columns=columns
-                    rows=Signal::derive(move || current_page_rows.get())
-                    loading=loading
-                    texts=texts_for_body
-                    body_cell_class=classes.body_cell
-                    row_class=classes.row
-                    loading_row_class=classes.loading_row
-                    empty_row_class=classes.empty_row
-                />
-            </Table>
+        <div class=container_class node_ref=node_ref style=container_style>
+            {move || {
+                if searchable.get() {
+                    Some(view! {
+                        <div class="mb-3">
+                            <input
+                                type="text"
+                                class="input input-bordered input-sm w-full max-w-xs"
+                                placeholder=search_placeholder
+                                aria-label="Search table"
+                                prop:value=move || search_query.get()
+                                on:input=on_search_input
+                            />
+                        </div>
+                    })
+                } else {
+                    None
+                }
+            }}
+
+            <div style=table_wrapper_style>
+                <Table
+                    size=table_size
+                    zebra=zebra
+                    pin_rows=pin_rows
+                    pin_cols=pin_cols
+                >
+                    <DataTableHeader
+                        columns=columns
+                        sort_column=Signal::derive(move || sort_column.get())
+                        sort_order=Signal::derive(move || sort_order.get())
+                        on_sort=on_sort
+                        header_cell_class=classes.header_cell
+                    />
+                    <DataTableBody
+                        columns=columns
+                        rows=Signal::derive(move || current_page_rows.get())
+                        loading=loading
+                        texts=texts_for_body
+                        body_cell_class=classes.body_cell
+                        row_class=classes.row
+                        loading_row_class=classes.loading_row
+                        empty_row_class=classes.empty_row
+                    />
+                </Table>
+            </div>
 
             {move || {
                 if paginate.get() && !loading.get() && !data.get().is_empty() {
                     Some(view! {
-                        <DataTableControls
-                            current_page=Signal::derive(move || current_page.get())
-                            set_current_page=set_current_page
-                            total_pages=Signal::derive(move || total_pages.get())
-                            texts=texts_for_controls.clone()
-                            pagination_class=classes.pagination
-                            button_class=classes.pagination_button
-                            indicator_class=classes.page_indicator
-                        />
+                        <div style=controls_style>
+                            <DataTableControls
+                                current_page=Signal::derive(move || current_page.get())
+                                set_current_page=set_current_page
+                                total_pages=Signal::derive(move || total_pages.get())
+                                texts=texts_for_controls.clone()
+                                pagination_class=classes.pagination
+                                button_class=classes.pagination_button
+                                indicator_class=classes.page_indicator
+                            />
+                        </div>
                     })
                 } else {
                     None

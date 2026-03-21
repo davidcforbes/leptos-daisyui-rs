@@ -46,9 +46,11 @@ mod body;
 mod component;
 mod controls;
 mod header;
+mod server_component;
 
 /// Types for DataTable component including Column, SortOrder, and configuration structs
 pub mod types;
 
 pub use component::*;
+pub use server_component::*;
 pub use types::*;
