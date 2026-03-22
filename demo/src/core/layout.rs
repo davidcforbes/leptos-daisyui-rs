@@ -367,6 +367,16 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     href: "/components/timeline",
                     value: "timeline",
                 },
+                ComponentItem {
+                    name: "SVG Display",
+                    href: "/components/svg_display",
+                    value: "svg_display",
+                },
+                ComponentItem {
+                    name: "Mermaid Display",
+                    href: "/components/mermaid_display",
+                    value: "mermaid_display",
+                },
             ],
         },
         MenuCategory {

@@ -156,3 +156,7 @@ pub mod typography_customizer;
 pub use typography_customizer::*;
 pub mod component_customizer;
 pub use component_customizer::*;
+pub mod mermaid_display;
+pub use mermaid_display::*;
+pub mod svg_display;
+pub use svg_display::*;
