@@ -308,6 +308,7 @@ pub fn DataTableDemo() -> impl IntoView {
                         page_indicator: "Página {current} de {total}",
                         previous: "Anterior",
                         next: "Siguiente",
+                        search_placeholder: "Buscar...",
                     }
                 />
             </Section>

@@ -2,7 +2,7 @@ use crate::core::{ContentLayout, Section};
 use leptos::prelude::*;
 use leptos_daisyui_rs::components::*;
 
-const SAMPLE_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100"><rect x="10" y="10" width="80" height="80" fill="#0078D4" rx="8"/><circle cx="150" cy="50" r="40" fill="#50E6FF"/><text x="100" y="55" text-anchor="middle" fill="white" font-size="14">SVG</text></svg>"#;
+const SAMPLE_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100"><rect x="10" y="10" width="80" height="80" fill="#0078D4" rx="8"/><circle cx="150" cy="50" r="40" fill="#50E6FF"/><text x="100" y="55" text-anchor="middle" fill="white" font-size="14">SVG</text></svg>"##;
 
 #[component]
 pub fn SvgDisplayDemo() -> impl IntoView {
