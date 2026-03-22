@@ -105,6 +105,10 @@ pub fn MenuItem(
     #[prop(optional, into)]
     is_submenu: bool,
 
+    /// Optional click callback (for action-based menus, not navigation)
+    #[prop(optional, into)]
+    on_click: Option<Callback<()>>,
+
     /// Item content
     children: Children,
 ) -> impl IntoView {
@@ -114,6 +118,12 @@ pub fn MenuItem(
         if disabled.get_untracked() {
             e.prevent_default();
             return;
+        }
+
+        // Fire action callback if provided
+        if let Some(cb) = on_click {
+            e.prevent_default();
+            cb.run(());
         }
 
         // Prevent default navigation if href is empty or not a real URL
@@ -209,6 +219,15 @@ pub fn SubMenu(
             {children()}
         </ul>
     }
+}
+
+/// # Menu Divider Component
+///
+/// A horizontal rule divider for separating groups of menu items.
+/// Renders as `<li><hr /></li>` following daisyUI 5 conventions.
+#[component]
+pub fn MenuDivider() -> impl IntoView {
+    view! { <li><hr /></li> }
 }
 
 /// Internal context manager for menu selection state.
