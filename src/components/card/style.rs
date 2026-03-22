@@ -1,5 +1,5 @@
 /// Defines the visual styles for card components.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum CardStyle {
     /// Default card styling with no additional border or outline.
     #[default]
@@ -24,7 +24,7 @@ impl CardStyle {
 }
 
 /// Defines the size variants for card components.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum CardSize {
     /// Extra small card size.
     Xs,

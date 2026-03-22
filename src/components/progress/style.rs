@@ -1,5 +1,5 @@
 /// # Progress Color Variants
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum ProgressColor {
     /// Default progress color (no color class applied)
     #[default]

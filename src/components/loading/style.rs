@@ -1,5 +1,5 @@
 /// Style definitions for the Loading component.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum LoadingColor {
     /// Default theme color
     #[default]
@@ -48,7 +48,7 @@ impl LoadingColor {
 }
 
 /// Animation type variations for loading indicators.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum LoadingType {
     /// Classic spinning circle animation (default)
     #[default]
@@ -85,7 +85,7 @@ impl LoadingType {
 }
 
 /// Size variations for loading indicators.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum LoadingSize {
     /// Extra small size
     Xs,

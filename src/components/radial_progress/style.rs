@@ -2,7 +2,7 @@
 ///
 /// Style enum for daisyUI radial progress color classes that control the semantic color scheme
 /// of radial progress indicators. Colors follow daisyUI's semantic system for context and meaning.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum RadialProgressColor {
     /// Default radial progress color (no color class applied)
     #[default]

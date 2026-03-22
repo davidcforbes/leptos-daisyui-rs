@@ -2,7 +2,7 @@
 ///
 /// Style enum for daisyUI input style classes that control the visual appearance
 /// of input components.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum InputStyle {
     /// Default input style (no style class applied)
     #[default]
@@ -26,7 +26,7 @@ impl InputStyle {
 ///
 /// Style enum for daisyUI input color classes that control the semantic color scheme
 /// of input components. Colors follow daisyUI's semantic system for context and meaning.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum InputColor {
     /// Default input color (no color class applied)
     #[default]
@@ -78,7 +78,7 @@ impl InputColor {
 ///
 /// Style enum for daisyUI input size classes that control the physical dimensions
 /// of input components. Sizes scale proportionally for various contexts.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum InputSize {
     /// Extra small size for compact layouts
     Xs,

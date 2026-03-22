@@ -3,7 +3,7 @@
 /// The `TimelineDirection` enum controls how the timeline is oriented,
 /// affecting the flow and positioning of timeline items and their content.
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum TimelineDirection {
     /// Vertical timeline flowing from top to bottom (default)
     #[default]
@@ -28,7 +28,7 @@ impl TimelineDirection {
 /// The `TimelineItemPosition` enum determines which connector lines are shown
 /// for a timeline item, enabling proper visual flow between timeline events.
 /// This is crucial for creating cohesive timeline layouts.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum TimelineItemPosition {
     /// First item in the timeline (shows connector line after)
     #[default]

@@ -2,7 +2,7 @@
 ///
 /// Style enum for daisyUI file input style classes that control the visual appearance
 /// of file input components.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum FileInputStyle {
     /// Default file input style (no style class applied)
     #[default]
@@ -26,7 +26,7 @@ impl FileInputStyle {
 ///
 /// Style enum for daisyUI file input color classes that control the semantic color scheme
 /// of file input components. Colors follow daisyUI's semantic system for context and meaning.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum FileInputColor {
     /// Default file input color (no color class applied)
     #[default]
@@ -78,7 +78,7 @@ impl FileInputColor {
 ///
 /// Style enum for daisyUI file input size classes that control the physical dimensions
 /// of file input components. Sizes scale proportionally for various contexts.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum FileInputSize {
     /// Extra small size for compact layouts
     Xs,

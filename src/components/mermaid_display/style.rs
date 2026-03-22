@@ -1,7 +1,7 @@
 /// # Mermaid Theme Variants
 ///
 /// Style enum for controlling the color theme of rendered mermaid diagrams.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum MermaidTheme {
     /// Light theme (default)
     #[default]

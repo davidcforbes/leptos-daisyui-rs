@@ -1,5 +1,5 @@
 /// Direction variants for steps layout orientation.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum StepsDirection {
     /// Horizontal step flow from left to right (default)
     #[default]
@@ -19,7 +19,7 @@ impl StepsDirection {
 }
 
 /// Color variants for individual step indicators.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum StepColor {
     /// Default step styling - neutral/inactive appearance
     #[default]

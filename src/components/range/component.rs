@@ -24,6 +24,10 @@ pub fn Range(
     #[prop(optional, into)]
     size: Signal<RangeSize>,
 
+    /// Whether the range slider is disabled
+    #[prop(optional, into)]
+    disabled: Signal<bool>,
+
     /// Additional CSS classes
     #[prop(optional, into)]
     class: &'static str,
@@ -34,6 +38,7 @@ pub fn Range(
 ) -> impl IntoView {
     view! {
         <input
+            disabled=disabled
             node_ref=node_ref
             type="range"
             class=move || {

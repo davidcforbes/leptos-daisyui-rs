@@ -2,7 +2,7 @@
 ///
 /// Style enum for daisyUI table size classes that control the physical dimensions
 /// of table components. Sizes scale proportionally for various contexts.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum TableSize {
     /// Extra small size for compact layouts
     Xs,

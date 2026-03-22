@@ -24,6 +24,10 @@ pub fn Radio(
     #[prop(optional, into)]
     size: Signal<RadioSize>,
 
+    /// Whether the radio button is disabled
+    #[prop(optional, into)]
+    disabled: Signal<bool>,
+
     /// Additional CSS classes
     #[prop(optional, into)]
     class: &'static str,
@@ -34,6 +38,7 @@ pub fn Radio(
 ) -> impl IntoView {
     view! {
         <input
+            disabled=disabled
             node_ref=node_ref
             type="radio"
             class=move || {

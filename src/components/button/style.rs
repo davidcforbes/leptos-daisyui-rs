@@ -2,7 +2,7 @@
 ///
 /// Style enum for daisyUI button color classes that control the semantic color scheme
 /// of button components. Colors follow daisyUI's semantic color system.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum ButtonColor {
     /// Default button color (no color class applied)
     #[default]
@@ -54,7 +54,7 @@ impl ButtonColor {
 ///
 /// Style enum for daisyUI button style classes that control the visual appearance
 /// and treatment of button components.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum ButtonStyle {
     /// Default filled button style
 
@@ -95,7 +95,7 @@ impl ButtonStyle {
 ///
 /// Style enum for daisyUI button size classes that control the dimensions
 /// and typography scale of button components.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum ButtonSize {
     /// Extra small button size
     Xs,
@@ -132,7 +132,7 @@ impl ButtonSize {
 ///
 /// Style enum for daisyUI button shape/layout classes that control the geometry
 /// and layout behavior of button components.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum ButtonShape {
     /// Default button shape
 

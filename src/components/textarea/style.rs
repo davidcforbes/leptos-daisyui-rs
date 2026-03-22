@@ -1,5 +1,5 @@
 /// Style variants for the Textarea component.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum TextareaStyle {
     /// Standard textarea styling with default appearance
     #[default]
@@ -20,7 +20,7 @@ impl TextareaStyle {
 }
 
 /// Color variants for the Textarea component.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum TextareaColor {
     /// Default textarea styling with no additional color classes
     #[default]
@@ -65,7 +65,7 @@ impl TextareaColor {
 }
 
 /// Size variants for the Textarea component.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum TextareaSize {
     /// Extra small textarea
     Xs,

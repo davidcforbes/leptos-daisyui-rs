@@ -2,7 +2,7 @@
 ///
 /// Style enum for daisyUI accordion modifier classes that control the visual appearance
 /// and interaction indicators for accordion/collapse components.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum AccordionModifier {
     /// No visual indicator (default)
     #[default]
@@ -31,7 +31,7 @@ impl AccordionModifier {
 /// Controls the type of input used for accordion toggle behavior:
 /// - Radio: Only one accordion can be open at a time in a group (cannot be closed by clicking again)
 /// - Checkbox: Accordion can be toggled open/closed independently (can be closed by clicking again)
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum AccordionInputType {
     /// Radio button - only one can be open at a time, cannot be closed by clicking again
     #[default]
@@ -52,7 +52,7 @@ impl AccordionInputType {
 }
 
 /// # Accordion Open force Modifiers
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum AccordionForceModifier {
     /// No indicator (default)
     #[default]

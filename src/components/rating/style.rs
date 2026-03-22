@@ -2,7 +2,7 @@
 ///
 /// Style enum for daisyUI rating size classes that control the physical dimensions
 /// of rating components. Sizes scale proportionally from extra small to large.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum RatingSize {
     /// Default size (no size class applied)
     #[default]

@@ -1,5 +1,5 @@
 /// Color variants for the Radio component.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum RadioColor {
     /// Default radio styling
     #[default]
@@ -44,7 +44,7 @@ impl RadioColor {
 }
 
 /// Size variants for the Radio component.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum RadioSize {
     /// Extra small radio
     Xs,

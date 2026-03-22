@@ -2,7 +2,7 @@
 ///
 /// Style enum for daisyUI link color classes that control the semantic color scheme
 /// of link text. Colors follow daisyUI's semantic system for context and meaning.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum LinkColor {
     /// Default link color (no color class applied)
     #[default]

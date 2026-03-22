@@ -2,7 +2,7 @@
 ///
 /// Style enum for daisyUI pagination size classes that control the physical dimensions
 /// of pagination components. Sizes scale proportionally for various contexts.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum PaginationSize {
     /// Extra small size for compact layouts
     Xs,

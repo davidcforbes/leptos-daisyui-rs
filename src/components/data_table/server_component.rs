@@ -223,7 +223,7 @@ pub fn ServerDataTable(
                     <DataTableHeader
                         columns=columns
                         sort_column=Signal::derive(move || None)
-                        sort_order=Signal::derive(move || SortOrder::default())
+                        sort_order=Signal::derive(SortOrder::default)
                         on_sort=noop_sort
                         header_cell_class=classes.header_cell
                     />

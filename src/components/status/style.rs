@@ -1,5 +1,5 @@
 /// Color variants for the Status component.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum StatusColor {
     /// Default status styling
     #[default]
@@ -48,7 +48,7 @@ impl StatusColor {
 }
 
 /// Size variants for the Status component.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum StatusSize {
     /// Extra small status
     Xs,

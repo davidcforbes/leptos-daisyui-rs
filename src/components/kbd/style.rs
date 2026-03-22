@@ -2,7 +2,7 @@
 ///
 /// Style enum for daisyUI kbd size classes that control the physical dimensions
 /// of keyboard key display components. Sizes scale proportionally for various contexts.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum KbdSize {
     /// Extra small size for inline text usage
     Xs,

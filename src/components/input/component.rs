@@ -28,6 +28,10 @@ pub fn Input(
     #[prop(optional, into)]
     size: Signal<InputSize>,
 
+    /// Whether the input is disabled
+    #[prop(optional, into)]
+    disabled: Signal<bool>,
+
     /// Additional CSS classes
     #[prop(optional, into)]
     class: &'static str,
@@ -38,6 +42,7 @@ pub fn Input(
 ) -> impl IntoView {
     view! {
         <input
+            disabled=disabled
             node_ref=node_ref
             class=move || {
                 merge_classes!(

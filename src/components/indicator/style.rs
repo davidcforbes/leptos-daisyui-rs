@@ -2,7 +2,7 @@
 ///
 /// Style enum for daisyUI indicator vertical positioning classes that control
 /// where indicators appear along the vertical axis of their parent element.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum IndicatorVerticalPlacement {
     /// Top vertical placement (default)
     #[default]
@@ -30,7 +30,7 @@ impl IndicatorVerticalPlacement {
 ///
 /// Style enum for daisyUI indicator horizontal positioning classes that control
 /// where indicators appear along the horizontal axis of their parent element.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum IndicatorHorizontalPlacement {
     /// Left horizontal placement
     Start,

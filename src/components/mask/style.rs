@@ -2,7 +2,7 @@
 ///
 /// Style enum for daisyUI mask shape classes that crop content to various geometric shapes.
 /// Perfect for creating shaped avatars, decorative elements, and custom visual layouts.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum MaskType {
     /// Rounded square with subtle curves (default shape)
     #[default]

@@ -2,7 +2,7 @@
 ///
 /// Style enum for daisyUI swap animation classes that control the transition effect
 /// when swapping between elements.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum SwapRotate {
     /// No rotation animation (default)
     #[default]

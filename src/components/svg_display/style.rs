@@ -2,7 +2,7 @@
 ///
 /// Style enum for CSS object-fit classes that control how SVG content
 /// is sized within its container.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum SvgFit {
     /// Default fit (no class applied)
     #[default]

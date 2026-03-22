@@ -2,7 +2,7 @@
 ///
 /// Style enum for daisyUI footer placement classes that control the alignment
 /// of footer content within the footer container.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum FooterPlacement {
     /// Default footer placement (no placement class applied)
     #[default]
@@ -25,7 +25,7 @@ impl FooterPlacement {
 ///
 /// Style enum for daisyUI footer direction classes that control the layout
 /// direction of footer content items.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum FooterDirection {
     /// Default footer direction (no direction class applied)
     #[default]

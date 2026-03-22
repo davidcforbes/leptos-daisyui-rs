@@ -1,5 +1,5 @@
 /// Color variants for checkbox components based on daisyUI's color system.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum CheckboxColor {
     /// Default checkbox color (no additional styling)
     #[default]
@@ -49,7 +49,7 @@ impl CheckboxColor {
 
 /// Size variants for checkbox components based on daisyUI's sizing system.
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum CheckboxSize {
     /// Extra small checkbox
     Xs,

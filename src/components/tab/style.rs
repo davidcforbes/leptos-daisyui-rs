@@ -2,7 +2,7 @@
 ///
 /// Style enum for daisyUI tab size classes that control the physical dimensions
 /// of tab components. Sizes scale proportionally for various contexts.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum TabSize {
     /// Extra small size for compact layouts
     Xs,
@@ -38,7 +38,7 @@ impl TabSize {
 ///
 /// Style enum for daisyUI tab style classes that control the visual appearance
 /// of tab containers.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum TabVariant {
     /// Default tab style (no style class applied)
     #[default]
@@ -70,7 +70,7 @@ impl TabVariant {
 ///
 /// Style enum for daisyUI tab style classes that control the visual appearance
 /// of tab containers.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum TabPlacement {
     /// Puts tab buttons on top of the tab-content (default)
     #[default]

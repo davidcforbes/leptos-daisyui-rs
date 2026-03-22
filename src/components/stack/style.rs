@@ -1,5 +1,5 @@
 /// # Stack Placement Variants
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum StackPlacement {
     /// Top vertical placement
     Top,
@@ -11,7 +11,7 @@ pub enum StackPlacement {
     /// Start horizontal placement
     Start,
 
-    /// End horizaonahorizontall placement
+    /// End horizontal placement
     End,
 }
 
@@ -20,7 +20,7 @@ impl StackPlacement {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Top => "stack-top",
-            Self::Bottom => "indicator-bottom",
+            Self::Bottom => "stack-bottom",
             Self::Start => "stack-start",
             Self::End => "stack-end",
         }

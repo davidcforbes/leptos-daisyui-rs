@@ -1,5 +1,5 @@
 /// Style variants for the Select component.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum SelectStyle {
     /// Default select styling
     #[default]
@@ -20,7 +20,7 @@ impl SelectStyle {
 }
 
 /// Color variants for the Select component.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum SelectColor {
     /// Default select styling
     #[default]
@@ -65,7 +65,7 @@ impl SelectColor {
 }
 
 /// Size variants for the Select component.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum SelectSize {
     /// Extra small select
     Xs,

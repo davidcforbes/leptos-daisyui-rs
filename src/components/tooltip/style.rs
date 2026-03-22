@@ -2,7 +2,7 @@
 ///
 /// Position variants for daisyUI tooltip component that control where the tooltip appears
 /// relative to its trigger element.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum TooltipPosition {
     /// Tooltip appears above the element (default)
     #[default]
@@ -34,7 +34,7 @@ impl TooltipPosition {
 ///
 /// Color variants for daisyUI tooltip component that control the background color
 /// of the tooltip bubble.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum TooltipColor {
     /// Default tooltip color (theme-dependent)
     #[default]

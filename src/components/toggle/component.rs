@@ -24,6 +24,10 @@ pub fn Toggle(
     #[prop(optional, into)]
     size: Signal<ToggleSize>,
 
+    /// Whether the toggle is disabled
+    #[prop(optional, into)]
+    disabled: Signal<bool>,
+
     /// Additional CSS classes to apply to the toggle
     #[prop(optional, into)]
     class: &'static str,
@@ -34,6 +38,7 @@ pub fn Toggle(
 ) -> impl IntoView {
     view! {
         <input
+            disabled=disabled
             node_ref=node_ref
             type="checkbox"
             class=move || {
