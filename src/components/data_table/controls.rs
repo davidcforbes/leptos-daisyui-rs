@@ -43,11 +43,16 @@ pub fn DataTableControls(
         }
     };
 
+    // Extract >= comparison outside view! macro to avoid RSX parser
+    // interpreting `>=` as an HTML tag close.
+    let prev_disabled = move || current_page.get() == 0;
+    let next_disabled = move || current_page.get() + 1 >= total_pages.get();
+
     view! {
         <div class=pagination_class>
             <button
                 class=button_class
-                disabled=move || current_page.get() == 0
+                disabled=prev_disabled
                 on:click=on_previous
             >
                 {texts.previous}
@@ -65,7 +70,7 @@ pub fn DataTableControls(
 
             <button
                 class=button_class
-                disabled=move || current_page.get() + 1 >= total_pages.get()
+                disabled=next_disabled
                 on:click=on_next
             >
                 {texts.next}
