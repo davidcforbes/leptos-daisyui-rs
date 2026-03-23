@@ -144,23 +144,34 @@ Props follow a generally consistent order: state/behavior props first, styling p
 
 ---
 
-## 7. Actionable Fix Plan
+## 7. Completed Fixes (2026-03-22/23)
 
-### Priority 1: Quick Wins (Low Risk)
-1. Fix 2 documentation typos
-2. Add `PartialEq` derive to all style enums
+All items from the original fix plan have been completed:
 
-### Priority 2: Consistency Fixes (Medium Risk)
-3. Add `disabled` prop to 7 form input components
+### Library Fixes
+- [x] Fixed 2 documentation typos (textarea, breadcrumbs)
+- [x] Added `PartialEq` derive to all style enums (54 files)
+- [x] Added `disabled` prop to 7 form input components
+- [x] Added tests for all 35 untested style enum components (1146 total tests)
+- [x] Fixed `StackPlacement::Bottom` CSS bug (`indicator-bottom` -> `stack-bottom`)
+- [x] Fixed clippy `redundant_closure` warning in data_table
+- [x] All tests pass, clippy clean, build succeeds
 
-### Priority 3: Test Coverage (No Risk)
-4. Add `tests.rs` for all 35 components with style enums
-5. Each test file should cover: every variant's `as_str()`, Default, Clone, Debug, PartialEq
+### Demo App Fixes (found during visual testing)
+- [x] Replaced Drawer layout with flex sidebar (content was clipping behind sidebar)
+- [x] Fixed ThemeControllerDemo blank page (wrong context type)
+- [x] Fixed Icon demo (removed broken Lucide CDN, uses leptos_icons with span wrappers)
+- [x] Fixed FilterReset garbled character (Unicode x -> "Reset")
+- [x] Added Kanban column borders (`border border-base-300`)
+- [x] Fixed vertical Range sliders overflowing into next section
+- [x] Fixed svg_display raw string literal (`r#` -> `r##`)
+- [x] Added missing `search_placeholder` field to DataTable demo
+- [x] Changed demo default port to 3010
 
-### Priority 4: Build Verification
-6. Run `cargo test` to verify all new tests pass
-7. Run `cargo clippy` to fix any linter warnings
-8. Verify `cargo build` succeeds
+### Remaining Known Issues (for future work)
+- Icon component depends on Lucide JS library (external dependency) — consider migrating to leptos_icons
+- Form inputs lack common HTML attributes (placeholder, value, name) — would benefit from spread attributes
+- `class` prop uses `&'static str` — future improvement could accept `Signal<String>`
 
 ---
 
@@ -172,4 +183,4 @@ Props follow a generally consistent order: state/behavior props first, styling p
 - `demo/src/` (87 files)
 - `demo/input.css`
 - `Cargo.toml`
-- All 25 existing `tests.rs` files
+- All 25 existing `tests.rs` files + 35 new test files
