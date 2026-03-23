@@ -2,7 +2,7 @@ use leptos::prelude::*;
 use leptos_daisyui_rs::components::*;
 use leptos_icons::Icon;
 use leptos_router::{components::Outlet, hooks::use_location};
-use leptos_use::{breakpoints_tailwind, use_breakpoints, use_interval_fn, BreakpointsTailwind};
+use leptos_use::use_interval_fn;
 use wasm_bindgen::prelude::*;
 
 // External JavaScript interface for performance.memory (Chrome only)
@@ -16,7 +16,6 @@ extern "C" {
 #[component]
 pub fn Layout() -> impl IntoView {
     let location = use_location();
-    let breakpoints = use_breakpoints(breakpoints_tailwind());
 
     let selected = RwSignal::new(None);
 
@@ -83,11 +82,6 @@ pub fn Layout() -> impl IntoView {
         <div class="h-screen w-screen bg-base-100 flex flex-col">
             <Navbar class="w-screen bg-base-200 border-b border-base-300 flex-none">
                 <NavbarStart class="gap-4">
-                    <div class="lg:hidden">
-                        <label for="drawer-toggle" class="hover:cursor-pointer">
-                            <Icon icon=icondata::AiMenuOutlined />
-                        </label>
-                    </div>
                     <Icon icon=icondata::CgComponents />
                     <h1 class="text-xl font-bold">"daisyUI + Leptos Showcase"</h1>
                 </NavbarStart>
@@ -102,56 +96,49 @@ pub fn Layout() -> impl IntoView {
                 </NavbarEnd>
             </Navbar>
 
-            <div class="flex-1 overflow-hidden">
-                <Drawer class="h-full" open=breakpoints.ge(BreakpointsTailwind::Lg)>
-                    <DrawerToggle id="drawer-toggle" checked=breakpoints.ge(BreakpointsTailwind::Lg) />
-
-                    <div class="drawer-content overflow-y-auto h-full">
-
-                        // Content area with padding
-                        <div class="p-6 w-full">
-                            <Outlet />
-                        </div>
+            <div class="flex-1 flex overflow-hidden">
+                // Sidebar
+                <aside class="hidden lg:flex flex-col w-64 flex-none bg-base-200 border-r border-base-300 overflow-y-auto">
+                    <div class="p-4">
+                        <h2 class="text-lg font-semibold mb-4">"Components"</h2>
+                        <Menu
+                            selected=selected
+                            direction=MenuDirection::Vertical
+                            class="w-full"
+                        >
+                            {get_menu_categories()
+                                .into_iter()
+                                .map(|category| {
+                                    view! {
+                                        <MenuItem is_submenu=true>
+                                            <MenuTitle>{category.title}</MenuTitle>
+                                            <SubMenu>
+                                                {category
+                                                    .items
+                                                    .into_iter()
+                                                    .map(|item| {
+                                                        view! {
+                                                            <MenuItem href=item.href value=item.value>
+                                                                {item.name}
+                                                            </MenuItem>
+                                                        }
+                                                    })
+                                                    .collect_view()}
+                                            </SubMenu>
+                                        </MenuItem>
+                                    }
+                                })
+                                .collect_view()}
+                        </Menu>
                     </div>
+                </aside>
 
-                    <DrawerSide>
-                        <label for="drawer-toggle" class="drawer-overlay"></label>
-                        <div class="min-h-full w-64 bg-base-200 text-base-content overflow-y-auto">
-                            <div class="p-4">
-                                <h2 class="text-lg font-semibold mb-4">"Components"</h2>
-                                <Menu
-                                    selected=selected
-                                    direction=MenuDirection::Vertical
-                                    class="w-full"
-                                >
-                                    {get_menu_categories()
-                                        .into_iter()
-                                        .map(|category| {
-                                            view! {
-                                                <MenuItem is_submenu=true>
-                                                    <MenuTitle>{category.title}</MenuTitle>
-                                                    <SubMenu>
-                                                        {category
-                                                            .items
-                                                            .into_iter()
-                                                            .map(|item| {
-                                                                view! {
-                                                                    <MenuItem href=item.href value=item.value>
-                                                                        {item.name}
-                                                                    </MenuItem>
-                                                                }
-                                                            })
-                                                            .collect_view()}
-                                                    </SubMenu>
-                                                </MenuItem>
-                                            }
-                                        })
-                                        .collect_view()}
-                                </Menu>
-                            </div>
-                        </div>
-                    </DrawerSide>
-                </Drawer>
+                // Main content area
+                <main class="flex-1 overflow-y-auto min-w-0">
+                    <div class="p-6">
+                        <Outlet />
+                    </div>
+                </main>
             </div>
 
             // Status footer

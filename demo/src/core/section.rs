@@ -10,7 +10,7 @@ pub fn Section(
 ) -> impl IntoView {
     view! {
         <h2 class="text-xl font-semibold">{title}</h2>
-        <div class="flex gap-2" class:flex-col=col class:flex-row=row>
+        <div class="flex gap-2 flex-wrap min-w-0" class:flex-col=col class:flex-row=row>
             {{ children() }}
         </div>
     }
