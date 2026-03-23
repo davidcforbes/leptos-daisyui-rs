@@ -276,47 +276,62 @@ pub fn RangeDemo() -> impl IntoView {
                 <p class="text-sm text-base-content/70">
                     "Use CSS transforms to create vertical range sliders"
                 </p>
-                <div class="flex gap-8 items-end h-64">
+                <div class="flex gap-16 items-center justify-start py-4" style="height: 300px;">
                     <div class="flex flex-col items-center gap-2">
                         <div class="text-sm font-medium">"Volume"</div>
-                        <Range
-                            color=RangeColor::Primary
-                            size=RangeSize::Md
-                            prop:min="0"
-                            prop:max="100"
-                            prop:value=75
-                            class="w-64 h-8"
-                            style:transform="rotate(-90deg)"
-                            style:transform-origin="center"
-                        />
+                        <div class="relative" style="width: 32px; height: 200px;">
+                            <Range
+                                color=RangeColor::Primary
+                                size=RangeSize::Md
+                                prop:min="0"
+                                prop:max="100"
+                                prop:value=75
+                                class="absolute"
+                                style:width="200px"
+                                style:transform="rotate(-90deg)"
+                                style:transform-origin="top left"
+                                style:top="200px"
+                                style:left="0"
+                            />
+                        </div>
                         <div class="text-sm text-base-content/70">"75%"</div>
                     </div>
                     <div class="flex flex-col items-center gap-2">
                         <div class="text-sm font-medium">"Bass"</div>
-                        <Range
-                            color=RangeColor::Secondary
-                            size=RangeSize::Md
-                            prop:min="0"
-                            prop:max="100"
-                            prop:value=60
-                            class="w-64 h-8"
-                            style:transform="rotate(-90deg)"
-                            style:transform-origin="center"
-                        />
+                        <div class="relative" style="width: 32px; height: 200px;">
+                            <Range
+                                color=RangeColor::Secondary
+                                size=RangeSize::Md
+                                prop:min="0"
+                                prop:max="100"
+                                prop:value=60
+                                class="absolute"
+                                style:width="200px"
+                                style:transform="rotate(-90deg)"
+                                style:transform-origin="top left"
+                                style:top="200px"
+                                style:left="0"
+                            />
+                        </div>
                         <div class="text-sm text-base-content/70">"60%"</div>
                     </div>
                     <div class="flex flex-col items-center gap-2">
                         <div class="text-sm font-medium">"Treble"</div>
-                        <Range
-                            color=RangeColor::Accent
-                            size=RangeSize::Md
-                            prop:min="0"
-                            prop:max="100"
-                            prop:value=45
-                            class="w-64 h-8"
-                            style:transform="rotate(-90deg)"
-                            style:transform-origin="center"
-                        />
+                        <div class="relative" style="width: 32px; height: 200px;">
+                            <Range
+                                color=RangeColor::Accent
+                                size=RangeSize::Md
+                                prop:min="0"
+                                prop:max="100"
+                                prop:value=45
+                                class="absolute"
+                                style:width="200px"
+                                style:transform="rotate(-90deg)"
+                                style:transform-origin="top left"
+                                style:top="200px"
+                                style:left="0"
+                            />
+                        </div>
                         <div class="text-sm text-base-content/70">"45%"</div>
                     </div>
                 </div>

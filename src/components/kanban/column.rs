@@ -54,7 +54,7 @@ pub fn KanbanColumnView(
 
     view! {
         <div
-            class="kanban-column flex-shrink-0 bg-base-200 rounded-lg"
+            class="kanban-column flex-shrink-0 bg-base-200 rounded-lg border border-base-300"
             class:w-12=move || is_collapsed.get()
             class:w-80=move || !is_collapsed.get()
         >
