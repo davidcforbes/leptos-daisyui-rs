@@ -1,6 +1,5 @@
 use crate::core::{ContentLayout, Section};
 use leptos::prelude::*;
-use leptos_daisyui_rs::components::*;
 use leptos_icons::Icon as LeptosIcon;
 
 #[component]
@@ -16,37 +15,37 @@ pub fn IconDemo() -> impl IntoView {
                     " crate which provides inline SVG icons from multiple icon sets."
                 </p>
                 <div class="flex gap-4 items-center">
-                    <LeptosIcon icon=icondata::AiHomeFilled class="w-6 h-6" />
-                    <LeptosIcon icon=icondata::AiHeartFilled class="w-6 h-6 text-error" />
-                    <LeptosIcon icon=icondata::AiStarFilled class="w-6 h-6 text-warning" />
-                    <LeptosIcon icon=icondata::AiCheckCircleFilled class="w-6 h-6 text-success" />
-                    <LeptosIcon icon=icondata::AiInfoCircleFilled class="w-6 h-6 text-info" />
-                    <LeptosIcon icon=icondata::AiSettingFilled class="w-6 h-6" />
-                    <LeptosIcon icon=icondata::AiSearchOutlined class="w-6 h-6" />
-                    <LeptosIcon icon=icondata::AiBellFilled class="w-6 h-6 text-primary" />
+                    <span class="w-6 h-6"><LeptosIcon icon=icondata::AiHomeFilled /></span>
+                    <span class="w-6 h-6 text-error"><LeptosIcon icon=icondata::AiHeartFilled /></span>
+                    <span class="w-6 h-6 text-warning"><LeptosIcon icon=icondata::AiStarFilled /></span>
+                    <span class="w-6 h-6 text-success"><LeptosIcon icon=icondata::AiCheckCircleFilled /></span>
+                    <span class="w-6 h-6 text-info"><LeptosIcon icon=icondata::AiInfoCircleFilled /></span>
+                    <span class="w-6 h-6"><LeptosIcon icon=icondata::AiSettingFilled /></span>
+                    <span class="w-6 h-6"><LeptosIcon icon=icondata::AiSearchOutlined /></span>
+                    <span class="w-6 h-6 text-primary"><LeptosIcon icon=icondata::AiBellFilled /></span>
                 </div>
             </Section>
 
             <Section title="Icon Sizes" col=true>
                 <div class="flex gap-6 items-end">
                     <div class="flex flex-col items-center gap-2">
-                        <LeptosIcon icon=icondata::AiStarFilled class="w-4 h-4" />
+                        <span class="w-4 h-4"><LeptosIcon icon=icondata::AiStarFilled /></span>
                         <span class="text-xs">"16px"</span>
                     </div>
                     <div class="flex flex-col items-center gap-2">
-                        <LeptosIcon icon=icondata::AiStarFilled class="w-5 h-5" />
+                        <span class="w-5 h-5"><LeptosIcon icon=icondata::AiStarFilled /></span>
                         <span class="text-xs">"20px"</span>
                     </div>
                     <div class="flex flex-col items-center gap-2">
-                        <LeptosIcon icon=icondata::AiStarFilled class="w-6 h-6" />
+                        <span class="w-6 h-6"><LeptosIcon icon=icondata::AiStarFilled /></span>
                         <span class="text-xs">"24px"</span>
                     </div>
                     <div class="flex flex-col items-center gap-2">
-                        <LeptosIcon icon=icondata::AiStarFilled class="w-8 h-8" />
+                        <span class="w-8 h-8"><LeptosIcon icon=icondata::AiStarFilled /></span>
                         <span class="text-xs">"32px"</span>
                     </div>
                     <div class="flex flex-col items-center gap-2">
-                        <LeptosIcon icon=icondata::AiStarFilled class="w-12 h-12" />
+                        <span class="w-12 h-12"><LeptosIcon icon=icondata::AiStarFilled /></span>
                         <span class="text-xs">"48px"</span>
                     </div>
                 </div>
@@ -54,35 +53,35 @@ pub fn IconDemo() -> impl IntoView {
 
             <Section title="Colored Icons" col=true>
                 <div class="flex gap-4 items-center">
-                    <LeptosIcon icon=icondata::AiHeartFilled class="w-8 h-8 text-error" />
-                    <LeptosIcon icon=icondata::AiStarFilled class="w-8 h-8 text-warning" />
-                    <LeptosIcon icon=icondata::AiCheckCircleFilled class="w-8 h-8 text-success" />
-                    <LeptosIcon icon=icondata::AiInfoCircleFilled class="w-8 h-8 text-info" />
-                    <LeptosIcon icon=icondata::AiThunderboltFilled class="w-8 h-8 text-primary" />
-                    <LeptosIcon icon=icondata::AiFireFilled class="w-8 h-8 text-secondary" />
-                    <LeptosIcon icon=icondata::AiWarningFilled class="w-8 h-8 text-accent" />
+                    <span class="w-8 h-8 text-error"><LeptosIcon icon=icondata::AiHeartFilled /></span>
+                    <span class="w-8 h-8 text-warning"><LeptosIcon icon=icondata::AiStarFilled /></span>
+                    <span class="w-8 h-8 text-success"><LeptosIcon icon=icondata::AiCheckCircleFilled /></span>
+                    <span class="w-8 h-8 text-info"><LeptosIcon icon=icondata::AiInfoCircleFilled /></span>
+                    <span class="w-8 h-8 text-primary"><LeptosIcon icon=icondata::AiThunderboltFilled /></span>
+                    <span class="w-8 h-8 text-secondary"><LeptosIcon icon=icondata::AiFireFilled /></span>
+                    <span class="w-8 h-8 text-accent"><LeptosIcon icon=icondata::AiWarningFilled /></span>
                 </div>
             </Section>
 
             <Section title="Icons in Buttons" col=true>
                 <div class="flex gap-2 flex-wrap">
                     <button class="btn btn-primary">
-                        <LeptosIcon icon=icondata::AiHeartFilled class="w-5 h-5" />
+                        <span class="w-5 h-5"><LeptosIcon icon=icondata::AiHeartFilled /></span>
                         "Like"
                     </button>
                     <button class="btn btn-secondary">
-                        <LeptosIcon icon=icondata::AiShareAltOutlined class="w-5 h-5" />
+                        <span class="w-5 h-5"><LeptosIcon icon=icondata::AiShareAltOutlined /></span>
                         "Share"
                     </button>
                     <button class="btn btn-accent">
-                        <LeptosIcon icon=icondata::AiDownloadOutlined class="w-5 h-5" />
+                        <span class="w-5 h-5"><LeptosIcon icon=icondata::AiDownloadOutlined /></span>
                         "Download"
                     </button>
                     <button class="btn btn-ghost btn-circle">
-                        <LeptosIcon icon=icondata::AiSearchOutlined class="w-5 h-5" />
+                        <span class="w-5 h-5"><LeptosIcon icon=icondata::AiSearchOutlined /></span>
                     </button>
                     <button class="btn btn-ghost btn-circle">
-                        <LeptosIcon icon=icondata::AiBellFilled class="w-5 h-5" />
+                        <span class="w-5 h-5"><LeptosIcon icon=icondata::AiBellFilled /></span>
                     </button>
                 </div>
             </Section>
@@ -103,7 +102,8 @@ pub fn IconDemo() -> impl IntoView {
                     <pre data-prefix="2"><code>{"<Icon name=\"heart\" size=IconSize::Large color=\"text-error\" />"}</code></pre>
                     <pre data-prefix="3"><code>{""}</code></pre>
                     <pre data-prefix="4"><code>{"// Using leptos_icons (recommended, no JS required)"}</code></pre>
-                    <pre data-prefix="5"><code>{"<Icon icon=icondata::AiHeartFilled class=\"w-8 h-8 text-error\" />"}</code></pre>
+                    <pre data-prefix="5"><code>{"use leptos_icons::Icon;"}</code></pre>
+                    <pre data-prefix="6"><code>{"<span class=\"w-8 h-8 text-error\"><Icon icon=icondata::AiHeartFilled /></span>"}</code></pre>
                 </div>
             </Section>
 
@@ -123,31 +123,31 @@ pub fn IconDemo() -> impl IntoView {
                                 <td><code>"XSmall"</code></td>
                                 <td><code>"w-4 h-4"</code></td>
                                 <td>"16px"</td>
-                                <td><LeptosIcon icon=icondata::AiStarFilled class="w-4 h-4" /></td>
+                                <td><span class="w-4 h-4 inline-block"><LeptosIcon icon=icondata::AiStarFilled /></span></td>
                             </tr>
                             <tr>
                                 <td><code>"Small"</code></td>
                                 <td><code>"w-5 h-5"</code></td>
                                 <td>"20px"</td>
-                                <td><LeptosIcon icon=icondata::AiStarFilled class="w-5 h-5" /></td>
+                                <td><span class="w-5 h-5 inline-block"><LeptosIcon icon=icondata::AiStarFilled /></span></td>
                             </tr>
                             <tr>
                                 <td><code>"Medium"</code></td>
                                 <td><code>"w-6 h-6"</code></td>
                                 <td>"24px"</td>
-                                <td><LeptosIcon icon=icondata::AiStarFilled class="w-6 h-6" /></td>
+                                <td><span class="w-6 h-6 inline-block"><LeptosIcon icon=icondata::AiStarFilled /></span></td>
                             </tr>
                             <tr>
                                 <td><code>"Large"</code></td>
                                 <td><code>"w-8 h-8"</code></td>
                                 <td>"32px"</td>
-                                <td><LeptosIcon icon=icondata::AiStarFilled class="w-8 h-8" /></td>
+                                <td><span class="w-8 h-8 inline-block"><LeptosIcon icon=icondata::AiStarFilled /></span></td>
                             </tr>
                             <tr>
                                 <td><code>"XLarge"</code></td>
                                 <td><code>"w-12 h-12"</code></td>
                                 <td>"48px"</td>
-                                <td><LeptosIcon icon=icondata::AiStarFilled class="w-12 h-12" /></td>
+                                <td><span class="w-12 h-12 inline-block"><LeptosIcon icon=icondata::AiStarFilled /></span></td>
                             </tr>
                         </tbody>
                     </table>
