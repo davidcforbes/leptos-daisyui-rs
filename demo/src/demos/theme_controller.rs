@@ -1,19 +1,17 @@
 use leptos::prelude::*;
 use leptos_daisyui_rs::components::ThemeController;
+use leptos_daisyui_rs::theme::use_theme_context;
 
 #[component]
 pub fn ThemeControllerDemo() -> impl IntoView {
-    // Get the global theme setter from context
-    let set_theme = use_context::<WriteSignal<String>>()
-        .expect("Theme context should be provided by App");
+    let theme_ctx = use_theme_context();
 
-    // Track selected theme for UI display
-    let (selected_theme, set_local) = signal("light".to_string());
+    // Derive the current theme reactively
+    let selected_theme = Signal::derive(move || theme_ctx.base_theme());
 
-    // Helper to update both global and local
+    // Helper to update the theme
     let update_theme_sync = move |theme: String| {
-        set_theme.set(theme.clone());
-        set_local.set(theme);
+        theme_ctx.set_base_theme(theme);
     };
 
     view! {
