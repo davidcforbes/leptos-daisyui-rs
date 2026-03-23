@@ -1,11 +1,16 @@
 use super::style::MermaidTheme;
 use crate::components::SvgDisplay;
 use leptos::{html::Figure, prelude::*};
+use markview_mermaid::{detect_init, remove_directives, RenderConfig, Theme};
 
 /// # Mermaid Diagram Display Component
 ///
 /// A reactive Leptos component that renders mermaid diagram source text as inline SVG
 /// using the native `markview-mermaid` renderer. Composes `SvgDisplay` internally.
+///
+/// Supports `%%{init}%%` directives for theme and spacing overrides, and
+/// automatically decodes HTML entities (`&lt;`, `&gt;`, `&amp;`, `&quot;`)
+/// before parsing.
 ///
 /// ## Node References
 /// - `node_ref` - References the `<figure>` element ([HTMLElement](https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement))
@@ -42,19 +47,58 @@ pub fn MermaidDisplay(
             return String::new();
         }
 
-        let is_dark = matches!(theme.get(), MermaidTheme::Dark);
+        // Decode HTML entities before processing
+        let src = src
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&amp;", "&")
+            .replace("&quot;", "\"");
 
-        match markview_mermaid::parse(&src) {
+        // Process init directives before parsing
+        let directive_config = detect_init(&src);
+        let clean_source = remove_directives(&src);
+
+        match markview_mermaid::parse(&clean_source) {
             Ok(diagram) => {
-                let render_theme = if is_dark {
-                    markview_mermaid::Theme::dark()
+                let is_dark = matches!(theme.get(), MermaidTheme::Dark);
+
+                // Build theme: directive overrides take precedence over prop
+                let render_theme = if let Some(ref dc) = directive_config {
+                    if dc.theme.is_some() || !dc.theme_variables.is_empty() {
+                        Theme::from_directive(dc)
+                    } else if is_dark {
+                        Theme::dark()
+                    } else {
+                        Theme::default()
+                    }
+                } else if is_dark {
+                    Theme::dark()
                 } else {
-                    markview_mermaid::Theme::default()
+                    Theme::default()
                 };
-                let config = markview_mermaid::RenderConfig {
+
+                let mut config = RenderConfig {
                     theme: render_theme,
+                    theme_css: directive_config
+                        .as_ref()
+                        .and_then(|dc| dc.theme_css.clone()),
                     ..Default::default()
                 };
+
+                // Extract spacing overrides from directive config
+                if let Some(ref dc) = directive_config {
+                    for key in &["flowchart", "sequence", "class", "state", "er"] {
+                        if let Some(serde_json::Value::Object(obj)) = dc.extra.get(*key) {
+                            if let Some(serde_json::Value::Number(n)) = obj.get("nodeSpacing") {
+                                config.node_spacing = n.as_f64();
+                            }
+                            if let Some(serde_json::Value::Number(n)) = obj.get("rankSpacing") {
+                                config.rank_spacing = n.as_f64();
+                            }
+                        }
+                    }
+                }
+
                 markview_mermaid::render_with_config(&diagram, &config).unwrap_or_else(|e| {
                     format!("<pre class=\"mermaid-error\">Render error: {}</pre>", e)
                 })
