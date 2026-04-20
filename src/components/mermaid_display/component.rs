@@ -1,12 +1,12 @@
 use super::style::MermaidTheme;
 use crate::components::SvgDisplay;
 use leptos::{html::Figure, prelude::*};
-use markview_mermaid::{detect_init, remove_directives, RenderConfig, Theme};
+use editmark_mermaid::{RenderConfig, Theme, detect_init, remove_directives};
 
 /// # Mermaid Diagram Display Component
 ///
 /// A reactive Leptos component that renders mermaid diagram source text as inline SVG
-/// using the native `markview-mermaid` renderer. Composes `SvgDisplay` internally.
+/// using the native `editmark-mermaid` renderer. Composes `SvgDisplay` internally.
 ///
 /// Supports `%%{init}%%` directives for theme and spacing overrides, and
 /// automatically decodes HTML entities (`&lt;`, `&gt;`, `&amp;`, `&quot;`)
@@ -58,7 +58,7 @@ pub fn MermaidDisplay(
         let directive_config = detect_init(&src);
         let clean_source = remove_directives(&src);
 
-        match markview_mermaid::parse(&clean_source) {
+        match editmark_mermaid::parse(&clean_source) {
             Ok(diagram) => {
                 let is_dark = matches!(theme.get(), MermaidTheme::Dark);
 
@@ -99,7 +99,7 @@ pub fn MermaidDisplay(
                     }
                 }
 
-                markview_mermaid::render_with_config(&diagram, &config).unwrap_or_else(|e| {
+                editmark_mermaid::render_with_config(&diagram, &config).unwrap_or_else(|e| {
                     format!("<pre class=\"mermaid-error\">Render error: {}</pre>", e)
                 })
             }
