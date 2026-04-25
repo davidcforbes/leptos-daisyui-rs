@@ -9,7 +9,7 @@ leptos-daisyui-rs = { path = "../" }
 leptos = { version = "0.8", features = ["csr"] }
 leptos_router = "0.8"
 leptos_icons = "0.7.1"
-leptos-use = "0.16.2"
+leptos-use = "0.18.3"
 leptos_meta = "0.8.6"
 icondata = "0.7.0"
 
