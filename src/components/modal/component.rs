@@ -141,3 +141,112 @@ pub fn ModalBackdrop(
         </form>
     }
 }
+
+/// # ModalInfoRow component
+///
+/// A horizontal `label: value` row for the find-and-restore dialog
+/// recipe (title → info → search → status → body → actions). Use one or
+/// more inside a [`ModalBox`] above the search row to surface read-only
+/// metadata like a source path, snapshot id, or counts.
+///
+/// ## Node References
+/// - `node_ref` - References the div element ([HTMLDivElement](https://developer.mozilla.org/en-US/docs/Web/API/HTMLDivElement))
+#[component]
+pub fn ModalInfoRow(
+    /// Optional bold label rendered before the children.
+    #[prop(optional, into)]
+    label: &'static str,
+
+    /// Additional CSS classes
+    #[prop(optional, into)]
+    class: &'static str,
+
+    /// Reference to the div element
+    #[prop(optional)]
+    node_ref: NodeRef<Div>,
+
+    /// Value content
+    children: Children,
+) -> impl IntoView {
+    view! {
+        <div
+            node_ref=node_ref
+            class=move || merge_classes!(
+                "flex items-center gap-2 py-2 border-b border-base-200",
+                class
+            )
+        >
+            {(!label.is_empty()).then(|| view! { <span class="font-semibold">{label}</span> })}
+            {children()}
+        </div>
+    }
+}
+
+/// # ModalSearchRow component
+///
+/// A flex row for the search input in find-and-restore dialogs. Children
+/// typically include an `<Input>` and an optional action button. The
+/// wrapper supplies consistent spacing and a daisyUI-themed divider
+/// below.
+///
+/// ## Node References
+/// - `node_ref` - References the div element ([HTMLDivElement](https://developer.mozilla.org/en-US/docs/Web/API/HTMLDivElement))
+#[component]
+pub fn ModalSearchRow(
+    /// Additional CSS classes
+    #[prop(optional, into)]
+    class: &'static str,
+
+    /// Reference to the div element
+    #[prop(optional)]
+    node_ref: NodeRef<Div>,
+
+    /// Row content
+    children: Children,
+) -> impl IntoView {
+    view! {
+        <div
+            node_ref=node_ref
+            class=move || merge_classes!(
+                "flex items-center gap-2 py-2 border-b border-base-200",
+                class
+            )
+        >
+            {children()}
+        </div>
+    }
+}
+
+/// # ModalStatusRow component
+///
+/// A subdued row for inline status text — match counts, last-refreshed
+/// timestamps, error banners — that sits between the search row and the
+/// dialog body in the find-and-restore recipe.
+///
+/// ## Node References
+/// - `node_ref` - References the div element ([HTMLDivElement](https://developer.mozilla.org/en-US/docs/Web/API/HTMLDivElement))
+#[component]
+pub fn ModalStatusRow(
+    /// Additional CSS classes
+    #[prop(optional, into)]
+    class: &'static str,
+
+    /// Reference to the div element
+    #[prop(optional)]
+    node_ref: NodeRef<Div>,
+
+    /// Row content
+    children: Children,
+) -> impl IntoView {
+    view! {
+        <div
+            node_ref=node_ref
+            class=move || merge_classes!(
+                "flex items-center gap-2 py-2 text-sm text-base-content/70",
+                class
+            )
+        >
+            {children()}
+        </div>
+    }
+}
