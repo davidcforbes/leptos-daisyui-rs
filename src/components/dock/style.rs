@@ -2,7 +2,7 @@
 ///
 /// Style enum for daisyUI dock size classes that control the dimensions
 /// of dock navigation components.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum DockSize {
     /// Default size (no size class applied)
     #[default]

@@ -2,7 +2,7 @@
 ///
 /// Style enum for daisyUI avatar modifier classes that control the status indicators
 /// and type of avatar components.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum AvatarModifier {
     /// Default avatar with no status indicator
     #[default]

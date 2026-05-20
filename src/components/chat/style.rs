@@ -2,7 +2,7 @@
 ///
 /// Style enum for daisyUI chat placement classes that control the alignment
 /// of chat messages within the conversation flow.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum ChatPlacement {
     /// Left-aligned chat messages (sender on left side)
     #[default]
@@ -26,7 +26,7 @@ impl ChatPlacement {
 ///
 /// Style enum for daisyUI chat bubble color classes that control the semantic color scheme
 /// of chat message bubbles. Colors follow daisyUI's semantic system for message context.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum ChatBubbleColor {
     /// Default bubble color (no color class applied)
     #[default]

@@ -1,5 +1,5 @@
 /// Color variants for divider styling and semantic meaning.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum DividerColor {
     /// Default divider color using theme defaults
     #[default]
@@ -69,7 +69,7 @@ impl DividerDirection {
 }
 
 /// Placement variants for divider text positioning.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum DividerPlacement {
     /// Default center placement for divider text
     #[default]

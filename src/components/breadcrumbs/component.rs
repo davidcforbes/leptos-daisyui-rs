@@ -14,7 +14,7 @@ use leptos::prelude::*;
 ///
 /// ## Node References
 /// - `outer_node_ref` - References the top `<div>` element ([HTMLDivElement](https://developer.mozilla.org/en-US/docs/Web/API/HTMLDivElement))
-/// - `inner_node_ref` - Rederences the inner `<ul>` element ([HTMLUlElement](https://developer.mozilla.org/en-US/docs/Web/API/HTMLUlElement))
+/// - `inner_node_ref` - References the inner `<ul>` element ([HTMLUlElement](https://developer.mozilla.org/en-US/docs/Web/API/HTMLUlElement))
 #[component]
 pub fn Breadcrumbs(
     /// Additional CSS classes for the outer container

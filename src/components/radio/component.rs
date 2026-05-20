@@ -24,6 +24,10 @@ pub fn Radio(
     #[prop(optional, into)]
     size: Signal<RadioSize>,
 
+    /// Whether the radio button is disabled
+    #[prop(optional, into)]
+    disabled: Signal<bool>,
+
     /// Additional CSS classes
     #[prop(optional, into)]
     class: &'static str,
@@ -34,11 +38,12 @@ pub fn Radio(
 ) -> impl IntoView {
     view! {
         <input
+            disabled=disabled
             node_ref=node_ref
             type="radio"
             class=move || {
                 merge_classes!(
-                    "radio",
+                    "radio ld-eased ld-focus-ring",
                     color.get().as_str(),
                     size.get().as_str(),
                     class

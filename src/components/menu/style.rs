@@ -1,5 +1,5 @@
 /// Style enums for Menu component variants.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum MenuDirection {
     /// Default vertical layout with items stacked vertically
     #[default]
@@ -19,7 +19,7 @@ impl MenuDirection {
 }
 
 /// Defines the size/scale of menu items.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum MenuSize {
     /// Extra small menu items with minimal padding
     Xs,

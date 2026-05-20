@@ -2,7 +2,7 @@
 ///
 /// Style enum for daisyUI drawer placement classes that control which side
 /// of the screen the drawer slides out from.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum DrawerPlacement {
     /// Drawer slides from the left side (default)
     #[default]

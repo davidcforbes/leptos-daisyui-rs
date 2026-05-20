@@ -2,7 +2,7 @@
 ///
 /// Style enum for daisyUI badge style classes that control the visual appearance
 /// and treatment of badge components.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum BadgeStyle {
     /// Default filled badge style
     #[default]
@@ -39,7 +39,7 @@ impl BadgeStyle {
 /// Style enum for daisyUI badge color classes that control the semantic color scheme
 /// of badge components. Colors follow daisyUI's semantic color system and convey
 /// meaning about status, categories, or importance.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum BadgeColor {
     /// Default badge color (no color class applied)
     #[default]
@@ -91,7 +91,7 @@ impl BadgeColor {
 ///
 /// Style enum for daisyUI badge size classes that control the physical dimensions
 /// of badge components. Sizes scale proportionally from extra small to extra large.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum BadgeSize {
     /// Extra small size for minimal space usage
     Xs,

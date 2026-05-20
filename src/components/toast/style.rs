@@ -2,7 +2,7 @@
 ///
 /// Style enum for daisyUI toast positioning classes that control where notification
 /// toasts appear on the screen. Supports all 9 corners and edges of the viewport.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum ToastPosition {
     /// Top-right corner of the screen
     TopEnd,

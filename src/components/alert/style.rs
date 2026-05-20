@@ -2,7 +2,7 @@
 ///
 /// Style enum for daisyUI alert style classes that control the visual appearance
 /// and treatment of alert components.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum AlertStyle {
     /// Default filled alert style
     #[default]
@@ -34,7 +34,7 @@ impl AlertStyle {
 ///
 /// Style enum for daisyUI alert color classes that control the semantic color scheme
 /// of alert components. Colors convey the meaning and urgency of the alert message.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum AlertColor {
     /// Default alert color (no color class applied)
     #[default]
@@ -70,7 +70,7 @@ impl AlertColor {
 ///
 /// Style enum for daisyUI alert direction classes that control the layout orientation
 /// of alert components and their content arrangement.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum AlertDirection {
     /// Default layout direction
     #[default]

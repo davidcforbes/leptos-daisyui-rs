@@ -2,7 +2,7 @@
 ///
 /// Style enum for daisyUI join direction classes that control how child elements
 /// are connected together in a joined layout.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum JoinDirection {
     /// Elements joined horizontally in a row (default)
     #[default]

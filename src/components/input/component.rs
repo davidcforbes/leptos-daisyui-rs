@@ -28,6 +28,26 @@ pub fn Input(
     #[prop(optional, into)]
     size: Signal<InputSize>,
 
+    /// Whether the input is disabled
+    #[prop(optional, into)]
+    disabled: Signal<bool>,
+
+    /// Bound value for the input
+    #[prop(optional, into)]
+    value: Signal<String>,
+
+    /// Placeholder text
+    #[prop(optional, into)]
+    placeholder: Signal<String>,
+
+    /// Callback fired on input change with the new value
+    #[prop(optional, into)]
+    on_input: Option<Callback<String>>,
+
+    /// Callback fired on keydown events
+    #[prop(optional, into)]
+    on_keydown: Option<Callback<web_sys::KeyboardEvent>>,
+
     /// Additional CSS classes
     #[prop(optional, into)]
     class: &'static str,
@@ -38,10 +58,23 @@ pub fn Input(
 ) -> impl IntoView {
     view! {
         <input
+            disabled=disabled
+            prop:value=move || value.get()
+            placeholder=move || placeholder.get()
+            on:input=move |e| {
+                if let Some(cb) = on_input {
+                    cb.run(event_target_value(&e));
+                }
+            }
+            on:keydown=move |e| {
+                if let Some(cb) = on_keydown {
+                    cb.run(e);
+                }
+            }
             node_ref=node_ref
             class=move || {
                 merge_classes!(
-                    "input",
+                    "input ld-focus-ring",
                     style.get().as_str(),
                     color.get().as_str(),
                     size.get().as_str(),

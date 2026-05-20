@@ -21,6 +21,10 @@ pub fn Checkbox(
     #[prop(optional, into)]
     size: Signal<CheckboxSize>,
 
+    /// Whether the checkbox is disabled
+    #[prop(optional, into)]
+    disabled: Signal<bool>,
+
     /// Additional CSS classes
     #[prop(optional, into)]
     class: &'static str,
@@ -31,11 +35,12 @@ pub fn Checkbox(
 ) -> impl IntoView {
     view! {
         <input
+            disabled=disabled
             node_ref=node_ref
             type="checkbox"
             class=move || {
                 merge_classes!(
-                    "checkbox",
+                    "checkbox ld-eased ld-focus-ring",
                     color.get().as_str(),
                     size.get().as_str(),
                     class

@@ -1,5 +1,8 @@
+@charset "UTF-8";
 @import "tailwindcss";
-@plugin "daisyui";
+@plugin "daisyui" {
+  themes: light --default, dark --prefersdark, cupcake, cyberpunk, retro, forest, aqua, dracula;
+}
 @source "../src/**/*.rs";
 
 /* Accordion */
@@ -17,13 +20,15 @@
 /* Calendar */
 @source inline("cally pika-single react-day-picker");
 /* Card */
-@source inline("card card-title card-body card-actions card-border card-dash card-side image-full card-xs card-sm card-md card-lg card-xl");
+@source inline("card card-title card-body card-actions card-border card-side image-full card-xs card-sm card-md card-lg card-xl");
 /* Carousel */
 @source inline("carousel carousel-item carousel-start carousel-center carousel-end carousel-horizontal carousel-vertical");
 /* Chat */
 @source inline("chat chat-image chat-header chat-footer chat-bubble chat-start chat-end chat-bubble-neutral chat-bubble-primary chat-bubble-secondary chat-bubble-accent chat-bubble-info chat-bubble-success chat-bubble-warning chat-bubble-error");
 /* Checkbox */
 @source inline("checkbox checkbox-primary checkbox-secondary checkbox-accent checkbox-neutral checkbox-success checkbox-warning checkbox-info checkbox-error checkbox-xs checkbox-sm checkbox-md checkbox-lg checkbox-xl");
+/* DataTable */
+@source inline("animate-pulse");
 /* Collapse */
 @source inline("collapse collapse-title collapse-content collapse-arrow collapse-plus collapse-open collapse-close");
 /* Countdown */
@@ -42,12 +47,37 @@
 @source inline("fieldset label fieldset-legend");
 /* File-Input */
 @source inline("file-input file-input-ghost file-input-neutral file-input-primary file-input-secondary file-input-accent file-input-info file-input-success file-input-warning file-input-error file-input-xs file-input-sm file-input-md file-input-lg file-input-xl");
+/* FAB (Floating Action Button) */
+@source inline("fab fab-close fab-main-action fab-flower fab-flower-bottom-right fab-flower-bottom-left fab-flower-top-right fab-flower-top-left");
+
+/* FAB direction variants for responsive flower layout */
+.fab-flower-bottom-left > :nth-child(3) { transform: translate(calc(var(--space, 4rem) * -1), var(--space, 4rem)); }
+.fab-flower-bottom-left > :nth-child(4) { transform: translate(calc(var(--space, 4rem) * -0.707), calc(var(--space, 4rem) * 0.707)); }
+.fab-flower-bottom-left > :nth-child(5) { transform: translate(0, var(--space, 4rem)); }
+.fab-flower-bottom-left > :nth-child(6) { transform: translate(calc(var(--space, 4rem) * 0.707), calc(var(--space, 4rem) * 0.707)); }
+
+.fab-flower-top-right > :nth-child(3) { transform: translate(var(--space, 4rem), calc(var(--space, 4rem) * -1)); }
+.fab-flower-top-right > :nth-child(4) { transform: translate(calc(var(--space, 4rem) * 0.707), calc(var(--space, 4rem) * -0.707)); }
+.fab-flower-top-right > :nth-child(5) { transform: translate(0, calc(var(--space, 4rem) * -1)); }
+.fab-flower-top-right > :nth-child(6) { transform: translate(calc(var(--space, 4rem) * -0.707), calc(var(--space, 4rem) * -0.707)); }
+
+.fab-flower-top-left > :nth-child(3) { transform: translate(calc(var(--space, 4rem) * -1), calc(var(--space, 4rem) * -1)); }
+.fab-flower-top-left > :nth-child(4) { transform: translate(calc(var(--space, 4rem) * -0.707), calc(var(--space, 4rem) * -0.707)); }
+.fab-flower-top-left > :nth-child(5) { transform: translate(0, calc(var(--space, 4rem) * -1)); }
+.fab-flower-top-left > :nth-child(6) { transform: translate(calc(var(--space, 4rem) * 0.707), calc(var(--space, 4rem) * -0.707)); }
+
+/* Default bottom-right direction (matches daisyUI's fab-flower) */
+.fab-flower-bottom-right { /* Uses default fab-flower positioning */ }
 /* Filter */
 @source inline("filter filter-reset");
 /* Footer */
 @source inline("footer footer-title footer-center footer-horizontal footer-vertical");
 /* Hero */
 @source inline("hero hero-content hero-overlay");
+/* Hover 3D */
+@source inline("hover-3d");
+/* Hover Gallery */
+@source inline("hover-gallery hover-gallery-item");
 /* Indicator */
 @source inline("indicator indicator-item indicator-start indicator-center indicator-end indicator-top indicator-middle indicator-bottom");
 /* Input */
@@ -112,6 +142,8 @@
 @source inline("table table-zebra table-pin-rows table-pin-cols table-xs table-sm table-md table-lg table-xl");
 /* Textarea */
 @source inline("textarea textarea-ghost textarea-neutral textarea-primary textarea-secondary textarea-accent textarea-info textarea-success textarea-warning textarea-error textarea-xs textarea-sm textarea-md textarea-lg textarea-xl");
+/* Text Rotate */
+@source inline("text-rotate text-rotate-item");
 /* Theme-Controller */
 @source inline("theme-controller");
 /* Timeline */
@@ -120,5 +152,79 @@
 @source inline("toast toast-start toast-center toast-end toast-top toast-middle toast-bottom");
 /* Toggle */
 @source inline("toggle toggle-primary toggle-secondary toggle-accent toggle-neutral toggle-success toggle-warning toggle-info toggle-error toggle-xs toggle-sm toggle-md toggle-lg toggle-xl");
+/* Tooltip */
+@source inline("tooltip tooltip-open tooltip-top tooltip-bottom tooltip-left tooltip-right tooltip-neutral tooltip-primary tooltip-secondary tooltip-accent tooltip-info tooltip-success tooltip-warning tooltip-error");
 /* Validator */
 @source inline("validator validator-hint");
+
+/* Enhanced Button Push Effect */
+@layer components {
+  .btn {
+    transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+    transform: translateY(0);
+    /* Enhanced resting shadow for pronounced depth */
+    box-shadow: 0 6px 12px -2px rgba(0, 0, 0, 0.15), 0 3px 6px -2px rgba(0, 0, 0, 0.1) !important;
+  }
+
+  .btn:active:not(:disabled):not(.btn-disabled) {
+    /* More pronounced push - 6px down */
+    transform: translateY(6px) !important;
+    /* Flattened shadow when pressed */
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12) !important;
+  }
+
+  /* Maintain ghost and link button styles */
+  .btn-ghost:not(:disabled):not(.btn-disabled),
+  .btn-link:not(:disabled):not(.btn-disabled) {
+    box-shadow: none !important;
+  }
+
+  .btn-ghost:active:not(:disabled):not(.btn-disabled),
+  .btn-link:active:not(:disabled):not(.btn-disabled) {
+    transform: translateY(3px) !important;
+  }
+}
+
+/* Fix Indicator Center Positioning */
+@layer components {
+  /* Fix for daisyUI bug: center variants set all 4 positioning properties to 50%,
+     constraining element to 0x0 size. We need to use left/top + transform instead. */
+
+  /* Top Center */
+  .indicator-item.indicator-top.indicator-center {
+    top: 0 !important;
+    left: 50% !important;
+    right: auto !important;
+    bottom: auto !important;
+    transform: translateX(-50%) !important;
+  }
+
+  /* Middle Center */
+  .indicator-item.indicator-middle.indicator-center {
+    top: 50% !important;
+    left: 50% !important;
+    right: auto !important;
+    bottom: auto !important;
+    transform: translate(-50%, -50%) !important;
+  }
+
+  /* Bottom Center */
+  .indicator-item.indicator-bottom.indicator-center {
+    top: auto !important;
+    left: 50% !important;
+    right: auto !important;
+    bottom: 0 !important;
+    transform: translateX(-50%) !important;
+  }
+}
+
+
+/* Smooth theme transitions */
+:root {
+  transition: background-color 0.3s ease-in-out, color 0.3s ease-in-out;
+}
+
+* {
+  transition: background-color 0.2s ease-in-out, color 0.2s ease-in-out,
+              border-color 0.2s ease-in-out;
+}

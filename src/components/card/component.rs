@@ -1,5 +1,6 @@
 use super::style::{CardSize, CardStyle};
 use crate::merge_classes;
+use crate::utils::{RippleOverlay, use_ripple};
 use leptos::html::{Div, H2};
 use leptos::prelude::*;
 
@@ -11,7 +12,7 @@ use leptos::prelude::*;
 ///
 /// ### Add to `input.css`
 /// ```css
-/// @source inline("card card-title card-body card-actions card-boader card-dash card-side image-full card-xs card-sm card-md card-lg card-xl");
+/// @source inline("card card-title card-body card-actions card-border card-side image-full card-xs card-sm card-md card-lg card-xl");
 /// ```
 ///
 /// ## Node References
@@ -35,6 +36,16 @@ pub fn Card(
     #[prop(optional, into)]
     image_full: Signal<bool>,
 
+    /// Apply the shared `ld-elevated` lift: rests at elevation tier 4
+    /// and lifts to tier 8 + 1px translate on hover. Tokens come from
+    /// the `ui-tokens` crate via [`UiTokensPreamble`](crate::tokens::UiTokensPreamble).
+    #[prop(optional, into)]
+    elevate: Signal<bool>,
+
+    /// Enables the click ripple effect. Defaults to off.
+    #[prop(optional, into)]
+    ripple: Signal<bool>,
+
     /// Additional CSS classes to apply to the card.
     #[prop(optional, into)]
     class: &'static str,
@@ -46,12 +57,13 @@ pub fn Card(
     /// Child elements to render inside the card.
     children: Children,
 ) -> impl IntoView {
+    let ripple_handle = use_ripple();
     view! {
         <div
             node_ref=node_ref
             class=move || {
                 merge_classes!(
-                    "card",
+                    "card ld-eased",
                     style.get().as_str(),
                     size.get().as_str(),
                     class
@@ -59,8 +71,16 @@ pub fn Card(
             }
             class:card-side=side
             class:image-full=image_full
+            class:ld-elevated=elevate
+            class:ld-ripple-host=ripple
+            on:click=move |ev| {
+                if ripple.get_untracked() {
+                    ripple_handle.trigger.run(ev);
+                }
+            }
         >
             {children()}
+            {move || ripple.get().then(|| view! { <RippleOverlay handle=ripple_handle /> })}
         </div>
     }
 }

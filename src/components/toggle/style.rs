@@ -1,5 +1,5 @@
 /// Color variants for the Toggle component.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum ToggleColor {
     /// Default toggle styling with no additional color classes
     #[default]
@@ -44,7 +44,7 @@ impl ToggleColor {
 }
 
 /// Size variants for the Toggle component.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum ToggleSize {
     /// Extra small toggle
     Xs,

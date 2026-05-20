@@ -1,13 +1,25 @@
 # daisyUI Components for Leptos
 
-This crate is a daisyUI 5 components library for Leptos, providing type-safe, reactive wrappers for daisyUI 5 components.
+This crate is a daisyUI 5 components library for Leptos, providing type-safe, reactive wrappers for daisyUI 5 components with an advanced runtime theming system.
 
 ""At present, it is assumed to be used for CSR.""
 
-> 🚧 **Work in Progress**  
-> This project is currently under active development.  
-> The design and usage are still evolving, and breaking changes can be expected.  
+> 🚧 **Work in Progress**
+> This project is currently under active development.
+> The design and usage are still evolving, and breaking changes can be expected.
 > Feedback is welcome!
+
+## Features
+
+- ✅ **62/62 daisyUI components** (100% coverage)
+- 🎨 **Advanced Runtime Theming** with customizer UI
+- 🎭 **32 Built-in Themes** from daisyUI
+- 🌈 **Oklahoma LCH Color Space** for perceptual color accuracy
+- 💾 **Theme Persistence** via localStorage
+- 📤 **Import/Export Themes** as JSON
+- 🔗 **Theme Sharing** via URL encoding
+- 🎯 **Type-Safe Props** with Rust enums
+- ⚡ **Reactive Signals** for dynamic updates
 
 ## How to use
 
@@ -24,10 +36,10 @@ cargo add leptos-daisyui-rs
 You can use components as follows: Tailwind CSS (v4) is used, so you can insert additional classes.
 
 
-```rust
-use leptos-daisyui-rs as daisyui'
+```rust,ignore
+use leptos_daisyui_rs as daisyui;
 
-use daisyui:components:::Accordion;
+use daisyui::components::Accordion;
 
 #[components]
 fn Demo () -> impl IntoView {
@@ -72,10 +84,10 @@ Therefore, it is designed to be flexible enough to add attributes and event list
 
 For example, take a look at the following Button component:
 
-```rust
+```rust,ignore
 use leptos::prelude::*;
 use leptos::html::{Button as HTMLButton};
-use leptos_daisyui_rs::components::*;;
+use leptos_daisyui_rs::components::*;
 
 
 let active = Signal::derive(move || some_condition());
@@ -137,6 +149,89 @@ Effect::new(move || {
 </Buttton>
 ```
 
+## Advanced Theming System
+
+This library includes a comprehensive runtime theming system that allows full customization of daisyUI themes.
+
+### Quick Start
+
+Wrap your app with `ThemeProvider`:
+
+```rust,ignore
+use leptos::prelude::*;
+use leptos_daisyui_rs::theme::ThemeProvider;
+
+#[component]
+fn App() -> impl IntoView {
+    view! {
+        <ThemeProvider load_from_storage=true storage_key="my-theme">
+            <YourApp />
+        </ThemeProvider>
+    }
+}
+```
+
+### Using Theme Context
+
+Access and modify themes programmatically:
+
+```rust,ignore
+use leptos_daisyui_rs::theme::use_theme_context;
+
+#[component]
+fn MyComponent() -> impl IntoView {
+    let theme_ctx = use_theme_context();
+
+    let switch_to_dark = move |_| {
+        theme_ctx.set_base_theme("dark");
+    };
+
+    view! {
+        <button on:click=switch_to_dark>"Dark Mode"</button>
+    }
+}
+```
+
+### Pre-built Customizer Components
+
+The library includes ready-to-use UI components for theme customization:
+
+- **`BaseThemeSelector`** - Grid of all 32 daisyUI themes
+- **`ColorCustomizer`** - Color pickers for all semantic colors
+- **`TypographyCustomizer`** - Font family, size, and scale controls
+- **`BorderCustomizer`** - Border width and spacing controls
+- **`ComponentCustomizer`** - Per-component style overrides
+- **`ThemeExportImport`** - JSON export/import functionality
+- **`ThemeShare`** - Generate shareable theme URLs
+- **`PresetThemesGallery`** - 6 curated preset themes
+
+Example usage:
+
+```rust,ignore
+use leptos_daisyui_rs::components::*;
+
+view! {
+    <div class="grid grid-cols-2 gap-4">
+        <BaseThemeSelector />
+        <ColorCustomizer />
+        <TypographyCustomizer />
+        <PresetThemesGallery />
+    </div>
+}
+```
+
+### Features
+
+- **32 Built-in Themes**: All daisyUI themes (light, dark, cupcake, cyberpunk, etc.)
+- **Oklahoma LCH Colors**: Perceptually uniform color space for better color consistency
+- **Runtime Customization**: Change colors, typography, borders, and component styles on the fly
+- **Persistence**: Automatic localStorage saving/loading
+- **Import/Export**: Share themes as JSON files
+- **URL Sharing**: Generate shareable links with embedded theme data
+- **Preset Themes**: 6 professionally designed preset themes included
+
+For complete documentation, see [doc/THEMING.md](./doc/THEMING.md).
+
 ### What you can't do
 
 While the above consists of top HTML elements that match daisyUI components to some degree, the CSS design should be more flexible than it should be. For example, we think it would be good to have a link (anchor tag) with a Button design.
@@ -145,7 +240,7 @@ If you would like to use the same design but use the internal configuration HTML
 
 As a workaround, a wrapper component that only assigns attributes to child components can be considered. For example
 
-```rust
+```rust,ignore
 use leptos::prelude::*;
 use leptos::tachys::html::class::class as class_fn;
 
@@ -181,7 +276,7 @@ pub fn FullWrapperButton(children: Children) -> impl IntoView {
 | Badge | ✅ | [src](src/components/badge/) | [docs](https://daisyui.com/components/badge/) |
 | Breadcrumbs | ✅ | [src](src/components/breadcrumbs/) | [docs](https://daisyui.com/components/breadcrumbs/) |
 | Button | ✅ | [src](src/components/button/) | [docs](https://daisyui.com/components/button/) |
-| Calendar | - | [src](src/components/calendar/) | [docs](https://daisyui.com/components/calendar/) |
+| Calendar | ✅ | [src](src/components/calendar/) | [docs](https://daisyui.com/components/calendar/) |
 | Card | ✅ | [src](src/components/card/) | [docs](https://daisyui.com/components/card/) |
 | Carousel | ✅ | [src](src/components/carousel/)  | [docs](https://daisyui.com/components/carousel/) |
 | Chat | ✅ | [src](src/components/chat/) | [docs](https://daisyui.com/components/chat/) |
@@ -196,8 +291,11 @@ pub fn FullWrapperButton(children: Children) -> impl IntoView {
 | Fieldset | ✅ | [src](src/components/fieldset/) | [docs](https://daisyui.com/components/fieldset/) |
 | File Input | ✅ | [src](src/components/file_input/) | [docs](https://daisyui.com/components/file-input/) |
 | Filter | ✅ | [src](src/components/filter/) | [docs](https://daisyui.com/components/filter/) |
+| FAB / Speed Dial | ✅ | [src](src/components/fab/) | [docs](https://daisyui.com/components/fab/) |
 | Footer | ✅ | [src](src/components/footer/) | [docs](https://daisyui.com/components/footer/) |
 | Hero | ✅ | [src](src/components/hero/) | [docs](https://daisyui.com/components/hero/) |
+| Hover 3D Card | ✅ | [src](src/components/hover_3d/) | [docs](https://daisyui.com/components/hover-3d/) |
+| Hover Gallery | ✅ | [src](src/components/hover_gallery/) | [docs](https://daisyui.com/components/hover-gallery/) |
 | Indicator | ✅ | [src](src/components/indicator/) | [docs](https://daisyui.com/components/indicator/) |
 | Input | ✅ | [src](src/components/input/) | [docs](https://daisyui.com/components/input/) |
 | Join | ✅ | [src](src/components/join/) | [docs](https://daisyui.com/components/join/) |
@@ -230,13 +328,111 @@ pub fn FullWrapperButton(children: Children) -> impl IntoView {
 | Tab | ✅ | [src](src/components/tab/) | [docs](https://daisyui.com/components/tab/) |
 | Table | ✅ | [src](src/components/table/) | [docs](https://daisyui.com/components/table/) |
 | Textarea | ✅ | [src](src/components/textarea/) | [docs](https://daisyui.com/components/textarea/) |
+| Text Rotate | ✅ | [src](src/components/text_rotate/) | [docs](https://daisyui.com/components/text-rotate/) |
 | Theme Controller | ✅ | [src](src/components/theme_controller/) | [docs](https://daisyui.com/components/theme-controller/) |
 | Timeline | ✅ | [src](src/components/timeline/) | [docs](https://daisyui.com/components/timeline/) |
 | Toast | ✅ | [src](src/components/toast/) | [docs](https://daisyui.com/components/toast/) |
 | Toggle | ✅ | [src](src/components/toggle/) | [docs](https://daisyui.com/components/toggle/) |
+| Tooltip | ✅ | [src](src/components/tooltip/) | [docs](https://daisyui.com/components/tooltip/) |
 | Validator | ✅ | [src](src/components/validator/) | [docs](https://daisyui.com/components/validator/) |
 
-**Progress: 56/57 components implemented**
+**Progress: 62/62 components implemented** 🎉
+
+
+## Known Issues & Workarounds
+
+This section documents known issues with daisyUI 5 that affect this library and their workarounds. All fixes are included in [`demo/custom-components.css`](demo/custom-components.css).
+
+### 1. Indicator Center Positioning Bug
+
+**Problem**: Indicator badges with center positioning variants (`.indicator-top.indicator-center`, `.indicator-middle.indicator-center`, `.indicator-bottom.indicator-center`) are constrained to 0×0 size and don't display correctly.
+
+**Root Cause**: daisyUI sets all four positioning properties (`top: 50%`, `left: 50%`, `right: 50%`, `bottom: 50%`) simultaneously, which constrains the element to 0×0 size in CSS. Proper centering requires only two properties (e.g., `left: 50%` + `transform: translateX(-50%)`).
+
+**Workaround**: Override the positioning with proper two-property centering:
+
+```css
+/* Top Center - horizontally centered at top */
+.indicator-item.indicator-top.indicator-center {
+  top: 0 !important;
+  left: 50% !important;
+  right: auto !important;
+  bottom: auto !important;
+  transform: translateX(-50%) !important;
+}
+
+/* Middle Center - centered both horizontally and vertically */
+.indicator-item.indicator-middle.indicator-center {
+  top: 50% !important;
+  left: 50% !important;
+  right: auto !important;
+  bottom: auto !important;
+  transform: translate(-50%, -50%) !important;
+}
+
+/* Bottom Center - horizontally centered at bottom */
+.indicator-item.indicator-bottom.indicator-center {
+  top: auto !important;
+  left: 50% !important;
+  right: auto !important;
+  bottom: 0 !important;
+  transform: translateX(-50%) !important;
+}
+```
+
+See [`demo/custom-components.css`](demo/custom-components.css#L319-L355) for the complete fix.
+
+### 2. Accordion Character Encoding Issue
+
+**Problem**: The accordion minus sign displays as garbled characters "â^ʹ" when the accordion is expanded.
+
+**Root Cause**: daisyUI uses Unicode character U+2212 (MINUS SIGN) in the CSS `content` property. When the server's Content-Type header doesn't specify UTF-8 charset, browsers may misinterpret the UTF-8 byte sequence (E2 88 92) as Windows-1252 or ISO-8859-1, resulting in garbled text.
+
+**Workaround**: Override the open state with ASCII hyphen-minus (U+002D) which doesn't require charset negotiation:
+
+```css
+/* Override only the OPEN/CHECKED states, preserve "+" for closed state */
+.collapse-plus:focus:not(.collapse-close) > .collapse-title:after,
+.collapse-plus:not(.collapse-close) > input:is([type="checkbox"], [type="radio"]):checked ~ .collapse-title:after,
+.collapse-plus[open] > .collapse-title:after {
+  content: "-" !important;
+}
+```
+
+**Alternative**: Ensure your server sends `Content-Type: text/css; charset=UTF-8` header for CSS files.
+
+See [`demo/custom-components.css`](demo/custom-components.css#L358-L373) for the complete fix.
+
+### 3. Drawer Close Animation Positioning Bug
+
+**Problem**: When a drawer is placed inside an `overflow-hidden` container, the close animation slides to the wrong position (viewport left edge instead of container left edge).
+
+**Root Cause**: daisyUI switches `.drawer-side` positioning between states:
+- **Open**: `position: sticky` (container-relative)
+- **Closed**: `position: fixed` (viewport-relative)
+
+This causes the close animation to target the viewport edge instead of the container edge.
+
+**Workaround**: Force `.drawer-side` to use `position: absolute` (container-relative) in both states when inside `overflow-hidden` containers:
+
+```css
+/* Target drawers inside overflow-hidden containers */
+.overflow-hidden > .drawer > .drawer-side {
+  position: absolute !important;
+  inset-inline-start: 0 !important;
+  height: 100% !important;
+}
+
+/* When drawer-open, override sticky positioning to absolute */
+.overflow-hidden > .drawer.drawer-open > .drawer-toggle:checked ~ .drawer-side,
+.overflow-hidden > .drawer.drawer-open > .drawer-side {
+  position: absolute !important;
+}
+```
+
+**Note**: This fix only applies to drawers in containers with `overflow-hidden`. Full-page drawers work correctly without this override.
+
+See [`demo/custom-components.css`](demo/custom-components.css#L376-L400) for the complete fix.
 
 
 ## TODO utility

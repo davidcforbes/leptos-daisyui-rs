@@ -1,5 +1,5 @@
 /// Modifies the visual style and behavior of collapse components.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum CollapseModifier {
     /// No visual indicator, basic collapsible behavior via tabindex
     #[default]
@@ -24,7 +24,7 @@ impl CollapseModifier {
 }
 
 /// Modifies the visual style and behavior of collapse components.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum CollapseForceModifier {
     /// No visual indicator, basic collapsible behavior via tabindex
     #[default]

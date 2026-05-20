@@ -2,7 +2,7 @@
 ///
 /// Style enum for daisyUI dropdown alignment classes that control horizontal positioning
 /// of dropdown menus relative to their trigger element.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum DropdownAlignment {
     /// Left-aligned dropdown (default)
     #[default]
@@ -30,7 +30,7 @@ impl DropdownAlignment {
 ///
 /// Style enum for daisyUI dropdown placement classes that control the direction
 /// dropdown menus expand from their trigger element.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum DropdownPlacement {
     /// Dropdown expands upward
     Top,

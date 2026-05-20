@@ -77,7 +77,7 @@ pub fn FilterReset(
             class=move || merge_classes!("btn filter-reset", class)
             type="radio"
             name=name
-            aria-label="×"
+            aria-label="Reset"
         />
     }
 }

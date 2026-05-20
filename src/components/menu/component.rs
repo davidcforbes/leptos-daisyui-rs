@@ -1,9 +1,11 @@
 use super::style::{MenuDirection, MenuSize};
 use crate::merge_classes;
 use leptos::{
+    ev,
     html::{H2, Li, Ul},
     prelude::*,
 };
+use leptos_router::components::A;
 
 /// # Menu Component
 ///
@@ -103,22 +105,38 @@ pub fn MenuItem(
     #[prop(optional, into)]
     is_submenu: bool,
 
+    /// Optional click callback (for action-based menus, not navigation)
+    #[prop(optional, into)]
+    on_click: Option<Callback<()>>,
+
     /// Item content
     children: Children,
 ) -> impl IntoView {
     let MenuManager { manual, selected } = MenuManager::expect_context();
 
-    let on_click = move |_| {
+    let on_anchor_click = move |e: ev::MouseEvent| {
         if disabled.get_untracked() {
+            e.prevent_default();
             return;
         }
 
-        if value.get_untracked().is_empty() {
-            return;
+        // Fire action callback if provided
+        if let Some(cb) = on_click {
+            e.prevent_default();
+            cb.run(());
         }
 
-        let mut selected = selected.write();
-        *selected = Some(value.get_untracked());
+        // Prevent default navigation if href is empty or not a real URL
+        let href_value = href.get_untracked();
+        if href_value.is_empty() || href_value == "#" || href_value.starts_with("javascript:") {
+            e.prevent_default();
+        }
+
+        if !value.get_untracked().is_empty() {
+            let mut selected = selected.write();
+            *selected = Some(value.get_untracked());
+        }
+        // Note: Don't prevent default for valid URLs - let the <A> component handle navigation
     };
 
     let is_active = move || {
@@ -133,12 +151,12 @@ pub fn MenuItem(
     };
 
     view! {
-        <li node_ref=node_ref on:click=on_click class=class>
+        <li node_ref=node_ref class=class>
             {if !is_submenu {
                 view! {
-                    <a href=href class:menu-active=is_active>
+                    <A href=move || href.get() class:menu-active=is_active on:click=on_anchor_click>
                         {children()}
-                    </a>
+                    </A>
                 }
                     .into_any()
             } else {
@@ -203,6 +221,15 @@ pub fn SubMenu(
     }
 }
 
+/// # Menu Divider Component
+///
+/// A horizontal rule divider for separating groups of menu items.
+/// Renders as `<li><hr /></li>` following daisyUI 5 conventions.
+#[component]
+pub fn MenuDivider() -> impl IntoView {
+    view! { <li><hr /></li> }
+}
+
 /// Internal context manager for menu selection state.
 #[derive(Clone)]
 pub(crate) struct MenuManager {
@@ -214,7 +241,11 @@ pub(crate) struct MenuManager {
 
 impl MenuManager {
     /// Retrieves the MenuManager from context.
+    ///
+    /// # Panics
+    /// Panics if MenuItem or MenuDropdown is used outside of a Menu component.
     pub fn expect_context() -> Self {
-        expect_context()
+        use_context::<MenuManager>()
+            .expect("MenuItem and MenuDropdown must be used within a Menu component")
     }
 }

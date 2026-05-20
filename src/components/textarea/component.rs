@@ -13,7 +13,7 @@ use leptos::{html::Textarea as HtmlTextarea, prelude::*};
 /// ```
 ///
 /// ## Node References
-/// - `node_ref` - References the table element ([HTMLTextareaElement](https://developer.mozilla.org/en-US/docs/Web/API/HTMLTextareaElement))
+/// - `node_ref` - References the textarea element ([HTMLTextareaElement](https://developer.mozilla.org/en-US/docs/Web/API/HTMLTextareaElement))
 #[component]
 pub fn Textarea(
     /// The color variant of the textarea
@@ -23,6 +23,10 @@ pub fn Textarea(
     /// The size variant of the textarea
     #[prop(optional, into)]
     size: Signal<TextareaSize>,
+
+    /// Whether the textarea is disabled
+    #[prop(optional, into)]
+    disabled: Signal<bool>,
 
     /// Additional CSS classes to apply
     #[prop(optional, into)]
@@ -34,10 +38,11 @@ pub fn Textarea(
 ) -> impl IntoView {
     view! {
         <textarea
+            disabled=disabled
             node_ref=node_ref
             class=move || {
                 merge_classes!(
-                    "textarea",
+                    "textarea ld-focus-ring",
                 color.get().as_str(),
                 size.get().as_str(),
                 class

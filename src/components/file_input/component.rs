@@ -28,6 +28,10 @@ pub fn FileInput(
     #[prop(optional, into)]
     size: Signal<FileInputSize>,
 
+    /// Whether the file input is disabled
+    #[prop(optional, into)]
+    disabled: Signal<bool>,
+
     /// Additional CSS classes
     #[prop(optional, into)]
     class: &'static str,
@@ -38,11 +42,12 @@ pub fn FileInput(
 ) -> impl IntoView {
     view! {
         <input
+            disabled=disabled
             node_ref=node_ref
             type="file"
             class=move || {
                 merge_classes!(
-                    "file-input",
+                    "file-input ld-focus-ring",
                     style.get().as_str(),
                     color.get().as_str(),
                     size.get().as_str(),

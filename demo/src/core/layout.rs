@@ -2,13 +2,20 @@ use leptos::prelude::*;
 use leptos_daisyui_rs::components::*;
 use leptos_icons::Icon;
 use leptos_router::{components::Outlet, hooks::use_location};
-use leptos_use::{breakpoints_tailwind, use_breakpoints, BreakpointsTailwind};
+use leptos_use::use_interval_fn;
+use wasm_bindgen::prelude::*;
+
+// External JavaScript interface for performance.memory (Chrome only)
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = performance, js_name = memory, getter)]
+    fn get_memory() -> JsValue;
+}
 
 /// Layout component for the demos
 #[component]
 pub fn Layout() -> impl IntoView {
     let location = use_location();
-    let breakpoints = use_breakpoints(breakpoints_tailwind());
 
     let selected = RwSignal::new(None);
 
@@ -22,15 +29,59 @@ pub fn Layout() -> impl IntoView {
         selected.set(init_component_name);
     });
 
+    // Status bar state
+    let (current_time, set_current_time) = signal(String::new());
+    let (memory_usage, set_memory_usage) = signal(String::new());
+
+    // Update time and memory every second
+    let _ = use_interval_fn(
+        move || {
+            // Update time
+            let date = js_sys::Date::new_0();
+            let time_str = format!(
+                "{:02}:{:02}:{:02}",
+                date.get_hours(),
+                date.get_minutes(),
+                date.get_seconds()
+            );
+            set_current_time.set(time_str);
+
+            // Update memory usage (Chrome only, graceful degradation)
+            let memory_obj = get_memory();
+            if !memory_obj.is_undefined() && !memory_obj.is_null() {
+                // Try to get usedJSHeapSize and jsHeapSizeLimit
+                if let Ok(used) = js_sys::Reflect::get(&memory_obj, &JsValue::from_str("usedJSHeapSize")) {
+                    if let Some(used_bytes) = used.as_f64() {
+                        let used_mb = used_bytes / 1_048_576.0;
+
+                        // Also try to get heap limit
+                        if let Ok(limit) = js_sys::Reflect::get(&memory_obj, &JsValue::from_str("jsHeapSizeLimit")) {
+                            if let Some(limit_bytes) = limit.as_f64() {
+                                let limit_mb = limit_bytes / 1_048_576.0;
+                                set_memory_usage.set(format!("{:.1}/{:.1} MB", used_mb, limit_mb));
+                            } else {
+                                set_memory_usage.set(format!("{:.1} MB", used_mb));
+                            }
+                        } else {
+                            set_memory_usage.set(format!("{:.1} MB", used_mb));
+                        }
+                    } else {
+                        set_memory_usage.set("N/A".to_string());
+                    }
+                } else {
+                    set_memory_usage.set("N/A".to_string());
+                }
+            } else {
+                set_memory_usage.set("N/A".to_string());
+            }
+        },
+        1000,
+    );
+
     view! {
-        <div class="h-screen w-screen bg-base-100">
-            <Navbar class="w-screen bg-base-200 border-b border-base-300">
+        <div class="h-screen w-screen bg-base-100 flex flex-col">
+            <Navbar class="w-screen bg-base-200 border-b border-base-300 flex-none">
                 <NavbarStart class="gap-4">
-                    <div class="lg:hidden">
-                        <label for="drawer-toggle" class="hover:cursor-pointer">
-                            <Icon icon=icondata::AiMenuOutlined />
-                        </label>
-                    </div>
                     <Icon icon=icondata::CgComponents />
                     <h1 class="text-xl font-bold">"daisyUI + Leptos Showcase"</h1>
                 </NavbarStart>
@@ -45,55 +96,82 @@ pub fn Layout() -> impl IntoView {
                 </NavbarEnd>
             </Navbar>
 
-            <Drawer open=breakpoints.ge(BreakpointsTailwind::Lg)>
-                <DrawerToggle id="drawer-toggle" />
+            <div class="flex-1 flex overflow-hidden">
+                // Sidebar
+                <aside class="hidden lg:flex flex-col w-64 flex-none bg-base-200 border-r border-base-300 overflow-y-auto">
+                    <div class="p-4">
+                        <h2 class="text-lg font-semibold mb-4">"Components"</h2>
+                        <Menu
+                            selected=selected
+                            direction=MenuDirection::Vertical
+                            class="w-full"
+                        >
+                            {get_menu_categories()
+                                .into_iter()
+                                .map(|category| {
+                                    view! {
+                                        <MenuItem is_submenu=true>
+                                            <MenuTitle>{category.title}</MenuTitle>
+                                            <SubMenu>
+                                                {category
+                                                    .items
+                                                    .into_iter()
+                                                    .map(|item| {
+                                                        view! {
+                                                            <MenuItem href=item.href value=item.value>
+                                                                {item.name}
+                                                            </MenuItem>
+                                                        }
+                                                    })
+                                                    .collect_view()}
+                                            </SubMenu>
+                                        </MenuItem>
+                                    }
+                                })
+                                .collect_view()}
+                        </Menu>
+                    </div>
+                </aside>
 
-                <div class="drawer-content">
-
-                    // Content area with padding
-                    <div class="p-6 w-full">
+                // Main content area
+                <main class="flex-1 overflow-y-auto min-w-0">
+                    <div class="p-6">
                         <Outlet />
                     </div>
-                </div>
+                </main>
+            </div>
 
-                <DrawerSide>
-                    <label for="drawer-toggle" class="drawer-overlay"></label>
-                    <div class="min-h-full w-64 bg-base-200 text-base-content">
-                        <div class="p-4">
-                            <h2 class="text-lg font-semibold mb-4">"Components"</h2>
-                            <Menu
-                                selected=selected
-                                direction=MenuDirection::Vertical
-                                class="w-full"
-                            >
-                                {get_menu_categories()
-                                    .into_iter()
-                                    .map(|category| {
-                                        view! {
-                                            <MenuItem is_submenu=true>
-                                                <MenuTitle>{category.title}</MenuTitle>
-                                                <SubMenu>
-                                                    {category
-                                                        .items
-                                                        .into_iter()
-                                                        .map(|item| {
-                                                            view! {
-                                                                <MenuItem href=item.href value=item.value>
-                                                                    {item.name}
-                                                                </MenuItem>
-                                                            }
-                                                        })
-                                                        .collect_view()}
-                                                </SubMenu>
-                                            </MenuItem>
-                                        }
-                                    })
-                                    .collect_view()}
-                            </Menu>
-                        </div>
+            // Status footer
+            <div class="w-screen bg-base-300 border-t border-base-content/10 px-4 py-1 flex-none">
+                <div class="flex items-center text-xs text-base-content/70 font-mono">
+                    // Left: Path
+                    <span class="flex items-center gap-1">
+                        <span class="w-3 h-3">
+                            <Icon icon=icondata::AiFolderOutlined />
+                        </span>
+                        {move || location.pathname.get()}
+                    </span>
+
+                    // Center: Memory (with flex-1 to take remaining space and center content)
+                    <div class="flex-1 flex justify-center">
+                        <span class="flex items-center gap-1">
+                            <span class="w-3 h-3">
+                                <Icon icon=icondata::AiDatabaseOutlined />
+                            </span>
+                            "Memory: "
+                            {move || memory_usage.get()}
+                        </span>
                     </div>
-                </DrawerSide>
-            </Drawer>
+
+                    // Right: Clock
+                    <span class="flex items-center gap-1">
+                        <span class="w-3 h-3">
+                            <Icon icon=icondata::AiClockCircleOutlined />
+                        </span>
+                        {move || current_time.get()}
+                    </span>
+                </div>
+            </div>
         </div>
     }
 }
@@ -125,6 +203,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     name: "Dropdown",
                     href: "/components/dropdown",
                     value: "dropdown",
+                },
+                ComponentItem {
+                    name: "FAB",
+                    href: "/components/fab",
+                    value: "fab",
                 },
                 ComponentItem {
                     name: "Modal",
@@ -182,14 +265,49 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     value: "collapse",
                 },
                 ComponentItem {
+                    name: "ConfigProvider",
+                    href: "/components/config-provider",
+                    value: "config-provider",
+                },
+                ComponentItem {
                     name: "Countdown",
                     href: "/components/countdown",
                     value: "countdown",
                 },
                 ComponentItem {
+                    name: "DataTable",
+                    href: "/components/data-table",
+                    value: "data-table",
+                },
+                ComponentItem {
                     name: "Diff",
                     href: "/components/diff",
                     value: "diff",
+                },
+                ComponentItem {
+                    name: "Hover 3D",
+                    href: "/components/hover_3d",
+                    value: "hover_3d",
+                },
+                ComponentItem {
+                    name: "Hover Gallery",
+                    href: "/components/hover_gallery",
+                    value: "hover_gallery",
+                },
+                ComponentItem {
+                    name: "Icon",
+                    href: "/components/icon",
+                    value: "icon",
+                },
+                ComponentItem {
+                    name: "Gantt",
+                    href: "/components/gantt",
+                    value: "gantt",
+                },
+                ComponentItem {
+                    name: "Kanban",
+                    href: "/components/kanban",
+                    value: "kanban",
                 },
                 ComponentItem {
                     name: "Kbd",
@@ -200,6 +318,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     name: "List",
                     href: "/components/list",
                     value: "list",
+                },
+                ComponentItem {
+                    name: "Persona",
+                    href: "/components/persona",
+                    value: "persona",
                 },
                 ComponentItem {
                     name: "Stats",
@@ -217,9 +340,29 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     value: "table",
                 },
                 ComponentItem {
+                    name: "Tag",
+                    href: "/components/tag",
+                    value: "tag",
+                },
+                ComponentItem {
+                    name: "Text Rotate",
+                    href: "/components/text_rotate",
+                    value: "text_rotate",
+                },
+                ComponentItem {
                     name: "Timeline",
                     href: "/components/timeline",
                     value: "timeline",
+                },
+                ComponentItem {
+                    name: "SVG Display",
+                    href: "/components/svg_display",
+                    value: "svg_display",
+                },
+                ComponentItem {
+                    name: "Mermaid Display",
+                    href: "/components/mermaid_display",
+                    value: "mermaid_display",
                 },
             ],
         },
@@ -291,11 +434,21 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     href: "/components/toast",
                     value: "toast",
                 },
+                ComponentItem {
+                    name: "Tooltip",
+                    href: "/components/tooltip",
+                    value: "tooltip",
+                },
             ],
         },
         MenuCategory {
             title: "Data Input",
             items: vec![
+                ComponentItem {
+                    name: "AutoComplete",
+                    href: "/components/auto-complete",
+                    value: "auto-complete",
+                },
                 ComponentItem {
                     name: "Calendar",
                     href: "/components/calendar",
@@ -305,6 +458,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     name: "Checkbox",
                     href: "/components/checkbox",
                     value: "checkbox",
+                },
+                ComponentItem {
+                    name: "ColorPicker",
+                    href: "/components/color-picker",
+                    value: "color-picker",
                 },
                 ComponentItem {
                     name: "Fieldset",
@@ -320,6 +478,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     name: "Filter",
                     href: "/components/filter",
                     value: "filter",
+                },
+                ComponentItem {
+                    name: "Input",
+                    href: "/components/input",
+                    value: "input",
                 },
                 ComponentItem {
                     name: "Label",
@@ -367,9 +530,19 @@ fn get_menu_categories() -> Vec<MenuCategory> {
             title: "Layout",
             items: vec![
                 ComponentItem {
+                    name: "AppShell",
+                    href: "/components/app-shell",
+                    value: "app-shell",
+                },
+                ComponentItem {
                     name: "Divider",
                     href: "/components/divider",
                     value: "divider",
+                },
+                ComponentItem {
+                    name: "Dock",
+                    href: "/components/dock",
+                    value: "dock",
                 },
                 ComponentItem {
                     name: "Drawer",
@@ -435,6 +608,21 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     name: "Mockup Window",
                     href: "/components/mockup_window",
                     value: "mockup_window",
+                },
+            ],
+        },
+        MenuCategory {
+            title: "Foundation",
+            items: vec![
+                ComponentItem {
+                    name: "Design Tokens",
+                    href: "/components/tokens",
+                    value: "tokens",
+                },
+                ComponentItem {
+                    name: "Motion",
+                    href: "/components/motion",
+                    value: "motion",
                 },
             ],
         },

@@ -1,5 +1,5 @@
 /// Color variants for the Range component.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum RangeColor {
     /// Default range styling
     #[default]
@@ -37,7 +37,7 @@ impl RangeColor {
 }
 
 /// Size variants for the Range component.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum RangeSize {
     /// Extra small range
     Xs,

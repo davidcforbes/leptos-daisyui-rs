@@ -2,7 +2,7 @@
 ///
 /// Style enum for daisyUI carousel modifier classes that control the alignment
 /// and positioning of carousel items.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum CarouselModifier {
     /// Default alignment (no modifier applied)
     #[default]
@@ -34,7 +34,7 @@ impl CarouselModifier {
 ///
 /// Style enum for daisyUI carousel direction classes that control the scroll
 /// direction of the carousel container.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum CarouselDirection {
     /// Horizontal scrolling (default) - items scroll left/right
     #[default]
