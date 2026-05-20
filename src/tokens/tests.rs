@@ -143,3 +143,121 @@ fn animations_css_has_no_html_unsafe_characters() {
     assert!(!css.contains('<'), "stray '<' in css: {css}");
     assert!(!css.contains("</"), "stray '</' in css: {css}");
 }
+
+#[test]
+fn animations_css_defines_dialog_keyframes() {
+    let css = ui_animations_css();
+    assert!(
+        css.contains("@keyframes ld-dialog-in"),
+        "missing ld-dialog-in: {css}"
+    );
+    assert!(
+        css.contains("@keyframes ld-backdrop-in"),
+        "missing ld-backdrop-in: {css}"
+    );
+    assert!(
+        css.contains("dialog.modal[open] > .modal-box"),
+        "missing modal-box selector: {css}"
+    );
+    assert!(
+        css.contains("dialog.modal[open]::backdrop"),
+        "missing ::backdrop selector: {css}"
+    );
+}
+
+#[test]
+fn animations_css_defines_toast_keyframes() {
+    let css = ui_animations_css();
+    assert!(
+        css.contains("@keyframes ld-toast-in-top"),
+        "missing ld-toast-in-top: {css}"
+    );
+    assert!(
+        css.contains("@keyframes ld-toast-in-bottom"),
+        "missing ld-toast-in-bottom: {css}"
+    );
+    assert!(
+        css.contains(".toast.toast-top > *"),
+        "missing toast-top selector: {css}"
+    );
+    assert!(
+        css.contains(".toast.toast-bottom > *"),
+        "missing toast-bottom selector: {css}"
+    );
+}
+
+#[test]
+fn animations_css_defines_dropdown_keyframes() {
+    let css = ui_animations_css();
+    assert!(
+        css.contains("@keyframes ld-dropdown-in"),
+        "missing ld-dropdown-in: {css}"
+    );
+    assert!(
+        css.contains(".dropdown-open > .dropdown-content"),
+        "missing dropdown-open selector: {css}"
+    );
+    assert!(
+        css.contains(".dropdown.dropdown-hover:hover"),
+        "missing dropdown-hover selector: {css}"
+    );
+}
+
+#[test]
+fn animations_css_defines_ripple() {
+    let css = ui_animations_css();
+    assert!(
+        css.contains(".ld-ripple-host"),
+        "missing ld-ripple-host: {css}"
+    );
+    assert!(
+        css.contains(".ld-ripple-element"),
+        "missing ld-ripple-element: {css}"
+    );
+    assert!(
+        css.contains("@keyframes ld-ripple"),
+        "missing ld-ripple keyframes: {css}"
+    );
+}
+
+#[test]
+fn animations_css_defines_focus_ring() {
+    let css = ui_animations_css();
+    assert!(
+        css.contains(".ld-focus-ring:focus-visible"),
+        "missing ld-focus-ring:focus-visible: {css}"
+    );
+    assert!(
+        css.contains("@keyframes ld-focus-ring-in"),
+        "missing ld-focus-ring-in keyframes: {css}"
+    );
+    assert!(
+        css.contains("var(--p"),
+        "ld-focus-ring must reference daisyUI --p primary token: {css}"
+    );
+}
+
+#[test]
+fn animations_css_defines_drawer_keyframes() {
+    let css = ui_animations_css();
+    assert!(
+        css.contains("@keyframes ld-drawer-in-start"),
+        "missing ld-drawer-in-start: {css}"
+    );
+    assert!(
+        css.contains("@keyframes ld-drawer-in-end"),
+        "missing ld-drawer-in-end: {css}"
+    );
+    assert!(
+        css.contains("@keyframes ld-drawer-overlay-in"),
+        "missing ld-drawer-overlay-in: {css}"
+    );
+    assert!(
+        css.contains(".drawer-open:not(.drawer-end)"),
+        "missing drawer-start selector: {css}"
+    );
+    assert!(
+        css.contains(".drawer-open.drawer-end"),
+        "missing drawer-end selector: {css}"
+    );
+}

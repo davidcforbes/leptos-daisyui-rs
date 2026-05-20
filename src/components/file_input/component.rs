@@ -47,7 +47,7 @@ pub fn FileInput(
             type="file"
             class=move || {
                 merge_classes!(
-                    "file-input",
+                    "file-input ld-focus-ring",
                     style.get().as_str(),
                     color.get().as_str(),
                     size.get().as_str(),

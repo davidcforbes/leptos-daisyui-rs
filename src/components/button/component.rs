@@ -1,5 +1,6 @@
 use super::style::{ButtonColor, ButtonShape, ButtonSize, ButtonStyle};
 use crate::merge_classes;
+use crate::utils::{RippleOverlay, use_ripple};
 use leptos::{
     html::{A, Button as HTMLButton},
     prelude::*,
@@ -47,6 +48,10 @@ pub fn Button(
     #[prop(optional, into)]
     disabled: Signal<bool>,
 
+    /// Enables the click ripple effect. Defaults to off.
+    #[prop(optional, into)]
+    ripple: Signal<bool>,
+
     /// Node reference for the button element
     #[prop(optional)]
     node_ref: NodeRef<HTMLButton>,
@@ -58,13 +63,14 @@ pub fn Button(
     /// Button content (text, icons, or other elements)
     children: Children,
 ) -> impl IntoView {
+    let ripple_handle = use_ripple();
     view! {
         <button
             disabled=disabled
             node_ref=node_ref
             class=move || {
                 merge_classes!(
-                    "btn ld-eased ld-pressable",
+                    "btn ld-eased ld-pressable ld-focus-ring",
                     color.get().as_str(),
                     style.get().as_str(),
                     size.get().as_str(),
@@ -76,8 +82,15 @@ pub fn Button(
             class:btn-active=active
             class:btn-disabled=disabled
             class:loading=loading
+            class:ld-ripple-host=ripple
+            on:click=move |ev| {
+                if ripple.get_untracked() {
+                    ripple_handle.trigger.run(ev);
+                }
+            }
         >
             {children()}
+            {move || ripple.get().then(|| view! { <RippleOverlay handle=ripple_handle /> })}
         </button>
     }
 }
@@ -111,6 +124,10 @@ pub fn LinkButton(
     #[prop(optional, into)]
     shape: Signal<ButtonShape>,
 
+    /// Enables the click ripple effect. Defaults to off.
+    #[prop(optional, into)]
+    ripple: Signal<bool>,
+
     /// Node reference for the anchor element
     #[prop(optional)]
     node_ref: NodeRef<A>,
@@ -122,13 +139,14 @@ pub fn LinkButton(
     /// Link content (text, icons, or other elements)
     children: Children,
 ) -> impl IntoView {
+    let ripple_handle = use_ripple();
     view! {
         <a
             href=href
             node_ref=node_ref
             class=move || {
                 merge_classes!(
-                    "btn ld-eased ld-pressable",
+                    "btn ld-eased ld-pressable ld-focus-ring",
                     color.get().as_str(),
                     style.get().as_str(),
                     size.get().as_str(),
@@ -136,9 +154,16 @@ pub fn LinkButton(
                     class
                 )
             }
+            class:ld-ripple-host=ripple
+            on:click=move |ev| {
+                if ripple.get_untracked() {
+                    ripple_handle.trigger.run(ev);
+                }
+            }
         >
 
             {children()}
+            {move || ripple.get().then(|| view! { <RippleOverlay handle=ripple_handle /> })}
         </a>
     }
 }

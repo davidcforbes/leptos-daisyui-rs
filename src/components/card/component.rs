@@ -1,5 +1,6 @@
 use super::style::{CardSize, CardStyle};
 use crate::merge_classes;
+use crate::utils::{RippleOverlay, use_ripple};
 use leptos::html::{Div, H2};
 use leptos::prelude::*;
 
@@ -41,6 +42,10 @@ pub fn Card(
     #[prop(optional, into)]
     elevate: Signal<bool>,
 
+    /// Enables the click ripple effect. Defaults to off.
+    #[prop(optional, into)]
+    ripple: Signal<bool>,
+
     /// Additional CSS classes to apply to the card.
     #[prop(optional, into)]
     class: &'static str,
@@ -52,6 +57,7 @@ pub fn Card(
     /// Child elements to render inside the card.
     children: Children,
 ) -> impl IntoView {
+    let ripple_handle = use_ripple();
     view! {
         <div
             node_ref=node_ref
@@ -66,8 +72,15 @@ pub fn Card(
             class:card-side=side
             class:image-full=image_full
             class:ld-elevated=elevate
+            class:ld-ripple-host=ripple
+            on:click=move |ev| {
+                if ripple.get_untracked() {
+                    ripple_handle.trigger.run(ev);
+                }
+            }
         >
             {children()}
+            {move || ripple.get().then(|| view! { <RippleOverlay handle=ripple_handle /> })}
         </div>
     }
 }

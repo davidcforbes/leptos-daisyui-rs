@@ -51,7 +51,7 @@ pub fn Select(
             node_ref=node_ref
             class=move || {
                 merge_classes!(
-                    "select",
+                    "select ld-focus-ring",
                 style.get().as_str(),
                 color.get().as_str(),
                 size.get().as_str(),

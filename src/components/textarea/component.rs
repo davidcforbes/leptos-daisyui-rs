@@ -42,7 +42,7 @@ pub fn Textarea(
             node_ref=node_ref
             class=move || {
                 merge_classes!(
-                    "textarea",
+                    "textarea ld-focus-ring",
                 color.get().as_str(),
                 size.get().as_str(),
                 class

@@ -74,7 +74,7 @@ pub fn Input(
             node_ref=node_ref
             class=move || {
                 merge_classes!(
-                    "input",
+                    "input ld-focus-ring",
                     style.get().as_str(),
                     color.get().as_str(),
                     size.get().as_str(),
