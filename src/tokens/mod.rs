@@ -18,8 +18,10 @@
 //! }
 //! ```
 
+mod animations;
 mod preamble;
 
+pub use animations::*;
 pub use preamble::*;
 
 #[cfg(test)]

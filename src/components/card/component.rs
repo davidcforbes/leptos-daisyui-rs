@@ -35,6 +35,12 @@ pub fn Card(
     #[prop(optional, into)]
     image_full: Signal<bool>,
 
+    /// Apply the shared `ld-elevated` lift: rests at elevation tier 4
+    /// and lifts to tier 8 + 1px translate on hover. Tokens come from
+    /// the `ui-tokens` crate via [`UiTokensPreamble`](crate::tokens::UiTokensPreamble).
+    #[prop(optional, into)]
+    elevate: Signal<bool>,
+
     /// Additional CSS classes to apply to the card.
     #[prop(optional, into)]
     class: &'static str,
@@ -51,7 +57,7 @@ pub fn Card(
             node_ref=node_ref
             class=move || {
                 merge_classes!(
-                    "card",
+                    "card ld-eased",
                     style.get().as_str(),
                     size.get().as_str(),
                     class
@@ -59,6 +65,7 @@ pub fn Card(
             }
             class:card-side=side
             class:image-full=image_full
+            class:ld-elevated=elevate
         >
             {children()}
         </div>

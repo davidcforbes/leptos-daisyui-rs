@@ -7,7 +7,7 @@ use leptos::mount::mount_to_body;
 use leptos::prelude::*;
 use leptos_daisyui_rs::components::*;
 use leptos_daisyui_rs::theme::{ThemeProvider, use_theme_context};
-use leptos_daisyui_rs::tokens::UiTokensPreamble;
+use leptos_daisyui_rs::tokens::{UiAnimationsPreamble, UiTokensPreamble};
 use leptos_icons::Icon;
 use leptos_meta::*;
 use leptos_router::{
@@ -43,6 +43,7 @@ fn AppInner() -> impl IntoView {
         <Html attr:data-theme=move || theme_ctx.base_theme() />
         <Title text="Leptos x daisyUI" />
         <UiTokensPreamble />
+        <UiAnimationsPreamble />
 
         <Router>
             <Routes fallback=|| "Page not found">

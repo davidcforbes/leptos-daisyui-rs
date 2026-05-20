@@ -43,7 +43,7 @@ pub fn Radio(
             type="radio"
             class=move || {
                 merge_classes!(
-                    "radio",
+                    "radio ld-eased",
                     color.get().as_str(),
                     size.get().as_str(),
                     class

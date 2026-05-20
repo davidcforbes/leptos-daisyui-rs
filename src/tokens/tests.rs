@@ -1,4 +1,4 @@
-use super::ui_tokens_css;
+use super::{ui_animations_css, ui_tokens_css};
 
 #[test]
 fn css_starts_with_root_selector() {
@@ -89,4 +89,57 @@ fn css_has_no_html_unsafe_characters() {
     assert!(!css.contains('<'), "stray '<' in css: {css}");
     assert!(!css.contains('>'), "stray '>' in css: {css}");
     assert!(!css.contains('&'), "stray '&' in css: {css}");
+}
+
+#[test]
+fn animations_css_defines_state_transition_class() {
+    let css = ui_animations_css();
+    assert!(css.contains(".ld-eased"), "missing ld-eased: {css}");
+    assert!(
+        css.contains("var(--ld-duration-fast)"),
+        "ld-eased must reference duration token: {css}"
+    );
+    assert!(
+        css.contains("var(--ld-ease-standard)"),
+        "ld-eased must reference easing token: {css}"
+    );
+}
+
+#[test]
+fn animations_css_defines_pressable_class() {
+    let css = ui_animations_css();
+    assert!(
+        css.contains(".ld-pressable:active"),
+        "missing ld-pressable:active: {css}"
+    );
+}
+
+#[test]
+fn animations_css_defines_elevated_lift() {
+    let css = ui_animations_css();
+    assert!(css.contains(".ld-elevated"), "missing ld-elevated: {css}");
+    assert!(
+        css.contains("var(--ld-elevation-4)"),
+        "ld-elevated must reference elevation token: {css}"
+    );
+    assert!(
+        css.contains("var(--ld-elevation-8)"),
+        "ld-elevated:hover must reference elevation-8 token: {css}"
+    );
+}
+
+#[test]
+fn animations_css_respects_reduced_motion() {
+    let css = ui_animations_css();
+    assert!(
+        css.contains("prefers-reduced-motion"),
+        "ld animations must respect prefers-reduced-motion: {css}"
+    );
+}
+
+#[test]
+fn animations_css_has_no_html_unsafe_characters() {
+    let css = ui_animations_css();
+    assert!(!css.contains('<'), "stray '<' in css: {css}");
+    assert!(!css.contains("</"), "stray '</' in css: {css}");
 }

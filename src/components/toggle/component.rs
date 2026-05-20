@@ -43,7 +43,7 @@ pub fn Toggle(
             type="checkbox"
             class=move || {
                 merge_classes!(
-                    "toggle",
+                    "toggle ld-eased",
                     color.get().as_str(),
                     size.get().as_str(),
                     class

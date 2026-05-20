@@ -1,6 +1,6 @@
 use leptos::prelude::*;
 use leptos_daisyui_rs::components::*;
-use leptos_daisyui_rs::tokens::ui_tokens_css;
+use leptos_daisyui_rs::tokens::{ui_animations_css, ui_tokens_css};
 
 #[component]
 pub fn TokensDemo() -> impl IntoView {
@@ -38,12 +38,27 @@ pub fn TokensDemo() -> impl IntoView {
                 <ElevationSwatch tier="64" />
             </div>
 
+            <h2 class="text-xl font-semibold">"Motion primitives"</h2>
+            <p class="text-base-content/70 text-sm">
+                "Utility classes from "<code>"UiAnimationsPreamble"</code>
+                ". Hover and click the live samples below to feel the eased transitions."
+            </p>
+            <div class="flex flex-wrap gap-4 items-center py-4">
+                <Button color=ButtonColor::Primary>"ld-eased ld-pressable"</Button>
+                <Card elevate=true class="bg-base-100">
+                    <CardBody class="p-4">
+                        <span class="font-mono text-xs">"ld-elevated card"</span>
+                    </CardBody>
+                </Card>
+            </div>
+
             <h2 class="text-xl font-semibold">"Generated CSS"</h2>
             <p class="text-base-content/70 text-sm">
-                "Output of "<code>"leptos_daisyui_rs::tokens::ui_tokens_css()"</code>"."
+                "Output of "<code>"ui_tokens_css()"</code>" and "
+                <code>"ui_animations_css()"</code>"."
             </p>
             <pre class="bg-base-200 p-4 rounded-lg overflow-x-auto text-xs">
-                <code>{ui_tokens_css()}</code>
+                <code>{ui_tokens_css()}{ui_animations_css()}</code>
             </pre>
         </div>
     }

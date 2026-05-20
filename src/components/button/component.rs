@@ -64,7 +64,7 @@ pub fn Button(
             node_ref=node_ref
             class=move || {
                 merge_classes!(
-                    "btn",
+                    "btn ld-eased ld-pressable",
                     color.get().as_str(),
                     style.get().as_str(),
                     size.get().as_str(),
@@ -128,7 +128,7 @@ pub fn LinkButton(
             node_ref=node_ref
             class=move || {
                 merge_classes!(
-                    "btn",
+                    "btn ld-eased ld-pressable",
                     color.get().as_str(),
                     style.get().as_str(),
                     size.get().as_str(),

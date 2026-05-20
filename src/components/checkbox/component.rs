@@ -40,7 +40,7 @@ pub fn Checkbox(
             type="checkbox"
             class=move || {
                 merge_classes!(
-                    "checkbox",
+                    "checkbox ld-eased",
                     color.get().as_str(),
                     size.get().as_str(),
                     class
