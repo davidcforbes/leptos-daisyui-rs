@@ -1,7 +1,7 @@
 use crate::core::{ContentLayout, Section};
 use leptos::prelude::*;
 use leptos_daisyui_rs::components::*;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 #[component]
 pub fn DataTableDemo() -> impl IntoView {
@@ -54,6 +54,17 @@ pub fn DataTableDemo() -> impl IntoView {
     // States
     let (loading, set_loading) = signal(false);
     let (page_size, set_page_size) = signal(10_usize);
+
+    // Multi-select state for the selection demo
+    let selected_rows = RwSignal::new(BTreeSet::<usize>::new());
+    let selection_anchor = RwSignal::new(Option::<usize>::None);
+    let selection_data = RwSignal::new(generate_users(20));
+    let selection_columns = RwSignal::new(vec![
+        Column::new("id", "ID"),
+        Column::new("name", "Name"),
+        Column::new("email", "Email"),
+        Column::new("role", "Role"),
+    ]);
 
     view! {
         <ContentLayout
@@ -383,6 +394,47 @@ pub fn DataTableDemo() -> impl IntoView {
                         <code>"}"</code>
                     </pre>
                 </div>
+            </Section>
+
+            // Multi-select rows (Ctrl / Shift)
+            <Section title="Multi-select rows">
+                <p class="text-sm opacity-70 mb-2">
+                    "Click a row to select it. " <kbd class="kbd kbd-xs">"Ctrl"</kbd>
+                    "+click toggles, " <kbd class="kbd kbd-xs">"Shift"</kbd>
+                    "+click extends the range from the anchor."
+                </p>
+                <p class="text-sm opacity-70 mb-4">
+                    "Selected absolute indices: "
+                    <code>
+                        {move || {
+                            let s = selected_rows.get();
+                            if s.is_empty() {
+                                "(none)".to_string()
+                            } else {
+                                s.iter()
+                                    .map(|i| i.to_string())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            }
+                        }}
+                    </code>
+                    " — anchor: "
+                    <code>
+                        {move || {
+                            selection_anchor
+                                .get()
+                                .map(|i| i.to_string())
+                                .unwrap_or_else(|| "(none)".to_string())
+                        }}
+                    </code>
+                </p>
+                <DataTable
+                    data=selection_data
+                    columns=selection_columns
+                    page_size=8
+                    selected_rows=selected_rows
+                    selection_anchor=selection_anchor
+                />
             </Section>
         </ContentLayout>
     }

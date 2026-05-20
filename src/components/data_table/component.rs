@@ -1,12 +1,14 @@
 use crate::components::data_table::body::DataTableBody;
 use crate::components::data_table::controls::DataTableControls;
 use crate::components::data_table::header::DataTableHeader;
+use crate::components::data_table::selection::handle_row_click;
 use crate::components::data_table::types::{
     Column, DataTableClasses, DataTableTexts, SortOrder, TableRow,
 };
 use crate::components::table::{Table, TableSize};
 use crate::merge_classes;
 use leptos::{html::Div, prelude::*};
+use std::collections::BTreeSet;
 use web_sys::wasm_bindgen::JsCast;
 
 /// # DataTable Component
@@ -119,6 +121,19 @@ pub fn DataTable(
     #[prop(optional, into)]
     searchable: Signal<bool>,
 
+    /// Optional selected-row state. When provided, rows respond to
+    /// Ctrl/Shift-click with multi-select semantics matching d2d-ui's
+    /// desktop table. Indices are absolute (into the underlying `data`)
+    /// so they survive pagination. Cleared automatically when `data` or
+    /// the sort column/order changes.
+    #[prop(optional)]
+    selected_rows: Option<RwSignal<BTreeSet<usize>>>,
+
+    /// Optional anchor index for Shift-range selection. Defaults to a
+    /// locally-owned signal if not provided.
+    #[prop(optional)]
+    selection_anchor: Option<RwSignal<Option<usize>>>,
+
     /// Node reference to container element
     #[prop(optional)]
     node_ref: NodeRef<Div>,
@@ -166,10 +181,7 @@ pub fn DataTable(
         });
         let window = web_sys::window().unwrap();
         let handle = window
-            .set_timeout_with_callback_and_timeout_and_arguments_0(
-                cb.as_ref().unchecked_ref(),
-                300,
-            )
+            .set_timeout_with_callback_and_timeout_and_arguments_0(cb.as_ref().unchecked_ref(), 300)
             .unwrap();
         set_debounce_handle.set(Some(handle));
     };
@@ -236,14 +248,14 @@ pub fn DataTable(
         }
     });
 
-    // Current page rows with safety guards
+    // Current page rows paired with absolute indices into `data`, with safety guards
     let current_page_rows = Memo::new(move |_| {
         if !paginate.get() {
             // No pagination: return all rows
             return sorted_indices
                 .get()
                 .iter()
-                .filter_map(|&idx| data.get().get(idx).cloned())
+                .filter_map(|&idx| data.get().get(idx).cloned().map(|row| (idx, row)))
                 .collect::<Vec<_>>();
         }
 
@@ -253,7 +265,7 @@ pub fn DataTable(
 
         sorted_indices.get()[start..end]
             .iter()
-            .filter_map(|&idx| data.get().get(idx).cloned())
+            .filter_map(|&idx| data.get().get(idx).cloned().map(|row| (idx, row)))
             .collect::<Vec<_>>()
     });
 
@@ -269,15 +281,42 @@ pub fn DataTable(
         }
     });
 
+    // Selection state — owned locally if the consumer didn't pass their own.
+    let selected_rows = selected_rows.unwrap_or_else(|| RwSignal::new(BTreeSet::new()));
+    let selection_anchor = selection_anchor.unwrap_or_else(|| RwSignal::new(None));
+
+    // Clear selection on data refresh or sort change; indices may no
+    // longer point at the same row after either of those events.
+    Effect::new(move |prev: Option<()>| {
+        let _ = data.get();
+        let _ = sort_column.get();
+        let _ = sort_order.get();
+        if prev.is_some() {
+            selected_rows.update(|s| s.clear());
+            selection_anchor.set(None);
+        }
+    });
+
+    // Row-click callback wiring multi-select semantics.
+    let on_row_click = Callback::new(move |(abs_idx, ev): (usize, web_sys::MouseEvent)| {
+        let total = data.with(|d| d.len());
+        let ctrl = ev.ctrl_key() || ev.meta_key();
+        let shift = ev.shift_key();
+        let mut next = selected_rows.get_untracked();
+        let mut anchor = selection_anchor.get_untracked();
+        handle_row_click(abs_idx, ctrl, shift, &mut next, &mut anchor, total);
+        selected_rows.set(next);
+        selection_anchor.set(anchor);
+    });
+
     let container_class = merge_classes!(classes.container, class);
     let texts_for_body = texts.clone();
     let texts_for_controls = texts.clone();
     let search_placeholder = texts.search_placeholder;
 
     // Container style for viewport-constrained scrolling
-    let container_style = max_height.map(|h| {
-        format!("display: flex; flex-direction: column; max-height: {}", h)
-    });
+    let container_style =
+        max_height.map(|h| format!("display: flex; flex-direction: column; max-height: {}", h));
 
     // Table wrapper style when max_height is set
     let has_max_height = container_style.is_some();
@@ -334,8 +373,11 @@ pub fn DataTable(
                         texts=texts_for_body
                         body_cell_class=classes.body_cell
                         row_class=classes.row
+                        selected_row_class=classes.selected_row
+                        selected_rows=Signal::derive(move || selected_rows.get())
                         loading_row_class=classes.loading_row
                         empty_row_class=classes.empty_row
+                        on_row_click=on_row_click
                     />
                 </Table>
             </div>

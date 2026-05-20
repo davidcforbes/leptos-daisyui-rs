@@ -176,9 +176,8 @@ pub fn ServerDataTable(
     });
 
     // Container style for viewport-constrained scrolling
-    let container_style = max_height.map(|h| {
-        format!("display: flex; flex-direction: column; max-height: {}", h)
-    });
+    let container_style =
+        max_height.map(|h| format!("display: flex; flex-direction: column; max-height: {}", h));
 
     let has_max_height = container_style.is_some();
     let table_wrapper_style = if has_max_height {
@@ -229,7 +228,9 @@ pub fn ServerDataTable(
                     />
                     <DataTableBody
                         columns=columns
-                        rows=rows
+                        rows=Signal::derive(move || {
+                            rows.get().into_iter().enumerate().collect::<Vec<_>>()
+                        })
                         loading=loading
                         texts=texts_for_body
                         body_cell_class=classes.body_cell

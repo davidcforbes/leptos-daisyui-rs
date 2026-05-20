@@ -1,6 +1,7 @@
 use crate::components::data_table::types::{Column, DataTableTexts, TableRow};
 use crate::merge_classes;
 use leptos::prelude::*;
+use std::collections::BTreeSet;
 
 /// DataTable body component with loading and empty states
 #[component]
@@ -9,9 +10,9 @@ pub fn DataTableBody(
     #[prop(into)]
     columns: Signal<Vec<Column>>,
 
-    /// Current page rows to display
+    /// Current page rows paired with their absolute index into the underlying data
     #[prop(into)]
-    rows: Signal<Vec<TableRow>>,
+    rows: Signal<Vec<(usize, TableRow)>>,
 
     /// Loading state
     #[prop(into)]
@@ -28,6 +29,14 @@ pub fn DataTableBody(
     #[prop(optional, into)]
     row_class: &'static str,
 
+    /// Class applied when a row's absolute index is in `selected_rows`
+    #[prop(optional, into)]
+    selected_row_class: &'static str,
+
+    /// Selected-row state, keyed by absolute index into the underlying data
+    #[prop(optional, into)]
+    selected_rows: Signal<BTreeSet<usize>>,
+
     /// Loading row class
     #[prop(optional, into)]
     loading_row_class: &'static str,
@@ -35,6 +44,10 @@ pub fn DataTableBody(
     /// Empty row class
     #[prop(optional, into)]
     empty_row_class: &'static str,
+
+    /// Click callback invoked with the row's absolute index and the raw `MouseEvent`
+    #[prop(optional, into)]
+    on_row_click: Option<Callback<(usize, web_sys::MouseEvent)>>,
 ) -> impl IntoView {
     view! {
         <tbody>
@@ -64,9 +77,28 @@ pub fn DataTableBody(
                     let rows_vec = rows.get();
                     let cols = columns.get();
 
-                    rows_vec.iter().map(|row| {
+                    rows_vec.iter().map(|(abs_idx, row)| {
+                        let abs_idx = *abs_idx;
+                        let click_handler = on_row_click.map(|cb| {
+                            move |ev: web_sys::MouseEvent| cb.run((abs_idx, ev))
+                        });
+                        let row_class_dyn = Signal::derive(move || {
+                            if selected_rows.with(|s| s.contains(&abs_idx)) {
+                                merge_classes!(row_class, selected_row_class).to_class()
+                            } else {
+                                merge_classes!(row_class).to_class()
+                            }
+                        });
+
                         view! {
-                            <tr class=row_class>
+                            <tr
+                                class=move || row_class_dyn.get()
+                                on:click=move |ev| {
+                                    if let Some(h) = &click_handler {
+                                        h(ev);
+                                    }
+                                }
+                            >
                                 {cols.iter().map(|col| {
                                     let cell_value = row.get(col.id).cloned().unwrap_or_default();
                                     let cell_class = merge_classes!(body_cell_class, col.class.unwrap_or(""));

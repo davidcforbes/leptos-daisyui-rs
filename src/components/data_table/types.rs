@@ -132,6 +132,8 @@ pub struct DataTableClasses {
     pub loading_row: &'static str,
     /// Empty row class
     pub empty_row: &'static str,
+    /// Class applied to selected rows when multi-select is in use
+    pub selected_row: &'static str,
     /// Pagination container class
     pub pagination: &'static str,
     /// Pagination button class
@@ -149,6 +151,7 @@ impl Default for DataTableClasses {
             row: "",
             loading_row: "animate-pulse",
             empty_row: "text-center text-base-content/50",
+            selected_row: "bg-base-200",
             pagination: "flex justify-between items-center mt-4",
             pagination_button: "btn btn-sm",
             page_indicator: "text-sm",
@@ -366,6 +369,7 @@ mod tests {
         assert_eq!(classes.row, "");
         assert_eq!(classes.loading_row, "animate-pulse");
         assert_eq!(classes.empty_row, "text-center text-base-content/50");
+        assert_eq!(classes.selected_row, "bg-base-200");
         assert_eq!(classes.pagination, "flex justify-between items-center mt-4");
         assert_eq!(classes.pagination_button, "btn btn-sm");
         assert_eq!(classes.page_indicator, "text-sm");
