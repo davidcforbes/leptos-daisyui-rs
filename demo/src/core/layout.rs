@@ -611,5 +611,13 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                 },
             ],
         },
+        MenuCategory {
+            title: "Foundation",
+            items: vec![ComponentItem {
+                name: "Design Tokens",
+                href: "/components/tokens",
+                value: "tokens",
+            }],
+        },
     ]
 }

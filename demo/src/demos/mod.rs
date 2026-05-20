@@ -73,6 +73,7 @@ pub mod theming;
 pub mod timeline;
 pub mod toast;
 pub mod toggle;
+pub mod tokens;
 pub mod tooltip;
 pub mod validator;
 
@@ -150,6 +151,7 @@ pub use theme_controller::*;
 pub use timeline::*;
 pub use toast::*;
 pub use toggle::*;
+pub use tokens::*;
 pub use tooltip::*;
 pub use validator::*;
 pub mod typography_customizer;
