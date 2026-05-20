@@ -14,7 +14,10 @@ fn test_timeline_direction_vertical() {
 
 #[test]
 fn test_timeline_direction_horizontal() {
-    assert_eq!(TimelineDirection::Horizontal.as_str(), "timeline-horizontal");
+    assert_eq!(
+        TimelineDirection::Horizontal.as_str(),
+        "timeline-horizontal"
+    );
 }
 
 #[test]

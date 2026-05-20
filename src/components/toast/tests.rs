@@ -24,12 +24,18 @@ fn test_toast_position_top_center() {
 
 #[test]
 fn test_toast_position_middle_start() {
-    assert_eq!(ToastPosition::MiddleStart.as_str(), "toast-middle toast-start");
+    assert_eq!(
+        ToastPosition::MiddleStart.as_str(),
+        "toast-middle toast-start"
+    );
 }
 
 #[test]
 fn test_toast_position_middle_center() {
-    assert_eq!(ToastPosition::MiddleCenter.as_str(), "toast-middle toast-center");
+    assert_eq!(
+        ToastPosition::MiddleCenter.as_str(),
+        "toast-middle toast-center"
+    );
 }
 
 #[test]
@@ -39,12 +45,18 @@ fn test_toast_position_middle_end() {
 
 #[test]
 fn test_toast_position_bottom_start() {
-    assert_eq!(ToastPosition::BottomStart.as_str(), "toast-bottom toast-start");
+    assert_eq!(
+        ToastPosition::BottomStart.as_str(),
+        "toast-bottom toast-start"
+    );
 }
 
 #[test]
 fn test_toast_position_bottom_center() {
-    assert_eq!(ToastPosition::BottomCenter.as_str(), "toast-bottom toast-center");
+    assert_eq!(
+        ToastPosition::BottomCenter.as_str(),
+        "toast-bottom toast-center"
+    );
 }
 
 #[test]

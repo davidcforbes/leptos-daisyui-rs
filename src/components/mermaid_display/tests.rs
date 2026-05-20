@@ -33,16 +33,22 @@ fn test_mermaid_theme_clone() {
 #[test]
 fn test_basic_flowchart_produces_svg() {
     let source = "graph TD\n    A --> B";
-    let diagram = markview_mermaid::parse(source).expect("should parse flowchart");
-    let svg = markview_mermaid::render(&diagram).expect("should render flowchart");
-    assert!(svg.contains("<svg"), "rendered output should contain <svg tag");
+    let diagram = editmark_mermaid::parse(source).expect("should parse flowchart");
+    let svg = editmark_mermaid::render(&diagram).expect("should render flowchart");
+    assert!(
+        svg.contains("<svg"),
+        "rendered output should contain <svg tag"
+    );
 }
 
 #[test]
 fn test_invalid_source_produces_error() {
     let source = "not a valid mermaid diagram %%% garbage";
-    let result = markview_mermaid::parse(source);
-    assert!(result.is_err(), "invalid source should produce a parse error");
+    let result = editmark_mermaid::parse(source);
+    assert!(
+        result.is_err(),
+        "invalid source should produce a parse error"
+    );
 }
 
 #[test]

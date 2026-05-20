@@ -1,7 +1,7 @@
 use super::style::MermaidTheme;
 use crate::components::SvgDisplay;
-use leptos::{html::Figure, prelude::*};
 use editmark_mermaid::{RenderConfig, Theme, detect_init, remove_directives};
+use leptos::{html::Figure, prelude::*};
 
 /// # Mermaid Diagram Display Component
 ///
