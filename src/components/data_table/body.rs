@@ -1,4 +1,4 @@
-use crate::components::data_table::types::{Column, DataTableTexts, TableRow};
+use crate::components::data_table::types::{CellRenderer, Column, DataTableTexts, TableRow};
 use crate::merge_classes;
 use leptos::prelude::*;
 use std::collections::BTreeSet;
@@ -48,6 +48,12 @@ pub fn DataTableBody(
     /// Click callback invoked with the row's absolute index and the raw `MouseEvent`
     #[prop(optional, into)]
     on_row_click: Option<Callback<(usize, web_sys::MouseEvent)>>,
+
+    /// Per-cell renderers. A column with `renderer_index = Some(i)` invokes
+    /// `cell_renderers[i]` with `(abs_idx, row)`; otherwise the cell renders
+    /// `row[col.id]` as plain text. Out-of-bounds indices fall back to text.
+    #[prop(optional)]
+    cell_renderers: Vec<CellRenderer>,
 ) -> impl IntoView {
     view! {
         <tbody>
@@ -76,6 +82,7 @@ pub fn DataTableBody(
                     // Data rows
                     let rows_vec = rows.get();
                     let cols = columns.get();
+                    let renderers = cell_renderers.clone();
 
                     rows_vec.iter().map(|(abs_idx, row)| {
                         let abs_idx = *abs_idx;
@@ -118,9 +125,11 @@ pub fn DataTableBody(
                                         None
                                     };
 
-                                    let content = {
-                                        let v = cell_value.clone();
-                                        view! { {v} }
+                                    // Custom renderer if column opts in and index is in range;
+                                    // otherwise render the cell as plain text.
+                                    let content = match col.renderer_index.and_then(|i| renderers.get(i)) {
+                                        Some(renderer) => renderer.run((abs_idx, row.clone())),
+                                        None => view! { {cell_value.clone()} }.into_any(),
                                     };
 
                                     view! {

@@ -3,7 +3,7 @@ use crate::components::data_table::controls::DataTableControls;
 use crate::components::data_table::header::DataTableHeader;
 use crate::components::data_table::selection::handle_row_click;
 use crate::components::data_table::types::{
-    Column, DataTableClasses, DataTableTexts, SortOrder, TableRow,
+    CellRenderer, Column, DataTableClasses, DataTableTexts, SortOrder, TableRow,
 };
 use crate::components::table::{Table, TableSize};
 use crate::merge_classes;
@@ -137,6 +137,13 @@ pub fn DataTable(
     /// Node reference to container element
     #[prop(optional)]
     node_ref: NodeRef<Div>,
+
+    /// Per-cell renderers indexed by `Column::renderer_index`. A column with
+    /// `renderer_index = Some(i)` invokes `cell_renderers[i]` with
+    /// `(abs_idx, row)` to produce its cell view; columns without an index
+    /// render `row[col.id]` as text. Out-of-bounds indices fall back to text.
+    #[prop(optional)]
+    cell_renderers: Vec<CellRenderer>,
 ) -> impl IntoView {
     // Default page size to 10 if not set
     let page_size = Signal::derive(move || {
@@ -378,6 +385,7 @@ pub fn DataTable(
                         loading_row_class=classes.loading_row
                         empty_row_class=classes.empty_row
                         on_row_click=on_row_click
+                        cell_renderers=cell_renderers
                     />
                 </Table>
             </div>

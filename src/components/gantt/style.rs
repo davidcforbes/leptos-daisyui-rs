@@ -128,6 +128,13 @@ impl GanttTaskHeight {
             GanttTaskHeight::Comfortable => 40,
         }
     }
+
+    /// Returns the row pitch (task-bar height plus vertical padding) used to
+    /// space rows in the task list and timeline. Matches the legacy 50 DIP
+    /// row height at the default Medium setting.
+    pub const fn row_height_px(&self) -> u32 {
+        self.height_px() + 20
+    }
 }
 
 #[cfg(test)]

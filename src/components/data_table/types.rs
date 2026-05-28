@@ -1,4 +1,13 @@
+use leptos::prelude::{AnyView, Callback};
 use std::collections::HashMap;
+
+/// Per-cell renderer.
+///
+/// Invoked with `(absolute_row_index, row_data)` and returns a type-erased
+/// view. Stored in `DataTable`'s `cell_renderers` prop; columns opt in by
+/// setting `renderer_index = Some(i)` (typically via `Column::with_renderer(i)`).
+/// Falls back to plain text rendering when the index is `None` or out of bounds.
+pub type CellRenderer = Callback<(usize, TableRow), AnyView>;
 
 /// Column definition for DataTable
 #[derive(Clone, Debug, PartialEq)]

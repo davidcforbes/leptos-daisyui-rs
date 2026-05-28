@@ -25,7 +25,7 @@
 ///
 ///     view! {
 ///         <KanbanBoard
-///             _board_id="my-board"
+///             board_id="my-board"
 ///             title="My Board"
 ///             columns=columns
 ///         />

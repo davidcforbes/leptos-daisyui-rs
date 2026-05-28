@@ -1,4 +1,5 @@
 use leptos::prelude::*;
+use web_sys::wasm_bindgen::JsCast;
 
 use super::types::*;
 
@@ -24,20 +25,42 @@ pub fn KanbanFilterBar(
     #[prop(optional, default = true)]
     enable_search: bool,
 
-    /// Search debounce in milliseconds
+    /// Search debounce in milliseconds. The filter signal updates only after
+    /// the user stops typing for this long; clamped to a minimum of 1 ms to
+    /// avoid a tight setTimeout loop. Set to a low value (e.g. 1) to behave
+    /// effectively un-debounced.
     #[prop(optional, default = 300)]
-    _search_debounce_ms: u64,
+    search_debounce_ms: u64,
 ) -> impl IntoView {
-    // Search input value
+    // Live input value (reflects every keystroke for the controlled <input>).
     let (search_input, set_search_input) = signal(String::new());
+    // Debounce handle so a new keystroke can cancel the pending timer.
+    let (debounce_handle, set_debounce_handle) = signal(Option::<i32>::None);
+    let debounce_ms = search_debounce_ms.max(1) as i32;
 
-    // Update filters when search changes
-    Effect::new(move || {
-        let query = search_input.get();
-        set_filters.update(|f| {
-            f.search_query = if query.is_empty() { None } else { Some(query) };
+    let schedule_filter_update = move |query: String| {
+        // Cancel any pending update.
+        if let Some(handle) = debounce_handle.get_untracked()
+            && let Some(window) = web_sys::window()
+        {
+            window.clear_timeout_with_handle(handle);
+        }
+
+        // Schedule a new update after the debounce window.
+        let cb = wasm_bindgen::closure::Closure::once_into_js(move || {
+            set_filters.update(|f| {
+                f.search_query = if query.is_empty() { None } else { Some(query) };
+            });
         });
-    });
+        if let Some(window) = web_sys::window()
+            && let Ok(handle) = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+                cb.as_ref().unchecked_ref(),
+                debounce_ms,
+            )
+        {
+            set_debounce_handle.set(Some(handle));
+        }
+    };
 
     view! {
         <div class="kanban-filters flex flex-wrap gap-4 items-center mb-4 p-4 bg-base-200 rounded-lg">
@@ -51,13 +74,18 @@ pub fn KanbanFilterBar(
                             class="input input-bordered input-sm w-full"
                             prop:value=move || search_input.get()
                             on:input=move |ev| {
-                                set_search_input.set(event_target_value(&ev));
+                                let value = event_target_value(&ev);
+                                set_search_input.set(value.clone());
+                                schedule_filter_update(value);
                             }
                         />
                         <Show when=move || !search_input.get().is_empty()>
                             <button
                                 class="btn btn-square btn-sm"
-                                on:click=move |_| set_search_input.set(String::new())
+                                on:click=move |_| {
+                                    set_search_input.set(String::new());
+                                    schedule_filter_update(String::new());
+                                }
                             >
                                 <svg
                                     xmlns="http://www.w3.org/2000/svg"
@@ -292,6 +320,14 @@ pub fn KanbanFilterBar(
                 class="btn btn-xs btn-ghost"
                 on:click=move |_| {
                     set_search_input.set(String::new());
+                    // Cancel a pending debounced search so it doesn't
+                    // overwrite the cleared filter state.
+                    if let Some(handle) = debounce_handle.get_untracked()
+                        && let Some(window) = web_sys::window()
+                    {
+                        window.clear_timeout_with_handle(handle);
+                        set_debounce_handle.set(None);
+                    }
                     set_filters.set(KanbanFilters::new());
                 }
             >

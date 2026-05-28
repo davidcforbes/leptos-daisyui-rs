@@ -22,7 +22,7 @@ pub fn GanttChart(
 
     /// Task bar height/density setting
     #[prop(optional, into, default=Signal::derive(|| GanttTaskHeight::Medium))]
-    _task_height: Signal<GanttTaskHeight>,
+    task_height: Signal<GanttTaskHeight>,
 
     /// Whether to show the task list panel
     #[prop(optional, into, default=Signal::derive(|| true))]
@@ -50,7 +50,7 @@ pub fn GanttChart(
 
     /// NodeRef for accessing the underlying DOM element
     #[prop(optional)]
-    _node_ref: NodeRef<leptos::html::Div>,
+    node_ref: NodeRef<leptos::html::Div>,
 
     /// Additional CSS classes
     #[prop(optional, into, default = "")]
@@ -162,7 +162,9 @@ pub fn GanttChart(
     // Split panel state management
     let (split_ratio, set_split_ratio) = signal(initial_split_ratio);
     let (is_dragging, set_is_dragging) = signal(false);
-    let container_ref = NodeRef::<leptos::html::Div>::new();
+    // Use the consumer-provided node_ref as the container for splitter math;
+    // a fresh one is created by the prop's default when not passed in.
+    let container_ref = node_ref;
 
     // Minimum panel widths in pixels
     const MIN_TASK_LIST_WIDTH: f64 = 200.0;
@@ -434,7 +436,7 @@ pub fn GanttChart(
                                             task_readonly
                                         )
                                         aria-selected=move || is_selected.get().to_string()
-                                        style="height: 50px"
+                                        style=move || format!("height: {}px", task_height.get().row_height_px())
                                         on:click=move |_| {
                                             set_selected_task_id.set(Some(task_id_for_select.clone()));
                                             if let Some(ref cb) = on_select_cb {
@@ -545,7 +547,10 @@ pub fn GanttChart(
                                             .iter()
                                             .position(|t| t.id == task_id)
                                             .unwrap_or(0);
-                                        let y_pos = Signal::derive(move || (task_idx as u32) * 50);
+                                        let y_pos = Signal::derive(move || {
+                                            (task_idx as u32) * task_height.get().row_height_px()
+                                        });
+                                        let bar_height = Signal::derive(move || task_height.get().height_px());
 
                                         let is_selected = Signal::derive(move || {
                                             selected_task_id.get().as_ref() == Some(&task_id_for_check)
@@ -564,6 +569,7 @@ pub fn GanttChart(
                                                 task=task_signal
                                                 timeline_start=start_date
                                                 y_position=y_pos
+                                                bar_height=bar_height
                                                 is_selected=is_selected
                                                 is_read_only=is_task_read_only
                                                 on_click=Some(Callback::new(move |id: String| {

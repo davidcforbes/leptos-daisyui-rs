@@ -8,9 +8,10 @@ use super::types::*;
 /// Main Kanban board component with drag-and-drop support
 #[component]
 pub fn KanbanBoard(
-    /// Unique identifier for the board
+    /// Unique identifier for the board. Rendered as the outer element's
+    /// `id` so consumers can target it (anchors, aria-controls, drag scopes).
     #[prop(into)]
-    _board_id: String,
+    board_id: String,
 
     /// Board title (optional)
     #[prop(optional, into)]
@@ -111,6 +112,7 @@ pub fn KanbanBoard(
     });
     view! {
         <div
+            id=board_id
             node_ref=node_ref
             class=format!("kanban-board w-full {}", class)
         >

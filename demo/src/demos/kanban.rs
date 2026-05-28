@@ -141,7 +141,7 @@ pub fn KanbanDemo() -> impl IntoView {
             <div class="mockup-window border bg-base-300 mb-6">
                 <div class="bg-base-200 px-4 py-8">
                     <KanbanBoard
-                        _board_id="demo-board"
+                        board_id="demo-board"
                         title="My Project"
                         columns=columns
                         on_card_move=handle_card_move

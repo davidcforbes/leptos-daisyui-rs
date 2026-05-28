@@ -1,7 +1,7 @@
 use crate::components::data_table::body::DataTableBody;
 use crate::components::data_table::header::DataTableHeader;
 use crate::components::data_table::types::{
-    Column, DataTableClasses, DataTableTexts, SortOrder, TableRow,
+    CellRenderer, Column, DataTableClasses, DataTableTexts, SortOrder, TableRow,
 };
 use crate::components::table::{Table, TableSize};
 use crate::merge_classes;
@@ -131,6 +131,13 @@ pub fn ServerDataTable(
     /// Node reference to container element
     #[prop(optional)]
     node_ref: NodeRef<Div>,
+
+    /// Per-cell renderers indexed by `Column::renderer_index`. A column with
+    /// `renderer_index = Some(i)` invokes `cell_renderers[i]` with
+    /// `(abs_idx, row)` to produce its cell view; columns without an index
+    /// render `row[col.id]` as text. Out-of-bounds indices fall back to text.
+    #[prop(optional)]
+    cell_renderers: Vec<CellRenderer>,
 ) -> impl IntoView {
     let container_class = merge_classes!(classes.container, class);
     let texts_for_body = texts.clone();
@@ -237,6 +244,7 @@ pub fn ServerDataTable(
                         row_class=classes.row
                         loading_row_class=classes.loading_row
                         empty_row_class=classes.empty_row
+                        cell_renderers=cell_renderers
                     />
                 </Table>
             </div>
