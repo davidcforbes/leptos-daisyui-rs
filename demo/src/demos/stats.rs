@@ -146,6 +146,47 @@ pub fn StatsDemo() -> impl IntoView {
                 </div>
             </Section>
 
+            <Section title="StatDelta — typed trend indicator">
+                <p class="text-sm opacity-70 mb-2">
+                    "Convenience helper that replaces hand-typed \"↗︎ 12% increase\" strings with a typed component. Trend drives both the arrow and the color (Positive=success, Negative=error, Neutral=inherits). Sign of value is ignored — abs() is rendered, because going up isn't always good (think churn)."
+                </p>
+                <Stats class="shadow">
+                    <Stat>
+                        <StatTitle>"Revenue"</StatTitle>
+                        <StatValue class="text-success">"$125,430"</StatValue>
+                        <StatDesc>"Last 30 days"</StatDesc>
+                        <StatDelta
+                            value=Signal::derive(|| 12.5)
+                            trend=Signal::derive(|| StatDeltaTrend::Positive)
+                            label="increase"
+                        />
+                    </Stat>
+                    <Stat>
+                        <StatTitle>"Churn"</StatTitle>
+                        <StatValue class="text-error">"3.2%"</StatValue>
+                        <StatDesc>"Last 30 days"</StatDesc>
+                        // Churn going UP is bad — Negative trend even
+                        // though the number rose.
+                        <StatDelta
+                            value=Signal::derive(|| 2.1)
+                            trend=Signal::derive(|| StatDeltaTrend::Negative)
+                            label="vs last month"
+                        />
+                    </Stat>
+                    <Stat>
+                        <StatTitle>"Active Users"</StatTitle>
+                        <StatValue>"15,672"</StatValue>
+                        <StatDesc>"All-time"</StatDesc>
+                        // First datapoint — no comparison yet.
+                        <StatDelta
+                            value=Signal::derive(|| 0.0)
+                            trend=Signal::derive(|| StatDeltaTrend::Neutral)
+                            label="no prior baseline"
+                        />
+                    </Stat>
+                </Stats>
+            </Section>
+
             <Section title="E-commerce Dashboard">
                 <Card class="bg-base-100 shadow-xl">
                     <CardBody>

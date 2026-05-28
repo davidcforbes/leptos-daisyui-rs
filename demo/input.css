@@ -129,7 +129,7 @@
 /* Stack */
 @source inline("stack stack-top stack-bottom stack-start stack-end");
 /* Stat */
-@source inline("stats stat stat-title stat-value stat-desc stat-figure stat-actions stats-horizontal stats-vertical");
+@source inline("stats stat stat-title stat-value stat-desc stat-figure stat-actions stats-horizontal stats-vertical text-success text-error");
 /* Status */
 @source inline("status status-neutral status-primary status-secondary status-accent status-info status-success status-warning status-error status-xs status-sm status-md status-lg status-xl");
 /* Steps */
