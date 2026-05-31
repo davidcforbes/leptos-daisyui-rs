@@ -1,0 +1,61 @@
+/* em-berj.6 — scoped styling for the graphic-mode editor.
+ *
+ * Selection: native ::selection looks fine cross-block in
+ * contenteditable; we just tighten the color so it reads on both
+ * light and dark themes.
+ *
+ * Atomic widgets (data-em-atomic): visually distinguish from the
+ * surrounding prose, hint at the double-click affordance on hover,
+ * and give them a clear focus ring during selection.
+ */
+
+.lds-graphic ::selection {
+    background: #b3d4fc;
+    color: inherit;
+}
+
+.lds-graphic [data-em-atomic] {
+    position: relative;
+    transition: background 100ms ease, outline 100ms ease;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.lds-graphic [data-em-atomic]:hover {
+    background: rgba(37, 99, 235, 0.06);
+    outline: 1px dashed rgba(37, 99, 235, 0.4);
+}
+
+.lds-graphic [data-em-atomic]:hover::after {
+    content: "Double-click to edit";
+    position: absolute;
+    top: 4px;
+    right: 8px;
+    font: 11px/1.2 'Segoe UI', sans-serif;
+    color: rgba(37, 99, 235, 0.85);
+    background: white;
+    padding: 2px 6px;
+    border-radius: 3px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    pointer-events: none;
+    z-index: 1;
+}
+
+/* Table cells get a thinner per-cell focus ring so the user can see
+ * which cell their caret sits in.  Native contenteditable selection
+ * still draws across cells, but the focused-cell hint helps with
+ * Tab/Arrow navigation. */
+.lds-graphic td:focus,
+.lds-graphic th:focus,
+.lds-graphic td:focus-within,
+.lds-graphic th:focus-within {
+    outline: 2px solid rgba(37, 99, 235, 0.4);
+    outline-offset: -2px;
+}
+
+/* When the caret is in a cell, give the row a subtle highlight too —
+ * matches the desktop's row-highlight affordance. */
+.lds-graphic tr:has(:focus),
+.lds-graphic tr:has(:focus-within) {
+    background: rgba(37, 99, 235, 0.04);
+}
