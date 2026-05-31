@@ -656,6 +656,35 @@ Components for theme management and UI customization.
 
 ---
 
+## Centralized Modules (promoted from editmark / EUC, 2026-05)
+
+Beyond the individual daisyUI components above, the library now hosts three
+reusable modules promoted out of consumer apps so others inherit them.
+`editmark-leptos` and the EUC frontend consume these via re-export shims, and
+CSS is namespaced `.lds-` to avoid collisions.
+
+### `markdown` — markdown rendering family (from editmark-leptos)
+
+`MarkdownView` / `MarkdownInline` (reactive parse → render → post-process,
+link-click interception), `highlight` (syntax token→span flattening),
+`sanitize` (`is_safe_href`), KaTeX `math`, the daisyUI `data-theme` ↔ scheme
+bridge (`daisyui_theme_to_scheme`), document `outline` + `stats`, image
+parse/round-trip, find/help overlays, image dialog, and the editor cluster.
+Depends on `editmark-core`. Mermaid/SVG delegate to the library's existing
+`MermaidDisplay`/`SvgDisplay`.
+
+### `charts` — SVG charts (from EUC)
+
+`line`, `bar`, `pie`, `sparkline`, `stacked-bar`, and `area` charts — pure SVG,
+no JS charting dependency.
+
+### `widgets` — composite widgets (from EUC)
+
+Property list, JSON tree viewer, timeline/version-history lists, risk
+assessment matrix, compliance checklist, pipeline kanban, data table, log
+viewer, tree view, workflow visualizer, tag input, filter tabs, and more —
+re-wired from `crate::ui` to `crate::components`.
+
 ## Maintenance Notes
 
 This catalog is automatically maintained as new components are added to the library. When adding a new component:
