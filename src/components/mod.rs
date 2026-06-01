@@ -1,6 +1,7 @@
 //! daisyUI components
 
 mod accordion;
+mod ai_chat;
 mod alert;
 mod app_shell;
 mod auto_complete;
@@ -97,6 +98,7 @@ mod upload_file;
 mod validator;
 
 pub use accordion::*;
+pub use ai_chat::*;
 pub use alert::*;
 pub use app_shell::*;
 pub use auto_complete::*;

@@ -1,0 +1,21 @@
+//! # AiChat
+//!
+//! A reusable Leptos chat panel over the shared, executor-free
+//! [`ai_chat_core`] model. See the design at
+//! `editmark/docs/superpowers/specs/2026-05-30-ai-chat-component-design.md`
+//! (rollout step 3). The desktop analogue is `d2d_ui::controls::chat`.
+
+mod component;
+mod style;
+#[cfg(test)]
+mod tests;
+
+pub use component::AiChat;
+pub use style::{is_markdown, role_classes, role_label};
+
+// Re-export the shared model so consumers can build a session/transport and
+// drive the component without a direct `ai-chat-core` dependency.
+pub use ai_chat_core::{
+    ChatError, ChatMessage, ChatRequest, ChatRole, ChatSession, ChatSettings, ChatTransport,
+    MessageMeta, StreamEvent,
+};

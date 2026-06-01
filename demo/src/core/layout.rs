@@ -255,6 +255,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     value: "carousel",
                 },
                 ComponentItem {
+                    name: "AiChat",
+                    href: "/components/ai-chat",
+                    value: "ai-chat",
+                },
+                ComponentItem {
                     name: "Chat",
                     href: "/components/chat",
                     value: "chat",

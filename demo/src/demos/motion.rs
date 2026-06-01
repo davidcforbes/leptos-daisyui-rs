@@ -214,7 +214,7 @@ pub fn MotionDemo() -> impl IntoView {
                     <input type="text" class="input ld-focus-ring" placeholder="text input" />
                     <Checkbox />
                     <Toggle />
-                    <Radio name="motion-radio" />
+                    <Radio />
                 </div>
             </Section>
 

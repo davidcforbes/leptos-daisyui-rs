@@ -12,6 +12,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ai-chat-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -896,6 +904,7 @@ dependencies = [
 name = "leptos-daisyui-rs"
 version = "0.0.3"
 dependencies = [
+ "ai-chat-core",
  "base64",
  "chrono",
  "editmark-core",
