@@ -37,6 +37,10 @@ pub fn AiChat(
     /// Extra classes for the root element.
     #[prop(optional, into)]
     class: &'static str,
+    /// Fired once per poll in which the engine reported a document edit
+    /// (`StreamEvent::DocumentChanged`). The host uses it to refresh the editor.
+    #[prop(optional, into)]
+    on_document_changed: Option<Callback<()>>,
 ) -> impl IntoView {
     // Bumped whenever a poll() (or a send) changes the transcript, so the
     // message-list closure re-runs. `messages()` borrows the session, so we
@@ -47,9 +51,23 @@ pub fn AiChat(
 
     set_interval(
         move || {
-            let changed = session.try_update_value(|s| s.poll()).unwrap_or(false);
+            let (changed, doc_changed) = session
+                .try_update_value(|s| {
+                    let changed = s.poll();
+                    let doc_changed = s
+                        .drain_events()
+                        .iter()
+                        .any(|e| matches!(e, ai_chat_core::StreamEvent::DocumentChanged { .. }));
+                    (changed, doc_changed)
+                })
+                .unwrap_or((false, false));
             if changed {
                 version.update(|n| *n += 1);
+            }
+            if doc_changed {
+                if let Some(cb) = on_document_changed {
+                    cb.run(());
+                }
             }
         },
         Duration::from_millis(interval),
