@@ -9,7 +9,7 @@
 //! The consumer chooses where to mount it — directly under the editor,
 //! in a side rail, in a status bar at the bottom of the page.
 
-use editmark_core::{document_stats, DocumentStats};
+use editmark_core::{DocumentStats, document_stats};
 use leptos::prelude::*;
 
 /// Reactive document-stats line.

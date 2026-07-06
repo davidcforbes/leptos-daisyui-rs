@@ -9,7 +9,7 @@
 //! Consumers can intercept clicks via `on_heading_click` if they want to
 //! do custom navigation (animated scroll, in-app routing, etc.).
 
-use editmark_core::{build_layout, runs_plain_text, FixedTextMeasure, NodeKind};
+use editmark_core::{FixedTextMeasure, NodeKind, build_layout, runs_plain_text};
 use leptos::ev;
 use leptos::prelude::*;
 

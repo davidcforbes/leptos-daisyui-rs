@@ -13,10 +13,10 @@
 //! - Unknown DaisyUI themes fall back to editmark's Default scheme.
 //! - When `data-theme` is absent, `prefers-color-scheme` chooses dark vs light.
 
-use editmark_core::{all_builtin_schemes, Color, ColorScheme, Palette};
+use editmark_core::{Color, ColorScheme, Palette, all_builtin_schemes};
 use leptos::prelude::*;
-use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
+use wasm_bindgen::closure::Closure;
 
 /// Mode of the picked palette — controls which side of [`ColorScheme`] we use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

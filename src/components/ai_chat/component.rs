@@ -64,10 +64,10 @@ pub fn AiChat(
             if changed {
                 version.update(|n| *n += 1);
             }
-            if doc_changed {
-                if let Some(cb) = on_document_changed {
-                    cb.run(());
-                }
+            if doc_changed
+                && let Some(cb) = on_document_changed
+            {
+                cb.run(());
             }
         },
         Duration::from_millis(interval),
@@ -144,7 +144,8 @@ fn MessageBubble(msg: ChatMessage) -> impl IntoView {
 
     let body = if md {
         let src = content.clone();
-        view! { <MarkdownView source=Signal::derive(move || src.clone()) inline=false /> }.into_any()
+        view! { <MarkdownView source=Signal::derive(move || src.clone()) inline=false /> }
+            .into_any()
     } else {
         view! { <span class="whitespace-pre-wrap">{content.clone()}</span> }.into_any()
     };

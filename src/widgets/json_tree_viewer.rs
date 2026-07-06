@@ -42,18 +42,22 @@ fn JsonNode(value: Value, depth: usize, #[prop(default = false)] collapsed: bool
     match value {
         Value::Null => view! {
             <span class="text-xs font-mono text-base-content/50" style=indent>"null"</span>
-        }.into_any(),
+        }
+        .into_any(),
         Value::Bool(b) => view! {
             <span class="text-xs font-mono text-info" style=indent>{b.to_string()}</span>
-        }.into_any(),
+        }
+        .into_any(),
         Value::Number(n) => view! {
             <span class="text-xs font-mono text-warning" style=indent>{n.to_string()}</span>
-        }.into_any(),
+        }
+        .into_any(),
         Value::String(s) => view! {
             <span class="text-xs font-mono text-success break-all" style=indent>
                 {format!("\"{}\"", s)}
             </span>
-        }.into_any(),
+        }
+        .into_any(),
         Value::Array(arr) => {
             let len = arr.len();
             view! {

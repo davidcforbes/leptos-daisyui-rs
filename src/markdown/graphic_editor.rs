@@ -46,9 +46,9 @@
 //!   still trigger a full re-render.
 
 use editmark_core::{
-    apply_edit, block_source_spans, build_layout, dom_to_markdown_with_source,
-    table_edit::{self, build_table_context_from_nodes, Reason},
-    Alignment, EditRequest, FixedTextMeasure, NodeKind, Snapshot, UndoStack,
+    Alignment, EditRequest, FixedTextMeasure, NodeKind, Snapshot, UndoStack, apply_edit,
+    block_source_spans, build_layout, dom_to_markdown_with_source,
+    table_edit::{self, Reason, build_table_context_from_nodes},
 };
 use leptos::prelude::*;
 use leptos::tachys::html::node_ref::NodeRefAttribute;
@@ -62,7 +62,7 @@ use super::asset_upload::{AssetUploadRequest, AssetUploader};
 use super::file_io::read_file_bytes;
 use super::ime_state::ImeState;
 use super::paste_normalizer::normalize_clipboard_event;
-use super::table_ui::{resolve_cell_in_dom, CellCoord};
+use super::table_ui::{CellCoord, resolve_cell_in_dom};
 use super::theme::{palette_style, use_theme};
 
 /// One action the table context-menu can dispatch (em-berj.3).
@@ -148,9 +148,7 @@ fn upload_and_splice_at_end(
             .push(Snapshot::new(&current, current.len()));
         // Glue with a blank line when there's prior content so the
         // inserted image lands as its own block.
-        let separator = if current.is_empty() {
-            ""
-        } else if current.ends_with("\n\n") {
+        let separator = if current.is_empty() || current.ends_with("\n\n") {
             ""
         } else if current.ends_with('\n') {
             "\n"
@@ -176,10 +174,10 @@ fn upload_and_splice_at_end(
 fn atomic_widget_ancestor(node: &web_sys::Node) -> Option<Element> {
     let mut current: Option<web_sys::Node> = Some(node.clone());
     while let Some(n) = current {
-        if let Some(el) = n.dyn_ref::<Element>() {
-            if el.has_attribute("data-em-atomic") {
-                return Some(el.clone());
-            }
+        if let Some(el) = n.dyn_ref::<Element>()
+            && el.has_attribute("data-em-atomic")
+        {
+            return Some(el.clone());
         }
         current = n.parent_node();
     }
@@ -491,22 +489,16 @@ pub fn MarkdownGraphicEditor(
         // Image-file path — only fires when the caller wired an
         // uploader and the clipboard carries at least one image/*
         // file.  Returns true when the paste was consumed.
-        if let Some(handle) = uploader_handle {
-            if let Some(data) = ev.clipboard_data() {
-                if let Some(files) = data.files() {
-                    for i in 0..files.length() {
-                        let Some(file) = files.get(i) else { continue };
-                        if file.type_().starts_with("image/") {
-                            let uploader = handle.get_value();
-                            upload_and_splice_at_end(
-                                file,
-                                uploader,
-                                source,
-                                undo_for_paste.clone(),
-                            );
-                            return;
-                        }
-                    }
+        if let Some(handle) = uploader_handle
+            && let Some(data) = ev.clipboard_data()
+            && let Some(files) = data.files()
+        {
+            for i in 0..files.length() {
+                let Some(file) = files.get(i) else { continue };
+                if file.type_().starts_with("image/") {
+                    let uploader = handle.get_value();
+                    upload_and_splice_at_end(file, uploader, source, undo_for_paste.clone());
+                    return;
                 }
             }
         }
@@ -660,40 +652,39 @@ pub fn MarkdownGraphicEditor(
         // nothing for the check.
         let table_relevant =
             !ctrl && (key == "enter" || key == "tab" || key == "arrowup" || key == "arrowdown");
-        if table_relevant {
-            if let Some(window) = web_sys::window() {
-                if let Some(cell) = super::table_ui::caret_cell(&window) {
-                    if key == "enter" {
-                        ev.prevent_default();
-                        return;
-                    }
-                    let target_cell = if key == "tab" {
-                        if shift {
-                            super::table_ui::prev_cell(&cell)
-                        } else {
-                            super::table_ui::next_cell(&cell)
-                        }
-                    } else if key == "arrowup" {
-                        super::table_ui::cell_above(&cell)
-                    } else {
-                        super::table_ui::cell_below(&cell)
-                    };
-                    // Arrow keys fall through to native handling when
-                    // there's no target cell, so the caret can exit
-                    // the table.  Tab always preventDefault to avoid
-                    // browser focus drift to the next focusable
-                    // element on the page.
-                    if let Some(target) = target_cell {
-                        ev.prevent_default();
-                        if let Some(doc) = window.document() {
-                            super::table_ui::focus_cell(&window, &doc, &target);
-                        }
-                        return;
-                    } else if key == "tab" {
-                        ev.prevent_default();
-                        return;
-                    }
+        if table_relevant
+            && let Some(window) = web_sys::window()
+            && let Some(cell) = super::table_ui::caret_cell(&window)
+        {
+            if key == "enter" {
+                ev.prevent_default();
+                return;
+            }
+            let target_cell = if key == "tab" {
+                if shift {
+                    super::table_ui::prev_cell(&cell)
+                } else {
+                    super::table_ui::next_cell(&cell)
                 }
+            } else if key == "arrowup" {
+                super::table_ui::cell_above(&cell)
+            } else {
+                super::table_ui::cell_below(&cell)
+            };
+            // Arrow keys fall through to native handling when
+            // there's no target cell, so the caret can exit
+            // the table.  Tab always preventDefault to avoid
+            // browser focus drift to the next focusable
+            // element on the page.
+            if let Some(target) = target_cell {
+                ev.prevent_default();
+                if let Some(doc) = window.document() {
+                    super::table_ui::focus_cell(&window, &doc, &target);
+                }
+                return;
+            } else if key == "tab" {
+                ev.prevent_default();
+                return;
             }
         }
 
@@ -839,10 +830,10 @@ pub fn MarkdownGraphicEditor(
     };
     let textarea_value = move || atomic_draft.get();
     let on_overlay_input = move |ev: leptos::ev::Event| {
-        if let Some(target) = ev.target() {
-            if let Ok(ta) = target.dyn_into::<web_sys::HtmlTextAreaElement>() {
-                atomic_draft.set(ta.value());
-            }
+        if let Some(target) = ev.target()
+            && let Ok(ta) = target.dyn_into::<web_sys::HtmlTextAreaElement>()
+        {
+            atomic_draft.set(ta.value());
         }
     };
     let undo_for_overlay = undo_stack.clone();
@@ -979,7 +970,7 @@ pub fn MarkdownGraphicEditor(
 /// DOM and stamp `data-em-src="START-END"` on each top-level block from
 /// `block_source_spans`.
 fn render_into(host: &HtmlElement, source: &str) {
-    use editmark_core::{build_layout, render_html, FixedTextMeasure};
+    use editmark_core::{FixedTextMeasure, build_layout, render_html};
     let measure = FixedTextMeasure::default();
     let nodes = build_layout(source, &measure, 900.0);
     let html = render_html(&nodes);

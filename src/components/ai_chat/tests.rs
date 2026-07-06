@@ -10,7 +10,11 @@ fn user_sits_end_agent_sits_start() {
         ChatRole::Thinking,
         ChatRole::Tool,
     ] {
-        assert_eq!(role_classes(&r).0, "chat-start", "{r:?} should be chat-start");
+        assert_eq!(
+            role_classes(&r).0,
+            "chat-start",
+            "{r:?} should be chat-start"
+        );
     }
 }
 

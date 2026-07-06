@@ -475,8 +475,7 @@ pub fn MarkdownEditor(
     let graphic_btn_style = move || style_for(Mode::Graphic);
     let source_btn_style = move || style_for(Mode::Source);
     let split_btn_style = move || style_for(Mode::Split);
-    let toggle_row_style =
-        "display:flex;gap:0;justify-content:flex-end;align-items:center;padding:4px;\
+    let toggle_row_style = "display:flex;gap:0;justify-content:flex-end;align-items:center;padding:4px;\
          border-bottom:1px solid #eee;";
 
     view! {

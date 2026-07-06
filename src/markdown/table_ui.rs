@@ -82,11 +82,7 @@ fn row_index_in_table(table: &Element, cell: &Element) -> Option<usize> {
         idx += 1;
         true
     });
-    if found {
-        Some(idx)
-    } else {
-        None
-    }
+    if found { Some(idx) } else { None }
 }
 
 fn walk_rows<F: FnMut(&Element) -> bool>(table: &Element, visit: &mut F) {
@@ -97,18 +93,14 @@ fn walk_rows<F: FnMut(&Element) -> bool>(table: &Element, visit: &mut F) {
             "thead" | "tbody" | "tfoot" => {
                 let mut row = el.first_element_child();
                 while let Some(r) = row {
-                    if r.tag_name().eq_ignore_ascii_case("tr") {
-                        if !visit(&r) {
-                            return;
-                        }
+                    if r.tag_name().eq_ignore_ascii_case("tr") && !visit(&r) {
+                        return;
                     }
                     row = r.next_element_sibling();
                 }
             }
-            "tr" => {
-                if !visit(&el) {
-                    return;
-                }
+            "tr" if !visit(&el) => {
+                return;
             }
             _ => {}
         }
@@ -171,12 +163,11 @@ pub fn next_cell(cell: &Element) -> Option<Element> {
         }
         // Skip over `<thead>` / `<tbody>` wrappers: descend into their
         // first `<tr>`.
-        if tag == "thead" || tag == "tbody" {
-            if let Some(inner) = s.first_element_child() {
-                if inner.tag_name().eq_ignore_ascii_case("tr") {
-                    return first_cell_of_row(&inner);
-                }
-            }
+        if (tag == "thead" || tag == "tbody")
+            && let Some(inner) = s.first_element_child()
+            && inner.tag_name().eq_ignore_ascii_case("tr")
+        {
+            return first_cell_of_row(&inner);
         }
         sibling = s.next_element_sibling();
     }
@@ -188,12 +179,11 @@ pub fn next_cell(cell: &Element) -> Option<Element> {
         let mut next_section = section.next_element_sibling();
         while let Some(sec) = next_section {
             let tag = sec.tag_name().to_ascii_lowercase();
-            if tag == "tbody" || tag == "thead" {
-                if let Some(first_tr) = sec.first_element_child() {
-                    if first_tr.tag_name().eq_ignore_ascii_case("tr") {
-                        return first_cell_of_row(&first_tr);
-                    }
-                }
+            if (tag == "tbody" || tag == "thead")
+                && let Some(first_tr) = sec.first_element_child()
+                && first_tr.tag_name().eq_ignore_ascii_case("tr")
+            {
+                return first_cell_of_row(&first_tr);
             }
             next_section = sec.next_element_sibling();
         }
@@ -216,12 +206,11 @@ pub fn prev_cell(cell: &Element) -> Option<Element> {
         if tag == "tr" {
             return last_cell_of_row(&s);
         }
-        if tag == "thead" || tag == "tbody" {
-            if let Some(inner) = s.last_element_child() {
-                if inner.tag_name().eq_ignore_ascii_case("tr") {
-                    return last_cell_of_row(&inner);
-                }
-            }
+        if (tag == "thead" || tag == "tbody")
+            && let Some(inner) = s.last_element_child()
+            && inner.tag_name().eq_ignore_ascii_case("tr")
+        {
+            return last_cell_of_row(&inner);
         }
         sibling = s.previous_element_sibling();
     }
@@ -231,12 +220,11 @@ pub fn prev_cell(cell: &Element) -> Option<Element> {
         let mut prev_section = section.previous_element_sibling();
         while let Some(sec) = prev_section {
             let tag = sec.tag_name().to_ascii_lowercase();
-            if tag == "tbody" || tag == "thead" {
-                if let Some(last_tr) = sec.last_element_child() {
-                    if last_tr.tag_name().eq_ignore_ascii_case("tr") {
-                        return last_cell_of_row(&last_tr);
-                    }
-                }
+            if (tag == "tbody" || tag == "thead")
+                && let Some(last_tr) = sec.last_element_child()
+                && last_tr.tag_name().eq_ignore_ascii_case("tr")
+            {
+                return last_cell_of_row(&last_tr);
             }
             prev_section = sec.previous_element_sibling();
         }
@@ -278,12 +266,11 @@ pub fn next_row(cell: &Element) -> Option<Element> {
         let mut next_section = section.next_element_sibling();
         while let Some(sec) = next_section {
             let t = sec.tag_name().to_ascii_lowercase();
-            if t == "tbody" || t == "thead" {
-                if let Some(first_tr) = sec.first_element_child() {
-                    if first_tr.tag_name().eq_ignore_ascii_case("tr") {
-                        return Some(first_tr);
-                    }
-                }
+            if (t == "tbody" || t == "thead")
+                && let Some(first_tr) = sec.first_element_child()
+                && first_tr.tag_name().eq_ignore_ascii_case("tr")
+            {
+                return Some(first_tr);
             }
             next_section = sec.next_element_sibling();
         }
@@ -303,12 +290,11 @@ pub fn prev_row(cell: &Element) -> Option<Element> {
         let mut prev_section = section.previous_element_sibling();
         while let Some(sec) = prev_section {
             let t = sec.tag_name().to_ascii_lowercase();
-            if t == "tbody" || t == "thead" {
-                if let Some(last_tr) = sec.last_element_child() {
-                    if last_tr.tag_name().eq_ignore_ascii_case("tr") {
-                        return Some(last_tr);
-                    }
-                }
+            if (t == "tbody" || t == "thead")
+                && let Some(last_tr) = sec.last_element_child()
+                && last_tr.tag_name().eq_ignore_ascii_case("tr")
+            {
+                return Some(last_tr);
             }
             prev_section = sec.previous_element_sibling();
         }
@@ -411,7 +397,7 @@ pub fn focus_cell(window: &Window, document: &Document, cell: &Element) {
     } else {
         let _ = range.set_start(cell_node, 0);
     }
-    let _ = range.collapse_with_to_start(true);
+    range.collapse_with_to_start(true);
     if let Ok(Some(selection)) = window.get_selection() {
         let _ = selection.remove_all_ranges();
         let _ = selection.add_range(&range);

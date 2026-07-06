@@ -11,7 +11,9 @@
 
 use leptos::prelude::*;
 
-use crate::components::{Timeline, TimelineItem, TimelineItemEnd, TimelineItemMiddle, TimelineItemPosition};
+use crate::components::{
+    Timeline, TimelineItem, TimelineItemEnd, TimelineItemMiddle, TimelineItemPosition,
+};
 
 /// One row in a `TimelineList`.
 #[derive(Clone, Debug)]

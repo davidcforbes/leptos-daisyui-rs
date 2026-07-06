@@ -60,6 +60,6 @@ pub use outline::{DocOutline, OutlineEntry};
 pub use sanitize::is_safe_href;
 pub use stats::{DocStatsBar, DocStatsFields};
 pub use theme::{
-    color_to_css, daisyui_theme_to_scheme, palette_style, use_theme, ThemeContext, ThemeMode,
+    ThemeContext, ThemeMode, color_to_css, daisyui_theme_to_scheme, palette_style, use_theme,
 };
 pub use view::MarkdownView;

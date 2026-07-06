@@ -7,7 +7,7 @@
 //! a token *is* lives in editmark-core; we just convert its `SyntaxKind`
 //! values into CSS class names.
 
-use editmark_core::{markdown_highlight, SyntaxKind, SyntaxSpan};
+use editmark_core::{SyntaxKind, SyntaxSpan, markdown_highlight};
 
 /// HTML-escape `s` and append it to `out`.
 fn push_escaped(out: &mut String, s: &str) {

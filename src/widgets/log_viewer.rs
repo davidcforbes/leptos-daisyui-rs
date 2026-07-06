@@ -134,8 +134,7 @@ pub fn LogViewer(
         }
         let st = scroll_top.get();
         let first_visible_row = st / ROW_HEIGHT_PX;
-        let last_visible_row =
-            (st + VIEWPORT_HEIGHT_PX).div_ceil(ROW_HEIGHT_PX);
+        let last_visible_row = (st + VIEWPORT_HEIGHT_PX).div_ceil(ROW_HEIGHT_PX);
         let start = first_visible_row.saturating_sub(VIEWPORT_BUFFER_ROWS);
         let end = (last_visible_row + VIEWPORT_BUFFER_ROWS).min(total);
         let slice: Vec<LogEntry> = all[start..end].to_vec();
@@ -199,10 +198,10 @@ pub fn LogViewer(
                 style:height=move || format!("{}px", VIEWPORT_HEIGHT_PX)
                 on:scroll=move |ev| {
                     use leptos::wasm_bindgen::JsCast;
-                    if let Some(target) = ev.target() {
-                        if let Ok(elem) = target.dyn_into::<web_sys::HtmlElement>() {
-                            scroll_top.set(elem.scroll_top().max(0) as usize);
-                        }
+                    if let Some(target) = ev.target()
+                        && let Ok(elem) = target.dyn_into::<web_sys::HtmlElement>()
+                    {
+                        scroll_top.set(elem.scroll_top().max(0) as usize);
                     }
                 }
             >

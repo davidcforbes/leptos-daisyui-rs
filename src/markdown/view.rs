@@ -10,11 +10,11 @@
 //!
 //! The pipeline is reactive: any change to `source` re-runs from step 1.
 
-use editmark_core::{build_layout, render_html, FixedTextMeasure};
+use editmark_core::{FixedTextMeasure, build_layout, render_html};
 use leptos::prelude::*;
 use leptos::tachys::html::node_ref::NodeRefAttribute;
-use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
+use wasm_bindgen::closure::Closure;
 use web_sys::HtmlElement;
 
 use super::highlight::highlight_to_html;

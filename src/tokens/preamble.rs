@@ -1,6 +1,6 @@
 use leptos::prelude::*;
-use ui_tokens::elevation::{Shadow, LEVEL_16, LEVEL_2, LEVEL_4, LEVEL_64, LEVEL_8};
-use ui_tokens::motion::{Easing, DURATION_FAST_MS, DURATION_NORMAL_MS, DURATION_SLOW_MS};
+use ui_tokens::elevation::{LEVEL_2, LEVEL_4, LEVEL_8, LEVEL_16, LEVEL_64, Shadow};
+use ui_tokens::motion::{DURATION_FAST_MS, DURATION_NORMAL_MS, DURATION_SLOW_MS, Easing};
 
 /// Build the CSS custom-property block exposing every `ui-tokens` design
 /// token as a `--ld-*` variable on `:root`.

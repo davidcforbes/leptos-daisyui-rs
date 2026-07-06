@@ -29,7 +29,7 @@ mod tree_view;
 mod version_history_list;
 mod workflow_visualizer;
 
-pub use avatar_badge::{initials_from_name, AvatarBadge, AvatarBadgeSize};
+pub use avatar_badge::{AvatarBadge, AvatarBadgeSize, initials_from_name};
 pub use compliance_checklist::{ComplianceChecklist, ComplianceChecklistItem};
 pub use data_table::{DataTable, TableColumn};
 pub use defect_severity_bar::{DefectSegment, DefectSeverityBar};

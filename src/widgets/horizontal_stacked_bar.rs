@@ -53,7 +53,11 @@ pub fn HorizontalStackedBar(
                 .sum::<f64>()
         })
         .fold(0.0_f64, f64::max);
-    let scale = if max_total.abs() < f64::EPSILON { 1.0 } else { max_total };
+    let scale = if max_total.abs() < f64::EPSILON {
+        1.0
+    } else {
+        max_total
+    };
 
     let legend_view = if show_legend {
         Some(view! {
@@ -80,7 +84,7 @@ pub fn HorizontalStackedBar(
         let right = right_labels.as_ref().and_then(|s| s.get(ci)).cloned();
         let segments = series.iter().map(|s| {
             let raw = s.values.get(ci).copied().unwrap_or(0.0);
-            let pct = (raw / scale * 100.0).max(0.0).min(100.0);
+            let pct = (raw / scale * 100.0).clamp(0.0, 100.0);
             let color = s.color.clone();
             let label = if raw > 0.0 { format!("{}", raw as i64) } else { String::new() };
             view! {
