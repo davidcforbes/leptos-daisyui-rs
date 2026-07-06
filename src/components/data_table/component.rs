@@ -167,30 +167,44 @@ pub fn DataTable(
     // Search state with debounce
     let (search_query, set_search_query) = signal(String::new());
     let (debounced_search, set_debounced_search) = signal(String::new());
-    let (debounce_handle, set_debounce_handle) = signal(Option::<i32>::None);
+    let (debounce_handle, set_debounce_handle) = signal(Option::<TimeoutHandle>::None);
 
     let on_search_input = move |ev: leptos::ev::Event| {
-        let target = ev.target().unwrap();
-        let input: web_sys::HtmlInputElement = target.unchecked_into();
+        // The event always has an `HtmlInputElement` target in practice, but
+        // if the browser ever hands us something that doesn't cast cleanly,
+        // skip this keystroke rather than panicking the whole WASM app.
+        let Some(target) = ev.target() else {
+            return;
+        };
+        let Ok(input) = target.dyn_into::<web_sys::HtmlInputElement>() else {
+            return;
+        };
         let value = input.value();
         set_search_query.set(value.clone());
 
-        // Clear previous timer
+        // Clear previous timer, if any.
         if let Some(handle) = debounce_handle.get_untracked() {
-            let window = web_sys::window().unwrap();
-            window.clear_timeout_with_handle(handle);
+            handle.clear();
         }
 
-        // Set new 300ms debounce timer
-        let cb = wasm_bindgen::closure::Closure::once_into_js(move || {
-            set_debounced_search.set(value);
-            set_current_page.set(0);
-        });
-        let window = web_sys::window().unwrap();
-        let handle = window
-            .set_timeout_with_callback_and_timeout_and_arguments_0(cb.as_ref().unchecked_ref(), 300)
-            .unwrap();
-        set_debounce_handle.set(Some(handle));
+        // Set new 300ms debounce timer. If scheduling fails (no `window`,
+        // e.g. outside a browser context), fall back to running the search
+        // immediately instead of silently dropping the keystroke.
+        let value_for_timeout = value.clone();
+        match set_timeout_with_handle(
+            move || {
+                set_debounced_search.set(value_for_timeout);
+                set_current_page.set(0);
+            },
+            std::time::Duration::from_millis(300),
+        ) {
+            Ok(handle) => set_debounce_handle.set(Some(handle)),
+            Err(_) => {
+                set_debounced_search.set(value);
+                set_current_page.set(0);
+                set_debounce_handle.set(None);
+            }
+        }
     };
 
     // Reset to page 1 when data changes
