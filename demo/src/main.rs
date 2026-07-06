@@ -1,5 +1,6 @@
 mod core;
 mod demos;
+mod test_mode;
 
 use core::Layout;
 use demos::*;
@@ -18,6 +19,13 @@ use leptos_router::{
 fn main() {
     console_error_panic_hook::set_once();
     let _ = console_log::init_with_level(log::Level::Debug);
+
+    // PixelProof determinism seam (ldui-49w.2): `?pp-freeze=1` kills
+    // animations/transitions before first paint so SSIM baselines don't
+    // flap. See test_mode.rs module docs.
+    if test_mode::is_test_mode() {
+        test_mode::install_style_kill_switch();
+    }
 
     mount_to_body(|| {
         view! { <App /> }
