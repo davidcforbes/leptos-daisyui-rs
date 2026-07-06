@@ -1,4 +1,6 @@
 mod core;
+mod debug;
+mod debug_state;
 mod demos;
 mod test_mode;
 
@@ -13,6 +15,7 @@ use leptos_icons::Icon;
 use leptos_meta::*;
 use leptos_router::{
     components::{ParentRoute, Route, Router, Routes},
+    hooks::use_location,
     path,
 };
 
@@ -46,6 +49,23 @@ fn App() -> impl IntoView {
 #[component]
 fn AppInner() -> impl IntoView {
     let theme_ctx = use_theme_context();
+    let location = use_location();
+
+    // window.__APP_DEBUG__ state oracle (ldui-49w.3): registered once, root-
+    // permanent (route + theme never unmount for the life of the session),
+    // gated behind the same test-mode check as the style kill-switch above
+    // so production windows never carry the debug surface. See debug.rs.
+    if test_mode::is_test_mode() {
+        debug::register_signal("route", {
+            let location = location.clone();
+            move || serde_json::Value::String(location.pathname.get_untracked())
+        });
+        debug::register_signal("theme", move || {
+            serde_json::Value::String(theme_ctx.config.get_untracked().base_theme)
+        });
+        debug::register_signal("state", debug_state::get_all);
+        debug::install_debug_bridge();
+    }
 
     view! {
         <Html attr:data-theme=move || theme_ctx.base_theme() />
