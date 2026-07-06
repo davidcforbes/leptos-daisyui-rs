@@ -102,14 +102,14 @@ trunk build --release
 The demo automatically:
 - Runs Tailwind CSS compilation via pre_build hook: `npx tailwindcss -i input.css -o output.css`
 - Watches both `../src` (library) and `./src` (demo) for changes
-- Showcases all 62 daisyUI components with interactive examples
+- Showcases all 96 daisyUI components with interactive examples
 
 ## Architecture
 
 ### Core Structure
 
 The crate has two main modules:
-- `src/components/` - daisyUI component wrappers (62/62 components - 100% coverage!)
+- `src/components/` - daisyUI component wrappers (96/96 components - 100% coverage!)
 - `src/utils/` - Utility code including `ClassAttributes` for dynamic class management
 
 ### Newly Implemented Components (2026-01-28)

@@ -71,7 +71,7 @@ wait_for({ text: "Button" })
 - [ ] Verify navbar renders
 - [ ] Check sidebar menu is visible (desktop)
 - [ ] Verify all 7 categories load
-- [ ] Count menu items (should be 62)
+- [ ] Count menu items (should be 96)
 
 ```javascript
 // Desktop view (1920x1080)
@@ -688,7 +688,7 @@ const SCREENSHOT_DIR = "./test-screenshots";
 const DESKTOP_SIZE = { width: 1920, height: 1080 };
 const MOBILE_SIZE = { width: 375, height: 667 };
 
-// Component routes (all 62)
+// Component routes (all 96)
 const COMPONENT_ROUTES = [
   "accordion", "alert", "avatar", "badge", "breadcrumbs", "button",
   "calendar", "card", "carousel", "chat", "checkbox", "collapse",
@@ -746,7 +746,7 @@ async function testLandingPage() {
 }
 
 async function testComponent(componentName, index) {
-  console.log(`\n📍 Testing Component ${index + 1}/62: ${componentName}...`);
+  console.log(`\n📍 Testing Component ${index + 1}/96: ${componentName}...`);
 
   const url = `${BASE_URL}/components/${componentName}`;
 
@@ -851,8 +851,8 @@ async function generateReport(results) {
   const failed = results.filter(r => !r.success).length;
   const totalErrors = results.reduce((sum, r) => sum + (r.errors || 0), 0);
 
-  console.log(`\n✅ Successful: ${successful}/62`);
-  console.log(`❌ Failed: ${failed}/62`);
+  console.log(`\n✅ Successful: ${successful}/96`);
+  console.log(`❌ Failed: ${failed}/96`);
   console.log(`⚠️ Total console errors: ${totalErrors}`);
 
   if (failed > 0) {
@@ -887,7 +887,7 @@ async function runAllTests() {
     // Test landing page
     await testLandingPage();
 
-    // Test all 62 components
+    // Test all 96 components
     const results = [];
     for (let i = 0; i < COMPONENT_ROUTES.length; i++) {
       const result = await testComponent(COMPONENT_ROUTES[i], i);
@@ -1000,7 +1000,7 @@ mkdir test-screenshots/run-$(date +%Y%m%d)
 - [ ] Theme switching applies correctly
 
 ### Overall Pass Criteria
-- [ ] 62/62 components load successfully
+- [ ] 96/96 components load successfully
 - [ ] Zero critical console errors
 - [ ] All navigation routes work
 - [ ] Mobile drawer functions correctly
@@ -1036,7 +1036,7 @@ mkdir test-screenshots/run-$(date +%Y%m%d)
 
 ## 📊 Deliverables
 
-1. **Test Screenshots** (62+ images)
+1. **Test Screenshots** (96+ images)
    - One per component
    - Mobile/desktop views
    - Light/dark themes
@@ -1079,7 +1079,7 @@ mkdir test-screenshots/run-$(date +%Y%m%d)
 ## 📅 Estimated Time
 
 - **Setup**: 10 minutes
-- **Automated tests**: 30-45 minutes (all 62 components)
+- **Automated tests**: 30-45 minutes (all 96 components)
 - **Manual interaction tests**: 30 minutes
 - **Performance analysis**: 15 minutes
 - **Report generation**: 15 minutes
