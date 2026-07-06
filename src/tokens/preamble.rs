@@ -59,7 +59,7 @@ fn shadow_to_box_shadow(s: Shadow) -> String {
 
 /// Component that mounts the `--ld-*` token block once at the root of an
 /// app. Render it near the top of your component tree (e.g. inside the
-/// router shell or directly under the [`Router`]).
+/// router shell or directly under the `Router`).
 ///
 /// The resulting `<style>` element exposes the design tokens as CSS custom
 /// properties on `:root`, so any rule downstream can reference

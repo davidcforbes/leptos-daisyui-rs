@@ -7,11 +7,11 @@
 //! similar visualization.
 //!
 //! Shape contract:
-//! - `categories`: Vec<String> — one row per category.
-//! - `series`: Vec<HorizontalSeries> — each series holds one value per
+//! - `categories`: `Vec<String>` — one row per category.
+//! - `series`: `Vec<HorizontalSeries>` — each series holds one value per
 //!   category (`values.len() == categories.len()`). Segments are stacked
 //!   left-to-right inside each row's bar.
-//! - `right_labels`: optional Vec<String> — tail label per row (e.g.
+//! - `right_labels`: optional `Vec<String>` — tail label per row (e.g.
 //!   `"4 instances"`). Same length as `categories`.
 //! - `subtitle`: optional sub-text under each category label (e.g.
 //!   `"4 vCPU / 8GB / 20GB"`).

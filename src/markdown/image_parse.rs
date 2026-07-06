@@ -72,13 +72,13 @@ pub fn find_all(source: &str) -> Vec<ImageRef> {
             // Require word boundary after "img".
             let after = i + 4;
             let next = bytes.get(after).copied().unwrap_or(b' ');
-            if next == b' ' || next == b'\t' || next == b'\n' || next == b'>' || next == b'/' {
-                if let Some(img) = parse_html_image(source, i) {
-                    let end = img.range.end;
-                    out.push(img);
-                    i = end;
-                    continue;
-                }
+            if (next == b' ' || next == b'\t' || next == b'\n' || next == b'>' || next == b'/')
+                && let Some(img) = parse_html_image(source, i)
+            {
+                let end = img.range.end;
+                out.push(img);
+                i = end;
+                continue;
             }
         }
         i += 1;
@@ -117,19 +117,19 @@ pub fn serialize(
         s.push_str("\" alt=\"");
         s.push_str(&escape_html_attr(alt));
         s.push('"');
-        if let Some(w) = width {
-            if !w.is_empty() {
-                s.push_str(" width=\"");
-                s.push_str(&escape_html_attr(w));
-                s.push('"');
-            }
+        if let Some(w) = width
+            && !w.is_empty()
+        {
+            s.push_str(" width=\"");
+            s.push_str(&escape_html_attr(w));
+            s.push('"');
         }
-        if let Some(h) = height {
-            if !h.is_empty() {
-                s.push_str(" height=\"");
-                s.push_str(&escape_html_attr(h));
-                s.push('"');
-            }
+        if let Some(h) = height
+            && !h.is_empty()
+        {
+            s.push_str(" height=\"");
+            s.push_str(&escape_html_attr(h));
+            s.push('"');
         }
         s.push_str(" />");
         s

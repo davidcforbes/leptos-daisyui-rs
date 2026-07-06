@@ -55,8 +55,7 @@ impl ImeState {
     /// Windows).  Callers can use the return value to decide whether
     /// to dispatch the trailing edit.
     pub fn end(&self) -> bool {
-        let was = self.composing.replace(false);
-        was
+        self.composing.replace(false)
     }
 }
 

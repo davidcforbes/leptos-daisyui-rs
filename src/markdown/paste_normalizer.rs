@@ -107,15 +107,15 @@ fn strip_office_preamble(html: &str) -> String {
     }
     // No fragment markers — drop a leading `<html>...<body>` wrapper
     // if present so we start at the body content.
-    if let Some(idx) = html.find("<body") {
-        if let Some(close) = html[idx..].find('>') {
-            let after_body = &html[idx + close + 1..];
-            // Trim a matching `</body>...</html>` tail.
-            if let Some(end) = after_body.find("</body>") {
-                return after_body[..end].to_string();
-            }
-            return after_body.to_string();
+    if let Some(idx) = html.find("<body")
+        && let Some(close) = html[idx..].find('>')
+    {
+        let after_body = &html[idx + close + 1..];
+        // Trim a matching `</body>...</html>` tail.
+        if let Some(end) = after_body.find("</body>") {
+            return after_body[..end].to_string();
         }
+        return after_body.to_string();
     }
     html.to_string()
 }

@@ -2,14 +2,14 @@
 ## Using Chrome DevTools MCP & Claude Chrome Extension
 
 **Target**: 100% component coverage validation
-**Components**: 62 daisyUI components across 7 categories
+**Components**: 96 daisyUI components across 7 categories
 **Test Environment**: http://127.0.0.1:3000
 
 ---
 
 ## 🎯 Testing Strategy Overview
 
-This plan validates all 62 components through automated browser testing using Chrome DevTools MCP. The tests verify:
+This plan validates all 96 components through automated browser testing using Chrome DevTools MCP. The tests verify:
 
 1. **Visual Rendering**: Components display correctly
 2. **Interactive Behavior**: Clicks, hovers, inputs work as expected

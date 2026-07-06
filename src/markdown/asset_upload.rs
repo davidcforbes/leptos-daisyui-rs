@@ -5,7 +5,7 @@
 //! - The editor doesn't know how to talk to your backend.  It hands you
 //!   bytes, filename, and content-type, then awaits the URL you give back.
 //! - You wrap your `async fn upload(...)` in an [`AssetUploader`] and pass
-//!   it as the `on_asset_upload` prop on [`crate::MarkdownEditor`].
+//!   it as the `on_asset_upload` prop on [`crate::markdown::MarkdownEditor`].
 //! - On each picker / paste / drop, the editor calls
 //!   `uploader(request).await` and inserts `![filename](<returned url>)` at
 //!   the cursor.  On error, the editor surfaces the error string in a small

@@ -410,10 +410,10 @@ pub fn DataTable(
                                                 let col_key = cols.get(idx).map(|c| c.key.clone()).unwrap_or_default();
                                                 let cell_value = cell.clone();
                                                 let on_click = move |_| {
-                                                    if is_link {
-                                                        if let Some(cb) = on_link_click {
-                                                            cb.run((col_key.clone(), cell_value.clone()));
-                                                        }
+                                                    if is_link
+                                                        && let Some(cb) = on_link_click
+                                                    {
+                                                        cb.run((col_key.clone(), cell_value.clone()));
                                                     }
                                                 };
                                                 view! {
