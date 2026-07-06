@@ -164,7 +164,9 @@ pub fn DataTable(
     let (sort_column, set_sort_column) = signal(Option::<&'static str>::None);
     let (sort_order, set_sort_order) = signal(SortOrder::default());
 
-    // Search state with debounce
+    // Search state with debounce. Mirrors the debounce pattern in
+    // `data_table::server_component::ServerDataTable` -- keep the two in
+    // sync if either changes.
     let (search_query, set_search_query) = signal(String::new());
     let (debounced_search, set_debounced_search) = signal(String::new());
     let (debounce_handle, set_debounce_handle) = signal(Option::<TimeoutHandle>::None);

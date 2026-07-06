@@ -143,37 +143,50 @@ pub fn ServerDataTable(
     let texts_for_body = texts.clone();
     let search_placeholder = texts.search_placeholder;
 
-    // Search state with debounce (only used when on_search is provided)
+    // Search state with debounce (only used when on_search is provided).
+    // Mirrors the debounce pattern in `data_table::component::DataTable`
+    // (see ldui-1ub) -- keep the two in sync if either changes.
     let (search_query, set_search_query) = signal(String::new());
-    let (debounce_handle, set_debounce_handle) = signal(Option::<i32>::None);
+    let (debounce_handle, set_debounce_handle) = signal(Option::<TimeoutHandle>::None);
     let has_search = on_search.is_some();
 
     let on_search_input = move |ev: leptos::ev::Event| {
-        let target = ev.target().unwrap();
-        let input: web_sys::HtmlInputElement = target.unchecked_into();
+        // The event always has an `HtmlInputElement` target in practice, but
+        // if the browser ever hands us something that doesn't cast cleanly,
+        // skip this keystroke rather than panicking the whole WASM app.
+        let Some(target) = ev.target() else {
+            return;
+        };
+        let Ok(input) = target.dyn_into::<web_sys::HtmlInputElement>() else {
+            return;
+        };
         let value = input.value();
         set_search_query.set(value.clone());
 
-        // Clear previous timer
+        // Clear previous timer, if any.
         if let Some(handle) = debounce_handle.get_untracked() {
-            let window = web_sys::window().unwrap();
-            window.clear_timeout_with_handle(handle);
+            handle.clear();
         }
 
-        // Set new 300ms debounce timer
-        if let Some(cb) = on_search {
-            let val = value.clone();
-            let closure = wasm_bindgen::closure::Closure::once_into_js(move || {
-                cb.run(val);
-            });
-            let window = web_sys::window().unwrap();
-            let handle = window
-                .set_timeout_with_callback_and_timeout_and_arguments_0(
-                    closure.as_ref().unchecked_ref(),
-                    300,
-                )
-                .unwrap();
-            set_debounce_handle.set(Some(handle));
+        // Set new 300ms debounce timer. If scheduling fails (no `window`,
+        // e.g. outside a browser context), fall back to running the search
+        // immediately instead of silently dropping the keystroke.
+        let Some(cb) = on_search else {
+            set_debounce_handle.set(None);
+            return;
+        };
+        let value_for_timeout = value.clone();
+        match set_timeout_with_handle(
+            move || {
+                cb.run(value_for_timeout);
+            },
+            std::time::Duration::from_millis(300),
+        ) {
+            Ok(handle) => set_debounce_handle.set(Some(handle)),
+            Err(_) => {
+                cb.run(value);
+                set_debounce_handle.set(None);
+            }
         }
     };
 
