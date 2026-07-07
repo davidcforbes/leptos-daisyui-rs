@@ -8,6 +8,36 @@ During comprehensive code review, we identified and fixed **18 issues**, of whic
 
 ---
 
+## Sync Cadence (upstream tracking)
+
+This fork has diverged substantially from upstream
+(`noshishiRust/leptos-daisyui-rs`). To keep missed upstream bugfixes from
+accumulating silently, we review upstream on a fixed cadence rather than ad hoc.
+
+- **Policy:** review upstream **monthly**. Fetch `origin/main`
+  (the `origin` remote points at upstream noshishiRust; `fork` points at the
+  davidcforbes fork), check `git rev-list --left-right --count origin/main...HEAD`,
+  skim upstream's new commits for bugfixes worth cherry-picking, and open a
+  `merge/upstream-YYYY-MM` prep branch for any non-trivial integration.
+- **Last synced:** 2026-07-06 (ldui-1i7).
+- **Divergence at last sync:** 53 behind / 212 ahead of `origin/main`.
+- **Last sync outcome — needs a human.** A full `git merge origin/main` was
+  attempted on branch `merge/upstream-2026-07` and **aborted**: upstream has
+  reorganized the entire repository into a Cargo **workspace** (moved `src/` into
+  a `leptos-daisyui-rs/` member crate, added a `leptos-daisyui-cli` component
+  generator and a `demo-macros` crate, bumped to `0.0.4` with
+  `[workspace.package]`). This produced **79 unmerged paths** — ~162 renames,
+  ~45 file-location conflicts (every fork-added `tests.rs` sits in a directory
+  upstream relocated), and ~23 real content conflicts (`Cargo.toml`, `src/lib.rs`,
+  `README.md`, `CLAUDE.md`, `countdown`, `stats/style.rs`, `utils/ripple.rs`,
+  plus most `demo/` files). This is a structural, architecture-level merge, not a
+  routine catch-up, and must be driven by a human. Recommended approach: rather
+  than a single `git merge`, decide first whether to adopt upstream's workspace
+  layout, then port the fork's 212 commits onto it (or selectively cherry-pick
+  upstream bugfixes onto the current single-crate layout).
+
+---
+
 ## Issues That Should Be Contributed Back
 
 ### 🔴 **Critical Bug Fixes (Should Report Immediately)**
