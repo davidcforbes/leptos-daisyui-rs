@@ -442,6 +442,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     value: "alert",
                 },
                 ComponentItem {
+                    name: "Capacity Bar",
+                    href: "/components/capacity_bar",
+                    value: "capacity_bar",
+                },
+                ComponentItem {
                     name: "Empty State",
                     href: "/components/empty_state",
                     value: "empty_state",

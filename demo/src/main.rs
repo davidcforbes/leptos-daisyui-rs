@@ -95,6 +95,7 @@ fn AppInner() -> impl IntoView {
                     <Route path=path!("/breadcrumbs") view=BreadcrumbsDemo />
                     <Route path=path!("/button") view=ButtonDemo />
                     <Route path=path!("/calendar") view=CalendarDemo />
+                    <Route path=path!("/capacity_bar") view=CapacityBarDemo />
                     <Route path=path!("/card") view=CardDemo />
                     <Route path=path!("/carousel") view=CarouselDemo />
                     <Route path=path!("/component_customizer") view=ComponentCustomizerDemo />
