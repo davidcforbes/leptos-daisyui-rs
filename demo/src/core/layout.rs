@@ -557,6 +557,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     value: "rating",
                 },
                 ComponentItem {
+                    name: "Result List",
+                    href: "/components/result-list",
+                    value: "result-list",
+                },
+                ComponentItem {
                     name: "Select",
                     href: "/components/select",
                     value: "select",
