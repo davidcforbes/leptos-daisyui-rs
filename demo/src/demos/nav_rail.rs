@@ -15,7 +15,7 @@ pub fn NavRailDemo() -> impl IntoView {
         >
             <Section title="Basic NavRail" col=true>
                 <p class="text-sm text-base-content/70 mb-4">
-                    "Click an icon to select it. The active item shows a filled pill and a left-edge accent bar; Settings is pinned to the bottom via NavRailGroup's `pinned` prop."
+                    "Click an icon to select it. The active item shows a filled pill and a left-edge accent bar; Settings is pinned to the bottom via NavRailGroup's `pinned` prop. Messages shows an unread count via the `badge` prop."
                 </p>
                 <div class="h-96 flex bg-base-200 rounded-lg overflow-hidden border border-base-300">
                     <NavRail active=active>
@@ -25,7 +25,7 @@ pub fn NavRailDemo() -> impl IntoView {
                         <NavRailItem value="search" label="Search">
                             <Icon icon=icondata::AiSearchOutlined />
                         </NavRailItem>
-                        <NavRailItem value="messages" label="Messages">
+                        <NavRailItem value="messages" label="Messages" badge=Some(5u32)>
                             <Icon icon=icondata::AiMessageFilled />
                         </NavRailItem>
                         <NavRailGroup pinned=true>

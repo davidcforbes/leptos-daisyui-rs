@@ -1,21 +1,3 @@
-/// Formats a nav-item badge count for display, clamping large counts to
-/// `"99+"` -- mirrors d2d-ui's `NavItem` badge rendering
-/// (`if count > 99 { "99+" } else { count.to_string() }`).
-pub fn badge_text(count: u32) -> String {
-    if count > 99 {
-        "99+".to_string()
-    } else {
-        count.to_string()
-    }
-}
-
-/// Whether a badge should render at all. `None` (no badge) and `Some(0)`
-/// (an explicit zero count) are both hidden, matching d2d-ui's
-/// `NavItem::with_badge`, which only sets the badge when `count > 0`.
-pub fn badge_visible(count: Option<u32>) -> bool {
-    count.is_some_and(|n| n > 0)
-}
-
 /// Root classes for `AppShell`. When a status bar slot is present, the root
 /// switches from a single-row layout to a column layout so the main
 /// 3-panel row and the status bar can stack vertically; the row itself then

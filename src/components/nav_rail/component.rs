@@ -1,5 +1,6 @@
 use super::style::{group_class, indicator_class, item_class, rail_class};
 use crate::merge_classes;
+use crate::utils::{badge_text, badge_visible};
 use leptos::{
     ev,
     html::{Button, Div, Nav},
@@ -144,6 +145,18 @@ pub fn NavRailGroup(
 /// control (via the `active` prop) when the parent `NavRail` has
 /// `manual=true`.
 ///
+/// ### Badge count (`badge` prop)
+/// Pass `badge=Some(count)` to render a small count badge pinned to the
+/// item's top-right corner, e.g. for an unread/exception count. `None` and
+/// `Some(0)` both hide the badge; counts over 99 display as `"99+"`,
+/// mirroring [`AppShellIconNavItem`](crate::components::AppShellIconNavItem)'s
+/// `badge` prop (and d2d-ui's `NavItem::with_badge`).
+///
+/// ### Add to `input.css`
+/// ```css
+/// @source inline("badge badge-error badge-sm absolute -top-1 -right-1");
+/// ```
+///
 /// ## Node References
 /// - `node_ref` - References the item `<button>` element ([HTMLButtonElement](https://developer.mozilla.org/en-US/docs/Web/API/HTMLButtonElement))
 #[component]
@@ -162,6 +175,12 @@ pub fn NavRailItem(
     /// users and should always provide a label.
     #[prop(optional, into)]
     label: Signal<String>,
+
+    /// Optional count badge (e.g. unread/exception count) pinned to the
+    /// item's top-right corner. `None` and `Some(0)` both hide it; counts
+    /// over 99 display as `"99+"`.
+    #[prop(optional, into)]
+    badge: Signal<Option<u32>>,
 
     /// Additional CSS classes.
     #[prop(optional, into)]
@@ -218,6 +237,11 @@ pub fn NavRailItem(
         >
             <span class=move || indicator_class(is_active())></span>
             {children()}
+            <Show when=move || badge_visible(badge.get())>
+                <span class="badge badge-error badge-sm absolute -top-1 -right-1">
+                    {move || badge_text(badge.get().unwrap_or(0))}
+                </span>
+            </Show>
         </button>
     }
 }

@@ -1,5 +1,6 @@
-use super::style::{app_shell_root_class, badge_text, badge_visible, nav_group_class};
+use super::style::{app_shell_root_class, nav_group_class};
 use crate::merge_classes;
+use crate::utils::{badge_text, badge_visible};
 use leptos::{
     ev,
     html::{Button, Div, Nav},
@@ -238,6 +239,17 @@ pub fn AppShellHeader(
 /// `Some(0)` both hide the badge; counts over 99 display as `"99+"`,
 /// mirroring d2d-ui's `NavItem::with_badge`.
 ///
+/// ### Manual mode, `on_click`, and `aria-current`
+/// The rendered `<button>` carries `type="button"` so an `AppShell` embedded
+/// in a `<form>` doesn't submit on nav clicks. When the parent `AppShell` has
+/// `manual=true`, clicking an item no longer writes to `active_section` --
+/// only the item's own `active` prop (driven externally, e.g. by a router)
+/// determines its active state, mirroring [`NavRailItem`](crate::components::NavRailItem)'s
+/// `manual` gating. The optional `on_click` callback fires on every click
+/// regardless of `manual`, so callers can still react (e.g. to drive
+/// external state in manual mode). The active item also gets
+/// `aria-current="page"`.
+///
 /// ### Add to `input.css`
 /// ```css
 /// @source inline("relative flex flex-col items-center justify-center gap-1 p-2 w-full cursor-pointer");
@@ -278,6 +290,12 @@ pub fn AppShellIconNavItem(
     #[prop(optional)]
     node_ref: NodeRef<Button>,
 
+    /// Optional click callback, fired in addition to the built-in
+    /// selection tracking (which itself is skipped when the parent
+    /// `AppShell` has `manual=true`).
+    #[prop(optional)]
+    on_click: Option<Callback<()>>,
+
     /// Item content (icon and/or label)
     children: Children,
 ) -> impl IntoView {
@@ -287,10 +305,13 @@ pub fn AppShellIconNavItem(
         show_labels,
     } = AppShellContext::expect_context();
 
-    let on_click = move |_: ev::MouseEvent| {
+    let on_button_click = move |_: ev::MouseEvent| {
         let v = value.get_untracked();
-        if !v.is_empty() {
+        if !manual && !v.is_empty() {
             active_section.set(Some(v));
+        }
+        if let Some(cb) = on_click {
+            cb.run(());
         }
     };
 
@@ -306,6 +327,7 @@ pub fn AppShellIconNavItem(
 
     view! {
         <button
+            type="button"
             node_ref=node_ref
             class=move || {
                 merge_classes!(
@@ -318,7 +340,8 @@ pub fn AppShellIconNavItem(
                 let l = label.get();
                 (!l.is_empty()).then_some(l)
             }
-            on:click=on_click
+            aria-current=move || is_active().then_some("page")
+            on:click=on_button_click
         >
             {children()}
             <Show when=move || show_labels.get() && !label.get().is_empty()>
