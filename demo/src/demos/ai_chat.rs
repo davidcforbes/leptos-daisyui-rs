@@ -58,8 +58,21 @@ pub fn AiChatDemo() -> impl IntoView {
         >
             <Section title="Live demo" col=true>
                 <div class="h-96 w-full max-w-2xl border border-base-300 rounded-box overflow-hidden">
-                    <AiChat session=session />
+                    <AiChat
+                        session=session
+                        subtitle="Scripted demo transport"
+                        welcome_prompts=vec![
+                            "Summarize this document".to_string(),
+                            "What changed recently?".to_string(),
+                            "Draft a reply".to_string(),
+                        ]
+                    />
                 </div>
+                <p class="text-sm opacity-70 mt-2">
+                    "Try the welcome chips on the empty transcript, press Enter to send \
+                     (Shift+Enter for a newline), hit Stop mid-stream to cancel a turn, \
+                     copy any message, or click New session to reset."
+                </p>
             </Section>
         </ContentLayout>
     }

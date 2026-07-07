@@ -11,7 +11,10 @@ mod style;
 mod tests;
 
 pub use component::AiChat;
-pub use style::{is_markdown, role_classes, role_label};
+pub use style::{
+    ComposerAction, composer_key_action, is_markdown, is_thinking, role_classes, role_label,
+    should_stick_to_bottom, show_welcome_chips,
+};
 
 // Re-export the shared model so consumers can build a session/transport and
 // drive the component without a direct `ai-chat-core` dependency.
