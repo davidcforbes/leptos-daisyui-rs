@@ -1,5 +1,5 @@
 use super::style::ToolbarSize;
-use super::types::{ToolbarItem, visible_count_for_width};
+use super::types::{ToolbarItem, item_key, visible_count_for_width};
 use crate::components::button::{Button, ButtonColor, ButtonStyle};
 use crate::components::dropdown::{Dropdown, DropdownContent};
 use crate::components::join::Join;
@@ -60,11 +60,11 @@ const OVERFLOW_FALLBACK_WIDTH: f64 = 32.0;
 /// @source inline("invisible pointer-events-none absolute -left-full top-0 -z-10 flex items-center");
 /// @source inline("inline-flex relative");
 /// @source inline("pointer-events-none absolute inset-x-1 -bottom-0.5 h-0.5 rounded-full");
-/// @source inline("bg-primary opacity-60");
+/// @source inline("bg-primary");
 /// @source inline("join join-item");
-/// @source inline("btn btn-ghost btn-soft btn-xs btn-sm btn-md btn-lg");
+/// @source inline("btn btn-ghost btn-soft btn-primary btn-xs btn-sm btn-md btn-lg");
 /// @source inline("tooltip tooltip-bottom");
-/// @source inline("dropdown dropdown-content dropdown-end menu menu-sm z-10 w-40 p-2 shadow rounded-box bg-base-100");
+/// @source inline("dropdown dropdown-content dropdown-end menu menu-active menu-sm z-10 w-40 p-2 shadow rounded-box bg-base-100");
 /// ```
 ///
 /// ## Node References
@@ -146,6 +146,14 @@ pub fn Toolbar(
     // `node_ref.get()` here is what makes this effect re-run the one time it
     // flips from `None` to `Some`; it never flips back, so this never runs
     // its setup branch again for the life of the component.
+    //
+    // No-feedback-loop precondition: `do_measure` only *reads* the
+    // container's width and hides/shows items via `visible_count`, it never
+    // changes the container's own size — but that only holds if the caller
+    // gives the container a width from its layout context (e.g. `w-full` /
+    // `flex-1`) rather than letting it shrink-wrap to its (variable) content;
+    // a shrink-wrapped container would resize itself every time items are
+    // hidden/shown, re-triggering this observer forever.
     Effect::new(move |_| {
         let Some(container) = node_ref.get() else {
             return;
@@ -216,7 +224,7 @@ pub fn Toolbar(
             >
                 <For
                     each=move || items.get()
-                    key=|item| item.id.clone()
+                    key=item_key
                     children=move |item| {
                         view! {
                             <Button
@@ -243,7 +251,7 @@ pub fn Toolbar(
             <Join>
                 <For
                     each=visible_items
-                    key=|(idx, item)| (*idx, item.id.clone())
+                    key=|(idx, item)| (*idx, item_key(item))
                     children=move |(_idx, item)| {
                         let checked = item.checked;
                         let enabled = item.enabled;
@@ -253,6 +261,9 @@ pub fn Toolbar(
                             <div class="inline-flex relative">
                                 <Button
                                     attr:r#type="button"
+                                    attr:aria-pressed=move || {
+                                        checked.map(|c| if c { "true" } else { "false" })
+                                    }
                                     size=Signal::derive(move || size.get().button_size())
                                     color=Signal::derive(move || {
                                         if checked == Some(true) {
@@ -315,9 +326,10 @@ pub fn Toolbar(
                         >
                             <For
                                 each=overflow_items
-                                key=|(idx, item)| (*idx, item.id.clone())
+                                key=|(idx, item)| (*idx, item_key(item))
                                 children=move |(_idx, item)| {
                                     let enabled = item.enabled;
+                                    let is_toggle = item.checked.is_some();
                                     let checked = item.checked == Some(true);
                                     let label = item.label.clone();
                                     let item_for_click = item.clone();
@@ -326,6 +338,9 @@ pub fn Toolbar(
                                             <button
                                                 type="button"
                                                 disabled=!enabled
+                                                aria-pressed=move || {
+                                                    is_toggle.then_some(if checked { "true" } else { "false" })
+                                                }
                                                 class:menu-active=checked
                                                 on:click=move |_| fire_click(&item_for_click)
                                             >

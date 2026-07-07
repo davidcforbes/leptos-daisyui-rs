@@ -1,5 +1,5 @@
 use super::style::ToolbarSize;
-use super::types::{ToolbarItem, visible_count_for_width};
+use super::types::{ToolbarItem, item_key, visible_count_for_width};
 use crate::components::button::ButtonSize;
 
 // ─── ToolbarItem builder ─────────────────────────────────────────────────────
@@ -30,6 +30,54 @@ fn toolbar_item_builder_chaining() {
 fn toggle_sets_checked_state() {
     let item = ToolbarItem::new("italic", "I").toggle(false);
     assert_eq!(item.checked, Some(false));
+}
+
+// ─── item_key (For-loop content-hash key) ───────────────────────────────────
+
+#[test]
+fn item_key_equal_items_have_equal_keys() {
+    let a = ToolbarItem::new("bold", "B").tooltip("Bold").toggle(true);
+    let b = ToolbarItem::new("bold", "B").tooltip("Bold").toggle(true);
+    assert_eq!(item_key(&a), item_key(&b));
+}
+
+#[test]
+fn item_key_changes_when_checked_changes() {
+    let a = ToolbarItem::new("bold", "B").toggle(true);
+    let b = ToolbarItem::new("bold", "B").toggle(false);
+    assert_ne!(
+        item_key(&a),
+        item_key(&b),
+        "flipping `checked` with the same id must change the key so <For> re-renders"
+    );
+}
+
+#[test]
+fn item_key_changes_when_enabled_changes() {
+    let a = ToolbarItem::new("underline", "U");
+    let b = ToolbarItem::new("underline", "U").disabled();
+    assert_ne!(item_key(&a), item_key(&b));
+}
+
+#[test]
+fn item_key_changes_when_label_changes_without_id_change() {
+    let a = ToolbarItem::new("cmd-1", "Cmd 1");
+    let b = ToolbarItem::new("cmd-1", "Cmd 1 (renamed)");
+    assert_ne!(item_key(&a), item_key(&b));
+}
+
+#[test]
+fn item_key_changes_when_tooltip_changes() {
+    let a = ToolbarItem::new("save", "💾").tooltip("Save");
+    let b = ToolbarItem::new("save", "💾").tooltip("Save now");
+    assert_ne!(item_key(&a), item_key(&b));
+}
+
+#[test]
+fn item_key_differs_for_different_ids() {
+    let a = ToolbarItem::new("bold", "B");
+    let b = ToolbarItem::new("italic", "B");
+    assert_ne!(item_key(&a), item_key(&b));
 }
 
 // ─── ToolbarSize ─────────────────────────────────────────────────────────────

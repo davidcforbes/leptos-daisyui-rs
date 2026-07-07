@@ -166,8 +166,8 @@
 @source inline("theme-controller");
 /* Toolbar (composes join/btn/tooltip/dropdown; layout utilities covered by @source src scan) */
 @source inline("relative flex items-center invisible pointer-events-none absolute -left-full top-0 -z-10 inline-flex");
-@source inline("pointer-events-none absolute inset-x-1 -bottom-0.5 h-0.5 rounded-full bg-primary opacity-60");
-@source inline("menu-active menu-sm w-40 p-2 shadow rounded-box dropdown-end");
+@source inline("pointer-events-none absolute inset-x-1 -bottom-0.5 h-0.5 rounded-full bg-primary");
+@source inline("btn-primary menu-active menu-sm w-40 p-2 shadow rounded-box dropdown-end");
 /* Timeline */
 @source inline("timeline timeline-start timeline-middle timeline-end timeline-snap-icon timeline-box timeline-compact timeline-vertical timeline-horizontal");
 /* Toast */

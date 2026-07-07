@@ -11,7 +11,7 @@
 /// Mirrors d2d-ui's `ToolbarItem`: an identifier dispatched on click, a label
 /// rendered inside the button, an optional tooltip, an optional checked/toggle
 /// state (rendered as an accent underline), and an enabled flag.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ToolbarItem {
     /// Command identifier passed to `Toolbar`'s `on_item_click` callback.
     pub id: String,
@@ -57,6 +57,21 @@ impl ToolbarItem {
         self.enabled = false;
         self
     }
+}
+
+/// Content fingerprint of a toolbar item, used (together with the item's
+/// index) as the row key inside [`Toolbar`](super::component::Toolbar)'s
+/// `<For>` lists so a button re-renders whenever *any* of its render-relevant
+/// fields change — not just when `id` changes. Without this, replacing an
+/// item with the same `id` but a different `checked`/`enabled`/`label`/
+/// `tooltip` (e.g. the demo's Bold/Italic toggle buttons, which rebuild the
+/// item list with the same ids but a flipped `checked` on every click) leaves
+/// `<For>` reusing the stale view and the button never visually updates.
+pub fn item_key(item: &ToolbarItem) -> u64 {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    item.hash(&mut hasher);
+    hasher.finish()
 }
 
 /// Given the toolbar's available `container_width` and the natural (measured)
