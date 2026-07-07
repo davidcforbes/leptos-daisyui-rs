@@ -214,6 +214,18 @@ pub fn index_of_key(nodes: &[FlatNode], key: &str) -> Option<usize> {
     nodes.iter().position(|n| n.key == key)
 }
 
+/// Whether a load should be spawned for `node`: an unloaded branch that isn't
+/// already mid-fetch. This is the single source of truth for "does this node
+/// need a load right now?", used in two places: `toggle_by_key`'s expand path
+/// guards against the double-load race (collapse a pending branch, then
+/// re-expand it — without this guard a second load spawns, and both
+/// completions splice children, producing duplicate `row_key`s that break the
+/// keyed `<For>`); and the mount effect uses it to find initially-`open()`
+/// lazy branches, which [`build_flat`] marks `expanded` but never loads.
+pub fn should_spawn_load(node: &FlatNode) -> bool {
+    node.is_branch && !node.children_loaded && !node.loading
+}
+
 /// The indices of the currently **visible** nodes, in top-to-bottom order: a
 /// node is visible when every ancestor is expanded. Descendants of a collapsed
 /// branch are skipped. This is the flatten-visible-nodes function the keyboard

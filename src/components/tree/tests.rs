@@ -329,6 +329,48 @@ fn tree_child_builders() {
     assert_eq!(TreeChild::leaf("k", "l").with_icon("x").icon.as_deref(), Some("x"));
 }
 
+// ── should_spawn_load (double-load race guard) ──────────────────────────
+
+#[test]
+fn should_spawn_load_true_for_unloaded_not_loading_branch() {
+    let nodes = build_flat(&[TreeNode::branch("lazy", "lazy")]);
+    assert!(should_spawn_load(&nodes[0]));
+}
+
+#[test]
+fn should_spawn_load_false_when_already_loading() {
+    // Simulates: expand spawned a load (loading=true), then collapse+re-expand
+    // observes the node before that load resolves — must not spawn a second one.
+    let mut nodes = build_flat(&[TreeNode::branch("lazy", "lazy")]);
+    nodes[0].loading = true;
+    assert!(!should_spawn_load(&nodes[0]));
+}
+
+#[test]
+fn should_spawn_load_false_when_already_loaded() {
+    let nodes = build_flat(&[
+        TreeNode::branch("eager", "eager").with_children(vec![TreeNode::leaf("c", "c")]),
+    ]);
+    assert!(!should_spawn_load(&nodes[0]), "eager branch already has children_loaded");
+}
+
+#[test]
+fn should_spawn_load_false_for_leaf() {
+    let nodes = build_flat(&[TreeNode::leaf("f", "f")]);
+    assert!(!should_spawn_load(&nodes[0]));
+}
+
+#[test]
+fn should_spawn_load_false_when_loaded_and_loading_both_set() {
+    // Defensive: even a (shouldn't-happen) node with both flags set is not a
+    // spawn candidate — children_loaded alone is enough to say "don't fetch".
+    let mut nodes = build_flat(&[
+        TreeNode::branch("eager", "eager").with_children(vec![TreeNode::leaf("c", "c")]),
+    ]);
+    nodes[0].loading = true;
+    assert!(!should_spawn_load(&nodes[0]));
+}
+
 #[test]
 fn flat_children_sets_depth_and_load_state() {
     let kids = flat_children(

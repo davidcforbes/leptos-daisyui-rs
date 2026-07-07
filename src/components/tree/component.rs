@@ -1,6 +1,6 @@
 use super::types::{
     FlatNode, KeyNav, TreeLoader, TreeNode, build_flat, child_indices, flat_children, handle_key,
-    index_of_key, insert_children, row_key,
+    index_of_key, insert_children, row_key, should_spawn_load,
 };
 use crate::merge_classes;
 use leptos::{ev::KeyboardEvent, html, prelude::*};
@@ -77,6 +77,23 @@ fn toggle_by_key(ctx: &Ctx, key: String) {
         return;
     }
 
+    if !should_spawn_load(&node) {
+        // Already loading — e.g. this branch was collapsed while its first
+        // load was still in flight, and is now being re-expanded before that
+        // load resolved. Just restore `expanded` and let the in-flight load
+        // complete on its own; spawning a second load here is the double-load
+        // race (both completions would splice children, duplicating rows).
+        store.update(|n| {
+            if let Some(i) = index_of_key(n, &key) {
+                n[i].expanded = true;
+            }
+        });
+        if let Some(cb) = ctx.on_toggle {
+            cb.run(key);
+        }
+        return;
+    }
+
     match ctx.loader.clone() {
         Some(loader) => {
             // Show the loading state immediately, then fetch children.
@@ -86,22 +103,7 @@ fn toggle_by_key(ctx: &Ctx, key: String) {
                     n[i].loading = true;
                 }
             });
-            let fut = loader.load(key.clone());
-            let on_toggle = ctx.on_toggle;
-            leptos::task::spawn_local(async move {
-                let children = fut.await;
-                store.update(|n| {
-                    if let Some(i) = index_of_key(n, &key) {
-                        let depth = n[i].depth;
-                        n[i].children_loaded = true;
-                        n[i].loading = false;
-                        insert_children(n, i, flat_children(&children, depth + 1));
-                    }
-                });
-                if let Some(cb) = on_toggle {
-                    cb.run(key);
-                }
-            });
+            spawn_load_children(store, loader, key, ctx.on_toggle);
         }
         None => {
             // No loader configured: treat the branch as empty-but-loaded.
@@ -116,6 +118,39 @@ fn toggle_by_key(ctx: &Ctx, key: String) {
             }
         }
     }
+}
+
+/// Spawn the async load of `key`'s children into `store` — the single load
+/// path shared by [`toggle_by_key`]'s expand branch and the mount effect's
+/// eager load of initially-`open()` lazy branches. On completion, splices the
+/// loaded children in **only if the node is still `!children_loaded`** at that
+/// point: idempotent defense-in-depth against the double-load race (paired
+/// with `should_spawn_load` guarding the *spawn* side in `toggle_by_key`), so
+/// even if two loads for the same key were ever in flight, children are only
+/// ever inserted once.
+fn spawn_load_children(
+    store: RwSignal<Vec<FlatNode>>,
+    loader: TreeLoader,
+    key: String,
+    on_toggle: Option<Callback<String>>,
+) {
+    let fut = loader.load(key.clone());
+    leptos::task::spawn_local(async move {
+        let children = fut.await;
+        store.update(|n| {
+            if let Some(i) = index_of_key(n, &key)
+                && !n[i].children_loaded
+            {
+                let depth = n[i].depth;
+                n[i].children_loaded = true;
+                n[i].loading = false;
+                insert_children(n, i, flat_children(&children, depth + 1));
+            }
+        });
+        if let Some(cb) = on_toggle {
+            cb.run(key);
+        }
+    });
 }
 
 /// Set the selection to `key` and fire `on_selection_change`.
@@ -255,10 +290,8 @@ fn tree_item(node: FlatNode, ctx: Ctx) -> AnyView {
     let key_click = key.clone();
     let on_row_click = move |_| {
         select_key(&ctx_row, Some(key_click.clone()));
-        if !is_branch {
-            if let Some(cb) = ctx_row.on_activate {
-                cb.run(key_click.clone());
-            }
+        if !is_branch && let Some(cb) = ctx_row.on_activate {
+            cb.run(key_click.clone());
         }
     };
 
@@ -427,11 +460,38 @@ pub fn Tree(
     let hover = RwSignal::new(None::<String>);
 
     // Rebuild the flat model whenever the roots signal changes; reset state.
+    let effect_loader = loader.clone();
+    let effect_on_toggle = on_toggle;
     Effect::new(move |_| {
         let roots = nodes.get();
         store.set(build_flat(&roots));
         selected.set(None);
         hover.set(None);
+
+        // `build_flat` only carries over `TreeNode::open()`'s `expanded` flag —
+        // it never fetches, so an initially-open *lazy* branch would otherwise
+        // render expanded-but-empty until manually toggled twice. Eagerly spawn
+        // the same load path `toggle_by_key` uses for every such branch.
+        if let Some(loader) = effect_loader.clone() {
+            let to_load: Vec<String> = store.with_untracked(|n| {
+                n.iter()
+                    .filter(|node| node.expanded && should_spawn_load(node))
+                    .map(|node| node.key.clone())
+                    .collect()
+            });
+            if !to_load.is_empty() {
+                store.update(|n| {
+                    for key in &to_load {
+                        if let Some(i) = index_of_key(n, key) {
+                            n[i].loading = true;
+                        }
+                    }
+                });
+                for key in to_load {
+                    spawn_load_children(store, loader.clone(), key, effect_on_toggle);
+                }
+            }
+        }
     });
 
     let ctx = Ctx {
