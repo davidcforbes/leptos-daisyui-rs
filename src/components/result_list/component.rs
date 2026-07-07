@@ -1,4 +1,4 @@
-use super::types::{ResultRow, move_selection, select_first, select_last};
+use super::types::{ResultRow, move_selection, result_row_key, select_first, select_last};
 use crate::merge_classes;
 use leptos::{ev::KeyboardEvent, html::Div, prelude::*};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -203,7 +203,7 @@ pub fn ResultList(
             >
                 <For
                     each=indexed_items
-                    key=|(i, _row)| *i
+                    key=|(i, row)| result_row_key(*i, row)
                     children=move |(i, row)| {
                         let title = row.title.clone();
                         let secondary = row.secondary_line().to_string();

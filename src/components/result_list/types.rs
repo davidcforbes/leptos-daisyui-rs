@@ -12,7 +12,7 @@
 //! without a DOM.
 
 /// One entry in a [`ResultList`](super::ResultList) — a ranked search result.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct ResultRow {
     /// Primary, single-line title (rendered bold, truncated with an ellipsis
     /// if it overflows).
@@ -73,4 +73,23 @@ pub fn select_first(len: usize) -> Option<usize> {
 /// Select the last row (`End` key), or `None` if there are no rows.
 pub fn select_last(len: usize) -> Option<usize> {
     len.checked_sub(1)
+}
+
+/// Content fingerprint of a result row, combined with its index, used as the
+/// row key inside [`ResultList`](super::ResultList)'s `<For>` list so a row
+/// re-renders whenever *any* of its render-relevant fields change — not just
+/// when its index changes. Keying purely by index let `<For>` reuse stale
+/// views when `items` was replaced wholesale (the component's primary flow:
+/// search results changing per keystroke): rows at unchanged indices kept
+/// their old titles/snippets on screen, and — because the `on:click` handler
+/// closes over the row value captured when that view was created — clicking
+/// a row fired `on_select` with the *previous* result set's row instead of
+/// the current one. Hashing the row's content into the key forces `<For>` to
+/// tear down and rebuild the view (with a fresh closure over the new row)
+/// whenever the content at that index changes.
+pub fn result_row_key(i: usize, row: &ResultRow) -> (usize, u64) {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    row.hash(&mut hasher);
+    (i, hasher.finish())
 }

@@ -111,6 +111,70 @@ fn select_last_returns_len_minus_one() {
     assert_eq!(select_last(10), Some(9));
 }
 
+// ── result_row_key (For-loop content-hash key) ──
+
+#[test]
+fn row_key_equal_rows_at_same_index_have_equal_keys() {
+    let a = ResultRow {
+        title: "readme.md".into(),
+        subtitle: "/docs".into(),
+        snippet: "...matched text...".into(),
+    };
+    let b = ResultRow {
+        title: "readme.md".into(),
+        subtitle: "/docs".into(),
+        snippet: "...matched text...".into(),
+    };
+    assert_eq!(result_row_key(0, &a), result_row_key(0, &b));
+}
+
+#[test]
+fn row_key_changes_when_title_changes_at_same_index() {
+    let a = ResultRow::new("index.md");
+    let b = ResultRow::new("readme.md");
+    assert_ne!(
+        result_row_key(0, &a),
+        result_row_key(0, &b),
+        "replacing the row at a fixed index with a different title must change the key so <For> re-renders"
+    );
+}
+
+#[test]
+fn row_key_changes_when_subtitle_changes_at_same_index() {
+    let a = ResultRow {
+        title: "readme.md".into(),
+        subtitle: "/docs".into(),
+        snippet: String::new(),
+    };
+    let b = ResultRow {
+        title: "readme.md".into(),
+        subtitle: "/src".into(),
+        snippet: String::new(),
+    };
+    assert_ne!(result_row_key(0, &a), result_row_key(0, &b));
+}
+
+#[test]
+fn row_key_changes_when_snippet_changes_at_same_index() {
+    let a = ResultRow {
+        title: "readme.md".into(),
+        subtitle: "/docs".into(),
+        snippet: "...old match...".into(),
+    };
+    let b = ResultRow {
+        title: "readme.md".into(),
+        subtitle: "/docs".into(),
+        snippet: "...new match...".into(),
+    };
+    assert_ne!(result_row_key(0, &a), result_row_key(0, &b));
+}
+
+#[test]
+fn row_key_differs_for_different_indices_with_same_content() {
+    let row = ResultRow::new("index.md");
+    assert_ne!(result_row_key(0, &row), result_row_key(1, &row));
+}
+
 // ── end-to-end nav sequence (mirrors d2d's `selection_moves_and_clamps`) ──
 
 #[test]
