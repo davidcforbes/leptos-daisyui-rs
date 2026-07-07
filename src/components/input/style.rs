@@ -109,3 +109,50 @@ impl InputSize {
         }
     }
 }
+
+/// # Input Type Variants
+///
+/// Maps to the HTML `type` attribute of the underlying `<input>` element,
+/// controlling browser-level input semantics (keyboard, validation, password
+/// masking, etc.). Ported from d2d-ui's password/leading-icon `TextField`
+/// (d2d-ui/src/controls/text_field.rs).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum InputType {
+    /// Plain single-line text (default)
+    #[default]
+    Text,
+
+    /// Password field; browsers mask the value. Combine with `revealable` on
+    /// [`Input`](super::Input) to add a show/hide toggle.
+    Password,
+
+    /// Email address; browsers may offer format validation/autocomplete
+    Email,
+
+    /// Numeric entry; browsers may show a numeric keypad on mobile
+    Number,
+
+    /// Telephone number; browsers may show a phone keypad on mobile
+    Tel,
+
+    /// Search field; browsers may add a native clear affordance
+    Search,
+
+    /// URL; browsers may offer format validation/autocomplete
+    Url,
+}
+
+impl InputType {
+    /// HTML `type` attribute value
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            InputType::Text => "text",
+            InputType::Password => "password",
+            InputType::Email => "email",
+            InputType::Number => "number",
+            InputType::Tel => "tel",
+            InputType::Search => "search",
+            InputType::Url => "url",
+        }
+    }
+}
