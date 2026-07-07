@@ -59,7 +59,7 @@ cargo fmt && cargo clippy --fix --allow-dirty && cargo test
 ```
 leptos-daisyui-rs/
 ├── src/
-│   ├── components/     # 62 daisyUI components (100% coverage)
+│   ├── components/     # 96 daisyUI components (100% coverage)
 │   │   ├── button/
 │   │   ├── tooltip/    # ← New components
 │   │   ├── fab/
@@ -232,7 +232,7 @@ cargo build
 
 ## 🎯 Next Steps
 
-1. Explore all 62 components in the demo app
+1. Explore all 96 components in the demo app
 2. Modify an existing component and see hot-reload in action
 3. Create a custom component following the pattern above
 4. Run the full verification suite before committing
