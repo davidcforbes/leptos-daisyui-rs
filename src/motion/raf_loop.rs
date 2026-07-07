@@ -5,9 +5,9 @@
 //! [`use_spring`](super::use_spring). It self-reschedules via
 //! `requestAnimationFrame` for as long as the supplied `on_frame` callback
 //! returns `true`, and stops — without scheduling another frame — the
-//! instant it returns `false`. A future duration-based `Transition<T>`/
-//! `Lerp` hook is expected to reuse this same driver rather than hand-roll
-//! another rAF trampoline.
+//! instant it returns `false`. [`super::use_animated`], the duration-based
+//! `Transition<T>`/`Lerp` hook, reuses this same driver rather than
+//! hand-rolling another rAF trampoline.
 //!
 //! The `requestAnimationFrame` scheduling itself is deliberately excluded
 //! from unit tests (per the crate's testing conventions, rAF plumbing needs

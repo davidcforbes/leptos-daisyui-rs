@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a Rust crate providing type-safe, reactive daisyUI 5 component wrappers for Leptos framework. The library wraps daisyUI components as Leptos components with proper type safety, leveraging Leptos's spread attributes functionality. Currently designed for CSR (Client-Side Rendering).
 
-**Component Coverage: 96/96 (100%)**
+**Component Coverage: 109 components** (full daisyUI 5 coverage, plus custom app-shell/data/scheduling/motion components added since the original 96/96 milestone)
 
 ## Build Commands
 
@@ -102,23 +102,21 @@ trunk build --release
 The demo automatically:
 - Runs Tailwind CSS compilation via pre_build hook: `npx tailwindcss -i input.css -o output.css`
 - Watches both `../src` (library) and `./src` (demo) for changes
-- Showcases all 96 daisyUI components with interactive examples
+- Showcases all 109 components with interactive examples
 
 ## Architecture
 
 ### Core Structure
 
 The crate has two main modules:
-- `src/components/` - daisyUI component wrappers (96/96 components - 100% coverage!)
+- `src/components/` - daisyUI component wrappers (109 components: full daisyUI 5 coverage plus custom additions)
 - `src/utils/` - Utility code including `ClassAttributes` for dynamic class management
+- `src/motion/` - Animation primitives (`Lerp`, `Transition`, `Keyframe`/`Track`, easing, spring, `use_animated` hook)
 
-### Newly Implemented Components (2026-01-28)
-- `calendar/` - Styling wrapper for Cally, Pikaday, and React Day Picker
-- `fab/` - Floating Action Button with speed dial (flower/vertical layouts)
-- `hover_3d/` - 3D tilt effect on mouse hover
-- `hover_gallery/` - Interactive image gallery with horizontal hover reveal
-- `text_rotate/` - Animated text rotation (up to 6 items)
-- `tooltip/` - Contextual hover messages with positioning and colors
+### Recent additions (2026-07)
+- `sparkline/`, `empty_state/`, `icon_tile/`, `metric_row/`, `capacity_bar/`, `sla_chip/`, `nav_rail/`, `result_list/`, `day_scheduler/`, `toolbar/`, `tree/`, `week_view/` - new app-shell/data/scheduling components
+- `vertical_steps/` - extended with additional layout options
+- `src/motion/` - new animation module (see above)
 
 ### Component Pattern
 
@@ -169,7 +167,7 @@ When adding or modifying components:
 
 1. **Style Enums**: Define enums for all daisyUI variants (color, size, style) with `as_str()` method returning CSS class
 2. **Props**: Use `#[prop(optional, into)]` for optional reactive props that accept `Signal<T>`
-3. **Spread Attributes**: Always include `#[prop(attrs)] attributes: Vec<(&'static str, Attribute)>` and spread onto root element
+3. **Spread Attributes**: Do not declare a `#[prop(attrs)] attributes: Vec<(&'static str, Attribute)>` prop — that is a stale Leptos 0.6 idiom and no component in this repo uses it. Leptos 0.8 forwards spread attributes (`attr:`, `class:`, `style:`, `on:`, `prop:`) from call sites onto a component's root HTML element automatically, as long as the component's view resolves to a single root element. Declare an explicit `#[prop(optional, into)] class: &'static str` prop for user-supplied classes and merge it with the component's own daisyUI classes via the `merge_classes!` macro (see `src/components/button/component.rs`, `src/components/checkbox/component.rs`)
 4. **Documentation**: Include:
    - Component-level doc comment with usage example
    - CSS classes needed in `input.css` via `@source inline(...)`

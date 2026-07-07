@@ -17,9 +17,9 @@
 //! a small but self-contained *system* (pure numeric core + a reactive rAF
 //! driver +, eventually, more than one primitive sharing that driver), and
 //! `d2d-ui` itself groups the equivalent code the same way
-//! (`motion::{spring, transition, clock, easing}`). A future duration-based
-//! `Transition<T>`/`Lerp` primitive is expected to land alongside [`Spring`]
-//! in this module, reusing [`start_raf_loop`].
+//! (`motion::{spring, transition, clock, easing}`). The duration-based
+//! [`Transition`]/[`Lerp`] primitive now lives alongside [`Spring`] in this
+//! module, reusing [`start_raf_loop`].
 //!
 //! ## What's here
 //! - [`Spring`] — the pure numeric core (no `leptos`/`web-sys` dependency).

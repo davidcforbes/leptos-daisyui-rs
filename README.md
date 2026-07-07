@@ -37,7 +37,7 @@ leptos-daisyui-rs = { path = "../leptos-daisyui-rs" }
 
 ## Features
 
-- ✅ **96/96 daisyUI components** (100% coverage)
+- ✅ **109 components** — full daisyUI 5 coverage plus custom app-shell/data/scheduling/motion components
 - 🎨 **Advanced Runtime Theming** with customizer UI
 - 🎭 **32 Built-in Themes** from daisyUI
 - 🌈 **Oklahoma LCH Color Space** for perceptual color accuracy
@@ -364,7 +364,7 @@ pub fn FullWrapperButton(children: Children) -> impl IntoView {
 | Tooltip | ✅ | [src](src/components/tooltip/) | [docs](https://daisyui.com/components/tooltip/) |
 | Validator | ✅ | [src](src/components/validator/) | [docs](https://daisyui.com/components/validator/) |
 
-**Progress: 96/96 components implemented** 🎉
+**Progress: 109 components implemented** (all of daisyUI 5, plus custom additions — this table is illustrative, not exhaustive) 🎉
 
 
 ## Known Issues & Workarounds
