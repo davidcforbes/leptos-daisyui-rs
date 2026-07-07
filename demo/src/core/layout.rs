@@ -472,6 +472,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     value: "skeleton",
                 },
                 ComponentItem {
+                    name: "SLA Chip",
+                    href: "/components/sla_chip",
+                    value: "sla_chip",
+                },
+                ComponentItem {
                     name: "Toast",
                     href: "/components/toast",
                     value: "toast",
