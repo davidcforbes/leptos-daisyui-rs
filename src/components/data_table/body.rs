@@ -141,13 +141,11 @@ pub fn DataTableBody(
                                 {cols.iter().map(|col| {
                                     let cell_value = row.get(col.id).cloned().unwrap_or_default();
                                     let cell_class = merge_classes!(body_cell_class, col.class.unwrap_or(""));
+                                    let col_id = col.id;
 
-                                    // Column-resize width override, kept in sync with the header.
-                                    let width_style = column_widths
-                                        .with(|m| m.get(col.id).copied())
-                                        .map(|w| format!("width: {}px; ", w.round()));
-
-                                    // Build truncation style if enabled
+                                    // Build truncation style if enabled. Static per column (doesn't
+                                    // depend on `column_widths`), computed once here and cloned into
+                                    // the reactive width closure below.
                                     let truncate_style = if col.truncate {
                                         let max_w = col.max_width.map(|w| format!("max-width: {}px; ", w)).unwrap_or_default();
                                         Some(format!("{}overflow: hidden; text-overflow: ellipsis; white-space: nowrap;", max_w))
@@ -155,11 +153,22 @@ pub fn DataTableBody(
                                         None
                                     };
 
-                                    let style_attr = match (width_style, truncate_style) {
-                                        (Some(w), Some(t)) => Some(format!("{w}{t}")),
-                                        (Some(w), None) => Some(w),
-                                        (None, Some(t)) => Some(t),
-                                        (None, None) => None,
+                                    // Column-resize width override, kept in sync with the header.
+                                    // Scoped to its own reactive closure bound to just this cell's
+                                    // `style` attribute (mirrors `row_class_dyn` above) instead of
+                                    // being read in this outer per-row/per-column map -- so a
+                                    // column-width drag only re-renders each cell's style, not the
+                                    // whole body.
+                                    let style_attr = move || {
+                                        let width_style = column_widths
+                                            .with(|m| m.get(col_id).copied())
+                                            .map(|w| format!("width: {}px; ", w.round()));
+                                        match (width_style, truncate_style.clone()) {
+                                            (Some(w), Some(t)) => Some(format!("{w}{t}")),
+                                            (Some(w), None) => Some(w),
+                                            (None, Some(t)) => Some(t),
+                                            (None, None) => None,
+                                        }
                                     };
 
                                     // Title attribute for native tooltip when truncated

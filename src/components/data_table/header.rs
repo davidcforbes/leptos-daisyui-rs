@@ -76,11 +76,19 @@ pub fn DataTableHeader(
                         // Explicit width (set by a prior resize drag) always
                         // wins; otherwise fall back to the original
                         // `min_width`-only style so unresized columns are
-                        // unaffected.
-                        let width_style = column_widths
-                            .with(|m| m.get(col_id).copied())
-                            .map(|w| format!("width: {}px; min-width: {}px; max-width: {}px", w.round(), w.round(), w.round()))
-                            .or_else(|| min_width_opt.map(|w| format!("min-width: {}px", w)));
+                        // unaffected. Scoped to its own reactive closure bound
+                        // to just this `<th>`'s `style` attribute (rather than
+                        // read in this outer per-column map) so a
+                        // column-width drag only re-renders this header
+                        // cell's style instead of rebuilding the whole header
+                        // row -- and never replaces the resize-handle DOM
+                        // node mid-drag.
+                        let width_style = move || {
+                            column_widths
+                                .with(|m| m.get(col_id).copied())
+                                .map(|w| format!("width: {}px; min-width: {}px; max-width: {}px", w.round(), w.round(), w.round()))
+                                .or_else(|| min_width_opt.map(|w| format!("min-width: {}px", w)))
+                        };
 
                         view! {
                             <th
@@ -153,10 +161,20 @@ pub fn DataTableHeader(
                                                 });
                                             }
                                         }
-                                        on:pointerup=move |_ev: web_sys::PointerEvent| {
+                                        on:pointerup=move |ev: web_sys::PointerEvent| {
+                                            if let Some(target) = ev.target()
+                                                && let Ok(el) = target.dyn_into::<web_sys::Element>()
+                                            {
+                                                let _ = el.release_pointer_capture(ev.pointer_id());
+                                            }
                                             resize_drag.set(None);
                                         }
-                                        on:pointercancel=move |_ev: web_sys::PointerEvent| {
+                                        on:pointercancel=move |ev: web_sys::PointerEvent| {
+                                            if let Some(target) = ev.target()
+                                                && let Ok(el) = target.dyn_into::<web_sys::Element>()
+                                            {
+                                                let _ = el.release_pointer_capture(ev.pointer_id());
+                                            }
                                             resize_drag.set(None);
                                         }
                                     ></span>
