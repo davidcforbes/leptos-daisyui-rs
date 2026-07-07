@@ -441,6 +441,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     href: "/components/tab",
                     value: "tab",
                 },
+                ComponentItem {
+                    name: "Vertical Steps",
+                    href: "/components/vertical-steps",
+                    value: "vertical-steps",
+                },
             ],
         },
         MenuCategory {

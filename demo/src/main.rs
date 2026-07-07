@@ -177,6 +177,7 @@ fn AppInner() -> impl IntoView {
                     <Route path=path!("/svg_display") view=SvgDisplayDemo />
                     <Route path=path!("/mermaid_display") view=MermaidDisplayDemo />
                     <Route path=path!("/validator") view=ValidatorDemo />
+                    <Route path=path!("/vertical-steps") view=VerticalStepsDemo />
                 </ParentRoute>
             </Routes>
         </Router>

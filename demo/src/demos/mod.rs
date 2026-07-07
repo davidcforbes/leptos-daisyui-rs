@@ -87,6 +87,7 @@ pub mod toggle;
 pub mod tokens;
 pub mod tooltip;
 pub mod validator;
+pub mod vertical_steps;
 
 pub use app_shell::*;
 pub use accordion::*;
@@ -176,6 +177,7 @@ pub use toggle::*;
 pub use tokens::*;
 pub use tooltip::*;
 pub use validator::*;
+pub use vertical_steps::*;
 pub mod typography_customizer;
 pub use typography_customizer::*;
 pub mod component_customizer;

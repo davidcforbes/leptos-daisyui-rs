@@ -20,6 +20,11 @@ use leptos::prelude::*;
 /// - `.toast > *` slides in from the corresponding edge.
 /// - `.dropdown-open > .dropdown-content` slides down (also on `:hover`).
 /// - `.drawer-open .drawer-side` slides in from the start or end edge.
+///
+/// Plus a component-driven flow animation:
+///
+/// - `.ld-vstep-rail > .ld-vstep-flow-dash` — a small dash sliding down a
+///   [`VerticalSteps`](crate::components::VerticalSteps) rail segment.
 pub fn ui_animations_css() -> &'static str {
     r#"
 .ld-eased {
@@ -143,6 +148,32 @@ dialog.modal[open]::backdrop {
     to   { outline-color: var(--p, currentColor); }
 }
 
+/* VerticalSteps: a small dash sliding down a "lit" rail segment, giving a
+   sense of forward progress through a chain of dependent checks. Ported from
+   d2d-ui's `VerticalSteps::draw`, which computed the dash's y-offset each
+   frame from a 1400ms phase; here it is a plain looping CSS animation. */
+.ld-vstep-rail {
+    position: relative;
+    overflow: hidden;
+}
+.ld-vstep-flow-dash {
+    position: absolute;
+    left: 50%;
+    top: -0.75rem;
+    width: 2px;
+    height: 0.75rem;
+    border-radius: 9999px;
+    background-color: var(--color-accent-content, currentColor);
+    transform: translateX(-50%);
+    animation: ld-vstep-flow 1.4s linear infinite;
+}
+@keyframes ld-vstep-flow {
+    0% { top: -0.75rem; opacity: 0; }
+    10% { opacity: 1; }
+    90% { opacity: 1; }
+    100% { top: 100%; opacity: 0; }
+}
+
 @media (prefers-reduced-motion: reduce) {
     .ld-eased,
     .ld-elevated {
@@ -160,8 +191,12 @@ dialog.modal[open]::backdrop {
     .drawer-open .drawer-side,
     .drawer-open .drawer-overlay,
     .ld-ripple-element,
-    .ld-focus-ring:focus-visible {
+    .ld-focus-ring:focus-visible,
+    .ld-vstep-flow-dash {
         animation: none;
+    }
+    .ld-vstep-flow-dash {
+        display: none;
     }
 }
 "#
