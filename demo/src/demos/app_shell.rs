@@ -130,9 +130,10 @@ pub fn AppShellDemo() -> impl IntoView {
             <Section title="Sidebar Collapse & Status Bar" col=true>
                 <p class="text-sm text-base-content/70 mb-4">
                     "Toggle the side panel via "<code>"AppShellSidePanel"</code>"'s "<code>"visible"</code>
-                    " signal -- the content area reflows to fill the freed width. "
-                    <code>"AppShellStatusBar"</code>" is a sibling of "<code>"AppShell"</code>
-                    " (not a child), wrapped together in an outer flex column, with its own "
+                    " signal -- the content area reflows to fill the freed width. Pass "
+                    <code>"AppShellStatusBar"</code>" via "<code>"AppShell"</code>"'s "
+                    <code>"status_bar"</code>" prop to pin it below the main row; "
+                    <code>"AppShell"</code>" handles the layout, with the status bar's own "
                     <code>"show"</code>" signal for the show/toggle."
                 </p>
                 <div class="flex gap-2 mb-3">
@@ -144,32 +145,36 @@ pub fn AppShellDemo() -> impl IntoView {
                     </Button>
                 </div>
                 <div class="h-72 bg-base-200 rounded-lg overflow-hidden border border-base-300">
-                    <div class="flex flex-col h-full">
-                        <AppShell class="flex-1 min-h-0 w-full">
-                            <AppShellIconNav class="w-16 border-r border-base-content/10">
-                                <AppShellIconNavItem value="home" class="py-3">
-                                    <Icon icon=icondata::AiHomeFilled />
-                                </AppShellIconNavItem>
-                            </AppShellIconNav>
-                            <AppShellSidePanel
-                                width="w-48"
-                                visible=Signal::derive(move || sidebar_visible.get())
-                                class="border-r border-base-content/10 p-3"
-                            >
-                                <h3 class="text-sm font-semibold">"Side Panel"</h3>
-                                <p class="text-xs text-base-content/70">"Collapses via visible=false"</p>
-                            </AppShellSidePanel>
-                            <AppShellContent class="p-6">
-                                <p class="text-base-content/70">
-                                    "Main content reflows to fill the sidebar's space when it's collapsed."
-                                </p>
-                            </AppShellContent>
-                        </AppShell>
-                        <AppShellStatusBar show=Signal::derive(move || status_bar_visible.get())>
-                            <span class="status status-success"></span>
-                            "Ready"
-                        </AppShellStatusBar>
-                    </div>
+                    <AppShell
+                        status_bar=Box::new(move || {
+                            view! {
+                                <AppShellStatusBar show=Signal::derive(move || status_bar_visible.get())>
+                                    <span class="status status-success"></span>
+                                    "Ready"
+                                </AppShellStatusBar>
+                            }
+                                .into_any()
+                        })
+                    >
+                        <AppShellIconNav class="w-16 border-r border-base-content/10">
+                            <AppShellIconNavItem value="home" class="py-3">
+                                <Icon icon=icondata::AiHomeFilled />
+                            </AppShellIconNavItem>
+                        </AppShellIconNav>
+                        <AppShellSidePanel
+                            width="w-48"
+                            visible=Signal::derive(move || sidebar_visible.get())
+                            class="border-r border-base-content/10 p-3"
+                        >
+                            <h3 class="text-sm font-semibold">"Side Panel"</h3>
+                            <p class="text-xs text-base-content/70">"Collapses via visible=false"</p>
+                        </AppShellSidePanel>
+                        <AppShellContent class="p-6">
+                            <p class="text-base-content/70">
+                                "Main content reflows to fill the sidebar's space when it's collapsed."
+                            </p>
+                        </AppShellContent>
+                    </AppShell>
                 </div>
             </Section>
 

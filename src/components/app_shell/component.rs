@@ -1,4 +1,4 @@
-use super::style::{badge_text, badge_visible, nav_group_class};
+use super::style::{app_shell_root_class, badge_text, badge_visible, nav_group_class};
 use crate::merge_classes;
 use leptos::{
     ev,
@@ -46,6 +46,20 @@ use leptos::{
 /// }
 /// ```
 ///
+/// ### Status bar region
+/// Pass [`AppShellStatusBar`] via the `status_bar` prop to pin a bottom
+/// status/info bar below the main 3-panel row -- see [`AppShellStatusBar`]'s
+/// docs for the full example. When `status_bar` is set, the root switches
+/// to a column layout (`flex flex-col`) with the row area taking
+/// `flex-1 min-h-0` so the status bar can sit at a fixed height below it;
+/// when unset (the default), the root layout is unchanged from before this
+/// prop existed.
+///
+/// ### Add to `input.css`
+/// ```css
+/// @source inline("flex flex-col h-full w-full flex-1 min-h-0");
+/// ```
+///
 /// ## Node References
 /// - `node_ref` - References the root div element ([HTMLDivElement](https://developer.mozilla.org/en-US/docs/Web/API/HTMLDivElement))
 #[component]
@@ -74,6 +88,14 @@ pub fn AppShell(
     #[prop(optional)]
     node_ref: NodeRef<Div>,
 
+    /// Optional status bar region, rendered pinned to the bottom of the
+    /// shell below the main 3-panel row -- pass an [`AppShellStatusBar`]
+    /// here. Structural -- like `icon` on
+    /// [`EmptyState`](crate::components::empty_state::EmptyState) -- its
+    /// presence is decided once, at creation.
+    #[prop(optional)]
+    status_bar: Option<Children>,
+
     /// Shell content (AppShellIconNav, AppShellSidePanel, AppShellContent)
     children: Children,
 ) -> impl IntoView {
@@ -84,9 +106,20 @@ pub fn AppShell(
     };
     provide_context(ctx);
 
+    let has_status_bar = status_bar.is_some();
+
     view! {
-        <div node_ref=node_ref class=move || merge_classes!("flex h-full w-full", class)>
-            {children()}
+        <div node_ref=node_ref class=move || merge_classes!(app_shell_root_class(has_status_bar), class)>
+            {match status_bar {
+                Some(status_bar_fn) => {
+                    view! {
+                        <div class="flex flex-1 min-h-0 w-full">{children()}</div>
+                        {status_bar_fn()}
+                    }
+                        .into_any()
+                }
+                None => children().into_any(),
+            }}
         </div>
     }
 }
@@ -443,9 +476,10 @@ pub fn AppShellContent(
 
 /// # AppShell Status Bar Component
 ///
-/// An optional bottom status/info bar -- a sibling of `AppShell`, not a
-/// child. `AppShell`'s root stays a single-row 3-panel layout (unchanged),
-/// so to add a status bar wrap both in an outer flex column, e.g.:
+/// An optional bottom status/info bar -- pass it to `AppShell`'s
+/// `status_bar` prop to pin it below the main 3-panel row. `AppShell`
+/// arranges the layout for you: the row area takes `flex-1 min-h-0` and the
+/// status bar sits `shrink-0` beneath it.
 ///
 /// ```rust,ignore
 /// use leptos::prelude::*;
@@ -457,17 +491,20 @@ pub fn AppShellContent(
 ///     let show_status = RwSignal::new(true);
 ///
 ///     view! {
-///         <div class="flex flex-col h-full">
-///             <AppShell active_section=section class="flex-1 min-h-0 w-full">
-///                 <AppShellIconNav class="w-16">
-///                     <AppShellIconNavItem value="home">"Home"</AppShellIconNavItem>
-///                 </AppShellIconNav>
-///                 <AppShellContent class="p-6">"Main content"</AppShellContent>
-///             </AppShell>
-///             <AppShellStatusBar show=show_status>
-///                 "Ready"
-///             </AppShellStatusBar>
-///         </div>
+///         <AppShell
+///             active_section=section
+///             status_bar=Box::new(move || {
+///                 view! {
+///                     <AppShellStatusBar show=show_status>"Ready"</AppShellStatusBar>
+///                 }
+///                     .into_any()
+///             })
+///         >
+///             <AppShellIconNav class="w-16">
+///                 <AppShellIconNavItem value="home">"Home"</AppShellIconNavItem>
+///             </AppShellIconNav>
+///             <AppShellContent class="p-6">"Main content"</AppShellContent>
+///         </AppShell>
 ///     }
 /// }
 /// ```
@@ -476,9 +513,14 @@ pub fn AppShellContent(
 /// toggle it (`show.update(|v| *v = !*v)`) -- mirrors d2d-ui's
 /// `AppShell::with_status_bar` / `toggle_status_bar`.
 ///
+/// Standalone use (outside the `status_bar` slot, e.g. hand-wrapped in your
+/// own `flex flex-col` container) remains possible -- the `shrink-0` in its
+/// base classes is harmless there too -- but is no longer the documented
+/// path.
+///
 /// ### Add to `input.css`
 /// ```css
-/// @source inline("flex items-center gap-2 border-t border-base-300 bg-base-200 px-4 text-xs text-base-content/70");
+/// @source inline("flex shrink-0 items-center gap-2 border-t border-base-300 bg-base-200 px-4 text-xs text-base-content/70");
 /// @source inline("hidden");
 /// ```
 ///
@@ -507,7 +549,7 @@ pub fn AppShellStatusBar(
             node_ref=node_ref
             class=move || {
                 merge_classes!(
-                    "flex items-center gap-2 border-t border-base-300 bg-base-200 px-4 text-xs text-base-content/70",
+                    "flex shrink-0 items-center gap-2 border-t border-base-300 bg-base-200 px-4 text-xs text-base-content/70",
                     class
                 )
             }

@@ -34,6 +34,21 @@ fn test_badge_visible_positive_counts_show() {
     assert!(badge_visible(Some(500)));
 }
 
+// app_shell_root_class tests
+
+#[test]
+fn test_app_shell_root_class_no_status_bar_is_unchanged() {
+    assert_eq!(app_shell_root_class(false), "flex h-full w-full");
+}
+
+#[test]
+fn test_app_shell_root_class_with_status_bar_switches_to_column() {
+    let class = app_shell_root_class(true);
+    assert_eq!(class, "flex flex-col h-full w-full");
+    assert!(class.contains("flex-col"));
+    assert_ne!(class, app_shell_root_class(false));
+}
+
 // nav_group_class tests
 
 #[test]
