@@ -87,7 +87,7 @@ pub fn VerticalSteps(
 ) -> impl IntoView {
     let indexed =
         move || -> Vec<(usize, VerticalStep)> { items.get().into_iter().enumerate().collect() };
-    let total = move || items.get().len();
+    let total = move || items.with(Vec::len);
 
     view! {
         <ol node_ref=node_ref class=move || merge_classes!("flex flex-col", class)>

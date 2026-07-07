@@ -152,8 +152,11 @@ pub fn WeekView(
         move || effective_height_px(height_px.get(), start_hour.get(), end_hour.get());
 
     // Timed events grouped by day column, each column laid into overlap
-    // lanes independently via `compute_week_event_layout`.
-    let timed_by_day = Signal::derive(move || {
+    // lanes independently via `compute_week_event_layout`. `Memo` (not
+    // `Signal::derive`) because each of the seven day-columns reads this
+    // signal once per render -- a plain derived signal would recompute the
+    // full grouping + lane layout on every one of those reads.
+    let timed_by_day = Memo::new(move |_| {
         let evs = events.get();
         let s = start_hour.get();
         let e = end_hour.get();
@@ -175,8 +178,9 @@ pub fn WeekView(
     });
 
     // All-day events grouped by day column; simply stacked (no lane math --
-    // the all-day strip has no time axis to overlap on).
-    let all_day_by_day = Signal::derive(move || {
+    // the all-day strip has no time axis to overlap on). `Memo` for the same
+    // reason as `timed_by_day` above -- read once per day-column.
+    let all_day_by_day = Memo::new(move |_| {
         let evs = events.get();
         (0..7)
             .map(|day| {

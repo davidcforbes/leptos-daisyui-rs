@@ -136,6 +136,11 @@ pub fn AppShell(
 /// bottom-pinned Settings item) -- this component itself is unchanged and
 /// simply renders whatever it's given in a vertical flex column.
 ///
+/// ### Add to `input.css`
+/// ```css
+/// @source inline("flex flex-col items-center bg-base-300");
+/// ```
+///
 /// ## Node References
 /// - `node_ref` - References the nav element ([HTMLElement](https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement))
 #[component]
@@ -471,6 +476,11 @@ pub fn AppShellSidePanel(
 ///
 /// Main content area that fills the remaining horizontal space in the layout.
 /// Scrolls independently of the icon nav and side panel.
+///
+/// ### Add to `input.css`
+/// ```css
+/// @source inline("flex-1 overflow-y-auto");
+/// ```
 ///
 /// ## Node References
 /// - `node_ref` - References the div element ([HTMLDivElement](https://developer.mozilla.org/en-US/docs/Web/API/HTMLDivElement))

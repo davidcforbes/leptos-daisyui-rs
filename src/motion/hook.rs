@@ -11,6 +11,108 @@ use super::raf_loop::{start_raf_loop, RafLoopHandle};
 use super::spring::Spring;
 use super::transition::{Lerp, Transition};
 
+/// Shared `requestAnimationFrame`-driver plumbing behind [`SpringHandle`] and
+/// [`AnimatedHandle`].
+///
+/// Both handles need the same three things around their per-frame `step`:
+/// an "is a loop already running" guard, a loop started via
+/// [`start_raf_loop`] whose value gets written back through `set_value`
+/// (a no-op via `try_set` if the owning scope was disposed mid-frame), and a
+/// single `on_cleanup` registration that cancels whichever loop is current
+/// when the component unmounts. Centralizing it here means the one subtle
+/// contract `ensure_running` depends on -- that a loop which stopped on its
+/// own (natural settle) marks its [`RafLoopHandle`] cancelled, so
+/// `ensure_running` can trust `RafLoopHandle::is_cancelled` to mean "no loop
+/// is actually driving this anymore" rather than just "nobody called
+/// `cancel()` yet" (see `continue_or_mark_stopped` in `raf_loop.rs`) -- only
+/// needs to be gotten right in one place.
+struct RafDriver<V: Send + Sync + 'static> {
+    set_value: WriteSignal<V>,
+    loop_handle: Rc<RefCell<Option<RafLoopHandle>>>,
+    cancelled: Rc<Cell<bool>>,
+}
+
+impl<V: Send + Sync + 'static> Clone for RafDriver<V> {
+    fn clone(&self) -> Self {
+        Self {
+            set_value: self.set_value,
+            loop_handle: self.loop_handle.clone(),
+            cancelled: self.cancelled.clone(),
+        }
+    }
+}
+
+impl<V: Send + Sync + 'static> RafDriver<V> {
+    fn new(set_value: WriteSignal<V>) -> Self {
+        Self {
+            set_value,
+            loop_handle: Rc::new(RefCell::new(None)),
+            cancelled: Rc::new(Cell::new(false)),
+        }
+    }
+
+    /// Starts the rAF loop if it is not already running. Called after every
+    /// `set_target` since that is the only way a settled/finished animation
+    /// becomes active again. `step(now_ms)` produces the next value and
+    /// whether the loop should keep going -- the same contract as
+    /// `on_frame` in [`start_raf_loop`].
+    fn ensure_running(&self, mut step: impl FnMut(f64) -> (V, bool) + 'static) {
+        if self.cancelled.get() {
+            return;
+        }
+        let already_running = self
+            .loop_handle
+            .borrow()
+            .as_ref()
+            .map(|h| !h.is_cancelled())
+            .unwrap_or(false);
+        if already_running {
+            return;
+        }
+
+        let set_value = self.set_value;
+        let cancelled = self.cancelled.clone();
+
+        let handle = start_raf_loop(move |now| {
+            if cancelled.get() {
+                return false;
+            }
+            let (value, keep_going) = step(now);
+            // `try_set` is a safe no-op if the owning scope has already
+            // been disposed (the signal is gone) — but that alone would
+            // not stop this closure from being rescheduled forever, hence
+            // the `cancelled` check above on every frame too.
+            let _ = set_value.try_set(value);
+            keep_going
+        });
+        *self.loop_handle.borrow_mut() = Some(handle);
+    }
+
+    /// Registers a single `on_cleanup`, cancelling whichever loop is current
+    /// when the calling component's reactive scope is disposed. Call once,
+    /// at construction -- re-registering on every `ensure_running` restart
+    /// would accumulate stale cleanup callbacks for the life of the scope
+    /// (see [`start_raf_loop`]'s doc note on the same point).
+    fn register_cleanup(&self) {
+        // `Rc<Cell<_>>`/`Rc<RefCell<_>>` are not `Send`/`Sync`, but
+        // `on_cleanup` requires both (the reactive graph is generic over
+        // native multithreaded use). This hook only ever runs
+        // single-threaded (wasm32 in the browser), so `SendWrapper`
+        // documents and encodes that assumption rather than working around
+        // it silently — same pattern as `components::toolbar`'s
+        // `ResizeObserver` cleanup.
+        let cleanup_guard =
+            send_wrapper::SendWrapper::new((self.cancelled.clone(), self.loop_handle.clone()));
+        on_cleanup(move || {
+            let (cancelled, loop_handle) = cleanup_guard.take();
+            cancelled.set(true);
+            if let Some(h) = loop_handle.borrow_mut().take() {
+                h.cancel();
+            }
+        });
+    }
+}
+
 /// Reactive handle returned by [`use_spring`] / [`use_spring_with_params`].
 ///
 /// Cheap to clone (it is a bundle of `Rc`s and `Copy` signals) — hand it to
@@ -22,10 +124,8 @@ pub struct SpringHandle {
     /// Read it inside a tracking context (a view closure, `Memo`, `Effect`)
     /// like any other signal.
     pub value: ReadSignal<f32>,
-    set_value: WriteSignal<f32>,
     spring: Rc<RefCell<Spring>>,
-    loop_handle: Rc<RefCell<Option<RafLoopHandle>>>,
-    cancelled: Rc<Cell<bool>>,
+    driver: RafDriver<f32>,
 }
 
 impl SpringHandle {
@@ -48,44 +148,17 @@ impl SpringHandle {
     /// [`set_target`](Self::set_target) since that is the only way a
     /// settled spring becomes un-settled again.
     fn ensure_running(&self) {
-        if self.cancelled.get() {
-            return;
-        }
-        let already_running = self
-            .loop_handle
-            .borrow()
-            .as_ref()
-            .map(|h| !h.is_cancelled())
-            .unwrap_or(false);
-        if already_running {
-            return;
-        }
-
         let spring = self.spring.clone();
-        let set_value = self.set_value;
-        let cancelled = self.cancelled.clone();
         let last_time = Rc::new(Cell::new(js_sys::Date::now()));
 
-        let handle = start_raf_loop(move |now| {
-            if cancelled.get() {
-                return false;
-            }
+        self.driver.ensure_running(move |now| {
             let dt_ms = (now - last_time.get()).max(0.0) as f32;
             last_time.set(now);
 
-            let (value, settled) = {
-                let mut s = spring.borrow_mut();
-                s.step(dt_ms);
-                (s.value, s.is_settled())
-            };
-            // `try_set` is a safe no-op if the owning scope has already
-            // been disposed (the signal is gone) — but that alone would
-            // not stop this closure from being rescheduled forever, hence
-            // the `cancelled` check above on every frame too.
-            let _ = set_value.try_set(value);
-            !settled
+            let mut s = spring.borrow_mut();
+            s.step(dt_ms);
+            (s.value, !s.is_settled())
         });
-        *self.loop_handle.borrow_mut() = Some(handle);
     }
 }
 
@@ -117,30 +190,13 @@ pub fn use_spring_with_params(initial: f32, stiffness: f32, damping: f32) -> Spr
         initial, stiffness, damping,
     )));
     let (value, set_value) = signal(initial);
-    let cancelled = Rc::new(Cell::new(false));
-    let loop_handle: Rc<RefCell<Option<RafLoopHandle>>> = Rc::new(RefCell::new(None));
-
-    // `Rc<Cell<_>>`/`Rc<RefCell<_>>` are not `Send`/`Sync`, but `on_cleanup`
-    // requires both (the reactive graph is generic over native multithreaded
-    // use). This hook only ever runs single-threaded (wasm32 in the
-    // browser), so `SendWrapper` documents and encodes that assumption
-    // rather than working around it silently — same pattern as
-    // `components::toolbar`'s `ResizeObserver` cleanup.
-    let cleanup_guard = send_wrapper::SendWrapper::new((cancelled.clone(), loop_handle.clone()));
-    on_cleanup(move || {
-        let (cancelled, loop_handle) = cleanup_guard.take();
-        cancelled.set(true);
-        if let Some(h) = loop_handle.borrow_mut().take() {
-            h.cancel();
-        }
-    });
+    let driver = RafDriver::new(set_value);
+    driver.register_cleanup();
 
     SpringHandle {
         value,
-        set_value,
         spring,
-        loop_handle,
-        cancelled,
+        driver,
     }
 }
 
@@ -156,10 +212,8 @@ pub struct AnimatedHandle<T: Lerp + Send + Sync + 'static> {
     /// inside a tracking context (a view closure, `Memo`, `Effect`) like any
     /// other signal.
     pub value: ReadSignal<T>,
-    set_value: WriteSignal<T>,
     transition: Rc<RefCell<Transition<T>>>,
-    loop_handle: Rc<RefCell<Option<RafLoopHandle>>>,
-    cancelled: Rc<Cell<bool>>,
+    driver: RafDriver<T>,
     duration_ms: f32,
     easing: Easing,
 }
@@ -193,39 +247,12 @@ impl<T: Lerp + Send + Sync + 'static> AnimatedHandle<T> {
     /// [`set_target`](Self::set_target) since that is the only way a
     /// finished transition becomes active again.
     fn ensure_running(&self) {
-        if self.cancelled.get() {
-            return;
-        }
-        let already_running = self
-            .loop_handle
-            .borrow()
-            .as_ref()
-            .map(|h| !h.is_cancelled())
-            .unwrap_or(false);
-        if already_running {
-            return;
-        }
-
         let transition = self.transition.clone();
-        let set_value = self.set_value;
-        let cancelled = self.cancelled.clone();
 
-        let handle = start_raf_loop(move |now| {
-            if cancelled.get() {
-                return false;
-            }
-            let (value, active) = {
-                let t = transition.borrow();
-                (t.value(now), t.is_active(now))
-            };
-            // `try_set` is a safe no-op if the owning scope has already
-            // been disposed (the signal is gone) — but that alone would
-            // not stop this closure from being rescheduled forever, hence
-            // the `cancelled` check above on every frame too.
-            let _ = set_value.try_set(value);
-            active
+        self.driver.ensure_running(move |now| {
+            let t = transition.borrow();
+            (t.value(now), t.is_active(now))
         });
-        *self.loop_handle.borrow_mut() = Some(handle);
     }
 }
 
@@ -253,27 +280,13 @@ where
 {
     let transition = Rc::new(RefCell::new(Transition::settled(initial)));
     let (value, set_value) = signal(initial);
-    let cancelled = Rc::new(Cell::new(false));
-    let loop_handle: Rc<RefCell<Option<RafLoopHandle>>> = Rc::new(RefCell::new(None));
-
-    // Same `SendWrapper` rationale as `use_spring_with_params` above: this
-    // hook only ever runs single-threaded (wasm32 in the browser), but
-    // `on_cleanup` requires `Send + Sync`.
-    let cleanup_guard = send_wrapper::SendWrapper::new((cancelled.clone(), loop_handle.clone()));
-    on_cleanup(move || {
-        let (cancelled, loop_handle) = cleanup_guard.take();
-        cancelled.set(true);
-        if let Some(h) = loop_handle.borrow_mut().take() {
-            h.cancel();
-        }
-    });
+    let driver = RafDriver::new(set_value);
+    driver.register_cleanup();
 
     AnimatedHandle {
         value,
-        set_value,
         transition,
-        loop_handle,
-        cancelled,
+        driver,
         duration_ms,
         easing,
     }

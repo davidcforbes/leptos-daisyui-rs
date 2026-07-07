@@ -37,6 +37,19 @@ fn menu_item_dom_id(instance: u64, index: usize) -> String {
 /// [`MenuItem`]/[`MenuCheckItem`]/[`MenuRadioItem`] renders the daisyUI
 /// `menu-focus` class when it is the highlighted item.
 ///
+/// ### Items must be statically mounted
+/// Items register with the enclosing `Menu`/`SubMenu`'s keyboard-highlight
+/// tracker exactly once, at creation (`MenuNav::register`); there is no
+/// matching unregister. Mounting/unmounting `MenuItem`,
+/// `MenuCheckItem`, or `MenuRadioItem` dynamically (e.g. inside a `<For>`
+/// over a changing list, or an `<Show>` that removes items from the DOM)
+/// leaks stale entries into the highlight tracker's index-keyed state
+/// (`disabled`/`activate` vectors and DOM ids), so highlighted-index math
+/// and `aria-activedescendant` drift out of sync with what's actually
+/// rendered. If an item's visibility needs to change at runtime, keep it
+/// mounted and toggle a CSS class (e.g. `hidden`) instead of conditionally
+/// rendering it.
+///
 /// ### Add to `input.css`
 /// ```css
 /// @source inline("menu menu-horizontal menu-vertical menu-xs menu-sm menu-md menu-lg menu-xl menu-title menu-active menu-focus menu-disabled");
