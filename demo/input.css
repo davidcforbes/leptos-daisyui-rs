@@ -44,7 +44,7 @@
 /* Dropdown */
 @source inline("dropdown dropdown-content dropdown-start dropdown-center dropdown-end dropdown-top dropdown-bottom dropdown-left dropdown-right dropdown-hover dropdown-open");
 /* Empty State */
-@source inline("text-neutral text-primary text-secondary text-accent text-info text-success text-warning text-error opacity-60");
+@source inline("flex flex-col items-center justify-center gap-2 p-8 text-center text-4xl text-lg text-sm opacity-60 font-semibold mt-2 text-neutral text-primary text-secondary text-accent text-info text-success text-warning text-error");
 /* Fieldset */
 @source inline("fieldset label fieldset-legend");
 /* File-Input */

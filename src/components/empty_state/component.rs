@@ -32,6 +32,8 @@ use leptos::{html::Div, prelude::*};
 ///
 /// ### Add to `input.css`
 /// ```css
+/// @source inline("flex flex-col items-center justify-center gap-2 p-8 text-center");
+/// @source inline("text-4xl text-lg text-sm opacity-60 font-semibold mt-2");
 /// @source inline("text-neutral text-primary text-secondary text-accent text-info text-success text-warning text-error");
 /// ```
 ///
