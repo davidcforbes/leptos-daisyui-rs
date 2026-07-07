@@ -3,8 +3,11 @@
 /// Semantic color for a [`SchedulerEvent`](super::types::SchedulerEvent)
 /// block: a soft tinted background plus a solid left accent bar. Mirrors
 /// d2d-ui's `DayScheduler::draw`, which filled each block with a translucent
-/// (alpha 0.18) version of the event's color and drew a solid 3px accent bar
-/// in the same color along the block's left edge.
+/// (alpha 0.15) version of the event's color and drew a solid 3px accent bar
+/// in the same color along the block's left edge. [`bg_class`](Self::bg_class)
+/// uses Tailwind's `/15` opacity classes (15%, matching d2d's alpha 0.15);
+/// [`border_class`](Self::border_class) renders as a `border-l-4` (4px)
+/// accent bar, a Tailwind rounding of d2d's 3px accent bar.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub enum SchedulerEventColor {
     /// Neutral color (default)

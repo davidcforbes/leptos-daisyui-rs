@@ -217,6 +217,8 @@ pub fn DayScheduler(
                             ev.end_min,
                             ev.title.clone(),
                             format!("{:?}", ev.color),
+                            layout.top_pct.to_bits(),
+                            layout.height_pct.to_bits(),
                             layout.left_pct.to_bits(),
                             layout.width_pct.to_bits(),
                         )
