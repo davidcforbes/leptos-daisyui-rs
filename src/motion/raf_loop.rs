@@ -9,9 +9,13 @@
 //! `Lerp` hook is expected to reuse this same driver rather than hand-roll
 //! another rAF trampoline.
 //!
-//! Deliberately excluded from unit tests (per the crate's testing
-//! conventions, rAF plumbing needs a browser and is exercised by the demo
-//! app instead) — [`crate::motion::spring`] carries the numeric coverage.
+//! The `requestAnimationFrame` scheduling itself is deliberately excluded
+//! from unit tests (per the crate's testing conventions, rAF plumbing needs
+//! a browser and is exercised by the demo app instead) —
+//! [`crate::motion::spring`] carries the numeric coverage. The one piece of
+//! this module's logic that *is* pure — "does an `on_frame` result flip the
+//! cancelled flag" — is factored into [`continue_or_mark_stopped`] below and
+//! covered by the `tests` module at the bottom of this file.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -77,8 +81,61 @@ fn schedule_frame(on_frame: Rc<RefCell<dyn FnMut(f64) -> bool>>, cancelled: Rc<C
         }
         let now = js_sys::Date::now();
         let should_continue = (on_frame.borrow_mut())(now);
-        if should_continue && !cancelled.get() {
+        if !continue_or_mark_stopped(should_continue, &cancelled) {
+            return;
+        }
+        if !cancelled.get() {
             schedule_frame(on_frame, cancelled);
         }
     });
+}
+
+/// Decides whether the loop should keep scheduling frames, marking
+/// `cancelled` when it should not.
+///
+/// Pulled out of [`schedule_frame`]'s `rAF` closure because it is the one
+/// piece of that closure with no `web-sys`/browser dependency — everything
+/// else needs a real `requestAnimationFrame` to exercise. Natural settle
+/// (`should_continue == false`) must flip the flag here so
+/// [`RafLoopHandle::is_cancelled`] honors its documented contract ("cancel()
+/// has been called, *or* `on_frame` already returned `false`") and callers
+/// like `SpringHandle::ensure_running` can trust a not-cancelled handle to
+/// mean "a loop is actually still driving this", not just "nobody called
+/// `cancel()` yet".
+fn continue_or_mark_stopped(should_continue: bool, cancelled: &Cell<bool>) -> bool {
+    if !should_continue {
+        cancelled.set(true);
+    }
+    should_continue
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn continuing_frame_leaves_cancelled_flag_unset() {
+        let cancelled = Cell::new(false);
+        assert!(continue_or_mark_stopped(true, &cancelled));
+        assert!(!cancelled.get());
+    }
+
+    #[test]
+    fn settled_frame_marks_flag_cancelled() {
+        let cancelled = Cell::new(false);
+        assert!(!continue_or_mark_stopped(false, &cancelled));
+        assert!(cancelled.get());
+    }
+
+    #[test]
+    fn already_cancelled_flag_is_left_set_when_frame_still_reports_continue() {
+        // A frame in flight when `cancel()` is called externally may still
+        // return `true` from `on_frame` (it doesn't know it was cancelled).
+        // This helper must not clear an already-set flag in that case —
+        // `schedule_frame`'s own `cancelled.get()` check right after this
+        // call is what actually stops the reschedule.
+        let cancelled = Cell::new(true);
+        assert!(continue_or_mark_stopped(true, &cancelled));
+        assert!(cancelled.get());
+    }
 }
