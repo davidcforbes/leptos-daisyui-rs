@@ -417,6 +417,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     value: "navbar",
                 },
                 ComponentItem {
+                    name: "NavRail",
+                    href: "/components/nav_rail",
+                    value: "nav_rail",
+                },
+                ComponentItem {
                     name: "Pagination",
                     href: "/components/pagination",
                     value: "pagination",
