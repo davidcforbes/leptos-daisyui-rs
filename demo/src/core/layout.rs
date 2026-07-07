@@ -307,6 +307,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     value: "day-scheduler",
                 },
                 ComponentItem {
+                    name: "Week View",
+                    href: "/components/week-view",
+                    value: "week-view",
+                },
+                ComponentItem {
                     name: "Diff",
                     href: "/components/diff",
                     value: "diff",

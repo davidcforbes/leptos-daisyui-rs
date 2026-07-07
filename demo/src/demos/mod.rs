@@ -89,6 +89,7 @@ pub mod toolbar;
 pub mod tooltip;
 pub mod validator;
 pub mod vertical_steps;
+pub mod week_view;
 
 pub use app_shell::*;
 pub use accordion::*;
@@ -180,6 +181,7 @@ pub use toolbar::*;
 pub use tooltip::*;
 pub use validator::*;
 pub use vertical_steps::*;
+pub use week_view::*;
 pub mod typography_customizer;
 pub use typography_customizer::*;
 pub mod component_customizer;

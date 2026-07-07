@@ -107,6 +107,7 @@ mod tooltip;
 mod upload_file;
 mod validator;
 mod vertical_steps;
+mod week_view;
 
 pub use accordion::*;
 pub use ai_chat::*;
@@ -211,6 +212,7 @@ pub use tooltip::*;
 pub use upload_file::*;
 pub use validator::*;
 pub use vertical_steps::*;
+pub use week_view::*;
 mod typography_customizer;
 pub use typography_customizer::*;
 mod component_customizer;
