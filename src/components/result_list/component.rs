@@ -195,7 +195,7 @@ pub fn ResultList(
                 when=move || !items.get().is_empty()
                 fallback=move || {
                     view! {
-                        <div class="p-4 text-sm text-center opacity-60">
+                        <div role="presentation" class="p-4 text-sm text-center opacity-60">
                             {move || empty_message.get()}
                         </div>
                     }

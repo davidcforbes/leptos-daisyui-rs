@@ -129,6 +129,8 @@
 @source inline("range range-neutral range-primary range-secondary range-accent range-success range-warning range-info range-error range-xs range-sm range-md range-lg range-xl");
 /* Rating */
 @source inline("rating rating-half rating-hidden rating-xs rating-sm rating-md rating-lg rating-xl");
+/* Result List */
+@source inline("flex flex-col gap-0.5 max-h-80 overflow-y-auto rounded-box border border-base-300 bg-base-100 outline-none focus:ring-2 focus:ring-primary/50 px-3 py-2 cursor-pointer bg-primary/10 text-primary bg-base-200 font-semibold text-sm truncate text-xs opacity-60 whitespace-normal break-words p-4 text-center");
 /* Select */
 @source inline("select select-ghost select-neutral select-primary select-secondary select-accent select-info select-success select-warning select-error select-xs select-sm select-md select-lg select-xl");
 /* Skeleton */
