@@ -297,6 +297,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     value: "data-table",
                 },
                 ComponentItem {
+                    name: "Day Scheduler",
+                    href: "/components/day-scheduler",
+                    value: "day-scheduler",
+                },
+                ComponentItem {
                     name: "Diff",
                     href: "/components/diff",
                     value: "diff",

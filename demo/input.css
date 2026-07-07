@@ -33,6 +33,13 @@
 @source inline("collapse collapse-title collapse-content collapse-arrow collapse-plus collapse-open collapse-close");
 /* Countdown */
 @source inline("countdown");
+/* Day Scheduler */
+@source inline("flex w-full relative w-12 shrink-0 border-r border-t border-base-300 border-base-300/40 flex-1 overflow-hidden");
+@source inline("absolute inset-x-0 right-2 -translate-y-1/2 whitespace-nowrap z-10 items-center pointer-events-none");
+@source inline("m-px rounded-sm border-l-4 p-1 truncate font-medium text-xs opacity-60");
+@source inline("-ml-1 h-2 w-2 rounded-full h-px ml-1 shrink-0 font-medium text-error bg-error");
+@source inline("bg-neutral/15 bg-primary/15 bg-secondary/15 bg-accent/15 bg-info/15 bg-success/15 bg-warning/15 bg-error/15");
+@source inline("border-neutral border-primary border-secondary border-accent border-info border-success border-warning border-error");
 /* Diff */
 @source inline("diff diff-item-1 diff-item-2 diff-resizer");
 /* Divider */
