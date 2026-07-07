@@ -144,9 +144,12 @@ pub fn SlaChip(
 /// loop.
 pub fn use_sla_now(poll_ms: u64) -> Signal<i64> {
     let now = RwSignal::new(js_sys::Date::now() as i64);
-    set_interval(
+    let handle = leptos::leptos_dom::helpers::set_interval_with_handle(
         move || now.set(js_sys::Date::now() as i64),
         Duration::from_millis(poll_ms),
     );
+    if let Ok(handle) = handle {
+        on_cleanup(move || handle.clear());
+    }
     now.into()
 }

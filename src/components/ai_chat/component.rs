@@ -49,7 +49,7 @@ pub fn AiChat(
     let input = RwSignal::new(String::new());
     let interval = poll_ms.unwrap_or(100);
 
-    set_interval(
+    let interval_handle = leptos::leptos_dom::helpers::set_interval_with_handle(
         move || {
             let (changed, doc_changed) = session
                 .try_update_value(|s| {
@@ -72,6 +72,9 @@ pub fn AiChat(
         },
         Duration::from_millis(interval),
     );
+    if let Ok(handle) = interval_handle {
+        on_cleanup(move || handle.clear());
+    }
 
     let submit = move || {
         let text = input.get();
