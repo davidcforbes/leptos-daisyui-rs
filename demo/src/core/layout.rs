@@ -317,6 +317,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     value: "icon",
                 },
                 ComponentItem {
+                    name: "Icon Tile",
+                    href: "/components/icon_tile",
+                    value: "icon_tile",
+                },
+                ComponentItem {
                     name: "Gantt",
                     href: "/components/gantt",
                     value: "gantt",

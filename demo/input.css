@@ -80,6 +80,11 @@
 @source inline("hover-3d");
 /* Hover Gallery */
 @source inline("hover-gallery hover-gallery-item");
+/* Icon Tile */
+@source inline("inline-flex items-center justify-center shrink-0 rounded-lg rounded-full");
+@source inline("bg-neutral/10 bg-primary/10 bg-secondary/10 bg-accent/10 bg-info/10 bg-success/10 bg-warning/10 bg-error/10");
+@source inline("text-neutral text-primary text-secondary text-accent text-info text-success text-warning text-error");
+@source inline("w-6 h-6 w-8 h-8 w-10 h-10 w-12 h-12 w-16 h-16 text-xs text-sm text-base text-lg text-2xl");
 /* Indicator */
 @source inline("indicator indicator-item indicator-start indicator-center indicator-end indicator-top indicator-middle indicator-bottom");
 /* Input */

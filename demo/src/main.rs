@@ -121,6 +121,7 @@ fn AppInner() -> impl IntoView {
                     <Route path=path!("/hover_3d") view=Hover3dDemo />
                     <Route path=path!("/hover_gallery") view=HoverGalleryDemo />
                     <Route path=path!("/icon") view=IconDemo />
+                    <Route path=path!("/icon_tile") view=IconTileDemo />
                     <Route path=path!("/indicator") view=IndicatorDemo />
                     <Route path=path!("/input") view=InputDemo />
                     <Route path=path!("/join") view=JoinDemo />
