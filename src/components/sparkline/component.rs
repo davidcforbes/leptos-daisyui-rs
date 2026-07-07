@@ -37,8 +37,10 @@ use leptos::{html::Div, prelude::*};
 ///
 /// ### Add to `input.css`
 /// ```css
-/// @source inline("text-base-content text-primary text-secondary text-accent text-success text-info text-warning text-error");
+/// @source inline("card card-border bg-base-100 p-2 text-base-content text-primary text-secondary text-accent text-success text-info text-warning text-error");
 /// ```
+///
+/// See also [`crate::charts::Sparkline`] for a minimal non-reactive chart primitive without daisyUI framing.
 ///
 /// ## Node References
 /// - `node_ref` - References the wrapping `div` element ([HTMLDivElement](https://developer.mozilla.org/en-US/docs/Web/API/HTMLDivElement))

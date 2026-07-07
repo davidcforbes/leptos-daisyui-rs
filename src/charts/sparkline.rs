@@ -3,6 +3,8 @@ use leptos::prelude::*;
 /// Sparkline component -- an inline mini chart with no axes or labels.
 ///
 /// Ideal for embedding in table cells or KPI cards to show trends at a glance.
+///
+/// See also [`crate::components::Sparkline`] for a reactive daisyUI-framed component with title and readout row.
 #[component]
 pub fn Sparkline(
     /// Data values (y-only; x is inferred from index).
