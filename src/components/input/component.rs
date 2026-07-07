@@ -72,6 +72,12 @@ pub fn Input(
     /// `Password`, a trailing eye button is rendered that flips the field
     /// between masked and plaintext. Structural (not reactive): decided once
     /// when the component is created, like `leading_icon`.
+    ///
+    /// > **Note:** the toggle button only renders when `input_type` is
+    /// > [`InputType::Password`]. Setting `revealable=true` with any other
+    /// > `input_type` still switches the component to the daisyUI
+    /// > `label.input` wrapper markup (matching `leading_icon`'s behavior),
+    /// > but no eye button is shown and nothing else changes.
     #[prop(optional, default = false)]
     revealable: bool,
 
@@ -152,6 +158,31 @@ pub fn Input(
     // existing Input API/markup stays backward compatible by default.
     let use_wrapper = leading_icon.is_some() || revealable;
 
+    // Shared `on:input` handler for both the wrapper and bare-`<input>`
+    // branches below: applies the character-class `filter`, writes the
+    // filtered value back onto the DOM element when the browser's raw
+    // keystroke was disallowed, then forwards the (post-filter) value to
+    // `on_input`. Only one of the two branches is ever instantiated at
+    // runtime, so moving this closure into each arm is fine.
+    let handle_filtered_input = move |e: web_sys::Event| {
+        let raw = event_target_value(&e);
+        let filtered = filter.get().apply(&raw);
+        // The browser already applied the raw keystroke; write the
+        // filtered value back so the field never shows a disallowed
+        // character, even momentarily. Simplest-possible caret
+        // handling: the browser places the caret at the end.
+        if filtered != raw
+            && let Some(el) = e
+                .target()
+                .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok())
+        {
+            el.set_value(&filtered);
+        }
+        if let Some(cb) = on_input {
+            cb.run(filtered);
+        }
+    };
+
     if use_wrapper {
         view! {
             <label
@@ -175,24 +206,7 @@ pub fn Input(
                     name=move || name.get()
                     prop:value=move || value.get()
                     placeholder=move || placeholder.get()
-                    on:input=move |e| {
-                        let raw = event_target_value(&e);
-                        let filtered = filter.get().apply(&raw);
-                        // The browser already applied the raw keystroke; write the
-                        // filtered value back so the field never shows a disallowed
-                        // character, even momentarily. Simplest-possible caret
-                        // handling: the browser places the caret at the end.
-                        if filtered != raw
-                            && let Some(el) = e
-                                .target()
-                                .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok())
-                        {
-                            el.set_value(&filtered);
-                        }
-                        if let Some(cb) = on_input {
-                            cb.run(filtered);
-                        }
-                    }
+                    on:input=handle_filtered_input
                     on:keydown=move |e| {
                         if let Some(cb) = on_keydown {
                             cb.run(e);
@@ -207,6 +221,7 @@ pub fn Input(
                             <button
                                 type="button"
                                 class="btn btn-ghost btn-xs btn-circle"
+                                disabled=move || disabled.get()
                                 aria-label=move || {
                                     if reveal.get() { "Hide password" } else { "Show password" }
                                 }
@@ -280,20 +295,7 @@ pub fn Input(
                 name=move || name.get()
                 prop:value=move || value.get()
                 placeholder=move || placeholder.get()
-                on:input=move |e| {
-                    let raw = event_target_value(&e);
-                    let filtered = filter.get().apply(&raw);
-                    if filtered != raw
-                        && let Some(el) = e
-                            .target()
-                            .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok())
-                    {
-                        el.set_value(&filtered);
-                    }
-                    if let Some(cb) = on_input {
-                        cb.run(filtered);
-                    }
-                }
+                on:input=handle_filtered_input
                 on:keydown=move |e| {
                     if let Some(cb) = on_keydown {
                         cb.run(e);
