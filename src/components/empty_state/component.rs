@@ -51,7 +51,7 @@ pub fn EmptyState(
 
     /// Optional icon slot (e.g. an inline SVG or emoji) rendered large and
     /// centered above the title. Structural -- like `leading_icon` on
-    /// [`Input`](super::input::Input) -- its presence is decided once, at
+    /// [`Input`](crate::components::input::Input) -- its presence is decided once, at
     /// creation.
     #[prop(optional)]
     icon: Option<Children>,

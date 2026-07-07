@@ -60,7 +60,8 @@ pub fn CapacityBar(
 
     /// Scale maximum (right edge of the track). Defaults to `cap * 1.25`,
     /// clamped to be at least `cap` and `value`, giving headroom to show the
-    /// overflow band. Pass a value to override the computed default.
+    /// overflow band. Pass a value to override the computed default; an explicit
+    /// override is still clamped to be at least `cap`.
     #[prop(optional, into)]
     max: Signal<Option<f64>>,
 
@@ -139,7 +140,7 @@ pub fn CapacityBar(
             <Show when=move || overflow_band().is_some()>
                 <span
                     class=move || {
-                        merge_classes!("absolute inset-y-0 top-0 h-full", over_color.get().as_str())
+                        merge_classes!("absolute inset-y-0 top-0 h-full rounded-full", over_color.get().as_str())
                     }
                     style:left=move || {
                         format!("{}%", overflow_band().map(|(left, _)| left).unwrap_or(0.0))
