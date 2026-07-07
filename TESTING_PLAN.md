@@ -1,3 +1,10 @@
+> **SUPERSEDED (2026-07-06, ldui-49w):** The manual drive-Chrome-DevTools procedure
+> in this document is superseded by the automated PixelProof suite:
+> `tests/visual_smoke.rs` + `tests/reactivity_smoke.rs`, run end-to-end via
+> `cargo make test-visual` (committed baselines: `tests/visual/baselines/`).
+> This file is kept for its component-state checklists only — do not follow it
+> as a testing procedure.
+
 # Comprehensive Demo App Testing Plan
 ## Using Chrome DevTools MCP & Claude Chrome Extension
 

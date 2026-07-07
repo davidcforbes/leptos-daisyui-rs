@@ -435,6 +435,12 @@ This causes the close animation to target the viewport edge instead of the conta
 See [`demo/custom-components.css`](demo/custom-components.css#L376-L400) for the complete fix.
 
 
+## Testing
+
+- **Unit tests**: `cargo test --lib` (1289 tests over the component library).
+- **Visual regression**: `cargo make test-visual` runs the PixelProof smoke suites (`tests/visual_smoke.rs`, `tests/reactivity_smoke.rs`) — headless Chrome drives the demo app, screenshots are SSIM-compared against committed baselines in `tests/visual/baselines/`, and interaction state is asserted through the demo's `window.__APP_DEBUG__` oracle (enabled by `?pp-freeze=1`).
+- **Refresh baselines** after an intentional visual change: `VISUAL_TEST_MODE=capture cargo make test-visual`, then review and commit the changed PNGs.
+
 ## TODO utility
 - utility hooks
     - [ ] toggle
