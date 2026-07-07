@@ -90,6 +90,42 @@ impl DependencyType {
     }
 }
 
+/// Content fingerprint of a task, combined with its position in the list,
+/// used as the row key inside [`GanttChart`](super::component::GanttChart)'s
+/// `<For>` lists (task list rows and task bars) so a row/bar re-renders
+/// whenever any of its render-relevant fields change — not just when the
+/// task's `id` stays the same. Without this, updating a task in place (same
+/// `id`, changed progress/dates/name/type — e.g. a milestone's progress
+/// crossing 1.0, which should flip its marker from outline to filled) left
+/// `<For>` reusing the stale view.
+///
+/// `DateTime<Utc>` and `f32` don't implement `Hash`, and `HashMap` iteration
+/// order isn't stable, so this hashes fields manually rather than deriving
+/// `Hash` on `GanttTask` directly: dates via `timestamp_millis()`, `progress`
+/// via `to_bits()`, and `metadata` via its entries sorted by key.
+pub fn task_key(index: usize, task: &GanttTask) -> (usize, u64) {
+    use std::hash::{DefaultHasher, Hash, Hasher};
+
+    let mut hasher = DefaultHasher::new();
+    task.id.hash(&mut hasher);
+    task.name.hash(&mut hasher);
+    task.start.timestamp_millis().hash(&mut hasher);
+    task.end.timestamp_millis().hash(&mut hasher);
+    task.progress.to_bits().hash(&mut hasher);
+    task.task_type.hash(&mut hasher);
+    task.parent_id.hash(&mut hasher);
+    task.dependencies.hash(&mut hasher);
+    task.assignees.hash(&mut hasher);
+    task.color.hash(&mut hasher);
+    task.read_only.hash(&mut hasher);
+
+    let mut metadata_entries: Vec<(&String, &String)> = task.metadata.iter().collect();
+    metadata_entries.sort_by(|a, b| a.0.cmp(b.0));
+    metadata_entries.hash(&mut hasher);
+
+    (index, hasher.finish())
+}
+
 impl Default for GanttTask {
     fn default() -> Self {
         Self {
@@ -242,5 +278,111 @@ mod tests {
         assert_eq!(deserialized.target_id, dep.target_id);
         assert_eq!(deserialized.dependency_type, dep.dependency_type);
         assert_eq!(deserialized.lag_days, dep.lag_days);
+    }
+
+    fn sample_task() -> GanttTask {
+        GanttTask {
+            id: "task-1".to_string(),
+            name: "Test Task".to_string(),
+            start: Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap(),
+            end: Utc.with_ymd_and_hms(2024, 1, 15, 0, 0, 0).unwrap(),
+            progress: 0.5,
+            task_type: TaskType::Task,
+            parent_id: None,
+            dependencies: vec![],
+            assignees: vec![],
+            color: None,
+            read_only: false,
+            metadata: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn test_task_key_same_content_same_key() {
+        let a = sample_task();
+        let b = sample_task();
+        assert_eq!(task_key(0, &a), task_key(0, &b));
+    }
+
+    #[test]
+    fn test_task_key_changed_progress_differs() {
+        let a = sample_task();
+        let mut b = sample_task();
+        b.progress = 0.75;
+        assert_ne!(task_key(0, &a), task_key(0, &b));
+    }
+
+    #[test]
+    fn test_task_key_changed_name_differs() {
+        let a = sample_task();
+        let mut b = sample_task();
+        b.name = "Renamed Task".to_string();
+        assert_ne!(task_key(0, &a), task_key(0, &b));
+    }
+
+    #[test]
+    fn test_task_key_changed_start_date_differs() {
+        let a = sample_task();
+        let mut b = sample_task();
+        b.start = Utc.with_ymd_and_hms(2024, 1, 2, 0, 0, 0).unwrap();
+        assert_ne!(task_key(0, &a), task_key(0, &b));
+    }
+
+    #[test]
+    fn test_task_key_changed_end_date_differs() {
+        let a = sample_task();
+        let mut b = sample_task();
+        b.end = Utc.with_ymd_and_hms(2024, 1, 20, 0, 0, 0).unwrap();
+        assert_ne!(task_key(0, &a), task_key(0, &b));
+    }
+
+    #[test]
+    fn test_task_key_changed_task_type_differs() {
+        let a = sample_task();
+        let mut b = sample_task();
+        b.task_type = TaskType::Milestone;
+        assert_ne!(task_key(0, &a), task_key(0, &b));
+    }
+
+    #[test]
+    fn test_task_key_changed_read_only_differs() {
+        let a = sample_task();
+        let mut b = sample_task();
+        b.read_only = true;
+        assert_ne!(task_key(0, &a), task_key(0, &b));
+    }
+
+    #[test]
+    fn test_task_key_changed_color_differs() {
+        let a = sample_task();
+        let mut b = sample_task();
+        b.color = Some("#ff0000".to_string());
+        assert_ne!(task_key(0, &a), task_key(0, &b));
+    }
+
+    #[test]
+    fn test_task_key_different_id_differs() {
+        let a = sample_task();
+        let mut b = sample_task();
+        b.id = "task-2".to_string();
+        assert_ne!(task_key(0, &a), task_key(0, &b));
+    }
+
+    #[test]
+    fn test_task_key_different_index_differs() {
+        let a = sample_task();
+        assert_ne!(task_key(0, &a), task_key(1, &a));
+    }
+
+    #[test]
+    fn test_task_key_milestone_progress_crossing_done_differs() {
+        // Milestone crossing progress >= 1.0 (outline -> filled) must change
+        // the key even though id/name/dates/task_type are unchanged.
+        let mut a = sample_task();
+        a.task_type = TaskType::Milestone;
+        a.progress = 0.99;
+        let mut b = a.clone();
+        b.progress = 1.0;
+        assert_ne!(task_key(0, &a), task_key(0, &b));
     }
 }

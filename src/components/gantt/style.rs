@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Type of task in the Gantt chart
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum TaskType {
     /// Regular task with start and end dates
     #[default]

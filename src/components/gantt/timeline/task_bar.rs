@@ -200,12 +200,19 @@ pub fn TaskBar(
 }
 
 /// Calculate the X position (in px) of a date relative to the timeline start.
+///
+/// `days_from_start` is negative for a date before `timeline_start` (e.g. a
+/// task/milestone scheduled prior to the visible timeline). It's saturated to
+/// 0 before the `u32` cast so such dates clamp to the timeline's left edge
+/// instead of wrapping to a huge offset (a negative `i64` cast to `u32`
+/// reinterprets the two's-complement bits, e.g. `-5i64 as u32 ==
+/// 4294967291`).
 fn timeline_x_position(
     date: DateTime<Utc>,
     timeline_start: DateTime<Utc>,
     column_width: u32,
 ) -> u32 {
-    let days_from_start = (date - timeline_start).num_days();
+    let days_from_start = (date - timeline_start).num_days().max(0);
     (days_from_start as u32) * column_width
 }
 
@@ -218,7 +225,7 @@ fn calculate_bar_position(
     let x_position = timeline_x_position(task.start, timeline_start, column_width);
 
     // Calculate task duration in days
-    let duration_days = (task.end - task.start).num_days();
+    let duration_days = (task.end - task.start).num_days().max(0);
     let width = (duration_days as u32) * column_width;
 
     (x_position, width.max(column_width / 2)) // Minimum width for visibility
@@ -390,6 +397,59 @@ mod tests {
         let (left, _top_inset, size) = calculate_milestone_marker(&task, timeline_start, 60, 30);
 
         // center_x = 0, so left is clamped to 0 rather than underflowing
+        assert_eq!(left, 0);
+        assert_eq!(size, 21);
+    }
+
+    #[test]
+    fn test_timeline_x_position_before_timeline_start_saturates_to_zero() {
+        let timeline_start = chrono::Utc.with_ymd_and_hms(2024, 1, 10, 0, 0, 0).unwrap();
+        // 5 days before timeline start: negative days_from_start must not
+        // wrap around via the `as u32` cast.
+        let date = chrono::Utc.with_ymd_and_hms(2024, 1, 5, 0, 0, 0).unwrap();
+
+        assert_eq!(timeline_x_position(date, timeline_start, 60), 0);
+    }
+
+    #[test]
+    fn test_calculate_bar_position_task_before_timeline_start_saturates() {
+        let timeline_start = chrono::Utc.with_ymd_and_hms(2024, 1, 10, 0, 0, 0).unwrap();
+
+        let task = GanttTask {
+            id: "task1".to_string(),
+            name: "Pre-timeline Task".to_string(),
+            // Both start and end are before the timeline start: without
+            // saturation, `(days_from_start as u32)` wraps to a huge value
+            // (e.g. -5 as u32 == 4294967291) rather than clamping to 0.
+            start: chrono::Utc.with_ymd_and_hms(2024, 1, 5, 0, 0, 0).unwrap(),
+            end: chrono::Utc.with_ymd_and_hms(2024, 1, 8, 0, 0, 0).unwrap(),
+            progress: 0.0,
+            ..Default::default()
+        };
+
+        let (x, width) = calculate_bar_position(&task, timeline_start, 60);
+
+        assert_eq!(x, 0);
+        // Duration is still 3 days, unaffected by the start-date saturation.
+        assert_eq!(width, 3 * 60);
+    }
+
+    #[test]
+    fn test_calculate_milestone_marker_before_timeline_start_saturates() {
+        let timeline_start = chrono::Utc.with_ymd_and_hms(2024, 1, 10, 0, 0, 0).unwrap();
+        let task = GanttTask {
+            id: "m-early".to_string(),
+            name: "Early Milestone".to_string(),
+            start: chrono::Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap(),
+            end: chrono::Utc.with_ymd_and_hms(2024, 1, 1, 0, 0, 0).unwrap(),
+            task_type: crate::components::gantt::TaskType::Milestone,
+            ..Default::default()
+        };
+
+        let (left, _top_inset, size) = calculate_milestone_marker(&task, timeline_start, 60, 30);
+
+        // center_x saturates to 0, so left clamps to 0 as well (not a huge
+        // wrapped value).
         assert_eq!(left, 0);
         assert_eq!(size, 21);
     }

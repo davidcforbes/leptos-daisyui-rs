@@ -5,6 +5,7 @@ use web_sys::WheelEvent;
 
 use crate::components::gantt::{
     EditContext, EditType, GanttTask, GanttTaskHeight, ReadOnlyMode, ViewMode,
+    task_key,
     timeline::{TaskBar, TimelineGrid, TimelineScale},
     utils::{AccessibleAnnouncement, LiveRegion, task_aria_label, zoom_aria_label},
 };
@@ -348,6 +349,13 @@ pub fn GanttChart(
         }
     };
 
+    // Computed as a plain closure (rather than inline inside the `view!`
+    // macro) so the `::<Vec<_>>` turbofish's `<`/`>` tokens don't confuse the
+    // macro's RSX-style tag parser. Pairs each task with its index so the
+    // `<For>` lists below can key on (index, content-hash) via `task_key`
+    // rather than `id` alone.
+    let indexed_tasks = move || -> Vec<(usize, GanttTask)> { tasks.get().into_iter().enumerate().collect() };
+
     view! {
         <div
             node_ref=container_ref
@@ -384,9 +392,9 @@ pub fn GanttChart(
                         style="height: calc(100vh - 200px)"
                     >
                         <For
-                            each=move || tasks.get()
-                            key=|task| task.id.clone()
-                            children=move |task| {
+                            each=indexed_tasks
+                            key=|(i, task)| task_key(*i, task)
+                            children=move |(_i, task)| {
                                 let task_id = task.id.clone();
                                 let task_id_for_select = task_id.clone();
                                 let task_id_for_check = task_id.clone();
@@ -536,17 +544,12 @@ pub fn GanttChart(
                             // Task bars overlaid on grid
                             <div class="absolute left-0 top-0">
                                 <For
-                                    each=move || tasks.get()
-                                    key=|task| task.id.clone()
-                                    children=move |task| {
+                                    each=indexed_tasks
+                                    key=|(i, task)| task_key(*i, task)
+                                    children=move |(task_idx, task)| {
                                         let task_id = task.id.clone();
                                         let task_id_for_check = task_id.clone();
                                         let task_signal = Signal::derive(move || task.clone());
-                                        let tasks_list = tasks.get();
-                                        let task_idx = tasks_list
-                                            .iter()
-                                            .position(|t| t.id == task_id)
-                                            .unwrap_or(0);
                                         let y_pos = Signal::derive(move || {
                                             (task_idx as u32) * task_height.get().row_height_px()
                                         });
