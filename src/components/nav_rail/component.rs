@@ -61,6 +61,13 @@ use leptos::{
 /// @source inline("absolute left-0 top-1/2 h-6 w-1 -translate-y-1/2 rounded-r-full bg-primary bg-transparent");
 /// ```
 ///
+/// ## Bottom-Pinning with NavRailGroup
+/// When a [`NavRailGroup`] has `pinned=true`, it is pushed to the bottom of
+/// the rail via `mt-auto`. For the group to reach the rail's bottom edge, the
+/// rail's parent container must have a definite height (e.g., `h-screen` or a
+/// fixed-height flex parent). Without such a constraint, the pinned group will
+/// not extend downward as expected.
+///
 /// ## Node References
 /// - `node_ref` - References the root `<nav>` element ([HTMLElement](https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement))
 #[component]
@@ -106,7 +113,9 @@ pub fn NavRail(
 /// - `node_ref` - References the group `<div>` element ([HTMLDivElement](https://developer.mozilla.org/en-US/docs/Web/API/HTMLDivElement))
 #[component]
 pub fn NavRailGroup(
-    /// Pin this group to the bottom of the rail (`mt-auto`).
+    /// Pin this group to the bottom of the rail (`mt-auto`). Requires the
+    /// rail's parent container to have a definite height (e.g., `h-screen` or
+    /// a fixed-height flex parent) for the group to reach the container bottom.
     #[prop(optional, into)]
     pinned: Signal<bool>,
 
@@ -148,7 +157,9 @@ pub fn NavRailItem(
     #[prop(optional, into)]
     active: Signal<bool>,
 
-    /// Accessible label, also used for the `aria-label` attribute.
+    /// Accessible label, also used for the `aria-label` attribute. Icon-only
+    /// items (with no label text) have no accessible name for screen-reader
+    /// users and should always provide a label.
     #[prop(optional, into)]
     label: Signal<String>,
 
@@ -195,6 +206,7 @@ pub fn NavRailItem(
 
     view! {
         <button
+            type="button"
             node_ref=node_ref
             class=move || merge_classes!(item_class(is_active()), class)
             aria-label=move || {
