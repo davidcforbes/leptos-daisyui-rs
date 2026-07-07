@@ -126,6 +126,8 @@
 @source inline("select select-ghost select-neutral select-primary select-secondary select-accent select-info select-success select-warning select-error select-xs select-sm select-md select-lg select-xl");
 /* Skeleton */
 @source inline("skeleton");
+/* Sparkline */
+@source inline("card card-border text-base-content text-primary text-secondary text-accent text-success text-info text-warning text-error");
 /* Stack */
 @source inline("stack stack-top stack-bottom stack-start stack-end");
 /* Stat */
