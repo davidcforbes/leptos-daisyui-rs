@@ -1,7 +1,9 @@
 use crate::core::{ContentLayout, Section};
 use leptos::prelude::*;
 use leptos_daisyui_rs::components::*;
-use leptos_daisyui_rs::motion::{use_spring, use_spring_with_params};
+use leptos_daisyui_rs::motion::{
+    use_animated, use_spring, use_spring_with_params, Easing,
+};
 
 #[component]
 pub fn MotionDemo() -> impl IntoView {
@@ -237,7 +239,90 @@ pub fn MotionDemo() -> impl IntoView {
                 </p>
                 <SpringFollowerDemo />
             </Section>
+
+            <Section title="12. Animated counter + color transition (Transition<T>)">
+                <p class="text-sm opacity-70 mb-3">
+                    <code>"leptos_daisyui_rs::motion::use_animated"</code>
+                    " is the fixed-duration counterpart to " <code>"use_spring"</code>
+                    " \u{2014} it eases toward a target over an exact duration instead
+                     of carrying velocity, and works for any type implementing "
+                    <code>"Lerp"</code> " (here, " <code>"f64"</code>
+                    " for the count-up and " <code>"[f32; 4]"</code> " RGBA for the swatch)."
+                </p>
+                <AnimatedCounterDemo />
+            </Section>
         </ContentLayout>
+    }
+}
+
+/// A count-up number driven by [`use_animated::<f64>`] alongside a color
+/// swatch driven by [`use_animated::<[f32; 4]>`] \u{2014} both retarget
+/// mid-flight without snapping, demonstrating `Transition<T>`'s eased,
+/// fixed-duration interpolation for arbitrary `Lerp` value types.
+#[component]
+fn AnimatedCounterDemo() -> impl IntoView {
+    let counter = use_animated(0.0_f64, 600.0, Easing::Decelerate);
+    let swatch = use_animated([0.20, 0.40, 0.90, 1.0_f32], 500.0, Easing::Standard);
+
+    let rgba = move || {
+        let [r, g, b, a] = swatch.value.get();
+        format!(
+            "rgba({}, {}, {}, {})",
+            (r * 255.0).round() as u8,
+            (g * 255.0).round() as u8,
+            (b * 255.0).round() as u8,
+            a
+        )
+    };
+
+    view! {
+        <div class="flex flex-col gap-6">
+            <div>
+                <p class="text-xs opacity-60 mb-1">
+                    "Count-up: " <code>"f64"</code>
+                    " eased with " <code>"Easing::Decelerate"</code> " over 600ms"
+                </p>
+                <div class="flex flex-wrap gap-3 items-center">
+                    <span class="text-3xl font-mono tabular-nums">
+                        {move || format!("{:.0}", counter.value.get())}
+                    </span>
+                    <Button on:click={
+                        let counter = counter.clone();
+                        move |_| counter.set_target(100.0)
+                    }>"Count to 100"</Button>
+                    <Button on:click={
+                        let counter = counter.clone();
+                        move |_| counter.set_target(0.0)
+                    }>"Reset to 0"</Button>
+                    <Button on:click=move |_| counter.set_target(42.0)>
+                        "Retarget to 42 mid-flight"
+                    </Button>
+                </div>
+            </div>
+            <div>
+                <p class="text-xs opacity-60 mb-1">
+                    "Color swatch: " <code>"[f32; 4]"</code>
+                    " RGBA eased with " <code>"Easing::Standard"</code> " over 500ms"
+                </p>
+                <div class="flex flex-wrap gap-3 items-center">
+                    <div
+                        class="size-16 rounded-lg border border-base-300"
+                        style:background-color=rgba
+                    ></div>
+                    <Button on:click={
+                        let swatch = swatch.clone();
+                        move |_| swatch.set_target([0.90, 0.20, 0.30, 1.0])
+                    }>"Red"</Button>
+                    <Button on:click={
+                        let swatch = swatch.clone();
+                        move |_| swatch.set_target([0.20, 0.80, 0.40, 1.0])
+                    }>"Green"</Button>
+                    <Button on:click=move |_| swatch.set_target([0.20, 0.40, 0.90, 1.0])>
+                        "Blue"
+                    </Button>
+                </div>
+            </div>
+        </div>
     }
 }
 
