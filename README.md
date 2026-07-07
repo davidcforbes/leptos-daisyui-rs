@@ -9,6 +9,32 @@ This crate is a daisyUI 5 components library for Leptos, providing type-safe, re
 > The design and usage are still evolving, and breaking changes can be expected.
 > Feedback is welcome!
 
+## Internal fork (not published)
+
+This repository is an **internal fork** of
+[`noshishiRust/leptos-daisyui-rs`](https://github.com/noshishiRust/leptos-daisyui-rs).
+It is `publish = false` and is **not** released to crates.io. It is consumed
+purely as a **path dependency** by sibling repositories in the same portfolio
+(e.g. EUC and the Rust-DeskApp component work), which check the fork out next to
+the projects that depend on it.
+
+Why it is not on crates.io:
+
+- The crate name `leptos-daisyui-rs` (currently `0.0.3`) is **owned upstream**,
+  so we cannot publish under the same name.
+- The fork pulls in **five sibling path dependencies** that have no crates.io
+  release of their own — `table-rs`, `ui-tokens`, `ai-chat-core`,
+  `editmark-mermaid`, and `editmark-core` — so `cargo publish` (which requires
+  every dependency to carry a version requirement) cannot succeed and there is
+  no docs.rs story to maintain.
+
+Consumers depend on it via a path, not `cargo add`:
+
+```toml
+[dependencies]
+leptos-daisyui-rs = { path = "../leptos-daisyui-rs" }
+```
+
 ## Features
 
 - ✅ **62/62 daisyUI components** (100% coverage)
@@ -25,10 +51,12 @@ This crate is a daisyUI 5 components library for Leptos, providing type-safe, re
 
 ### Install
 
-Include this crate in your dependencies.
+This is an internal, unpublished fork (see [Internal fork (not published)](#internal-fork-not-published)),
+so add it as a path dependency to a sibling checkout rather than via `cargo add`:
 
-```sh
-cargo add leptos-daisyui-rs
+```toml
+[dependencies]
+leptos-daisyui-rs = { path = "../leptos-daisyui-rs" }
 ```
 
 ### Code

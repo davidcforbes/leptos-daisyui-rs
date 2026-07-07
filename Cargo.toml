@@ -7,6 +7,11 @@ license = "MIT"
 authors = ["noshishiRust <nopenoshishi@gmail.com>"]
 readme = "README.md"
 repository = "https://github.com/noshishiRust/leptos-daisyui-rs"
+# Internal path-dep-only fork — NOT published to crates.io. See README "Internal
+# fork (not published)" and CLAUDE.md. The crate name is owned upstream on
+# crates.io and we consume five sibling path deps that have no crates.io release,
+# so `cargo publish` cannot succeed and is not a goal.
+publish = false
 
 [dependencies]
 leptos = { version = "0.8" }

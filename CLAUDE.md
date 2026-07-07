@@ -197,6 +197,17 @@ When adding or modifying components:
 - **daisyUI Version**: Targets daisyUI 5
 - **Tailwind CSS**: Version 4 compatibility
 
+### Publishing: internal path-dep fork only (`publish = false`)
+
+This is an **internal fork** of `noshishiRust/leptos-daisyui-rs` and is **not**
+published to crates.io (`publish = false` in `Cargo.toml`). It is consumed as a
+**path dependency** by sibling repos in the portfolio (EUC, Rust-DeskApp). Two
+reasons it cannot be published: the crate name `leptos-daisyui-rs` is owned
+upstream, and it depends on five sibling path crates with no crates.io release
+(`table-rs`, `ui-tokens`, `ai-chat-core`, `editmark-mermaid`, `editmark-core`),
+which makes `cargo publish` impossible. Do not attempt to add version pins or a
+docs.rs setup — the decision is to keep this a path-dep-only internal library.
+
 ### Development Dependencies
 
 **table-rs (Temporary Fork)**: This project currently uses a local fork of table-rs with security and stability fixes.
