@@ -79,6 +79,18 @@ command = "trunk"
 args = ["clean"]
 
 # ============================================================================
+# Visual / Reactivity Testing (PixelProof — ldui-49w)
+# ============================================================================
+
+[tasks.test-visual]
+description = """Run the PixelProof visual + reactivity smoke suites end-to-end:
+npm install (idempotent), trunk serve in background, wait for port 3010,
+run the #[ignore]d tests, kill the server. Baselines: tests/visual/baselines.
+Refresh baselines with VISUAL_TEST_MODE=capture."""
+command = "pwsh"
+args = ["-NoProfile", "-File", "scripts/test-visual.ps1"]
+
+# ============================================================================
 # Combined Workflows
 # ============================================================================
 

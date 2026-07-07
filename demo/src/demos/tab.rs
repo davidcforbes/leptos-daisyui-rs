@@ -8,6 +8,13 @@ pub fn TabDemo() -> impl IntoView {
     let (bordered_tab, set_bordered_tab) = signal(0);
     let (boxed_tab, set_boxed_tab) = signal(0);
 
+    // PixelProof oracle (ldui-49w.1): expose the Basic Tabs selection at
+    // window.__APP_DEBUG__.state().state["tab.active"]. No-op in normal mode.
+    let select_tab = move |idx: i32| {
+        set_active_tab.set(idx);
+        crate::debug_state::set("tab.active", idx);
+    };
+
     view! {
         <ContentLayout
             title="Tab"
@@ -17,19 +24,19 @@ pub fn TabDemo() -> impl IntoView {
                 <Tabs variant=TabVariant::Lift>
                     <Tab
                         active=Signal::derive(move || active_tab.get() == 0)
-                        on:click=move |_| set_active_tab.set(0)
+                        on:click=move |_| select_tab(0)
                     >
                         "Tab 1"
                     </Tab>
                     <Tab
                         active=Signal::derive(move || active_tab.get() == 1)
-                        on:click=move |_| set_active_tab.set(1)
+                        on:click=move |_| select_tab(1)
                     >
                         "Tab 2"
                     </Tab>
                     <Tab
                         active=Signal::derive(move || active_tab.get() == 2)
-                        on:click=move |_| set_active_tab.set(2)
+                        on:click=move |_| select_tab(2)
                     >
                         "Tab 3"
                     </Tab>

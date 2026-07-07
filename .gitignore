@@ -1,6 +1,10 @@
 /target
 .vercel
 
+# PixelProof ephemeral outputs (committed baselines live in tests/visual/baselines)
+.review/visual-renders/
+.review/visual-diffs/
+
 # Dolt database files (added by bd init)
 .dolt/
 *.db

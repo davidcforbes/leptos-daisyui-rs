@@ -144,6 +144,13 @@ pub fn DataTable(
     /// render `row[col.id]` as text. Out-of-bounds indices fall back to text.
     #[prop(optional)]
     cell_renderers: Vec<CellRenderer>,
+
+    /// Optional callback fired after a sortable header click changes the sort
+    /// state. Receives the new `(column_id, order)` pair. Useful for syncing
+    /// external state or exposing the (otherwise internal) sort state to a
+    /// test oracle/debug bridge.
+    #[prop(optional)]
+    on_sort_change: Option<Callback<(&'static str, SortOrder)>>,
 ) -> impl IntoView {
     // Default page size to 10 if not set
     let page_size = Signal::derive(move || {
@@ -294,13 +301,19 @@ pub fn DataTable(
 
     // Sort callback
     let on_sort = Callback::new(move |col_id: &'static str| {
-        if sort_column.get() == Some(col_id) {
+        let new_order = if sort_column.get() == Some(col_id) {
             // Same column: toggle order
-            set_sort_order.set(sort_order.get().toggle());
+            let toggled = sort_order.get().toggle();
+            set_sort_order.set(toggled);
+            toggled
         } else {
             // New column: set to Asc
             set_sort_column.set(Some(col_id));
             set_sort_order.set(SortOrder::Asc);
+            SortOrder::Asc
+        };
+        if let Some(cb) = on_sort_change {
+            cb.run((col_id, new_order));
         }
     });
 

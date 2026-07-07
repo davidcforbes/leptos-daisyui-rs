@@ -69,3 +69,10 @@ chrono = { version = "0.4", features = ["serde", "wasmbind"] }
 petgraph = "0.8"
 editmark-mermaid = { path = "../editmark/editmark-mermaid" }
 editmark-core = { path = "../editmark/editmark-core" }
+
+[dev-dependencies]
+# Visual + reactivity smoke suites (tests/visual_smoke.rs, tests/reactivity_smoke.rs).
+# Drives headless Chrome against the running demo app (trunk serve, port 3010).
+# C:/dev sibling checkout — same convention as the other path deps above.
+pixelproof-web = { path = "../PixelProof/crates/pixelproof-web" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }

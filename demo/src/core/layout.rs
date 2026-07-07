@@ -33,9 +33,21 @@ pub fn Layout() -> impl IntoView {
     let (current_time, set_current_time) = signal(String::new());
     let (memory_usage, set_memory_usage) = signal(String::new());
 
+    // PixelProof determinism (ldui-49w.1): under ?pp-freeze=1 the status bar
+    // must not tick — a live clock changes every capture and the
+    // performance.memory readout varies per run. Show fixed placeholders.
+    let frozen = crate::test_mode::is_test_mode();
+    if frozen {
+        set_current_time.set("00:00:00".to_string());
+        set_memory_usage.set("frozen".to_string());
+    }
+
     // Update time and memory every second
     let _ = use_interval_fn(
         move || {
+            if frozen {
+                return;
+            }
             // Update time
             let date = js_sys::Date::new_0();
             let time_str = format!(

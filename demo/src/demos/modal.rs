@@ -16,18 +16,33 @@ pub fn ModalDemo() -> impl IntoView {
 
             <Section title="Basic Modal">
 
-                <Button color=ButtonColor::Primary on:click=move |_| set_modal_1_open.set(true)>
+                <Button
+                    color=ButtonColor::Primary
+                    on:click=move |_| {
+                        set_modal_1_open.set(true);
+                        // PixelProof oracle (ldui-49w.1): expose open state at
+                        // window.__APP_DEBUG__.state().state["modal.open"].
+                        crate::debug_state::set("modal.open", true);
+                    }
+                >
                     "Open Modal"
                 </Button>
 
-                <Modal open=modal_1_open on:close=move |_| set_modal_1_open.set(false)>
+                <Modal
+                    open=modal_1_open
+                    on:close=move |_| {
+                        set_modal_1_open.set(false);
+                        crate::debug_state::set("modal.open", false);
+                    }
+                >
                     <ModalBox>
                         <h3 class="text-lg font-bold">"Hello!"</h3>
                         <p class="py-4">"Press ESC key or click the button below to close"</p>
                         <ModalAction>
                             <form method="dialog">
                                 <Button on:click=move |_| {
-                                    set_modal_1_open.set(false)
+                                    set_modal_1_open.set(false);
+                                    crate::debug_state::set("modal.open", false);
                                 }>
 
                                     "Close"

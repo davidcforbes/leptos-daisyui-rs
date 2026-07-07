@@ -80,6 +80,14 @@ pub fn DataTableDemo() -> impl IntoView {
                     data=small_data
                     columns=standard_columns
                     page_size=3
+                    // PixelProof oracle (ldui-49w.1): surface the internal sort
+                    // state at window.__APP_DEBUG__.state().state["datatable.sort"].
+                    on_sort_change=Callback::new(|(col, order): (&'static str, SortOrder)| {
+                        crate::debug_state::set(
+                            "datatable.sort",
+                            serde_json::json!({ "column": col, "order": order.as_aria_str() }),
+                        );
+                    })
                 />
             </Section>
 
