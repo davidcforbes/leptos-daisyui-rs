@@ -432,6 +432,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     value: "alert",
                 },
                 ComponentItem {
+                    name: "Empty State",
+                    href: "/components/empty_state",
+                    value: "empty_state",
+                },
+                ComponentItem {
                     name: "Loading",
                     href: "/components/loading",
                     value: "loading",

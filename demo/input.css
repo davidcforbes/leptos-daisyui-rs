@@ -43,6 +43,8 @@
 @source inline("drawer drawer-toggle drawer-content drawer-side drawer-overlay drawer-end drawer-open");
 /* Dropdown */
 @source inline("dropdown dropdown-content dropdown-start dropdown-center dropdown-end dropdown-top dropdown-bottom dropdown-left dropdown-right dropdown-hover dropdown-open");
+/* Empty State */
+@source inline("text-neutral text-primary text-secondary text-accent text-info text-success text-warning text-error opacity-60");
 /* Fieldset */
 @source inline("fieldset label fieldset-legend");
 /* File-Input */
