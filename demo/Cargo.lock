@@ -1234,6 +1234,7 @@ dependencies = [
  "leptos",
  "leptos_router",
  "petgraph",
+ "send_wrapper",
  "serde",
  "serde_json",
  "table-rs",

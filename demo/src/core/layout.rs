@@ -236,6 +236,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     href: "/components/theme_controller",
                     value: "theme_controller",
                 },
+                ComponentItem {
+                    name: "Toolbar",
+                    href: "/components/toolbar",
+                    value: "toolbar",
+                },
             ],
         },
         MenuCategory {

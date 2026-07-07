@@ -1490,6 +1490,7 @@ dependencies = [
  "leptos_router",
  "petgraph",
  "pixelproof-web",
+ "send_wrapper",
  "serde",
  "serde_json",
  "table-rs",
