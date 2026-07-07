@@ -36,6 +36,41 @@ accumulating silently, we review upstream on a fixed cadence rather than ad hoc.
   layout, then port the fork's 212 commits onto it (or selectively cherry-pick
   upstream bugfixes onto the current single-crate layout).
 
+### Decision (2026-07-07, ldui-rqg): **Option B — stay flat, cherry-pick selectively**
+
+We will **not** adopt upstream's workspace restructure. This fork is now
+`publish = false` internal (ldui-8wo), so there's no crates.io release train to
+stay structurally mergeable with; the restructure's one-time cost buys us little.
+Going forward we keep the flat single-crate layout and cherry-pick only specific
+upstream **bugfixes** onto it, skipping upstream's structural/feature churn.
+
+**What we deliberately SKIP** (not bugfixes, or tied to the restructure we declined):
+- the `leptos-daisyui-cli` generator + `demo-macros` crate + workspace move
+  (all the `feat: … CLI …` / `refactor: macros` / `feat: … workspace …` commits);
+- upstream's own `CLAUDE.md` / Claude-docs / skill / demo-docs commits;
+- dependency bumps (`leptos 0.8.15`, `cargo upgrade`) — the fork pins its own;
+- CI/deploy (GitHub Actions, Vercel) — irrelevant to an internal path-dep crate;
+- the three markdown-parser fixes (`e97cc70`, `84aa72d`, `b4105bf`) — they live in
+  upstream's new `demo-macros/` crate, which is a **different architecture** from
+  this fork's `src/markdown/`; porting them would mean translating across that
+  divergence into files under active local development. Re-evaluate if/when the
+  fork's markdown module is stable and a concrete parser bug is observed.
+
+**Cherry-picked this cycle (2026-07-07):**
+- `e5b15c7` **Fix SSR missing generated classes** → applied as `9375508`
+  (`git cherry-pick -x`). Real SSR correctness bug: `ClassAttributes::to_html`
+  discarded its computed classes (`fn to_html(self, _class: &mut String) { self.to_class(); }`)
+  so server-rendered markup was missing every generated daisyUI class. Fix writes
+  them into the buffer (`*class = self.to_class()`). Verified present-and-buggy in
+  the fork before applying; 1289 lib tests pass, clippy clean.
+- `861d970` (doc-typo fix) — **skipped, already fixed** independently in the fork
+  (empty cherry-pick).
+- `607c187` (`create_element` fallback) — **skipped**: Leptos-version-coupled
+  change to a dead "should never execute" fallback path; low value, version risk.
+
+**Go-forward cadence unchanged:** monthly review; cherry-pick genuine flat-layout
+bugfixes with `git cherry-pick -x` (records provenance); log each cycle here.
+
 ---
 
 ## Issues That Should Be Contributed Back
