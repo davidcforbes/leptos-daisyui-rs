@@ -70,12 +70,13 @@ pub fn TagPicker(
                         .into_iter()
                         .enumerate()
                         .map(|(index, tag)| {
+                            let tag_label = tag.clone();
                             view! {
                                 <div class="badge badge-primary gap-2">
                                     <span>{tag}</span>
                                     <button
                                         class="btn btn-xs btn-circle btn-ghost"
-                                        aria-label="Remove tag"
+                                        aria-label=move || format!("Remove {}", tag_label)
                                         disabled=disabled
                                         on:click=move |_| remove_tag(index)
                                     >

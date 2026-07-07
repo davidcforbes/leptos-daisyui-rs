@@ -87,8 +87,17 @@ pub fn AutoComplete(
                 role="combobox"
                 aria-haspopup="listbox"
                 aria-autocomplete="list"
-                aria-expanded=move || if show_suggestions.get() { "true" } else { "false" }
-                aria-controls=move || show_suggestions.get().then(|| controls_id.clone())
+                aria-expanded=move || {
+                    if show_suggestions.get() && !filtered_suggestions.get().is_empty() {
+                        "true"
+                    } else {
+                        "false"
+                    }
+                }
+                aria-controls=move || {
+                    (show_suggestions.get() && !filtered_suggestions.get().is_empty())
+                        .then(|| controls_id.clone())
+                }
                 placeholder=move || placeholder.get()
                 value=move || value.get()
                 disabled=disabled

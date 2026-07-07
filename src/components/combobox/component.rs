@@ -82,8 +82,17 @@ pub fn Combobox(
                 role="combobox"
                 aria-haspopup="listbox"
                 aria-autocomplete="list"
-                aria-expanded=move || if is_open.get() { "true" } else { "false" }
-                aria-controls=move || is_open.get().then(|| controls_id.clone())
+                aria-expanded=move || {
+                    if is_open.get() && !filtered_options.get().is_empty() {
+                        "true"
+                    } else {
+                        "false"
+                    }
+                }
+                aria-controls=move || {
+                    (is_open.get() && !filtered_options.get().is_empty())
+                        .then(|| controls_id.clone())
+                }
                 placeholder=move || {
                     let v = value.get();
                     if v.is_empty() { placeholder.get() } else { v }
