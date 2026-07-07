@@ -4,9 +4,11 @@
 
 mod component;
 mod style;
+mod types;
 
 pub use component::*;
 pub use style::*;
+pub use types::*;
 
 #[cfg(test)]
 mod tests;

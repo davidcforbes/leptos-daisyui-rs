@@ -8,6 +8,18 @@ pub fn MenuDemo() -> impl IntoView {
     let selected = RwSignal::new(None::<String>);
     let _manual_selected = RwSignal::new(None::<String>);
 
+    // Check items (each independently toggled).
+    let show_toolbar = RwSignal::new(true);
+    let show_sidebar = RwSignal::new(false);
+
+    // Radio group: every item's `checked` is derived from the same shared
+    // `alignment` signal, and each item's `on_toggle` writes back to it —
+    // that shared signal *is* the "group" (see MenuRadioItem's docs).
+    let alignment = RwSignal::new("left".to_string());
+
+    // Controlled submenu open/close.
+    let submenu_open = RwSignal::new(true);
+
     view! {
         <ContentLayout
             title="Menu"
@@ -131,6 +143,121 @@ pub fn MenuDemo() -> impl IntoView {
                         </MenuItem>
                     </Menu>
                 </div>
+            </Section>
+
+            <Section title="Keyboard Navigation, Check/Radio Items, Shortcuts">
+                <p class="text-sm text-base-content/70 mb-2">
+                    "Click into the menu, then use "
+                    <kbd class="kbd kbd-xs">"↑"</kbd>
+                    "/"
+                    <kbd class="kbd kbd-xs">"↓"</kbd>
+                    ", "
+                    <kbd class="kbd kbd-xs">"Home"</kbd>
+                    "/"
+                    <kbd class="kbd kbd-xs">"End"</kbd>
+                    ", and "
+                    <kbd class="kbd kbd-xs">"Enter"</kbd>
+                    "/"
+                    <kbd class="kbd kbd-xs">"Space"</kbd>
+                    " to navigate and activate items (disabled items are skipped)."
+                </p>
+                <Menu class="bg-base-200 rounded-box w-72">
+                    <MenuTitle>"File"</MenuTitle>
+                    <MenuItem
+                        value="new"
+                        icon="file-plus"
+                        shortcut="Ctrl+N"
+                        on_click=Callback::new(|_| leptos::logging::log!("New"))
+                    >
+                        "New"
+                    </MenuItem>
+                    <MenuItem
+                        value="open"
+                        icon="folder-open"
+                        shortcut="Ctrl+O"
+                        on_click=Callback::new(|_| leptos::logging::log!("Open"))
+                    >
+                        "Open"
+                    </MenuItem>
+                    <MenuItem
+                        value="save"
+                        icon="save"
+                        shortcut="Ctrl+S"
+                        disabled=true
+                        on_click=Callback::new(|_| leptos::logging::log!("Save"))
+                    >
+                        "Save (disabled)"
+                    </MenuItem>
+
+                    <MenuDivider />
+
+                    <MenuTitle>"View"</MenuTitle>
+                    <MenuCheckItem
+                        checked=Signal::derive(move || show_toolbar.get())
+                        shortcut="Ctrl+T"
+                        on_toggle=Callback::new(move |next| show_toolbar.set(next))
+                    >
+                        "Show Toolbar"
+                    </MenuCheckItem>
+                    <MenuCheckItem
+                        checked=Signal::derive(move || show_sidebar.get())
+                        on_toggle=Callback::new(move |next| show_sidebar.set(next))
+                    >
+                        "Show Sidebar"
+                    </MenuCheckItem>
+
+                    <MenuDivider />
+
+                    <MenuTitle>"Alignment"</MenuTitle>
+                    <MenuRadioItem
+                        checked=Signal::derive(move || alignment.get() == "left")
+                        on_toggle=Callback::new(move |_| alignment.set("left".to_string()))
+                    >
+                        "Left"
+                    </MenuRadioItem>
+                    <MenuRadioItem
+                        checked=Signal::derive(move || alignment.get() == "center")
+                        on_toggle=Callback::new(move |_| alignment.set("center".to_string()))
+                    >
+                        "Center"
+                    </MenuRadioItem>
+                    <MenuRadioItem
+                        checked=Signal::derive(move || alignment.get() == "right")
+                        on_toggle=Callback::new(move |_| alignment.set("right".to_string()))
+                    >
+                        "Right"
+                    </MenuRadioItem>
+                </Menu>
+                <p class="text-sm text-base-content/70 mt-2">
+                    "Toolbar: " {move || show_toolbar.get().to_string()} ", Sidebar: "
+                    {move || show_sidebar.get().to_string()} ", Alignment: "
+                    {move || alignment.get()}
+                </p>
+            </Section>
+
+            <Section title="Submenu: Programmatic Open/Close">
+                <div class="flex items-center gap-2 mb-2">
+                    <button
+                        class="btn btn-sm"
+                        on:click=move |_| submenu_open.update(|o| *o = !*o)
+                    >
+                        {move || if submenu_open.get() { "Close Submenu" } else { "Open Submenu" }}
+                    </button>
+                </div>
+                <Menu class="bg-base-200 rounded-box w-56">
+                    <MenuItem value="more">
+                        <Icon icon=icondata::AiFolderOutlined />
+                        "More"
+                        <SubMenu open=Signal::derive(move || submenu_open.get()) class="p-2">
+                            <MenuItem value="sub-a" is_submenu=true>
+                                "Sub A"
+                            </MenuItem>
+                            <MenuItem value="sub-b" is_submenu=true>
+                                "Sub B"
+                            </MenuItem>
+                        </SubMenu>
+                    </MenuItem>
+                </Menu>
             </Section>
 
             <Section title="Menu as Sidebar">
