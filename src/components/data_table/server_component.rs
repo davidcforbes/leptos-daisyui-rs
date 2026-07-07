@@ -1,11 +1,12 @@
 use crate::components::data_table::body::DataTableBody;
 use crate::components::data_table::header::DataTableHeader;
 use crate::components::data_table::types::{
-    CellRenderer, Column, DataTableClasses, DataTableTexts, SortOrder, TableRow,
+    CellRenderer, Column, DataTableClasses, DataTableTexts, SortOrder, TableRow, TypedCellFn,
 };
 use crate::components::table::{Table, TableSize};
 use crate::merge_classes;
 use leptos::{html::Div, prelude::*};
+use std::collections::HashMap;
 use web_sys::wasm_bindgen::JsCast;
 
 /// # ServerDataTable Component
@@ -58,6 +59,12 @@ use web_sys::wasm_bindgen::JsCast;
 /// ```css
 /// @source inline("table table-zebra table-pin-rows table-pin-cols table-xs table-sm table-md table-lg");
 /// @source inline("btn btn-sm btn-ghost btn-active animate-pulse join join-item");
+/// // Column-resize divider (header.rs)
+/// @source inline("relative absolute top-0 right-0 z-10 h-full w-1.5 cursor-col-resize select-none");
+/// @source inline("opacity-0 hover:opacity-100 hover:bg-primary/50 active:opacity-100 active:bg-primary/70");
+/// // Typed cells (Column::with_typed_cell -> TypedCell::Badge / TypedCell::Icon)
+/// @source inline("badge badge-neutral badge-primary badge-secondary badge-accent badge-info badge-success badge-warning badge-error");
+/// @source inline("inline-block w-4 h-4 w-5 h-5 w-6 h-6 w-8 h-8 w-12 h-12");
 /// ```
 ///
 /// ## Node References
@@ -138,7 +145,23 @@ pub fn ServerDataTable(
     /// render `row[col.id]` as text. Out-of-bounds indices fall back to text.
     #[prop(optional)]
     cell_renderers: Vec<CellRenderer>,
+
+    /// Per-cell typed-cell resolvers indexed by `Column::typed_cell_index`,
+    /// for lightweight `Badge`/`Icon` rendering without a full custom
+    /// `CellRenderer`. Additive alongside `cell_renderers` -- a column's
+    /// `renderer_index` (when set) always takes precedence.
+    #[prop(optional)]
+    typed_cells: Vec<TypedCellFn>,
+
+    /// Optional per-row extra CSS classes (e.g. a background tint) computed
+    /// from the row's absolute index and data. Merged with `classes.row`.
+    #[prop(optional)]
+    row_class_fn: Option<Callback<(usize, TableRow), String>>,
 ) -> impl IntoView {
+    // Column-width overrides from dragging a header divider, keyed by
+    // column id. Shared between the header (writer) and body (reader) so
+    // resized columns stay aligned.
+    let column_widths = RwSignal::new(HashMap::<&'static str, f64>::new());
     let container_class = merge_classes!(classes.container, class);
     let texts_for_body = texts.clone();
     let search_placeholder = texts.search_placeholder;
@@ -245,6 +268,7 @@ pub fn ServerDataTable(
                         sort_order=Signal::derive(SortOrder::default)
                         on_sort=noop_sort
                         header_cell_class=classes.header_cell
+                        column_widths=column_widths
                     />
                     <DataTableBody
                         columns=columns
@@ -258,6 +282,9 @@ pub fn ServerDataTable(
                         loading_row_class=classes.loading_row
                         empty_row_class=classes.empty_row
                         cell_renderers=cell_renderers
+                        column_widths=Signal::derive(move || column_widths.get())
+                        typed_cells=typed_cells
+                        row_class_fn=row_class_fn
                     />
                 </Table>
             </div>

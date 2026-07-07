@@ -66,6 +66,91 @@ pub fn DataTableDemo() -> impl IntoView {
         Column::new("role", "Role"),
     ]);
 
+    // Column resize + typed cells (Badge/Icon) + row background + clipboard export
+    let feature_data = RwSignal::new(generate_users(12));
+    let feature_columns = RwSignal::new(vec![
+        Column::new("id", "ID").with_min_width(60),
+        Column::new("name", "Name").with_min_width(120),
+        Column::new("email", "Email").with_min_width(180),
+        Column::new("role", "Role").with_min_width(110).with_typed_cell(0),
+        Column::new("status", "Status").with_min_width(100).with_typed_cell(1),
+        Column::new_non_sortable("actions", "Actions")
+            .with_min_width(90)
+            .non_resizable()
+            .with_renderer(0),
+    ]);
+
+    // Typed cell: render "Role" as a Lucide icon instead of plain text.
+    let role_typed_cell: TypedCellFn =
+        Callback::new(|(_idx, row): (usize, HashMap<&'static str, String>)| {
+            let role = row.get("role").cloned().unwrap_or_default();
+            let icon_name = match role.as_str() {
+                "Admin" => "shield",
+                "Developer" => "code",
+                "Designer" => "palette",
+                "Manager" => "briefcase",
+                _ => "user",
+            };
+            TypedCell::Icon {
+                name: icon_name.to_string(),
+                color: "text-primary".to_string(),
+            }
+        });
+
+    // Typed cell: render "Status" as a colored Badge instead of plain text.
+    let status_typed_cell: TypedCellFn =
+        Callback::new(|(_idx, row): (usize, HashMap<&'static str, String>)| {
+            let status = row.get("status").cloned().unwrap_or_default();
+            let color = if status == "Active" {
+                BadgeColor::Success
+            } else {
+                BadgeColor::Neutral
+            };
+            TypedCell::Badge {
+                text: status,
+                color,
+            }
+        });
+
+    // Row background hook: tint inactive rows.
+    let feature_row_class_fn =
+        Callback::new(|(_idx, row): (usize, HashMap<&'static str, String>)| {
+            if row.get("status").map(String::as_str) == Some("Inactive") {
+                "bg-base-200/60".to_string()
+            } else {
+                String::new()
+            }
+        });
+
+    // Clipboard export: "Copy" button per row, using the crate's pure
+    // `row_with_headers_text` helper and the same wasm-gated
+    // `navigator().clipboard().write_text(...)` pattern as `AiChat`'s
+    // message-copy button.
+    let copy_row_renderer: CellRenderer =
+        Callback::new(move |(_abs_idx, row): (usize, HashMap<&'static str, String>)| {
+            let columns_for_copy = feature_columns.get_untracked();
+            let row_for_copy = row.clone();
+            view! {
+                <button
+                    type="button"
+                    class="btn btn-ghost btn-xs"
+                    title="Copy row (tab-separated, with headers)"
+                    on:click=move |_| {
+                        let _text = row_with_headers_text(&row_for_copy, &columns_for_copy);
+                        #[cfg(target_arch = "wasm32")]
+                        {
+                            if let Some(window) = web_sys::window() {
+                                let _ = window.navigator().clipboard().write_text(&_text);
+                            }
+                        }
+                    }
+                >
+                    "Copy"
+                </button>
+            }
+            .into_any()
+        });
+
     view! {
         <ContentLayout
             title="DataTable"
@@ -442,6 +527,29 @@ pub fn DataTableDemo() -> impl IntoView {
                     page_size=8
                     selected_rows=selected_rows
                     selection_anchor=selection_anchor
+                />
+            </Section>
+
+            // Column resize, typed cells (Badge/Icon), row background, clipboard export
+            <Section title="Resizable Columns, Typed Cells, Row Styling, Clipboard Export">
+                <p class="text-sm opacity-70 mb-2">
+                    "Drag a header's right edge to resize its column (all columns "
+                    "are resizable by default). \"Role\" renders an "
+                    <code>"Icon"</code>
+                    " typed cell, \"Status\" renders a "
+                    <code>"Badge"</code>
+                    " typed cell, inactive rows get a subtle background via "
+                    <code>"row_class_fn"</code>
+                    ", and \"Actions\" copies the row (tab-separated, with headers) "
+                    "to the clipboard."
+                </p>
+                <DataTable
+                    data=feature_data
+                    columns=feature_columns
+                    page_size=8
+                    typed_cells=vec![role_typed_cell, status_typed_cell]
+                    row_class_fn=feature_row_class_fn
+                    cell_renderers=vec![copy_row_renderer]
                 />
             </Section>
         </ContentLayout>

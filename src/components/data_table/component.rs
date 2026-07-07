@@ -3,12 +3,12 @@ use crate::components::data_table::controls::DataTableControls;
 use crate::components::data_table::header::DataTableHeader;
 use crate::components::data_table::selection::handle_row_click;
 use crate::components::data_table::types::{
-    CellRenderer, Column, DataTableClasses, DataTableTexts, SortOrder, TableRow,
+    CellRenderer, Column, DataTableClasses, DataTableTexts, SortOrder, TableRow, TypedCellFn,
 };
 use crate::components::table::{Table, TableSize};
 use crate::merge_classes;
 use leptos::{html::Div, prelude::*};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use web_sys::wasm_bindgen::JsCast;
 
 /// # DataTable Component
@@ -59,6 +59,12 @@ use web_sys::wasm_bindgen::JsCast;
 /// ```css
 /// @source inline("table table-zebra table-pin-rows table-pin-cols table-xs table-sm table-md table-lg");
 /// @source inline("btn btn-sm animate-pulse");
+/// // Column-resize divider (header.rs)
+/// @source inline("relative absolute top-0 right-0 z-10 h-full w-1.5 cursor-col-resize select-none");
+/// @source inline("opacity-0 hover:opacity-100 hover:bg-primary/50 active:opacity-100 active:bg-primary/70");
+/// // Typed cells (Column::with_typed_cell -> TypedCell::Badge / TypedCell::Icon)
+/// @source inline("badge badge-neutral badge-primary badge-secondary badge-accent badge-info badge-success badge-warning badge-error");
+/// @source inline("inline-block w-4 h-4 w-5 h-5 w-6 h-6 w-8 h-8 w-12 h-12");
 /// ```
 ///
 /// ## Node References
@@ -151,7 +157,24 @@ pub fn DataTable(
     /// test oracle/debug bridge.
     #[prop(optional)]
     on_sort_change: Option<Callback<(&'static str, SortOrder)>>,
+
+    /// Per-cell typed-cell resolvers indexed by `Column::typed_cell_index`,
+    /// for lightweight `Badge`/`Icon` rendering without a full custom
+    /// `CellRenderer`. Additive alongside `cell_renderers` -- a column's
+    /// `renderer_index` (when set) always takes precedence.
+    #[prop(optional)]
+    typed_cells: Vec<TypedCellFn>,
+
+    /// Optional per-row extra CSS classes (e.g. a background tint) computed
+    /// from the row's absolute index and data. Merged with `classes.row` /
+    /// `classes.selected_row`.
+    #[prop(optional)]
+    row_class_fn: Option<Callback<(usize, TableRow), String>>,
 ) -> impl IntoView {
+    // Column-width overrides from dragging a header divider, keyed by
+    // column id. Shared between the header (writer) and body (reader) so
+    // resized columns stay aligned.
+    let column_widths = RwSignal::new(HashMap::<&'static str, f64>::new());
     // Default page size to 10 if not set
     let page_size = Signal::derive(move || {
         let size = page_size.get();
@@ -401,6 +424,7 @@ pub fn DataTable(
                         sort_order=Signal::derive(move || sort_order.get())
                         on_sort=on_sort
                         header_cell_class=classes.header_cell
+                        column_widths=column_widths
                     />
                     <DataTableBody
                         columns=columns
@@ -415,6 +439,9 @@ pub fn DataTable(
                         empty_row_class=classes.empty_row
                         on_row_click=on_row_click
                         cell_renderers=cell_renderers
+                        column_widths=Signal::derive(move || column_widths.get())
+                        typed_cells=typed_cells
+                        row_class_fn=row_class_fn
                     />
                 </Table>
             </div>

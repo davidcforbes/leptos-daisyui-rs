@@ -27,6 +27,8 @@ web-sys = { version = "0.3", features = [
     "HtmlHeadElement",
     "Node",
     "CssStyleDeclaration",
+    "Navigator",
+    "Clipboard",
 ] }
 
 console_log = "1.0.0"

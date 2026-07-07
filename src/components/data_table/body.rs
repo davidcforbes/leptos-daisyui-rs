@@ -1,7 +1,11 @@
-use crate::components::data_table::types::{CellRenderer, Column, DataTableTexts, TableRow};
+use crate::components::badge::Badge;
+use crate::components::data_table::types::{
+    CellRenderer, Column, DataTableTexts, TableRow, TypedCell, TypedCellFn,
+};
+use crate::components::icon::Icon;
 use crate::merge_classes;
 use leptos::prelude::*;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 /// DataTable body component with loading and empty states
 #[component]
@@ -54,6 +58,29 @@ pub fn DataTableBody(
     /// `row[col.id]` as plain text. Out-of-bounds indices fall back to text.
     #[prop(optional)]
     cell_renderers: Vec<CellRenderer>,
+
+    /// Column-width overrides (set by dragging a header divider in
+    /// `DataTableHeader`), keyed by column id. Applied to each `<td>` so
+    /// cell widths stay in sync with the header regardless of the table's
+    /// layout algorithm.
+    #[prop(optional, into)]
+    column_widths: Signal<HashMap<&'static str, f64>>,
+
+    /// Per-column typed-cell resolvers indexed by `Column::typed_cell_index`,
+    /// for lightweight `Badge`/`Icon` rendering without a full custom
+    /// `CellRenderer`. Checked only when `renderer_index` is `None` or out
+    /// of bounds -- `cell_renderers`/`renderer_index` always takes
+    /// precedence when both are set on a column.
+    #[prop(optional)]
+    typed_cells: Vec<TypedCellFn>,
+
+    /// Optional per-row extra CSS classes computed from the row's absolute
+    /// index and data (e.g. a background tint). Merged after `row_class` /
+    /// `selected_row_class`. `optional_no_strip` (rather than plain
+    /// `optional`) because the caller (`DataTable`/`ServerDataTable`)
+    /// forwards its own already-`Option`-wrapped prop straight through.
+    #[prop(optional_no_strip)]
+    row_class_fn: Option<Callback<(usize, TableRow), String>>,
 ) -> impl IntoView {
     view! {
         <tbody>
@@ -83,17 +110,22 @@ pub fn DataTableBody(
                     let rows_vec = rows.get();
                     let cols = columns.get();
                     let renderers = cell_renderers.clone();
+                    let typed_cell_fns = typed_cells.clone();
 
                     rows_vec.iter().map(|(abs_idx, row)| {
                         let abs_idx = *abs_idx;
                         let click_handler = on_row_click.map(|cb| {
                             move |ev: web_sys::MouseEvent| cb.run((abs_idx, ev))
                         });
+                        let extra_row_class = row_class_fn
+                            .map(|f| f.run((abs_idx, row.clone())))
+                            .unwrap_or_default();
                         let row_class_dyn = Signal::derive(move || {
+                            let extra = extra_row_class.clone();
                             if selected_rows.with(|s| s.contains(&abs_idx)) {
-                                merge_classes!(row_class, selected_row_class).to_class()
+                                merge_classes!(row_class, selected_row_class, extra).to_class()
                             } else {
-                                merge_classes!(row_class).to_class()
+                                merge_classes!(row_class, extra).to_class()
                             }
                         });
 
@@ -110,12 +142,24 @@ pub fn DataTableBody(
                                     let cell_value = row.get(col.id).cloned().unwrap_or_default();
                                     let cell_class = merge_classes!(body_cell_class, col.class.unwrap_or(""));
 
+                                    // Column-resize width override, kept in sync with the header.
+                                    let width_style = column_widths
+                                        .with(|m| m.get(col.id).copied())
+                                        .map(|w| format!("width: {}px; ", w.round()));
+
                                     // Build truncation style if enabled
                                     let truncate_style = if col.truncate {
                                         let max_w = col.max_width.map(|w| format!("max-width: {}px; ", w)).unwrap_or_default();
                                         Some(format!("{}overflow: hidden; text-overflow: ellipsis; white-space: nowrap;", max_w))
                                     } else {
                                         None
+                                    };
+
+                                    let style_attr = match (width_style, truncate_style) {
+                                        (Some(w), Some(t)) => Some(format!("{w}{t}")),
+                                        (Some(w), None) => Some(w),
+                                        (None, Some(t)) => Some(t),
+                                        (None, None) => None,
                                     };
 
                                     // Title attribute for native tooltip when truncated
@@ -125,15 +169,27 @@ pub fn DataTableBody(
                                         None
                                     };
 
-                                    // Custom renderer if column opts in and index is in range;
-                                    // otherwise render the cell as plain text.
+                                    // Precedence: full custom renderer, then typed cell
+                                    // (Badge/Icon), then plain text. `renderer_index`
+                                    // always wins when both are set on a column.
                                     let content = match col.renderer_index.and_then(|i| renderers.get(i)) {
                                         Some(renderer) => renderer.run((abs_idx, row.clone())),
-                                        None => view! { {cell_value.clone()} }.into_any(),
+                                        None => match col.typed_cell_index.and_then(|i| typed_cell_fns.get(i)) {
+                                            Some(typed_fn) => match typed_fn.run((abs_idx, row.clone())) {
+                                                TypedCell::Text(s) => view! { {s} }.into_any(),
+                                                TypedCell::Badge { text, color } => view! {
+                                                    <Badge color=color>{text}</Badge>
+                                                }.into_any(),
+                                                TypedCell::Icon { name, color } => view! {
+                                                    <Icon name=name color=color />
+                                                }.into_any(),
+                                            },
+                                            None => view! { {cell_value.clone()} }.into_any(),
+                                        },
                                     };
 
                                     view! {
-                                        <td class=cell_class style=truncate_style title=title_attr>
+                                        <td class=cell_class style=style_attr title=title_attr>
                                             {content}
                                         </td>
                                     }

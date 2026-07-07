@@ -1,3 +1,4 @@
+use crate::components::badge::BadgeColor;
 use leptos::prelude::{AnyView, Callback};
 use std::collections::HashMap;
 
@@ -8,6 +9,53 @@ use std::collections::HashMap;
 /// setting `renderer_index = Some(i)` (typically via `Column::with_renderer(i)`).
 /// Falls back to plain text rendering when the index is `None` or out of bounds.
 pub type CellRenderer = Callback<(usize, TableRow), AnyView>;
+
+/// Lightweight built-in cell content, rendered via the crate's own `Badge`/
+/// `Icon` components without requiring a full custom [`CellRenderer`].
+///
+/// Additive alongside `cell_renderers` -- a column's `renderer_index` (when
+/// set) always takes precedence over its `typed_cell_index`, and columns
+/// using neither are unaffected (they keep rendering `row[col.id]` as plain
+/// text exactly as before).
+#[derive(Clone, Debug, PartialEq)]
+pub enum TypedCell {
+    /// Plain text, rendered identically to the default (no typed cell) path.
+    Text(String),
+    /// A `Badge` pill with the given text and daisyUI semantic color.
+    Badge {
+        /// Badge label text.
+        text: String,
+        /// daisyUI semantic color for the badge.
+        color: BadgeColor,
+    },
+    /// A Lucide `Icon` by name, with an optional color utility class (e.g. `"text-error"`).
+    Icon {
+        /// Lucide icon name (e.g. `"check"`, `"x"`, `"alert-triangle"`).
+        name: String,
+        /// Color utility class, or `""` for the default icon color.
+        color: String,
+    },
+}
+
+impl TypedCell {
+    /// Text representation for clipboard export / accessibility purposes.
+    /// `Icon` cells have no text and return `""`.
+    pub fn as_text(&self) -> &str {
+        match self {
+            TypedCell::Text(s) => s,
+            TypedCell::Badge { text, .. } => text,
+            TypedCell::Icon { .. } => "",
+        }
+    }
+}
+
+/// Per-column typed-cell resolver.
+///
+/// Invoked with `(absolute_row_index, row_data)` and returns a [`TypedCell`]
+/// describing what to render. Stored in `DataTable`'s `typed_cells` prop;
+/// columns opt in by setting `typed_cell_index = Some(i)` (typically via
+/// `Column::with_typed_cell(i)`).
+pub type TypedCellFn = Callback<(usize, TableRow), TypedCell>;
 
 /// Column definition for DataTable
 #[derive(Clone, Debug, PartialEq)]
@@ -28,6 +76,14 @@ pub struct Column {
     pub max_width: Option<u32>,
     /// Index into the cell_renderers vec (None = plain text)
     pub renderer_index: Option<usize>,
+    /// Whether this column's width can be adjusted by dragging its header
+    /// divider (default: `true`). Set to `false` via
+    /// [`Column::non_resizable`] to keep a column's width fixed.
+    pub resizable: bool,
+    /// Index into the `typed_cells` vec for lightweight built-in Badge/Icon
+    /// rendering (`None` = no typed cell). Checked only when `renderer_index`
+    /// is `None` or out of bounds -- `renderer_index` always wins.
+    pub typed_cell_index: Option<usize>,
 }
 
 impl Column {
@@ -42,6 +98,8 @@ impl Column {
             truncate: false,
             max_width: None,
             renderer_index: None,
+            resizable: true,
+            typed_cell_index: None,
         }
     }
 
@@ -56,6 +114,8 @@ impl Column {
             truncate: false,
             max_width: None,
             renderer_index: None,
+            resizable: true,
+            typed_cell_index: None,
         }
     }
 
@@ -86,6 +146,21 @@ impl Column {
     /// Set the renderer index (indexes into a separate cell_renderers vec)
     pub fn with_renderer(mut self, index: usize) -> Self {
         self.renderer_index = Some(index);
+        self
+    }
+
+    /// Disable interactive column-width resizing for this column (columns
+    /// are resizable by default).
+    pub fn non_resizable(mut self) -> Self {
+        self.resizable = false;
+        self
+    }
+
+    /// Set the typed-cell index (indexes into a separate `typed_cells` vec)
+    /// for lightweight Badge/Icon rendering without a full custom
+    /// [`CellRenderer`].
+    pub fn with_typed_cell(mut self, index: usize) -> Self {
+        self.typed_cell_index = Some(index);
         self
     }
 }
@@ -227,7 +302,14 @@ mod tests {
         assert_eq!(col.max_width, None);
         assert_eq!(col.class, None);
         assert_eq!(col.renderer_index, None);
+        assert_eq!(col.typed_cell_index, None);
         assert!(!col.truncate);
+    }
+
+    #[test]
+    fn column_new_is_resizable_by_default() {
+        let col = Column::new("x", "X");
+        assert!(col.resizable);
     }
 
     // ── Column::new_non_sortable ──
@@ -252,7 +334,14 @@ mod tests {
         assert_eq!(col.max_width, None);
         assert_eq!(col.class, None);
         assert_eq!(col.renderer_index, None);
+        assert_eq!(col.typed_cell_index, None);
         assert!(!col.truncate);
+    }
+
+    #[test]
+    fn column_new_non_sortable_is_resizable_by_default() {
+        let col = Column::new_non_sortable("x", "X");
+        assert!(col.resizable);
     }
 
     // ── Builder methods ──
@@ -288,19 +377,35 @@ mod tests {
     }
 
     #[test]
+    fn non_resizable_clears_resizable_flag() {
+        let col = Column::new("id", "ID").non_resizable();
+        assert!(!col.resizable);
+    }
+
+    #[test]
+    fn with_typed_cell_sets_typed_cell_index() {
+        let col = Column::new("status", "Status").with_typed_cell(3);
+        assert_eq!(col.typed_cell_index, Some(3));
+    }
+
+    #[test]
     fn builder_methods_chain() {
         let col = Column::new("url", "URL")
             .with_truncate()
             .with_max_width(400)
             .with_min_width(100)
             .with_class("monospace")
-            .with_renderer(0);
+            .with_renderer(0)
+            .non_resizable()
+            .with_typed_cell(5);
 
         assert!(col.truncate);
         assert_eq!(col.max_width, Some(400));
         assert_eq!(col.min_width, Some(100));
         assert_eq!(col.class, Some("monospace"));
         assert_eq!(col.renderer_index, Some(0));
+        assert!(!col.resizable);
+        assert_eq!(col.typed_cell_index, Some(5));
         // Original fields preserved
         assert_eq!(col.id, "url");
         assert_eq!(col.header, "URL");
@@ -435,6 +540,20 @@ mod tests {
     }
 
     #[test]
+    fn columns_with_different_resizable_are_not_equal() {
+        let a = Column::new("x", "X");
+        let b = Column::new("x", "X").non_resizable();
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn columns_with_different_typed_cell_index_are_not_equal() {
+        let a = Column::new("x", "X").with_typed_cell(0);
+        let b = Column::new("x", "X").with_typed_cell(1);
+        assert_ne!(a, b);
+    }
+
+    #[test]
     fn columns_clone_equals_original() {
         let original = Column::new("col", "Col")
             .with_truncate()
@@ -442,5 +561,49 @@ mod tests {
             .with_class("custom");
         let cloned = original.clone();
         assert_eq!(original, cloned);
+    }
+
+    // ── TypedCell::as_text ──
+
+    #[test]
+    fn typed_cell_text_as_text_returns_inner_string() {
+        let cell = TypedCell::Text("hello".to_string());
+        assert_eq!(cell.as_text(), "hello");
+    }
+
+    #[test]
+    fn typed_cell_badge_as_text_returns_badge_text() {
+        let cell = TypedCell::Badge {
+            text: "Active".to_string(),
+            color: BadgeColor::Success,
+        };
+        assert_eq!(cell.as_text(), "Active");
+    }
+
+    #[test]
+    fn typed_cell_icon_as_text_is_empty() {
+        let cell = TypedCell::Icon {
+            name: "check".to_string(),
+            color: "text-success".to_string(),
+        };
+        assert_eq!(cell.as_text(), "");
+    }
+
+    #[test]
+    fn typed_cell_equality() {
+        let a = TypedCell::Badge {
+            text: "Active".to_string(),
+            color: BadgeColor::Success,
+        };
+        let b = TypedCell::Badge {
+            text: "Active".to_string(),
+            color: BadgeColor::Success,
+        };
+        let c = TypedCell::Badge {
+            text: "Active".to_string(),
+            color: BadgeColor::Error,
+        };
+        assert_eq!(a, b);
+        assert_ne!(a, c);
     }
 }

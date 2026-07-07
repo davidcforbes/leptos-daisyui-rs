@@ -43,15 +43,18 @@
 //! ```
 
 mod body;
+mod clipboard;
 mod component;
 mod controls;
 mod header;
+mod resize;
 mod selection;
 mod server_component;
 
 /// Types for DataTable component including Column, SortOrder, and configuration structs
 pub mod types;
 
+pub use clipboard::{cell_text, row_text, row_with_headers_text};
 pub use component::*;
 pub use selection::handle_row_click;
 pub use server_component::*;
