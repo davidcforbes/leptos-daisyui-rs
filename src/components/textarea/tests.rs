@@ -1,4 +1,26 @@
 use super::*;
+use super::component::optional_numeric_attr;
+
+// optional_numeric_attr tests (backs the `rows` / `maxlength` attribute plumbing)
+#[test]
+fn test_optional_numeric_attr_none() {
+    assert_eq!(optional_numeric_attr(None), None);
+}
+
+#[test]
+fn test_optional_numeric_attr_some_zero() {
+    assert_eq!(optional_numeric_attr(Some(0)), Some("0".to_string()));
+}
+
+#[test]
+fn test_optional_numeric_attr_some_value() {
+    assert_eq!(optional_numeric_attr(Some(4)), Some("4".to_string()));
+}
+
+#[test]
+fn test_optional_numeric_attr_large_value() {
+    assert_eq!(optional_numeric_attr(Some(500)), Some("500".to_string()));
+}
 
 // TextareaColor tests
 #[test]

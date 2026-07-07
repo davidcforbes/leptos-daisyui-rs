@@ -1223,7 +1223,7 @@ dependencies = [
 
 [[package]]
 name = "leptos-daisyui-rs"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "ai-chat-core",
  "base64",
