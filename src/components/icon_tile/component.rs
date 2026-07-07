@@ -1,4 +1,4 @@
-use super::style::{IconTileColor, IconTileSize};
+use super::style::{IconTileColor, IconTileSize, radius_class};
 use crate::merge_classes;
 use leptos::{html::Div, prelude::*};
 
@@ -66,7 +66,7 @@ pub fn IconTile(
     /// Centered icon content (e.g. an inline SVG, emoji, or `Icon`)
     children: Children,
 ) -> impl IntoView {
-    let radius_class = move || if circle.get() { "rounded-full" } else { "rounded-lg" };
+    let radius_class_value = move || radius_class(circle.get());
 
     view! {
         <div
@@ -77,7 +77,7 @@ pub fn IconTile(
                     bg.get().as_bg_class(),
                     fg.get().as_fg_class(),
                     size.get().as_str(),
-                    radius_class,
+                    radius_class_value,
                     class
                 )
             }

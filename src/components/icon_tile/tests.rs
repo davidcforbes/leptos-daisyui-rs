@@ -1,4 +1,5 @@
 use super::*;
+use super::style::radius_class;
 
 // IconTileColor tests
 
@@ -128,13 +129,8 @@ fn test_all_icon_tile_sizes_return_valid_classes() {
     }
 }
 
-// Circle / corner-radius selection logic (mirrors the component's inline
-// `radius_class` closure -- ported from d2d-ui's
-// `with_corner_radius(size / 2.0)` circle override).
-
-fn radius_class(circle: bool) -> &'static str {
-    if circle { "rounded-full" } else { "rounded-lg" }
-}
+// Circle / corner-radius selection logic tests
+// (ported from d2d-ui's `with_corner_radius(size / 2.0)` circle override).
 
 #[test]
 fn test_radius_class_default_is_rounded_square() {
