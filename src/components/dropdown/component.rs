@@ -49,6 +49,8 @@ pub fn Dropdown(
         <div
             node_ref=node_ref
             tabindex="0"
+            aria-haspopup="menu"
+            aria-expanded=move || if open.get() { "true" } else { "false" }
             class=move || {
                 merge_classes!(
                     "dropdown",

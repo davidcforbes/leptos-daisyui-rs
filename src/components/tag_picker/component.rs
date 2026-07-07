@@ -75,6 +75,7 @@ pub fn TagPicker(
                                     <span>{tag}</span>
                                     <button
                                         class="btn btn-xs btn-circle btn-ghost"
+                                        aria-label="Remove tag"
                                         disabled=disabled
                                         on:click=move |_| remove_tag(index)
                                     >

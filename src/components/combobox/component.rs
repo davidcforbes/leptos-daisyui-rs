@@ -1,5 +1,10 @@
 use crate::merge_classes;
 use leptos::{html::Div, prelude::*};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Per-instance sequence so each combobox gets a unique listbox id for
+/// `aria-controls` / `aria-owns` wiring.
+static COMBOBOX_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// # Combobox Component
 ///
@@ -46,6 +51,14 @@ pub fn Combobox(
     let (search_text, set_search_text) = signal(String::new());
     let (is_open, set_is_open) = signal(false);
 
+    // Unique id for the popup listbox so the input can reference it via
+    // `aria-controls` (WAI-ARIA 1.2 combobox pattern).
+    let listbox_id = format!(
+        "ld-combobox-listbox-{}",
+        COMBOBOX_SEQ.fetch_add(1, Ordering::Relaxed)
+    );
+    let controls_id = listbox_id.clone();
+
     let filtered_options = Signal::derive(move || {
         let search = search_text.get().to_lowercase();
         if search.is_empty() {
@@ -66,6 +79,11 @@ pub fn Combobox(
         >
             <input
                 type="text"
+                role="combobox"
+                aria-haspopup="listbox"
+                aria-autocomplete="list"
+                aria-expanded=move || if is_open.get() { "true" } else { "false" }
+                aria-controls=move || is_open.get().then(|| controls_id.clone())
                 placeholder=move || {
                     let v = value.get();
                     if v.is_empty() { placeholder.get() } else { v }
@@ -97,6 +115,8 @@ pub fn Combobox(
                 if is_open.get() && !filtered_options.get().is_empty() {
                     view! {
                         <ul
+                            id=listbox_id.clone()
+                            role="listbox"
                             tabindex="0"
                             class="dropdown-content menu bg-base-200 rounded-box z-[1] w-full p-2 shadow max-h-60 overflow-auto"
                         >
@@ -106,7 +126,7 @@ pub fn Combobox(
                                 .map(|option| {
                                     let option_clone = option.clone();
                                     view! {
-                                        <li>
+                                        <li role="option">
                                             <a
                                                 on:click=move |_| {
                                                     if let Some(ref callback) = on_select {

@@ -1,5 +1,10 @@
 use crate::merge_classes;
 use leptos::{html::Div, prelude::*};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Per-instance sequence so each autocomplete gets a unique listbox id for
+/// `aria-controls` wiring.
+static AUTOCOMPLETE_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// # AutoComplete Component
 ///
@@ -49,6 +54,14 @@ pub fn AutoComplete(
 ) -> impl IntoView {
     let (show_suggestions, set_show_suggestions) = signal(false);
 
+    // Unique id for the popup listbox so the input can reference it via
+    // `aria-controls` (WAI-ARIA 1.2 combobox pattern).
+    let listbox_id = format!(
+        "ld-autocomplete-listbox-{}",
+        AUTOCOMPLETE_SEQ.fetch_add(1, Ordering::Relaxed)
+    );
+    let controls_id = listbox_id.clone();
+
     // Filter suggestions based on current value
     let filtered_suggestions = Signal::derive(move || {
         let val = value.get().to_lowercase();
@@ -71,6 +84,11 @@ pub fn AutoComplete(
         >
             <input
                 type="text"
+                role="combobox"
+                aria-haspopup="listbox"
+                aria-autocomplete="list"
+                aria-expanded=move || if show_suggestions.get() { "true" } else { "false" }
+                aria-controls=move || show_suggestions.get().then(|| controls_id.clone())
                 placeholder=move || placeholder.get()
                 value=move || value.get()
                 disabled=disabled
@@ -102,6 +120,8 @@ pub fn AutoComplete(
                 if show_suggestions.get() && !filtered_suggestions.get().is_empty() {
                     view! {
                         <ul
+                            id=listbox_id.clone()
+                            role="listbox"
                             tabindex="0"
                             class="dropdown-content menu bg-base-200 rounded-box z-[1] w-full p-2 shadow max-h-60 overflow-auto"
                         >
@@ -111,7 +131,7 @@ pub fn AutoComplete(
                                 .map(|suggestion| {
                                     let suggestion_clone = suggestion.clone();
                                     view! {
-                                        <li>
+                                        <li role="option">
                                             <a
                                                 on:click=move |_| {
                                                     if let Some(ref callback) = on_select {
