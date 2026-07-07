@@ -46,21 +46,55 @@ fn only_user_and_assistant_render_markdown() {
 
 #[test]
 fn enter_without_shift_sends() {
-    assert_eq!(composer_key_action("Enter", false), ComposerAction::Send);
+    assert_eq!(
+        composer_key_action("Enter", false, false),
+        ComposerAction::Send
+    );
 }
 
 #[test]
 fn shift_enter_inserts_newline() {
-    assert_eq!(composer_key_action("Enter", true), ComposerAction::Newline);
+    assert_eq!(
+        composer_key_action("Enter", true, false),
+        ComposerAction::Newline
+    );
 }
 
 #[test]
 fn other_keys_are_ignored() {
-    assert_eq!(composer_key_action("a", false), ComposerAction::Ignore);
-    assert_eq!(composer_key_action("a", true), ComposerAction::Ignore);
-    assert_eq!(composer_key_action("Escape", false), ComposerAction::Ignore);
+    assert_eq!(composer_key_action("a", false, false), ComposerAction::Ignore);
+    assert_eq!(composer_key_action("a", true, false), ComposerAction::Ignore);
+    assert_eq!(
+        composer_key_action("Escape", false, false),
+        ComposerAction::Ignore
+    );
     // A bare Shift press must not send.
-    assert_eq!(composer_key_action("Shift", true), ComposerAction::Ignore);
+    assert_eq!(
+        composer_key_action("Shift", true, false),
+        ComposerAction::Ignore
+    );
+}
+
+// --- IME composition: Enter that commits a composition must never send ---
+
+#[test]
+fn enter_while_composing_is_ignored() {
+    // CJK/Korean IME: the Enter that commits the composed text fires a
+    // "Enter" keydown too. It must not be treated as "send".
+    assert_eq!(
+        composer_key_action("Enter", false, true),
+        ComposerAction::Ignore
+    );
+}
+
+#[test]
+fn shift_enter_while_composing_is_ignored() {
+    // Match standard chat behavior: while composing, Enter combinations are
+    // swallowed rather than inserting a newline.
+    assert_eq!(
+        composer_key_action("Enter", true, true),
+        ComposerAction::Ignore
+    );
 }
 
 // --- Auto-stick-to-bottom scroll decision ---
@@ -75,6 +109,12 @@ fn sticks_when_at_bottom() {
 fn sticks_within_threshold() {
     // distance = 1000 - 870 - 100 = 30, threshold 40 -> stick.
     assert!(should_stick_to_bottom(870.0, 1000.0, 100.0, 40.0));
+}
+
+#[test]
+fn sticks_exactly_at_threshold() {
+    // distance = 1000 - 860 - 100 = 40 == threshold -> inclusive, still sticks.
+    assert!(should_stick_to_bottom(860.0, 1000.0, 100.0, 40.0));
 }
 
 #[test]

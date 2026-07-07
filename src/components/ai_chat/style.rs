@@ -46,7 +46,15 @@ pub enum ComposerAction {
 
 /// Decide what a keydown means in the `<textarea>` composer: Enter (no Shift)
 /// sends, Shift+Enter inserts a newline, everything else is ordinary input.
-pub fn composer_key_action(key: &str, shift: bool) -> ComposerAction {
+///
+/// `is_composing` is `true` while an IME composition is in progress (CJK/Korean
+/// input methods, etc.). The Enter that commits a composition must never be
+/// treated as "send" — it's `KeyboardEvent.isComposing` in the browser, which
+/// callers should forward via `ev.is_composing()`.
+pub fn composer_key_action(key: &str, shift: bool, is_composing: bool) -> ComposerAction {
+    if is_composing {
+        return ComposerAction::Ignore;
+    }
     match key {
         "Enter" if !shift => ComposerAction::Send,
         "Enter" => ComposerAction::Newline,

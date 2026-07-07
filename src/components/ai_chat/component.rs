@@ -51,9 +51,9 @@ const STICK_THRESHOLD_PX: f64 = 40.0;
 /// Every literal class this component can render (add to your `input.css`):
 /// ```css
 /// @source inline("chat chat-start chat-end chat-header chat-bubble chat-bubble-primary chat-bubble-info chat-bubble-neutral chat-bubble-ghost");
-/// @source inline("flex flex-col flex-1 flex-wrap items-center justify-between gap-1 gap-2 h-full min-h-0 w-full overflow-y-auto p-2 p-3 p-4 space-y-3");
-/// @source inline("border-t border-b border-base-300 text-xs text-sm font-semibold opacity-50 opacity-60 whitespace-pre-wrap resize-none");
-/// @source inline("btn btn-primary btn-error btn-ghost btn-sm btn-xs btn-circle input input-bordered textarea textarea-bordered loading loading-dots loading-sm");
+/// @source inline("flex flex-col flex-1 flex-wrap items-center justify-between gap-2 h-full min-h-0 w-full overflow-y-auto p-2 p-3 p-4 space-y-3");
+/// @source inline("border-t border-b border-base-300 text-xs text-sm opacity-50 opacity-60 whitespace-pre-wrap resize-none");
+/// @source inline("btn btn-primary btn-error btn-ghost btn-sm btn-xs textarea textarea-bordered loading loading-dots loading-sm");
 /// ```
 #[component]
 pub fn AiChat(
@@ -65,7 +65,8 @@ pub fn AiChat(
     /// Placeholder for the input box.
     #[prop(optional, into)]
     placeholder: Signal<String>,
-    /// Optional header subtitle (token/context usage, corpus name, …). Empty hides it.
+    /// Optional header subtitle (token/context usage, corpus name, …). The
+    /// header span always renders; an empty string just renders as blank space.
     #[prop(optional, into)]
     subtitle: Signal<String>,
     /// Welcome/prompt chips shown on an empty transcript; clicking one sends it.
@@ -260,7 +261,7 @@ pub fn AiChat(
                     prop:value=move || input.get()
                     on:input=move |e| input.set(event_target_value(&e))
                     on:keydown=move |e| {
-                        match composer_key_action(&e.key(), e.shift_key()) {
+                        match composer_key_action(&e.key(), e.shift_key(), e.is_composing()) {
                             ComposerAction::Send => {
                                 e.prevent_default();
                                 submit();
