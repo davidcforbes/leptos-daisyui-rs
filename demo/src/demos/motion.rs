@@ -1,6 +1,7 @@
 use crate::core::{ContentLayout, Section};
 use leptos::prelude::*;
 use leptos_daisyui_rs::components::*;
+use leptos_daisyui_rs::motion::{use_spring, use_spring_with_params};
 
 #[component]
 pub fn MotionDemo() -> impl IntoView {
@@ -225,6 +226,74 @@ pub fn MotionDemo() -> impl IntoView {
                      on this page should go static \u{2014} state changes happen instantly with no easing."
                 </p>
             </Section>
+
+            <Section title="11. Spring follower (imperative physics)">
+                <p class="text-sm opacity-70 mb-3">
+                    "Everything above is a fixed-duration CSS transition or keyframe. "
+                    <code>"leptos_daisyui_rs::motion::use_spring"</code>
+                    " is different \u{2014} it carries velocity, so it has no fixed duration at all. "
+                    "Click a target below and watch the loose-tuned dot fly past it before settling back \u{2014}
+                     an overshoot a duration-based ease can't produce without being told when to happen."
+                </p>
+                <SpringFollowerDemo />
+            </Section>
         </ContentLayout>
+    }
+}
+
+/// A dot chasing a click target via [`use_spring`], alongside a
+/// loosely-damped sibling that visibly overshoots before settling \u{2014}
+/// demonstrating the difference from a duration-based CSS ease.
+#[component]
+fn SpringFollowerDemo() -> impl IntoView {
+    // Default snappy tuning (stiffness 220, damping 26) \u{2014} matches
+    // `Spring::new`: quick, no visible bounce.
+    let snappy = use_spring(0.0);
+    // Loose tuning: low damping relative to stiffness produces a clear
+    // overshoot before the spring settles onto the target.
+    let bouncy = use_spring_with_params(0.0, 90.0, 6.0);
+
+    let go_to = {
+        let snappy = snappy.clone();
+        let bouncy = bouncy.clone();
+        move |target: f32| {
+            snappy.set_target(target);
+            bouncy.set_target(target);
+        }
+    };
+    let go_left = { let go_to = go_to.clone(); move |_| go_to(0.0) };
+    let go_middle = { let go_to = go_to.clone(); move |_| go_to(0.5) };
+    let go_right = move |_| go_to(1.0);
+
+    view! {
+        <div class="flex flex-wrap gap-3 mb-4">
+            <Button on:click=go_left>"Target: left"</Button>
+            <Button on:click=go_middle>"Target: middle"</Button>
+            <Button on:click=go_right>"Target: right"</Button>
+        </div>
+        <div class="flex flex-col gap-6">
+            <div>
+                <p class="text-xs opacity-60 mb-1">
+                    "Default tuning (stiffness 220, damping 26) \u{2014} quick, no visible bounce"
+                </p>
+                <div class="relative h-8 bg-base-200 rounded-full">
+                    <div
+                        class="absolute top-1/2 size-6 rounded-full bg-primary -translate-y-1/2 -translate-x-1/2"
+                        style:left=move || format!("{}%", snappy.value.get() * 100.0)
+                    ></div>
+                </div>
+            </div>
+            <div>
+                <p class="text-xs opacity-60 mb-1">
+                    "Loose tuning (stiffness 90, damping 6) \u{2014} overshoots, then settles"
+                </p>
+                <div class="relative h-8 bg-base-200 rounded-full">
+                    <div
+                        class="absolute top-1/2 size-6 rounded-full bg-secondary -translate-y-1/2 -translate-x-1/2"
+                        style:left=move || format!("{}%", bouncy.value.get() * 100.0)
+                    ></div>
+                </div>
+            </div>
+        </div>
     }
 }

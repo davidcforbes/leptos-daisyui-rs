@@ -4,6 +4,7 @@
 pub mod charts;
 pub mod components;
 pub mod markdown;
+pub mod motion;
 pub mod theme;
 pub mod tokens;
 pub mod utils;
