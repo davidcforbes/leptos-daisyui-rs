@@ -342,6 +342,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     value: "list",
                 },
                 ComponentItem {
+                    name: "Metric Row",
+                    href: "/components/metric_row",
+                    value: "metric_row",
+                },
+                ComponentItem {
                     name: "Persona",
                     href: "/components/persona",
                     value: "persona",

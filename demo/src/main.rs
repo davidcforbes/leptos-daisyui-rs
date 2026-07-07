@@ -134,6 +134,7 @@ fn AppInner() -> impl IntoView {
                     <Route path=path!("/loading") view=LoadingDemo />
                     <Route path=path!("/mask") view=MaskDemo />
                     <Route path=path!("/menu") view=MenuDemo />
+                    <Route path=path!("/metric_row") view=MetricRowDemo />
                     <Route path=path!("/mockup_browser") view=MockupBrowserDemo />
                     <Route path=path!("/mockup_code") view=MockupCodeDemo />
                     <Route path=path!("/mockup_phone") view=MockupPhoneDemo />
