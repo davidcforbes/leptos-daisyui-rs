@@ -71,3 +71,17 @@ pub fn first_enabled_index(disabled: &[bool]) -> Option<usize> {
 pub fn last_enabled_index(disabled: &[bool]) -> Option<usize> {
     disabled.iter().rposition(|&d| !d)
 }
+
+/// Whether an `is_submenu` container [`MenuItem`](super::MenuItem) has its
+/// own click semantics — a non-empty `value` (participates in selection
+/// tracking) or an `on_click` callback — as opposed to being a purely
+/// structural wrapper (e.g. a `MenuTitle` + nested `SubMenu`, the demo
+/// sidebar's category-item pattern in `demo/src/core/layout.rs`). Pure so
+/// it's unit-testable without a DOM; see `MenuItem`'s `is_submenu` branch in
+/// `component.rs` for how it gates the click handler and `cursor-pointer`
+/// styling (ldui-jcs.21 review: unconditionally attaching those to every
+/// `is_submenu` container let clicks on nested, individually-clickable
+/// `SubMenu` items bubble up and spuriously re-activate the container).
+pub fn submenu_container_is_interactive(has_value: bool, has_on_click: bool) -> bool {
+    has_value || has_on_click
+}

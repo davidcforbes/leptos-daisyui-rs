@@ -106,6 +106,30 @@ fn last_enabled_index_skips_trailing_disabled() {
     assert_eq!(last_enabled_index(&[false, false, true, true]), Some(1));
 }
 
+// ── submenu_container_is_interactive (ldui-jcs.21 review) ──────────────────
+
+#[test]
+fn submenu_container_is_interactive_false_when_no_value_or_on_click() {
+    // The demo's sidebar category pattern: `MenuItem is_submenu=true` wrapping
+    // a `MenuTitle` + nested `SubMenu`, with no `value`/`on_click` of its own.
+    assert!(!submenu_container_is_interactive(false, false));
+}
+
+#[test]
+fn submenu_container_is_interactive_true_with_value() {
+    assert!(submenu_container_is_interactive(true, false));
+}
+
+#[test]
+fn submenu_container_is_interactive_true_with_on_click() {
+    assert!(submenu_container_is_interactive(false, true));
+}
+
+#[test]
+fn submenu_container_is_interactive_true_with_both() {
+    assert!(submenu_container_is_interactive(true, true));
+}
+
 // MenuDirection tests
 #[test]
 fn test_menu_direction_default() {

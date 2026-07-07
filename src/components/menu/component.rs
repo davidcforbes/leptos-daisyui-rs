@@ -1,5 +1,7 @@
 use super::style::{MenuDirection, MenuSize};
-use super::types::{first_enabled_index, last_enabled_index, next_enabled_index};
+use super::types::{
+    first_enabled_index, last_enabled_index, next_enabled_index, submenu_container_is_interactive,
+};
 use crate::components::icon::{Icon, IconSize};
 use crate::components::kbd::{Kbd, KbdSize};
 use crate::merge_classes;
@@ -193,6 +195,13 @@ pub fn MenuItem(
         // Fire action callback + selection tracking.
         activate();
 
+        // Action-based items (`on_click` set) never navigate, regardless of
+        // `href` — restores pre-ldui-jcs.21 behavior where `on_click` being
+        // `Some` unconditionally prevented default navigation.
+        if on_click.is_some() {
+            e.prevent_default();
+        }
+
         // Prevent default navigation if href is empty or not a real URL
         let href_value = href.get_untracked();
         if href_value.is_empty() || href_value == "#" || href_value.starts_with("javascript:") {
@@ -220,6 +229,14 @@ pub fn MenuItem(
     // children as-is — imposing a single-line flex row on those would break
     // their layout. Only opting into `icon`/`shortcut` opts into the row.
     let has_decoration = !icon.get_untracked().is_empty() || !shortcut.get_untracked().is_empty();
+
+    // Whether an `is_submenu` container has its own click semantics (a
+    // `value` or `on_click`), decided once at creation like `is_submenu`/
+    // `has_decoration` above. See `submenu_container_is_interactive`'s docs
+    // (ldui-jcs.21 review) for why purely structural containers (no `value`,
+    // no `on_click`) must not get a click handler or `cursor-pointer` class.
+    let is_submenu_interactive = is_submenu
+        && submenu_container_is_interactive(!value.get_untracked().is_empty(), on_click.is_some());
 
     view! {
         <li node_ref=node_ref role="none" class=class>
@@ -254,13 +271,11 @@ pub fn MenuItem(
                     </A>
                 }
                     .into_any()
-            } else {
-                // Note: `is_submenu` items render their children as-is (no
-                // icon/shortcut row wrapper) — this branch is also used for
-                // container items whose children are arbitrary block content
-                // (e.g. a `MenuTitle` + nested `SubMenu`, not a single-line
-                // label), so imposing a flex row here would break that
-                // layout. `icon`/`shortcut` are no-ops on `is_submenu` items.
+            } else if is_submenu_interactive {
+                // `is_submenu` container that has its own click semantics
+                // (`value` and/or `on_click` set): keep the clickable
+                // wrapper, mirroring the pre-ldui-jcs.21 behavior for such
+                // items. `icon`/`shortcut` are still no-ops here (see below).
                 view! {
                     <span
                         role="menuitem"
@@ -272,6 +287,37 @@ pub fn MenuItem(
                         class:menu-focus=move || nav.is_highlighted(index)
                         class:menu-disabled=move || disabled.get()
                         on:click=move |_| activate()
+                    >
+                        {children()}
+                    </span>
+                }
+                    .into_any()
+            } else {
+                // Note: `is_submenu` items render their children as-is (no
+                // icon/shortcut row wrapper) — this branch is also used for
+                // purely structural container items whose children are
+                // arbitrary block content (e.g. a `MenuTitle` + nested
+                // `SubMenu`, not a single-line label), so imposing a flex row
+                // here would break that layout. `icon`/`shortcut` are no-ops
+                // on `is_submenu` items.
+                //
+                // No click handler or `cursor-pointer` class here: this item
+                // has no `value`/`on_click` of its own (see
+                // `is_submenu_interactive` above), and its children include a
+                // real, individually-clickable `SubMenu` (`<a>`s) — attaching
+                // a click handler here would let those clicks bubble up and
+                // spuriously re-activate this container, plus the pointer
+                // cursor would misleadingly suggest the whole container is
+                // clickable (ldui-jcs.21 review).
+                view! {
+                    <span
+                        role="menuitem"
+                        tabindex="-1"
+                        id=menu_item_dom_id(nav.instance, index)
+                        aria-disabled=move || disabled.get().to_string()
+                        class:menu-active=is_active
+                        class:menu-focus=move || nav.is_highlighted(index)
+                        class:menu-disabled=move || disabled.get()
                     >
                         {children()}
                     </span>
