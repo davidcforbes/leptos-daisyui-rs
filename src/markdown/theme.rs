@@ -766,4 +766,41 @@ mod tests {
              call, not mint a fresh ThemeContext per caller"
         );
     }
+
+    #[test]
+    fn signals_survive_caller_owner_disposal() {
+        // The whole point of the singleton: a signal minted while some
+        // component's owner was current must NOT be disposed when that owner
+        // is dropped — otherwise the global theme observer's later writes
+        // panic on a dead signal (the original ldui-i4t crash).
+        //
+        // NOTE: `get_or_init_theme_ctx` memoizes into a process-wide
+        // thread_local, so if an earlier test in this module already
+        // initialized the singleton, the `init` closure below will not run
+        // and this test observes whichever `ThemeContext` won that race
+        // instead. That's fine for this assertion — any live singleton
+        // signal proves the property under test (it wasn't disposed when
+        // *its* originating caller owner was dropped) — so the test doesn't
+        // depend on which `init` call actually ran.
+        let ctx = {
+            let caller = Owner::new();
+            caller.with(|| {
+                get_or_init_theme_ctx(|owner| {
+                    owner.with(|| ThemeContext {
+                        scheme: RwSignal::new(
+                            all_builtin_schemes()
+                                .into_iter()
+                                .next()
+                                .expect("editmark-core ships at least one built-in scheme"),
+                        ),
+                        mode: RwSignal::new(ThemeMode::Dark),
+                    })
+                })
+            })
+            // `caller` dropped here
+        };
+        // Must not panic on a disposed signal:
+        ctx.mode.set(ThemeMode::Light);
+        assert_eq!(ctx.mode.get(), ThemeMode::Light);
+    }
 }
