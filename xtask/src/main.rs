@@ -166,8 +166,19 @@ fn main() -> ExitCode {
     match sub.as_str() {
         "verify" => run_steps(&gate_steps()),
         "fmt-check" | "clippy" | "build" | "check-demo" | "test" => run_steps(&steps_for(&sub)),
-        "verify-full" | "bump" => {
-            eprintln!("xtask: '{sub}' not implemented yet");
+        "verify-full" => {
+            // verify + the real wasm build (needs npm/trunk/tailwind installed).
+            let mut steps = gate_steps();
+            steps.push(Step {
+                name: "trunk-build",
+                program: "trunk",
+                args: args(&["build", "--release"]),
+                cwd: Some("demo"),
+            });
+            run_steps(&steps)
+        }
+        "bump" => {
+            eprintln!("xtask: 'bump' not implemented yet");
             ExitCode::from(1)
         }
         other => {
