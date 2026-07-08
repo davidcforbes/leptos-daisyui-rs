@@ -9,16 +9,21 @@ mod component;
 mod style;
 #[cfg(test)]
 mod tests;
+mod types;
 
 pub use component::AiChat;
 pub use style::{
     ComposerAction, composer_key_action, is_markdown, is_thinking, role_classes, role_label,
     should_stick_to_bottom, show_welcome_chips,
 };
+pub use types::{
+    format_allowed_tools, format_count, format_usage, parse_allowed_tools,
+    settings_from_form_fields,
+};
 
 // Re-export the shared model so consumers can build a session/transport and
 // drive the component without a direct `ai-chat-core` dependency.
 pub use ai_chat_core::{
     ChatError, ChatMessage, ChatRequest, ChatRole, ChatSession, ChatSettings, ChatTransport,
-    MessageMeta, StreamEvent,
+    MessageMeta, StreamEvent, Usage,
 };

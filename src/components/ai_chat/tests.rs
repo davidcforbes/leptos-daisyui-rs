@@ -2,7 +2,8 @@ use super::style::{
     ComposerAction, composer_key_action, is_markdown, is_thinking, role_classes, role_label,
     should_stick_to_bottom, show_welcome_chips,
 };
-use ai_chat_core::ChatRole;
+use super::types::format_usage;
+use ai_chat_core::{ChatRole, Usage};
 
 #[test]
 fn user_sits_end_agent_sits_start() {
@@ -162,4 +163,36 @@ fn chips_hidden_once_conversation_starts() {
 #[test]
 fn chips_hidden_without_configured_prompts() {
     assert!(!show_welcome_chips(0, 0));
+}
+
+// --- Usage/cost caption formatting ---
+
+#[test]
+fn format_usage_none_renders_nothing() {
+    assert_eq!(format_usage(None), None);
+}
+
+#[test]
+fn format_usage_all_zero_renders_nothing() {
+    assert_eq!(format_usage(Some(Usage::default())), None);
+}
+
+#[test]
+fn format_usage_formats_cost_and_tokens() {
+    let u = Usage {
+        cost_usd: 0.0021,
+        input_tokens: 1234,
+        output_tokens: 567,
+    };
+    assert_eq!(format_usage(Some(u)), Some("$0.0021 · 1,234 in · 567 out".to_string()));
+}
+
+#[test]
+fn format_usage_small_token_counts_have_no_commas() {
+    let u = Usage {
+        cost_usd: 0.0001,
+        input_tokens: 12,
+        output_tokens: 3,
+    };
+    assert_eq!(format_usage(Some(u)), Some("$0.0001 · 12 in · 3 out".to_string()));
 }

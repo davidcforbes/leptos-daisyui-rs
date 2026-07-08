@@ -27,6 +27,12 @@ impl ChatTransport for DemoTransport {
         for chunk in reply.split_inclusive(' ') {
             self.queue.push_back(StreamEvent::TextDelta(chunk.to_string()));
         }
+        // Scripted usage so the `show_usage` caption has something to show.
+        self.queue.push_back(StreamEvent::Usage(Usage {
+            cost_usd: 0.0006 * self.turn as f64,
+            input_tokens: 40 * self.turn as u64,
+            output_tokens: 65 * self.turn as u64,
+        }));
         self.queue.push_back(StreamEvent::Done);
         Ok(())
     }
@@ -66,12 +72,14 @@ pub fn AiChatDemo() -> impl IntoView {
                             "What changed recently?".to_string(),
                             "Draft a reply".to_string(),
                         ]
+                        show_usage=true
                     />
                 </div>
                 <p class="text-sm opacity-70 mt-2">
                     "Try the welcome chips on the empty transcript, press Enter to send \
                      (Shift+Enter for a newline), hit Stop mid-stream to cancel a turn, \
-                     copy any message, or click New session to reset."
+                     copy any message, or click New session to reset. The cost/token caption \
+                     (bottom-right of the composer) updates after each scripted reply."
                 </p>
             </Section>
         </ContentLayout>

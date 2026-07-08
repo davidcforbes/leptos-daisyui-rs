@@ -2,6 +2,7 @@ use super::style::{
     ComposerAction, composer_key_action, is_markdown, is_thinking, role_classes, role_label,
     should_stick_to_bottom, show_welcome_chips,
 };
+use super::types::format_usage;
 use crate::markdown::MarkdownView;
 use crate::merge_classes;
 use ai_chat_core::{ChatMessage, ChatRequest, ChatSession};
@@ -51,8 +52,8 @@ const STICK_THRESHOLD_PX: f64 = 40.0;
 /// Every literal class this component can render (add to your `input.css`):
 /// ```css
 /// @source inline("chat chat-start chat-end chat-header chat-bubble chat-bubble-primary chat-bubble-info chat-bubble-neutral chat-bubble-ghost");
-/// @source inline("flex flex-col flex-1 flex-wrap items-center justify-between gap-2 h-full min-h-0 w-full overflow-y-auto p-2 p-3 p-4 space-y-3");
-/// @source inline("border-t border-b border-base-300 text-xs text-sm opacity-50 opacity-60 whitespace-pre-wrap resize-none");
+/// @source inline("flex flex-col flex-1 flex-wrap items-center justify-between gap-2 h-full min-h-0 w-full overflow-y-auto p-2 p-3 p-4 px-3 pb-2 space-y-3");
+/// @source inline("border-t border-b border-base-300 text-xs text-sm opacity-50 opacity-60 text-right whitespace-pre-wrap resize-none");
 /// @source inline("btn btn-primary btn-error btn-ghost btn-sm btn-xs textarea textarea-bordered loading loading-dots loading-sm");
 /// ```
 #[component]
@@ -72,6 +73,12 @@ pub fn AiChat(
     /// Welcome/prompt chips shown on an empty transcript; clicking one sends it.
     #[prop(optional, into)]
     welcome_prompts: Signal<Vec<String>>,
+    /// Show the last turn's cost/token caption (from `ChatSession::last_usage`)
+    /// next to the composer hint. Defaults to `false` (no usage line) so
+    /// existing consumers are unchanged; renders nothing until the first
+    /// `Usage` event lands, and nothing again after a `restart`.
+    #[prop(optional, into)]
+    show_usage: Signal<bool>,
     /// Extra classes for the root element.
     #[prop(optional, into)]
     class: &'static str,
@@ -177,6 +184,16 @@ pub fn AiChat(
         session.with_value(|s| s.messages().len())
     };
     let show_chips = move || show_welcome_chips(message_count(), welcome_prompts.get().len());
+    // Last turn's cost/token caption; tracks `version` so it refreshes after
+    // each turn (a `Usage` event lands mid-poll) and clears on `restart`
+    // (which resets `last_usage` to `None`).
+    let usage_caption = move || {
+        version.track();
+        if !show_usage.get() {
+            return None;
+        }
+        format_usage(session.with_value(|s| s.last_usage()))
+    };
 
     // Auto-stick-to-bottom: after each transcript change, if the user is pinned
     // to the bottom, scroll the list all the way down.
@@ -304,6 +321,11 @@ pub fn AiChat(
                     </button>
                 </Show>
             </div>
+            <Show when=move || usage_caption().is_some()>
+                <div class="lds-aichat-usage px-3 pb-2 text-xs opacity-60 text-right">
+                    {move || usage_caption().unwrap_or_default()}
+                </div>
+            </Show>
         </div>
     }
 }
