@@ -11,7 +11,7 @@ pub fn IconDemo() -> impl IntoView {
         >
             <Section title="Icons with leptos_icons" col=true>
                 <p class="text-sm text-base-content/70">
-                    "The recommended approach uses the " <code class="bg-base-300 px-1 rounded">"leptos_icons"</code>
+                    "The recommended approach uses the " <code class="bg-base-300 text-base-content px-1 rounded">"leptos_icons"</code>
                     " crate which provides inline SVG icons from multiple icon sets."
                 </p>
                 <div class="flex gap-4 items-center">
@@ -91,8 +91,8 @@ pub fn IconDemo() -> impl IntoView {
                     <div>
                         <h4 class="font-bold">"Lucide Icon Component"</h4>
                         <p class="text-sm">
-                            "This library also includes an " <code class="bg-base-300 px-1 rounded">"Icon"</code>
-                            " component that renders Lucide icons via " <code class="bg-base-300 px-1 rounded">"data-lucide"</code>
+                            "This library also includes an " <code class="bg-base-300 text-base-content px-1 rounded">"Icon"</code>
+                            " component that renders Lucide icons via " <code class="bg-base-300 text-base-content px-1 rounded">"data-lucide"</code>
                             " attributes. This requires adding the Lucide JS library to your project."
                         </p>
                     </div>
