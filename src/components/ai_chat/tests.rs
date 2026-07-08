@@ -1,6 +1,7 @@
 use super::style::{
-    ComposerAction, clamp_composer_height, composer_key_action, is_markdown, is_thinking,
-    role_classes, role_label, should_stick_to_bottom, show_welcome_chips,
+    ComposerAction, clamp_composer_height, composer_hint, composer_key_action, is_markdown,
+    is_thinking, role_avatar_bg, role_classes, role_label, should_stick_to_bottom,
+    show_welcome_chips,
 };
 use super::types::{
     format_allowed_tools, format_usage, parse_allowed_tools, settings_from_form_fields,
@@ -290,4 +291,39 @@ fn settings_from_form_fields_trims_and_populates() {
     );
     assert!(s.show_thinking);
     assert!(s.show_tool_calls);
+}
+
+// --- Composer hint caption ---
+
+#[test]
+fn composer_hint_idle_shows_keybindings() {
+    assert_eq!(composer_hint(false), "Enter to send · Shift+Enter for newline");
+}
+
+#[test]
+fn composer_hint_busy_shows_generating() {
+    assert_eq!(composer_hint(true), "Generating… · Esc to stop");
+}
+
+// --- Per-role avatar background color ---
+
+#[test]
+fn avatar_bg_distinguishes_user_from_agent() {
+    assert_ne!(role_avatar_bg(&ChatRole::User), role_avatar_bg(&ChatRole::Assistant));
+}
+
+#[test]
+fn avatar_bg_is_a_daisyui_bg_class_for_every_role() {
+    for r in [
+        ChatRole::User,
+        ChatRole::Assistant,
+        ChatRole::System,
+        ChatRole::Thinking,
+        ChatRole::Tool,
+    ] {
+        assert!(
+            role_avatar_bg(&r).starts_with("bg-"),
+            "{r:?} avatar bg class should start with bg-"
+        );
+    }
 }

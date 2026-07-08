@@ -1,6 +1,7 @@
 use super::style::{
-    ComposerAction, clamp_composer_height, composer_key_action, is_markdown, is_thinking,
-    role_classes, role_label, should_stick_to_bottom, show_welcome_chips,
+    ComposerAction, clamp_composer_height, composer_hint, composer_key_action, is_markdown,
+    is_thinking, role_avatar_bg, role_classes, role_label, should_stick_to_bottom,
+    show_welcome_chips,
 };
 use super::types::{format_usage, format_allowed_tools, settings_from_form_fields};
 use crate::components::{Dropdown, DropdownAlignment, DropdownContent, Input, Textarea, Toggle};
@@ -56,11 +57,12 @@ const COMPOSER_MAX_HEIGHT_PX: f64 = 320.0;
 /// ## CSS
 /// Every literal class this component can render (add to your `input.css`):
 /// ```css
-/// @source inline("chat chat-start chat-end chat-header chat-bubble chat-bubble-primary chat-bubble-info chat-bubble-neutral chat-bubble-ghost");
-/// @source inline("flex flex-col flex-1 flex-wrap items-center justify-between gap-1 gap-2 h-full min-h-0 w-full w-72 overflow-y-auto p-2 p-3 p-4 px-3 pb-2 space-y-3 space-y-2");
-/// @source inline("border-t border-b border-base-300 text-xs text-sm opacity-50 opacity-60 text-right whitespace-pre-wrap resize-none max-h-[320px]");
-/// @source inline("btn btn-primary btn-error btn-ghost btn-sm btn-xs textarea textarea-bordered loading loading-dots loading-sm");
+/// @source inline("chat chat-start chat-end chat-header chat-bubble chat-bubble-primary chat-bubble-info chat-bubble-neutral chat-bubble-ghost chat-image avatar placeholder");
+/// @source inline("flex flex-col flex-1 flex-wrap items-center justify-between gap-1 gap-2 h-full min-h-0 w-full w-72 w-6 h-6 overflow-y-auto p-2 p-3 p-4 px-3 pb-2 space-y-3 space-y-2");
+/// @source inline("border-t border-b border-base-300 text-xs text-sm opacity-50 opacity-60 text-right whitespace-pre-wrap resize-none max-h-[320px] text-[10px]");
+/// @source inline("btn btn-primary btn-error btn-ghost btn-sm btn-xs textarea textarea-bordered loading loading-dots loading-sm rounded-full");
 /// @source inline("dropdown-content bg-base-100 rounded-box z-10 shadow border");
+/// @source inline("bg-primary bg-neutral bg-info bg-base-300 text-primary-content text-neutral-content text-info-content text-base-content");
 /// ```
 #[component]
 pub fn AiChat(
@@ -262,6 +264,10 @@ pub fn AiChat(
         }
         format_usage(session.with_value(|s| s.last_usage()))
     };
+    // Composer hint: keybinding reminder while idle, "Esc to stop" while busy.
+    // Always on (no gating prop) — a single unobtrusive caption line, matching
+    // the header subtitle's text-xs/opacity-60 styling.
+    let hint_text = move || composer_hint(waiting());
 
     // Auto-stick-to-bottom: after each transcript change, if the user is pinned
     // to the bottom, scroll the list all the way down.
@@ -417,57 +423,69 @@ pub fn AiChat(
                 </Show>
             </div>
 
-            <div class="lds-aichat-input border-t border-base-300 p-3 flex gap-2">
-                <textarea
-                    node_ref=textarea_ref
-                    class="textarea textarea-bordered flex-1 resize-none max-h-[320px] overflow-y-auto"
-                    rows="2"
-                    placeholder=move || {
-                        let p = placeholder.get();
-                        if p.is_empty() { "Ask Claude about this document\u{2026}".to_string() } else { p }
-                    }
-                    prop:value=move || input.get()
-                    on:input=move |e| {
-                        input.set(event_target_value(&e));
-                        resize_textarea();
-                    }
-                    on:keydown=move |e| {
-                        match composer_key_action(&e.key(), e.shift_key(), e.is_composing()) {
-                            ComposerAction::Send => {
-                                e.prevent_default();
-                                submit();
-                            }
-                            // Newline / Ignore: let the textarea handle it natively.
-                            ComposerAction::Newline | ComposerAction::Ignore => {}
+            <div class="lds-aichat-input border-t border-base-300 p-3 flex flex-col gap-1">
+                <div class="flex gap-2">
+                    <textarea
+                        node_ref=textarea_ref
+                        class="textarea textarea-bordered flex-1 resize-none max-h-[320px] overflow-y-auto"
+                        rows="2"
+                        placeholder=move || {
+                            let p = placeholder.get();
+                            if p.is_empty() { "Ask Claude about this document\u{2026}".to_string() } else { p }
                         }
-                    }
-                />
-                <Show
-                    when=waiting
-                    fallback=move || view! {
+                        prop:value=move || input.get()
+                        on:input=move |e| {
+                            input.set(event_target_value(&e));
+                            resize_textarea();
+                        }
+                        on:keydown=move |e| {
+                            // Esc cancels an in-flight turn — matches the composer
+                            // hint's "Esc to stop" while `waiting`.
+                            if e.key() == "Escape" && waiting() {
+                                e.prevent_default();
+                                cancel();
+                                return;
+                            }
+                            match composer_key_action(&e.key(), e.shift_key(), e.is_composing()) {
+                                ComposerAction::Send => {
+                                    e.prevent_default();
+                                    submit();
+                                }
+                                // Newline / Ignore: let the textarea handle it natively.
+                                ComposerAction::Newline | ComposerAction::Ignore => {}
+                            }
+                        }
+                    />
+                    <Show
+                        when=waiting
+                        fallback=move || view! {
+                            <button
+                                type="button"
+                                class="btn btn-primary"
+                                on:click=move |_| submit()
+                            >
+                                "Send"
+                            </button>
+                        }
+                    >
                         <button
                             type="button"
-                            class="btn btn-primary"
-                            on:click=move |_| submit()
+                            class="btn btn-error"
+                            on:click=move |_| cancel()
                         >
-                            "Send"
+                            "Stop"
                         </button>
-                    }
-                >
-                    <button
-                        type="button"
-                        class="btn btn-error"
-                        on:click=move |_| cancel()
-                    >
-                        "Stop"
-                    </button>
-                </Show>
-            </div>
-            <Show when=move || usage_caption().is_some()>
-                <div class="lds-aichat-usage px-3 pb-2 text-xs opacity-60 text-right">
-                    {move || usage_caption().unwrap_or_default()}
+                    </Show>
                 </div>
-            </Show>
+                <div class="flex items-center justify-between gap-2 text-xs opacity-60">
+                    <span>{hint_text}</span>
+                    <Show when=move || usage_caption().is_some()>
+                        <span class="lds-aichat-usage text-right">
+                            {move || usage_caption().unwrap_or_default()}
+                        </span>
+                    </Show>
+                </div>
+            </div>
         </div>
     }
 }
@@ -477,6 +495,8 @@ pub fn AiChat(
 fn MessageBubble(msg: ChatMessage) -> impl IntoView {
     let (side, bubble) = role_classes(&msg.role);
     let label = role_label(&msg.role);
+    let avatar_bg = role_avatar_bg(&msg.role);
+    let avatar_initial = label.chars().next().unwrap_or('?').to_string();
     let md = is_markdown(&msg.role);
     let streaming = msg.streaming;
     let content = msg.content.clone();
@@ -501,7 +521,14 @@ fn MessageBubble(msg: ChatMessage) -> impl IntoView {
     };
 
     view! {
-        <div class=move || merge_classes!("chat", side)>
+        <div class=move || merge_classes!("chat ld-aichat-msg-in", side)>
+            <div class="chat-image avatar placeholder">
+                <div class=move || {
+                    merge_classes!("w-6 h-6 rounded-full", avatar_bg)
+                }>
+                    <span class="text-[10px]">{avatar_initial}</span>
+                </div>
+            </div>
             <div class="chat-header text-xs opacity-60 flex items-center gap-2">
                 {label}
                 <button

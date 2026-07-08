@@ -96,3 +96,27 @@ pub fn show_welcome_chips(message_count: usize, prompt_count: usize) -> bool {
 pub fn clamp_composer_height(scroll_height: f64, base_height: f64, max_height: f64) -> f64 {
     scroll_height.max(base_height).min(max_height)
 }
+
+/// Composer hint caption text: the keybinding reminder while idle, switching
+/// to the in-flight hint (mirroring the Stop button) while a turn is busy.
+pub fn composer_hint(waiting: bool) -> &'static str {
+    if waiting {
+        "Generating\u{2026} \u{b7} Esc to stop"
+    } else {
+        "Enter to send \u{b7} Shift+Enter for newline"
+    }
+}
+
+/// Background daisyUI class for a role's avatar dot, paired with
+/// [`role_label`]'s first character as the initial. User gets the primary
+/// color (matching its `chat-bubble-primary`); everything else gets a
+/// neutral/info tone matching its bubble family.
+pub fn role_avatar_bg(role: &ChatRole) -> &'static str {
+    match role {
+        ChatRole::User => "bg-primary text-primary-content",
+        ChatRole::Assistant => "bg-neutral text-neutral-content",
+        ChatRole::System => "bg-info text-info-content",
+        ChatRole::Thinking => "bg-base-300 text-base-content",
+        ChatRole::Tool => "bg-neutral text-neutral-content",
+    }
+}

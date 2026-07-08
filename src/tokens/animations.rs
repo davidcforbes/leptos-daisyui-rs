@@ -25,6 +25,8 @@ use leptos::prelude::*;
 ///
 /// - `.ld-vstep-rail > .ld-vstep-flow-dash` — a small dash sliding down a
 ///   [`VerticalSteps`](crate::components::VerticalSteps) rail segment.
+/// - `.ld-aichat-msg-in` — a message bubble's entrance fade-in-and-rise,
+///   applied on mount by [`AiChat`](crate::components::AiChat).
 pub fn ui_animations_css() -> &'static str {
     r#"
 .ld-eased {
@@ -138,6 +140,14 @@ dialog.modal[open]::backdrop {
     animation: ld-drawer-overlay-in var(--ld-duration-normal) var(--ld-ease-standard);
 }
 
+@keyframes ld-message-in {
+    from { opacity: 0; transform: translateY(0.35rem); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+.ld-aichat-msg-in {
+    animation: ld-message-in var(--ld-duration-fast) var(--ld-ease-decelerate);
+}
+
 .ld-focus-ring:focus-visible {
     outline: 2px solid var(--p, currentColor);
     outline-offset: 2px;
@@ -192,7 +202,8 @@ dialog.modal[open]::backdrop {
     .drawer-open .drawer-overlay,
     .ld-ripple-element,
     .ld-focus-ring:focus-visible,
-    .ld-vstep-flow-dash {
+    .ld-vstep-flow-dash,
+    .ld-aichat-msg-in {
         animation: none;
     }
     .ld-vstep-flow-dash {
