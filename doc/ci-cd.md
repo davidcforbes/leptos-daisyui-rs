@@ -40,10 +40,19 @@ resolver = "2"
 
 The six sibling path-deps (`table-rs`, `ui-tokens`, `ai-chat-core`,
 `editmark-mermaid`, `editmark-core`, `pixelproof-web`) are **dependencies, not
-members** — they live outside this repo under `C:\dev`. Because they are not
-workspace members, workspace-wide commands (`--all`, `--workspace`) never reach
-into them. This is why `cargo fmt --all` is safe here, unlike Rust-DeskApp where
-a sibling *was* a member and `--all` had to be avoided.
+members** — they live outside this repo under `C:\dev`.
+
+Two workspace-wide commands turned out **not** to be safe here (verified
+empirically when the workspace was created), so the gate scopes explicitly:
+
+- **`cargo fmt --all` reaches into sibling repos** (e.g. `aws-update/...`, a
+  transitive local path-dep) — 300+ diffs in code this repo doesn't own. So
+  `fmt` is run **per-package** (`-p leptos-daisyui-rs -p leptos-daisyui-showcase
+  -p xtask`), never `--all`. (Same hazard Rust-DeskApp's doc warns about.)
+- **`cargo clippy --workspace` fails on feature unification** — co-building the
+  demo enables `leptos`'s `csr` feature on the library, surfacing csr-only lints
+  in the lib that don't exist when it's built standalone (as `cargo test --lib`
+  builds it). So `clippy` is run **per-crate** (lib and demo separately).
 
 ## Running it
 
@@ -65,8 +74,8 @@ Each step is scoped per-crate; that scoping **is** the xtask's logic.
 
 | Step | Command | Note |
 |---|---|---|
-| `fmt-check` | `cargo fmt --all -- --check` | `--all` = the three members only (siblings aren't members), so this never touches sibling repos. |
-| `clippy` | `cargo clippy --workspace --all-targets -- -D warnings` | Host target; covers lib + xtask + demo. |
+| `fmt-check` | `cargo fmt -p leptos-daisyui-rs -p leptos-daisyui-showcase -p xtask -- --check` | Per-package, **not `--all`** — `--all` reaches into sibling repos (see above). |
+| `clippy` | `cargo clippy -p leptos-daisyui-rs --all-targets -- -D warnings` **then** `-p leptos-daisyui-showcase` | Two per-crate runs — **not `--workspace`**, which fails on csr feature unification (see above). Host target. |
 | `build` | `cargo build -p leptos-daisyui-rs` | **Library only.** The CSR demo is not natively built here — a native `cargo build` of a wasm/CSR binary can link-fail on `web-sys` host stubs; the demo is *checked* instead (next row) and *really* built by `trunk` (see `verify-full`). |
 | `check-demo` | `cargo check -p leptos-daisyui-showcase` | Fast native check of the demo — catches ~all compile breakage without npm/trunk. |
 | `test` | `cargo test -p leptos-daisyui-rs --lib` + `cargo test -p xtask` | The library's unit-test suite (~1766 tests) plus the xtask's own pure-function tests (SemVer bump, etc.). Non-`#[ignore]`d tests only. |
@@ -88,13 +97,16 @@ screenshot**, not headed-vs-headless (the same rule Rust-DeskApp uses):
 - **No screenshot → auto-gated.** The library's `cargo test --lib` suite is pure
   logic (enum/`as_str` mappings, layout/date math, pagination windowing, class
   building, queue behavior) and runs headlessly in `verify`.
-- **Screenshot / live-browser → manual.** Visual verification of the demo (the
-  daisyUI components rendering in a real browser) is DPI-, theme-, and
-  browser-specific and is **not** in `cargo test`. Today it is done ad-hoc via
-  the `run` / `visual-ui-testing` flow against a live `trunk serve` + Chrome
-  DevTools MCP, exactly as during component work. If a committed browser
-  DOM-oracle suite is ever added, gate it automatically; keep any
-  SSIM/baseline-screenshot suite `#[ignore]`d and manual.
+- **Screenshot / live-browser → manual.** The committed PixelProof suite
+  (`tests/visual/**`, baselines under `tests/visual/baselines`) is `#[ignore]`d
+  and run on demand via `cargo make test-visual` (`scripts/test-visual.ps1`:
+  idempotent `npm install`, `trunk serve` on :3010, run the ignored tests, tear
+  down; refresh baselines with `VISUAL_TEST_MODE=capture`). SSIM/baseline
+  comparisons are DPI/monitor-specific, so they stay out of `verify` (which runs
+  only non-`#[ignore]`d tests). The reactivity/DOM-oracle subset (no screenshot)
+  is a candidate to un-ignore and auto-gate in a future pass, mirroring
+  Rust-DeskApp. Ad-hoc visual checks also use the `run` / `visual-ui-testing`
+  flow against a live `trunk serve` + Chrome DevTools MCP.
 
 ## Versioning — the automated bump
 
