@@ -13,6 +13,10 @@ repository = "https://github.com/noshishiRust/leptos-daisyui-rs"
 # so `cargo publish` cannot succeed and is not a goal.
 publish = false
 
+[workspace]
+members = [".", "demo"]
+resolver = "3"
+
 [dependencies]
 leptos = { version = "0.8" }
 leptos_router = "0.8"
