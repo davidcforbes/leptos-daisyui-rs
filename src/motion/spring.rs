@@ -182,7 +182,11 @@ mod tests {
             max_value > 1.05,
             "expected an overshoot past the target, max_value={max_value}"
         );
-        assert!(s.is_settled(), "spring should settle by 4s: value={}", s.value);
+        assert!(
+            s.is_settled(),
+            "spring should settle by 4s: value={}",
+            s.value
+        );
         assert_eq!(s.value, 1.0);
     }
 }

@@ -63,11 +63,7 @@ pub fn segment_lit(status: StepStatus) -> bool {
 
 /// CSS classes for a rail segment, given whether it is [`segment_lit`].
 pub fn vstep_rail_class(lit: bool) -> &'static str {
-    if lit {
-        "bg-accent"
-    } else {
-        "bg-base-300"
-    }
+    if lit { "bg-accent" } else { "bg-base-300" }
 }
 
 /// Whether step `index` (of `len` total steps) has a rail segment connecting
@@ -80,9 +76,5 @@ pub fn has_rail_segment(index: usize, len: usize) -> bool {
 /// rail segment) carry bottom padding so the flex-stretched rail has vertical
 /// travel between dots; the last step drops it so the list ends flush.
 pub fn content_class(has_segment: bool) -> &'static str {
-    if has_segment {
-        "flex-1 pb-6"
-    } else {
-        "flex-1"
-    }
+    if has_segment { "flex-1 pb-6" } else { "flex-1" }
 }

@@ -21,8 +21,14 @@ pub fn DataTableDemo() -> impl IntoView {
                         let depts = ["Engineering", "Sales", "Marketing", "HR", "Finance"];
                         depts[i % 5].to_string()
                     }),
-                    ("status", if i % 3 == 0 { "Active" } else { "Inactive" }.to_string()),
-                    ("joined", format!("2024-{:02}-{:02}", (i % 12) + 1, (i % 28) + 1)),
+                    (
+                        "status",
+                        if i % 3 == 0 { "Active" } else { "Inactive" }.to_string(),
+                    ),
+                    (
+                        "joined",
+                        format!("2024-{:02}-{:02}", (i % 12) + 1, (i % 28) + 1),
+                    ),
                 ])
             })
             .collect()
@@ -72,8 +78,12 @@ pub fn DataTableDemo() -> impl IntoView {
         Column::new("id", "ID").with_min_width(60),
         Column::new("name", "Name").with_min_width(120),
         Column::new("email", "Email").with_min_width(180),
-        Column::new("role", "Role").with_min_width(110).with_typed_cell(0),
-        Column::new("status", "Status").with_min_width(100).with_typed_cell(1),
+        Column::new("role", "Role")
+            .with_min_width(110)
+            .with_typed_cell(0),
+        Column::new("status", "Status")
+            .with_min_width(100)
+            .with_typed_cell(1),
         Column::new_non_sortable("actions", "Actions")
             .with_min_width(90)
             .non_resizable()
@@ -126,8 +136,8 @@ pub fn DataTableDemo() -> impl IntoView {
     // `row_with_headers_text` helper and the same wasm-gated
     // `navigator().clipboard().write_text(...)` pattern as `AiChat`'s
     // message-copy button.
-    let copy_row_renderer: CellRenderer =
-        Callback::new(move |(_abs_idx, row): (usize, HashMap<&'static str, String>)| {
+    let copy_row_renderer: CellRenderer = Callback::new(
+        move |(_abs_idx, row): (usize, HashMap<&'static str, String>)| {
             let columns_for_copy = feature_columns.get_untracked();
             let row_for_copy = row.clone();
             view! {
@@ -149,7 +159,8 @@ pub fn DataTableDemo() -> impl IntoView {
                 </button>
             }
             .into_any()
-        });
+        },
+    );
 
     view! {
         <ContentLayout

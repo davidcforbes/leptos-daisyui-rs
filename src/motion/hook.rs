@@ -7,7 +7,7 @@ use std::rc::Rc;
 use leptos::prelude::*;
 use ui_tokens::motion::Easing;
 
-use super::raf_loop::{start_raf_loop, RafLoopHandle};
+use super::raf_loop::{RafLoopHandle, start_raf_loop};
 use super::spring::Spring;
 use super::transition::{Lerp, Transition};
 

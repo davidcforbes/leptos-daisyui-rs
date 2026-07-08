@@ -11,14 +11,12 @@ use super::*;
 /// ```
 fn fixture() -> Vec<FlatNode> {
     build_flat(&[
-        TreeNode::branch("root", "root")
-            .open()
-            .with_children(vec![
-                TreeNode::branch("dir_a", "dir_a")
-                    .open()
-                    .with_children(vec![TreeNode::leaf("leaf_x", "leaf_x")]),
-                TreeNode::leaf("file_b", "file_b"),
-            ]),
+        TreeNode::branch("root", "root").open().with_children(vec![
+            TreeNode::branch("dir_a", "dir_a")
+                .open()
+                .with_children(vec![TreeNode::leaf("leaf_x", "leaf_x")]),
+            TreeNode::leaf("file_b", "file_b"),
+        ]),
         TreeNode::leaf("orphan", "orphan"),
     ])
 }
@@ -128,7 +126,10 @@ fn insert_children_splices_after_parent() {
     assert_eq!(keys, vec!["lazy", "k1", "k2", "sibling"]);
     assert_eq!(nodes[1].depth, 1);
     assert_eq!(nodes[2].depth, 1);
-    assert!(!nodes[2].children_loaded, "loaded branch child is itself lazy");
+    assert!(
+        !nodes[2].children_loaded,
+        "loaded branch child is itself lazy"
+    );
 }
 
 // ── handle_key: ArrowDown / ArrowUp ─────────────────────────────────────
@@ -184,7 +185,10 @@ fn arrow_right_on_leaf_does_nothing() {
 #[test]
 fn arrow_left_collapses_expanded_branch() {
     let nodes = fixture();
-    assert_eq!(handle_key(&nodes, Some(1), "ArrowLeft"), KeyNav::Collapse(1));
+    assert_eq!(
+        handle_key(&nodes, Some(1), "ArrowLeft"),
+        KeyNav::Collapse(1)
+    );
 }
 
 #[test]
@@ -257,7 +261,10 @@ fn keyboard_nav_sequence_expand_collapse_move() {
     assert_eq!(handle_key(&nodes, Some(2), "ArrowLeft"), KeyNav::Move(1));
 
     // On dir_a, ArrowLeft collapses it.
-    assert_eq!(handle_key(&nodes, Some(1), "ArrowLeft"), KeyNav::Collapse(1));
+    assert_eq!(
+        handle_key(&nodes, Some(1), "ArrowLeft"),
+        KeyNav::Collapse(1)
+    );
 }
 
 // ── row_key content hashing ─────────────────────────────────────────────
@@ -301,7 +308,11 @@ fn row_key_changes_when_expanded_or_label_changes() {
     relabeled.label = "n2".into();
     assert_ne!(row_key(&base), row_key(&expanded));
     assert_ne!(row_key(&base), row_key(&relabeled));
-    assert_eq!(row_key(&base), row_key(&base.clone()), "stable for equal nodes");
+    assert_eq!(
+        row_key(&base),
+        row_key(&base.clone()),
+        "stable for equal nodes"
+    );
 }
 
 // ── TreeNode / TreeChild builders ───────────────────────────────────────
@@ -326,7 +337,10 @@ fn tree_node_builders() {
 fn tree_child_builders() {
     assert!(!TreeChild::leaf("k", "l").is_branch);
     assert!(TreeChild::branch("k", "l").is_branch);
-    assert_eq!(TreeChild::leaf("k", "l").with_icon("x").icon.as_deref(), Some("x"));
+    assert_eq!(
+        TreeChild::leaf("k", "l").with_icon("x").icon.as_deref(),
+        Some("x")
+    );
 }
 
 // ── should_spawn_load (double-load race guard) ──────────────────────────
@@ -349,9 +363,12 @@ fn should_spawn_load_false_when_already_loading() {
 #[test]
 fn should_spawn_load_false_when_already_loaded() {
     let nodes = build_flat(&[
-        TreeNode::branch("eager", "eager").with_children(vec![TreeNode::leaf("c", "c")]),
+        TreeNode::branch("eager", "eager").with_children(vec![TreeNode::leaf("c", "c")])
     ]);
-    assert!(!should_spawn_load(&nodes[0]), "eager branch already has children_loaded");
+    assert!(
+        !should_spawn_load(&nodes[0]),
+        "eager branch already has children_loaded"
+    );
 }
 
 #[test]
@@ -365,7 +382,7 @@ fn should_spawn_load_false_when_loaded_and_loading_both_set() {
     // Defensive: even a (shouldn't-happen) node with both flags set is not a
     // spawn candidate — children_loaded alone is enough to say "don't fetch".
     let mut nodes = build_flat(&[
-        TreeNode::branch("eager", "eager").with_children(vec![TreeNode::leaf("c", "c")]),
+        TreeNode::branch("eager", "eager").with_children(vec![TreeNode::leaf("c", "c")])
     ]);
     nodes[0].loading = true;
     assert!(!should_spawn_load(&nodes[0]));
@@ -373,10 +390,7 @@ fn should_spawn_load_false_when_loaded_and_loading_both_set() {
 
 #[test]
 fn flat_children_sets_depth_and_load_state() {
-    let kids = flat_children(
-        &[TreeChild::leaf("a", "a"), TreeChild::branch("b", "b")],
-        3,
-    );
+    let kids = flat_children(&[TreeChild::leaf("a", "a"), TreeChild::branch("b", "b")], 3);
     assert_eq!(kids[0].depth, 3);
     assert!(kids[0].children_loaded); // leaf
     assert!(!kids[1].children_loaded); // branch child not yet loaded

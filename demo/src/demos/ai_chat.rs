@@ -25,7 +25,8 @@ impl ChatTransport for DemoTransport {
             user_message_id: None,
         });
         for chunk in reply.split_inclusive(' ') {
-            self.queue.push_back(StreamEvent::TextDelta(chunk.to_string()));
+            self.queue
+                .push_back(StreamEvent::TextDelta(chunk.to_string()));
         }
         // Scripted usage so the `show_usage` caption has something to show.
         self.queue.push_back(StreamEvent::Usage(Usage {

@@ -13,17 +13,29 @@ pub fn VerticalStepsDemo() -> impl IntoView {
         VerticalStep::new(StepStatus::NeedsYou, "Gateway", "Needs your sign-in")
             .with_tech("vpn-gw-03.internal:443")
             .with_action("Fix"),
-        VerticalStep::new(StepStatus::Pending, "Database", "Checked once gateway clears"),
+        VerticalStep::new(
+            StepStatus::Pending,
+            "Database",
+            "Checked once gateway clears",
+        ),
     ];
 
     let statuses = vec![
-        VerticalStep::new(StepStatus::Ready, "Ready", "Done / healthy — solid success dot"),
+        VerticalStep::new(
+            StepStatus::Ready,
+            "Ready",
+            "Done / healthy — solid success dot",
+        ),
         VerticalStep::new(
             StepStatus::Checking,
             "Checking",
             "In flight — pulsing accent dot; the rail below a Ready step animates a flow",
         ),
-        VerticalStep::new(StepStatus::Pending, "Pending", "Not yet reached — hollow ring"),
+        VerticalStep::new(
+            StepStatus::Pending,
+            "Pending",
+            "Not yet reached — hollow ring",
+        ),
         VerticalStep::new(
             StepStatus::NeedsYou,
             "Needs You",

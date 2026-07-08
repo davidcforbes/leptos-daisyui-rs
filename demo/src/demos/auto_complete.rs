@@ -153,7 +153,7 @@ pub fn AutoCompleteDemo() -> impl IntoView {
                 <h3 class="text-xl font-semibold">"Disabled State"</h3>
                 <AutoComplete
                     value=Signal::derive(|| "Disabled".to_string())
-                    suggestions=Signal::derive(|| vec![])
+                    suggestions=Signal::derive(std::vec::Vec::new)
                     placeholder=Signal::derive(|| "This is disabled".to_string())
                     disabled=Signal::derive(|| true)
                 />

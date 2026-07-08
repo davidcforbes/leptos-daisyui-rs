@@ -1,4 +1,4 @@
-use super::style::{sla_chip_label, sla_chip_tone, SLA_CHIP_DEFAULT_THRESHOLD_MS};
+use super::style::{SLA_CHIP_DEFAULT_THRESHOLD_MS, sla_chip_label, sla_chip_tone};
 use crate::components::icon::{Icon, IconSize};
 use crate::merge_classes;
 use leptos::{html::Span, prelude::*};

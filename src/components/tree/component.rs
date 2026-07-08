@@ -186,7 +186,9 @@ fn TreeLevel(parent_key: Option<String>, ctx: Ctx) -> impl IntoView {
                     None => Vec::new(),
                 },
             };
-            idxs.into_iter().map(|i| nodes[i].clone()).collect::<Vec<FlatNode>>()
+            idxs.into_iter()
+                .map(|i| nodes[i].clone())
+                .collect::<Vec<FlatNode>>()
         })
     });
 

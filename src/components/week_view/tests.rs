@@ -166,7 +166,13 @@ fn compute_week_event_layout_single_event_spans_full_width() {
 fn compute_week_event_layout_overlapping_events_split_into_lanes() {
     let events = vec![
         CalEvent::new("A", 3, 9 * 60, 10 * 60, SchedulerEventColor::Primary),
-        CalEvent::new("B", 3, 9 * 60 + 30, 10 * 60 + 30, SchedulerEventColor::Warning),
+        CalEvent::new(
+            "B",
+            3,
+            9 * 60 + 30,
+            10 * 60 + 30,
+            SchedulerEventColor::Warning,
+        ),
     ];
     let layouts = compute_week_event_layout(&events, 8, 18);
     assert_eq!(layouts[0].width_pct, 50.0);

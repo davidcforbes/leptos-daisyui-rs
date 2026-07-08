@@ -9,8 +9,14 @@ pub fn WeekViewDemo() -> impl IntoView {
 
     let events = Signal::derive(move || {
         vec![
-            CalEvent::new("Standup", 0, 9 * 60, 9 * 60 + 15, SchedulerEventColor::Primary)
-                .with_location("Room 1"),
+            CalEvent::new(
+                "Standup",
+                0,
+                9 * 60,
+                9 * 60 + 15,
+                SchedulerEventColor::Primary,
+            )
+            .with_location("Room 1"),
             CalEvent::new(
                 "Design review",
                 0,
@@ -19,8 +25,14 @@ pub fn WeekViewDemo() -> impl IntoView {
                 SchedulerEventColor::Accent,
             )
             .with_location("Room 2"),
-            CalEvent::new("Client call", 1, 14 * 60, 15 * 60, SchedulerEventColor::Success)
-                .with_location("Zoom"),
+            CalEvent::new(
+                "Client call",
+                1,
+                14 * 60,
+                15 * 60,
+                SchedulerEventColor::Success,
+            )
+            .with_location("Zoom"),
             CalEvent::new(
                 "Sprint planning",
                 2,
@@ -35,7 +47,13 @@ pub fn WeekViewDemo() -> impl IntoView {
                 10 * 60,
                 SchedulerEventColor::Warning,
             ),
-            CalEvent::new("Lunch with team", 3, 12 * 60, 13 * 60, SchedulerEventColor::Neutral),
+            CalEvent::new(
+                "Lunch with team",
+                3,
+                12 * 60,
+                13 * 60,
+                SchedulerEventColor::Neutral,
+            ),
             CalEvent::new(
                 "Retro",
                 4,

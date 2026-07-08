@@ -10,9 +10,7 @@ pub fn TreeDemo() -> impl IntoView {
     // ── Lazy tree: children are fetched on first expand. ──
     // A synthetic loader that fabricates a few children per branch key; a real
     // host would issue an HTTP / filesystem request here and `.await` it.
-    let lazy_roots = vec![
-        TreeNode::branch("/", "workspace").with_icon("📁").open(),
-    ];
+    let lazy_roots = vec![TreeNode::branch("/", "workspace").with_icon("📁").open()];
     let loader = TreeLoader::new(|key: String| async move {
         // Depth-limit the synthetic tree so it terminates.
         let depth = key.matches('/').count();
@@ -33,10 +31,12 @@ pub fn TreeDemo() -> impl IntoView {
             .with_icon("🐾")
             .open()
             .with_children(vec![
-                TreeNode::branch("mammals", "Mammals").open().with_children(vec![
-                    TreeNode::leaf("dog", "Dog").with_icon("🐕"),
-                    TreeNode::leaf("cat", "Cat").with_icon("🐈"),
-                ]),
+                TreeNode::branch("mammals", "Mammals")
+                    .open()
+                    .with_children(vec![
+                        TreeNode::leaf("dog", "Dog").with_icon("🐕"),
+                        TreeNode::leaf("cat", "Cat").with_icon("🐈"),
+                    ]),
                 TreeNode::branch("birds", "Birds").with_children(vec![
                     TreeNode::leaf("owl", "Owl").with_icon("🦉"),
                     TreeNode::leaf("duck", "Duck").with_icon("🦆"),

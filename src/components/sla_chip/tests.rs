@@ -76,10 +76,7 @@ fn test_tone_green_amber_red_by_remaining() {
 #[test]
 fn test_custom_threshold_changes_amber_window() {
     // With a 6h threshold, 5h out is amber (not green).
-    assert_eq!(
-        sla_chip_tone(deadline(Some(5)), NOW, 6 * H),
-        SlaTone::Amber
-    );
+    assert_eq!(sla_chip_tone(deadline(Some(5)), NOW, 6 * H), SlaTone::Amber);
 }
 
 // sla_chip_label tests (ported from d2d-ui's SlaChip::label tests)

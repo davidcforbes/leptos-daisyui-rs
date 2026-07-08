@@ -1,50 +1,47 @@
-use leptos::prelude::*;
 use leptos::logging;
+use leptos::prelude::*;
 use leptos_daisyui_rs::components::kanban::*;
 
 #[component]
 pub fn KanbanDemo() -> impl IntoView {
     // Create sample data
     let (columns, set_columns) = signal(vec![
-        KanbanColumn::new("todo", "To Do")
-            .with_cards(vec![
-                KanbanCard::new("card-1", "Implement login")
-                    .with_description("Add user authentication with JWT tokens")
-                    .with_priority(Priority::High)
-                    .with_label(Label::new("feature", "Feature").with_color("#3b82f6"))
-                    .with_assignee(Assignee::new("user-1", "Alice Smith")),
-                KanbanCard::new("card-2", "Fix navigation bug")
-                    .with_description("Fix the broken link on the homepage")
-                    .with_priority(Priority::Critical)
-                    .with_label(Label::new("bug", "Bug").with_color("#ef4444")),
-            ]),
-        KanbanColumn::new("in-progress", "In Progress")
-            .with_cards(vec![
-                KanbanCard::new("card-3", "Design homepage")
-                    .with_description("Create mockups for the new landing page")
-                    .with_priority(Priority::Medium)
-                    .with_label(Label::new("design", "Design").with_color("#8b5cf6"))
-                    .with_assignee(Assignee::new("user-2", "Bob Johnson")),
-            ]),
-        KanbanColumn::new("review", "Review")
-            .with_cards(vec![
-                KanbanCard::new("card-4", "Update documentation")
-                    .with_description("Add API reference docs")
-                    .with_priority(Priority::Low)
-                    .with_label(Label::new("docs", "Documentation").with_color("#10b981")),
-            ]),
-        KanbanColumn::new("done", "Done")
-            .with_cards(vec![
-                KanbanCard::new("card-5", "Setup CI/CD")
-                    .with_description("Configure GitHub Actions")
-                    .with_priority(Priority::Medium)
-                    .with_label(Label::new("devops", "DevOps").with_color("#f59e0b")),
-            ]),
+        KanbanColumn::new("todo", "To Do").with_cards(vec![
+            KanbanCard::new("card-1", "Implement login")
+                .with_description("Add user authentication with JWT tokens")
+                .with_priority(Priority::High)
+                .with_label(Label::new("feature", "Feature").with_color("#3b82f6"))
+                .with_assignee(Assignee::new("user-1", "Alice Smith")),
+            KanbanCard::new("card-2", "Fix navigation bug")
+                .with_description("Fix the broken link on the homepage")
+                .with_priority(Priority::Critical)
+                .with_label(Label::new("bug", "Bug").with_color("#ef4444")),
+        ]),
+        KanbanColumn::new("in-progress", "In Progress").with_cards(vec![
+            KanbanCard::new("card-3", "Design homepage")
+                .with_description("Create mockups for the new landing page")
+                .with_priority(Priority::Medium)
+                .with_label(Label::new("design", "Design").with_color("#8b5cf6"))
+                .with_assignee(Assignee::new("user-2", "Bob Johnson")),
+        ]),
+        KanbanColumn::new("review", "Review").with_cards(vec![
+            KanbanCard::new("card-4", "Update documentation")
+                .with_description("Add API reference docs")
+                .with_priority(Priority::Low)
+                .with_label(Label::new("docs", "Documentation").with_color("#10b981")),
+        ]),
+        KanbanColumn::new("done", "Done").with_cards(vec![
+            KanbanCard::new("card-5", "Setup CI/CD")
+                .with_description("Configure GitHub Actions")
+                .with_priority(Priority::Medium)
+                .with_label(Label::new("devops", "DevOps").with_color("#f59e0b")),
+        ]),
     ]);
 
     // Handle card movement
     let handle_card_move = Callback::new(move |operation: DragOperation| {
-        logging::log!("Moving card {} from {} to {} at position {}",
+        logging::log!(
+            "Moving card {} from {} to {} at position {}",
             operation.card_id,
             operation.from_column,
             operation.to_column,
@@ -59,7 +56,11 @@ pub fn KanbanDemo() -> impl IntoView {
             // Remove card from source column
             for col in cols.iter_mut() {
                 if col.column_id == operation.from_column {
-                    if let Some(index) = col.cards.iter().position(|c| c.card_id == operation.card_id) {
+                    if let Some(index) = col
+                        .cards
+                        .iter()
+                        .position(|c| c.card_id == operation.card_id)
+                    {
                         card_to_move = Some(col.cards.remove(index));
                     }
                     break;
@@ -117,12 +118,10 @@ pub fn KanbanDemo() -> impl IntoView {
         set_columns.update(|cols| {
             for col in cols.iter_mut() {
                 if col.column_id == column_id {
-                    let new_card = KanbanCard::new(
-                        format!("card-{}", new_id),
-                        format!("New Task {}", new_id)
-                    )
-                    .with_description("Add description here")
-                    .with_priority(Priority::Medium);
+                    let new_card =
+                        KanbanCard::new(format!("card-{}", new_id), format!("New Task {}", new_id))
+                            .with_description("Add description here")
+                            .with_priority(Priority::Medium);
 
                     col.cards.push(new_card);
                     break;

@@ -71,12 +71,16 @@ pub fn Layout() -> impl IntoView {
             let memory_obj = read_performance_memory().unwrap_or(JsValue::UNDEFINED);
             if !memory_obj.is_undefined() && !memory_obj.is_null() {
                 // Try to get usedJSHeapSize and jsHeapSizeLimit
-                if let Ok(used) = js_sys::Reflect::get(&memory_obj, &JsValue::from_str("usedJSHeapSize")) {
+                if let Ok(used) =
+                    js_sys::Reflect::get(&memory_obj, &JsValue::from_str("usedJSHeapSize"))
+                {
                     if let Some(used_bytes) = used.as_f64() {
                         let used_mb = used_bytes / 1_048_576.0;
 
                         // Also try to get heap limit
-                        if let Ok(limit) = js_sys::Reflect::get(&memory_obj, &JsValue::from_str("jsHeapSizeLimit")) {
+                        if let Ok(limit) =
+                            js_sys::Reflect::get(&memory_obj, &JsValue::from_str("jsHeapSizeLimit"))
+                        {
                             if let Some(limit_bytes) = limit.as_f64() {
                                 let limit_mb = limit_bytes / 1_048_576.0;
                                 set_memory_usage.set(format!("{:.1}/{:.1} MB", used_mb, limit_mb));

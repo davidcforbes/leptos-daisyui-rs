@@ -21,7 +21,8 @@ pub fn ResultListDemo() -> impl IntoView {
         ResultRow {
             title: "types.rs".into(),
             subtitle: String::new(),
-            snippet: "...pub fn move_selection(current: Option<usize>, delta: i32, len: usize)...".into(),
+            snippet: "...pub fn move_selection(current: Option<usize>, delta: i32, len: usize)..."
+                .into(),
         },
         ResultRow {
             title: "mod.rs".into(),
@@ -31,7 +32,9 @@ pub fn ResultListDemo() -> impl IntoView {
         ResultRow {
             title: "conventions.md".into(),
             subtitle: String::new(),
-            snippet: "...tests.rs — unit tests (enum as_str mappings, pure logic, builder methods)...".into(),
+            snippet:
+                "...tests.rs — unit tests (enum as_str mappings, pure logic, builder methods)..."
+                    .into(),
         },
         ResultRow {
             title: "task-11-brief.md".into(),

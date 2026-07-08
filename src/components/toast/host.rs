@@ -1,5 +1,5 @@
 use super::component::Toast;
-use super::service::{use_toast, ToastEntry};
+use super::service::{ToastEntry, use_toast};
 use super::style::ToastPosition;
 use crate::components::alert::Alert;
 use leptos::{html::Div, prelude::*};

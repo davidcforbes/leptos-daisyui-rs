@@ -1,5 +1,5 @@
 use super::style::{content_class, has_rail_segment, segment_lit, vstep_rail_class};
-use super::types::{step_key, VerticalStep};
+use super::types::{VerticalStep, step_key};
 use crate::merge_classes;
 use leptos::{html::Ol, prelude::*};
 

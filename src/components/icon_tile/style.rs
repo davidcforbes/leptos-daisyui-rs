@@ -106,9 +106,5 @@ impl IconTileSize {
 ///
 /// Mirrors d2d-ui's `with_corner_radius(size / 2.0)` circle override.
 pub fn radius_class(circle: bool) -> &'static str {
-    if circle {
-        "rounded-full"
-    } else {
-        "rounded-lg"
-    }
+    if circle { "rounded-full" } else { "rounded-lg" }
 }

@@ -10,25 +10,29 @@ pub fn FileInputDemo() -> impl IntoView {
 
     // File change handler for profile picture
     let handle_file_change = move |ev: Event| {
-        let input = ev.target().and_then(|t| t.dyn_into::<HtmlInputElement>().ok());
+        let input = ev
+            .target()
+            .and_then(|t| t.dyn_into::<HtmlInputElement>().ok());
 
         if let Some(input) = input
             && let Some(files) = input.files()
-                && let Some(file) = files.get(0) {
-                    let reader = FileReader::new().unwrap();
-                    let reader_clone = reader.clone();
+            && let Some(file) = files.get(0)
+        {
+            let reader = FileReader::new().unwrap();
+            let reader_clone = reader.clone();
 
-                    let onload = Closure::wrap(Box::new(move || {
-                        if let Ok(result) = reader_clone.result()
-                            && let Some(data_url) = result.as_string() {
-                                set_preview_url.set(Some(data_url));
-                            }
-                    }) as Box<dyn Fn()>);
-
-                    reader.set_onload(Some(onload.as_ref().unchecked_ref()));
-                    let _ = reader.read_as_data_url(&file);
-                    onload.forget();
+            let onload = Closure::wrap(Box::new(move || {
+                if let Ok(result) = reader_clone.result()
+                    && let Some(data_url) = result.as_string()
+                {
+                    set_preview_url.set(Some(data_url));
                 }
+            }) as Box<dyn Fn()>);
+
+            reader.set_onload(Some(onload.as_ref().unchecked_ref()));
+            let _ = reader.read_as_data_url(&file);
+            onload.forget();
+        }
     };
 
     view! {

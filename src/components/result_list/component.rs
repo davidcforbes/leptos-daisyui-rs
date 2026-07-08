@@ -173,7 +173,8 @@ pub fn ResultList(
     // Computed as a plain closure (rather than inline inside the `view!`
     // macro) so the `::<Vec<_>>` turbofish's `<`/`>` tokens don't confuse the
     // macro's RSX-style tag parser.
-    let indexed_items = move || -> Vec<(usize, ResultRow)> { items.get().into_iter().enumerate().collect() };
+    let indexed_items =
+        move || -> Vec<(usize, ResultRow)> { items.get().into_iter().enumerate().collect() };
 
     view! {
         <div

@@ -1,9 +1,7 @@
 use crate::core::{ContentLayout, Section};
 use leptos::prelude::*;
 use leptos_daisyui_rs::components::*;
-use leptos_daisyui_rs::motion::{
-    use_animated, use_spring, use_spring_with_params, Easing,
-};
+use leptos_daisyui_rs::motion::{Easing, use_animated, use_spring, use_spring_with_params};
 
 #[component]
 pub fn MotionDemo() -> impl IntoView {
@@ -346,8 +344,14 @@ fn SpringFollowerDemo() -> impl IntoView {
             bouncy.set_target(target);
         }
     };
-    let go_left = { let go_to = go_to.clone(); move |_| go_to(0.0) };
-    let go_middle = { let go_to = go_to.clone(); move |_| go_to(0.5) };
+    let go_left = {
+        let go_to = go_to.clone();
+        move |_| go_to(0.0)
+    };
+    let go_middle = {
+        let go_to = go_to.clone();
+        move |_| go_to(0.5)
+    };
     let go_right = move |_| go_to(1.0);
 
     view! {

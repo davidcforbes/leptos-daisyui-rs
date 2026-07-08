@@ -69,8 +69,11 @@ pub fn unregister_signal(name: &str) {
 /// Snapshot every registered signal into a JSON object.
 fn snapshot_state() -> serde_json::Value {
     REGISTRY.with(|r| {
-        let map: serde_json::Map<String, serde_json::Value> =
-            r.borrow().iter().map(|(k, get)| (k.clone(), get())).collect();
+        let map: serde_json::Map<String, serde_json::Value> = r
+            .borrow()
+            .iter()
+            .map(|(k, get)| (k.clone(), get()))
+            .collect();
         serde_json::Value::Object(map)
     })
 }
@@ -101,7 +104,10 @@ fn current_url() -> String {
 }
 
 fn current_title() -> String {
-    web_sys::window().and_then(|w| w.document()).map(|d| d.title()).unwrap_or_default()
+    web_sys::window()
+        .and_then(|w| w.document())
+        .map(|d| d.title())
+        .unwrap_or_default()
 }
 
 /// Pure assembly of the combined `{ url, title, state, dom }` value from
@@ -158,7 +164,9 @@ pub fn install_debug_bridge() {
     let ns = Object::new();
 
     set_fn0(&ns, "domHtml", || JsValue::from_str(&dump_dom()));
-    set_fn0(&ns, "state", || JsValue::from_str(&snapshot_state().to_string()));
+    set_fn0(&ns, "state", || {
+        JsValue::from_str(&snapshot_state().to_string())
+    });
     set_fn0(&ns, "dump", || JsValue::from_str(&dump_json()));
 
     // styles(selector, prop) -> string | null
@@ -209,7 +217,12 @@ mod tests {
 
     #[test]
     fn build_snapshot_has_documented_shape() {
-        let v = build_snapshot("http://x/", "Title", serde_json::json!({"a": 1}), "<html></html>");
+        let v = build_snapshot(
+            "http://x/",
+            "Title",
+            serde_json::json!({"a": 1}),
+            "<html></html>",
+        );
         assert_eq!(v["url"], serde_json::json!("http://x/"));
         assert_eq!(v["title"], serde_json::json!("Title"));
         assert_eq!(v["state"], serde_json::json!({"a": 1}));

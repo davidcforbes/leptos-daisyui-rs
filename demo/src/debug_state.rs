@@ -61,8 +61,11 @@ pub fn remove(key: &str) {
 /// registered with `debug::register_signal` in `main.rs`.
 pub fn get_all() -> serde_json::Value {
     STATE.with(|s| {
-        let map: serde_json::Map<String, serde_json::Value> =
-            s.borrow().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        let map: serde_json::Map<String, serde_json::Value> = s
+            .borrow()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
         serde_json::Value::Object(map)
     })
 }

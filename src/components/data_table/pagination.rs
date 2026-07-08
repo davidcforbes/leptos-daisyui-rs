@@ -55,10 +55,10 @@ pub fn page_window(current: usize, total: usize, max_visible: usize) -> Vec<Page
     let mut result = Vec::with_capacity(pages.len() + 2);
     let mut prev: Option<usize> = None;
     for p in pages {
-        if let Some(prev_p) = prev {
-            if p > prev_p + 1 {
-                result.push(PageSlot::Ellipsis);
-            }
+        if let Some(prev_p) = prev
+            && p > prev_p + 1
+        {
+            result.push(PageSlot::Ellipsis);
         }
         result.push(PageSlot::Page(p));
         prev = Some(p);
@@ -160,18 +160,12 @@ mod tests {
 
     #[test]
     fn current_at_zero_with_large_total() {
-        assert_eq!(
-            to_nums(&page_window(0, 100, 7)),
-            vec![0, 1, 2, -1, 99]
-        );
+        assert_eq!(to_nums(&page_window(0, 100, 7)), vec![0, 1, 2, -1, 99]);
     }
 
     #[test]
     fn current_at_last_with_large_total() {
-        assert_eq!(
-            to_nums(&page_window(99, 100, 7)),
-            vec![0, -1, 97, 98, 99]
-        );
+        assert_eq!(to_nums(&page_window(99, 100, 7)), vec![0, -1, 97, 98, 99]);
     }
 
     #[test]

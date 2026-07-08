@@ -1,5 +1,5 @@
-use super::*;
 use super::style::radius_class;
+use super::*;
 
 // IconTileColor tests
 
@@ -60,7 +60,11 @@ fn test_all_icon_tile_colors_return_valid_classes() {
     let variants = vec![
         (IconTileColor::Neutral, "bg-neutral/10", "text-neutral"),
         (IconTileColor::Primary, "bg-primary/10", "text-primary"),
-        (IconTileColor::Secondary, "bg-secondary/10", "text-secondary"),
+        (
+            IconTileColor::Secondary,
+            "bg-secondary/10",
+            "text-secondary",
+        ),
         (IconTileColor::Accent, "bg-accent/10", "text-accent"),
         (IconTileColor::Info, "bg-info/10", "text-info"),
         (IconTileColor::Success, "bg-success/10", "text-success"),

@@ -8,7 +8,9 @@ pub fn SparklineDemo() -> impl IntoView {
     // as `RwSignal`s (which are `Copy`) so they can be read from multiple
     // `move` closures below without fighting the borrow checker over a
     // shared `Vec<f32>`.
-    let throughput = RwSignal::new(vec![12.0, 18.0, 15.0, 22.0, 19.0, 27.0, 24.0, 31.0, 28.0, 35.0]);
+    let throughput = RwSignal::new(vec![
+        12.0, 18.0, 15.0, 22.0, 19.0, 27.0, 24.0, 31.0, 28.0, 35.0,
+    ]);
     let cpu = RwSignal::new(vec![40.0, 55.0, 48.0, 62.0, 58.0, 45.0, 50.0, 47.0]);
     let flat = RwSignal::new(vec![0.0, 0.0, 0.0, 0.0, 0.0]);
     let no_data = RwSignal::new(Vec::<f32>::new());

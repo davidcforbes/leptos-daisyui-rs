@@ -4,8 +4,7 @@ use leptos::prelude::*;
 use web_sys::WheelEvent;
 
 use crate::components::gantt::{
-    EditContext, EditType, GanttTask, GanttTaskHeight, ReadOnlyMode, ViewMode,
-    task_key,
+    EditContext, EditType, GanttTask, GanttTaskHeight, ReadOnlyMode, ViewMode, task_key,
     timeline::{TaskBar, TimelineGrid, TimelineScale},
     utils::{AccessibleAnnouncement, LiveRegion, task_aria_label, zoom_aria_label},
 };
@@ -354,7 +353,8 @@ pub fn GanttChart(
     // macro's RSX-style tag parser. Pairs each task with its index so the
     // `<For>` lists below can key on (index, content-hash) via `task_key`
     // rather than `id` alone.
-    let indexed_tasks = move || -> Vec<(usize, GanttTask)> { tasks.get().into_iter().enumerate().collect() };
+    let indexed_tasks =
+        move || -> Vec<(usize, GanttTask)> { tasks.get().into_iter().enumerate().collect() };
 
     view! {
         <div

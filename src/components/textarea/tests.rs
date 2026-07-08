@@ -1,5 +1,5 @@
-use super::*;
 use super::component::optional_numeric_attr;
+use super::*;
 
 // optional_numeric_attr tests (backs the `rows` / `maxlength` attribute plumbing)
 #[test]

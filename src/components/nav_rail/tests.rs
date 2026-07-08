@@ -76,10 +76,7 @@ fn test_indicator_class_shares_positioning_shell() {
 // component style modules (see metric_row::tests).
 #[test]
 fn test_all_item_states_return_valid_classes() {
-    let variants = vec![
-        (false, "text-base-content/60"),
-        (true, "text-primary"),
-    ];
+    let variants = vec![(false, "text-base-content/60"), (true, "text-primary")];
     for (active, expected_fragment) in variants {
         assert!(item_class(active).contains(expected_fragment));
     }
