@@ -1,0 +1,16 @@
+#!/bin/sh
+# Advisory pre-push: run the local CI gate, report, but NEVER block the push.
+# Enable per clone with:  git config core.hooksPath .githooks
+# See doc/ci-cd.md.
+
+if command -v cargo >/dev/null 2>&1; then
+    echo "[pre-push] cargo xtask verify (advisory) ..."
+    if cargo xtask verify; then
+        echo "[pre-push] gate green."
+    else
+        echo "[pre-push] gate reported failures above — pushing anyway (advisory)." >&2
+    fi
+else
+    echo "[pre-push] cargo not found; skipping gate." >&2
+fi
+exit 0
