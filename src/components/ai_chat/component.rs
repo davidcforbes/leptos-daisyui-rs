@@ -2,11 +2,12 @@ use super::style::{
     ComposerAction, clamp_composer_height, composer_key_action, is_markdown, is_thinking,
     role_classes, role_label, should_stick_to_bottom, show_welcome_chips,
 };
-use super::types::format_usage;
+use super::types::{format_usage, format_allowed_tools, settings_from_form_fields};
+use crate::components::{Dropdown, DropdownAlignment, DropdownContent, Input, Textarea, Toggle};
 use crate::markdown::MarkdownView;
 use crate::merge_classes;
-use ai_chat_core::{ChatMessage, ChatRequest, ChatSession};
-use leptos::html::{Div, Textarea};
+use ai_chat_core::{ChatMessage, ChatRequest, ChatSession, ChatSettings};
+use leptos::html::{Div, Textarea as HtmlTextarea};
 use leptos::prelude::*;
 use std::time::Duration;
 
@@ -56,9 +57,10 @@ const COMPOSER_MAX_HEIGHT_PX: f64 = 320.0;
 /// Every literal class this component can render (add to your `input.css`):
 /// ```css
 /// @source inline("chat chat-start chat-end chat-header chat-bubble chat-bubble-primary chat-bubble-info chat-bubble-neutral chat-bubble-ghost");
-/// @source inline("flex flex-col flex-1 flex-wrap items-center justify-between gap-2 h-full min-h-0 w-full overflow-y-auto p-2 p-3 p-4 px-3 pb-2 space-y-3");
+/// @source inline("flex flex-col flex-1 flex-wrap items-center justify-between gap-1 gap-2 h-full min-h-0 w-full w-72 overflow-y-auto p-2 p-3 p-4 px-3 pb-2 space-y-3 space-y-2");
 /// @source inline("border-t border-b border-base-300 text-xs text-sm opacity-50 opacity-60 text-right whitespace-pre-wrap resize-none max-h-[320px]");
 /// @source inline("btn btn-primary btn-error btn-ghost btn-sm btn-xs textarea textarea-bordered loading loading-dots loading-sm");
+/// @source inline("dropdown-content bg-base-100 rounded-box z-10 shadow border");
 /// ```
 #[component]
 pub fn AiChat(
@@ -83,6 +85,12 @@ pub fn AiChat(
     /// `Usage` event lands, and nothing again after a `restart`.
     #[prop(optional, into)]
     show_usage: Signal<bool>,
+    /// Show a gear button in the header that opens a settings popover
+    /// (model, system prompt, allowed tools, show-thinking/show-tool-calls)
+    /// wired to `ChatSession::configure`. Defaults to `false` so existing
+    /// consumers are unchanged.
+    #[prop(optional, into)]
+    show_settings: Signal<bool>,
     /// Extra classes for the root element.
     #[prop(optional, into)]
     class: &'static str,
@@ -102,7 +110,7 @@ pub fn AiChat(
     // Whether the transcript should follow new content; toggled by the user's scroll.
     let stick = RwSignal::new(true);
     let list_ref: NodeRef<Div> = NodeRef::new();
-    let textarea_ref: NodeRef<Textarea> = NodeRef::new();
+    let textarea_ref: NodeRef<HtmlTextarea> = NodeRef::new();
     let interval = poll_ms.unwrap_or(100);
 
     // Auto-grow the composer to fit its content, up to `COMPOSER_MAX_HEIGHT_PX`
@@ -131,6 +139,31 @@ pub fn AiChat(
             let _ = web_sys::HtmlElement::style(&el)
                 .set_property("height", &format!("{COMPOSER_BASE_HEIGHT_PX}px"));
         }
+    };
+
+    // Settings popover form state, seeded once from the session's current
+    // `ChatSettings` at creation time. `show_settings=false` (the default)
+    // never touches any of this.
+    let initial_settings = session.with_value(|s| s.settings().clone());
+    let settings_model = RwSignal::new(initial_settings.model.clone().unwrap_or_default());
+    let settings_system_prompt =
+        RwSignal::new(initial_settings.system_prompt.clone().unwrap_or_default());
+    let settings_tools_text = RwSignal::new(format_allowed_tools(&initial_settings.allowed_tools));
+    let settings_show_thinking = RwSignal::new(initial_settings.show_thinking);
+    let settings_show_tool_calls = RwSignal::new(initial_settings.show_tool_calls);
+
+    // Rebuild a `ChatSettings` from the form fields and forward it through
+    // `ChatSession::configure` (which also forwards to the transport).
+    let apply_settings = move || {
+        let new_settings: ChatSettings = settings_from_form_fields(
+            &settings_model.get(),
+            &settings_system_prompt.get(),
+            &settings_tools_text.get(),
+            settings_show_thinking.get(),
+            settings_show_tool_calls.get(),
+        );
+        session.update_value(|s| s.configure(new_settings));
+        version.update(|n| *n += 1);
     };
 
     let interval_handle = leptos::leptos_dom::helpers::set_interval_with_handle(
@@ -258,13 +291,83 @@ pub fn AiChat(
         <div class=move || merge_classes!("lds-aichat flex flex-col h-full min-h-0", class)>
             <div class="lds-aichat-header border-b border-base-300 p-2 flex items-center justify-between gap-2">
                 <span class="text-sm opacity-60 truncate">{move || subtitle.get()}</span>
-                <button
-                    type="button"
-                    class="btn btn-ghost btn-xs"
-                    on:click=move |_| restart()
-                >
-                    "New session"
-                </button>
+                <div class="flex items-center gap-2">
+                    <Show when=move || show_settings.get()>
+                        <Dropdown alignment=DropdownAlignment::End class="lds-aichat-settings">
+                            <button
+                                type="button"
+                                class="btn btn-ghost btn-xs"
+                                title="Chat settings"
+                                aria-label="Chat settings"
+                            >
+                                "\u{2699}"
+                            </button>
+                            <DropdownContent class="dropdown-content bg-base-100 rounded-box z-10 w-72 p-3 shadow border border-base-300 space-y-2">
+                                <label class="flex flex-col gap-1 text-xs">
+                                    <span class="opacity-60">"Model"</span>
+                                    <Input
+                                        size=crate::components::InputSize::Sm
+                                        value=Signal::derive(move || settings_model.get())
+                                        on_input=move |v| settings_model.set(v)
+                                        placeholder="(transport default)"
+                                    />
+                                </label>
+                                <label class="flex flex-col gap-1 text-xs">
+                                    <span class="opacity-60">"System prompt"</span>
+                                    <Textarea
+                                        size=crate::components::TextareaSize::Sm
+                                        rows=2
+                                        value=Signal::derive(move || settings_system_prompt.get())
+                                        on_input=move |v| settings_system_prompt.set(v)
+                                    />
+                                </label>
+                                <label class="flex flex-col gap-1 text-xs">
+                                    <span class="opacity-60">"Allowed tools (comma-separated)"</span>
+                                    <Input
+                                        size=crate::components::InputSize::Sm
+                                        value=Signal::derive(move || settings_tools_text.get())
+                                        on_input=move |v| settings_tools_text.set(v)
+                                        placeholder="read, write"
+                                    />
+                                </label>
+                                <label class="flex items-center justify-between gap-2 text-xs">
+                                    <span class="opacity-60">"Show thinking"</span>
+                                    <Toggle
+                                        size=crate::components::ToggleSize::Sm
+                                        attr:checked=move || settings_show_thinking.get()
+                                        on:change=move |e| {
+                                            settings_show_thinking.set(event_target_checked(&e))
+                                        }
+                                    />
+                                </label>
+                                <label class="flex items-center justify-between gap-2 text-xs">
+                                    <span class="opacity-60">"Show tool calls"</span>
+                                    <Toggle
+                                        size=crate::components::ToggleSize::Sm
+                                        attr:checked=move || settings_show_tool_calls.get()
+                                        on:change=move |e| {
+                                            settings_show_tool_calls.set(event_target_checked(&e))
+                                        }
+                                    />
+                                </label>
+                                <button
+                                    type="button"
+                                    class="btn btn-primary btn-xs w-full"
+                                    on:click=move |_| apply_settings()
+                                >
+                                    "Apply"
+                                </button>
+                            </DropdownContent>
+                        </Dropdown>
+                    </Show>
+                    <button
+                        type="button"
+                        class="btn btn-ghost btn-xs"
+                        on:click=move |_| restart()
+                    >
+                        "New session"
+                    </button>
+                </div>
             </div>
 
             <div

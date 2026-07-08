@@ -73,13 +73,18 @@ pub fn AiChatDemo() -> impl IntoView {
                             "Draft a reply".to_string(),
                         ]
                         show_usage=true
+                        show_settings=true
                     />
                 </div>
                 <p class="text-sm opacity-70 mt-2">
                     "Try the welcome chips on the empty transcript, press Enter to send \
                      (Shift+Enter for a newline), hit Stop mid-stream to cancel a turn, \
                      copy any message, or click New session to reset. The cost/token caption \
-                     (bottom-right of the composer) updates after each scripted reply."
+                     (bottom-right of the composer) updates after each scripted reply. The gear \
+                     icon in the header opens a settings popover (model, system prompt, allowed \
+                     tools, thinking/tool-call visibility) wired to ChatSession::configure — this \
+                     scripted transport ignores the settings, but the form still round-trips \
+                     through the session."
                 </p>
             </Section>
         </ContentLayout>

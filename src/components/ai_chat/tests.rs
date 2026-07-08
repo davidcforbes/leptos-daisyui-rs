@@ -2,7 +2,9 @@ use super::style::{
     ComposerAction, clamp_composer_height, composer_key_action, is_markdown, is_thinking,
     role_classes, role_label, should_stick_to_bottom, show_welcome_chips,
 };
-use super::types::format_usage;
+use super::types::{
+    format_allowed_tools, format_usage, parse_allowed_tools, settings_from_form_fields,
+};
 use ai_chat_core::{ChatRole, Usage};
 
 #[test]
@@ -218,4 +220,74 @@ fn clamp_composer_height_above_max_uses_max() {
 fn clamp_composer_height_exactly_at_bounds_is_inclusive() {
     assert_eq!(clamp_composer_height(48.0, 48.0, 320.0), 48.0);
     assert_eq!(clamp_composer_height(320.0, 48.0, 320.0), 320.0);
+}
+
+// --- Settings popover: allowed-tools comma-split parse/format ---
+
+#[test]
+fn parse_allowed_tools_splits_and_trims() {
+    assert_eq!(
+        parse_allowed_tools(" read, write , search"),
+        Some(vec!["read".to_string(), "write".to_string(), "search".to_string()])
+    );
+}
+
+#[test]
+fn parse_allowed_tools_drops_empty_entries() {
+    assert_eq!(
+        parse_allowed_tools("read,, write,"),
+        Some(vec!["read".to_string(), "write".to_string()])
+    );
+}
+
+#[test]
+fn parse_allowed_tools_blank_input_is_none() {
+    assert_eq!(parse_allowed_tools(""), None);
+    assert_eq!(parse_allowed_tools("   "), None);
+    assert_eq!(parse_allowed_tools(" , , "), None);
+}
+
+#[test]
+fn format_allowed_tools_joins_with_comma_space() {
+    assert_eq!(
+        format_allowed_tools(&Some(vec!["read".to_string(), "write".to_string()])),
+        "read, write"
+    );
+}
+
+#[test]
+fn format_allowed_tools_none_is_empty_string() {
+    assert_eq!(format_allowed_tools(&None), "");
+}
+
+#[test]
+fn allowed_tools_roundtrips_through_parse_and_format() {
+    let original = Some(vec!["a".to_string(), "b".to_string()]);
+    let text = format_allowed_tools(&original);
+    assert_eq!(parse_allowed_tools(&text), original);
+}
+
+// --- Settings popover: building ChatSettings from raw form fields ---
+
+#[test]
+fn settings_from_form_fields_blank_text_becomes_none() {
+    let s = settings_from_form_fields("", "  ", "", false, false);
+    assert_eq!(s.model, None);
+    assert_eq!(s.system_prompt, None);
+    assert_eq!(s.allowed_tools, None);
+    assert!(!s.show_thinking);
+    assert!(!s.show_tool_calls);
+}
+
+#[test]
+fn settings_from_form_fields_trims_and_populates() {
+    let s = settings_from_form_fields(" claude-x ", " be terse ", "read, write", true, true);
+    assert_eq!(s.model, Some("claude-x".to_string()));
+    assert_eq!(s.system_prompt, Some("be terse".to_string()));
+    assert_eq!(
+        s.allowed_tools,
+        Some(vec!["read".to_string(), "write".to_string()])
+    );
+    assert!(s.show_thinking);
+    assert!(s.show_tool_calls);
 }
