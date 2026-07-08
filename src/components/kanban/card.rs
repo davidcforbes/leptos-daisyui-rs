@@ -152,7 +152,7 @@ pub fn KanbanCardView(
                             let person_name = name.clone();
                             let person_initials = initials.clone();
                             view! {
-                                <div class="avatar placeholder">
+                                <div class="avatar avatar-placeholder">
                                     <div class="bg-neutral text-neutral-content rounded-full w-6">
                                         {if !avatar.is_empty() {
                                             view! {
@@ -171,7 +171,7 @@ pub fn KanbanCardView(
 
                     // Show count if more than 3 assignees
                     <Show when=move || { card.get().assignees.len() > 3 }>
-                        <div class="avatar placeholder">
+                        <div class="avatar avatar-placeholder">
                             <div class="bg-neutral text-neutral-content rounded-full w-6">
                                 <span class="text-xs">
                                     {move || format!("+{}", card.get().assignees.len() - 3)}

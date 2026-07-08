@@ -57,7 +57,7 @@ const COMPOSER_MAX_HEIGHT_PX: f64 = 320.0;
 /// ## CSS
 /// Every literal class this component can render (add to your `input.css`):
 /// ```css
-/// @source inline("chat chat-start chat-end chat-header chat-bubble chat-bubble-primary chat-bubble-info chat-bubble-neutral chat-bubble-ghost chat-image avatar placeholder");
+/// @source inline("chat chat-start chat-end chat-header chat-bubble chat-bubble-primary chat-bubble-info chat-bubble-neutral chat-bubble-ghost chat-image avatar avatar-placeholder");
 /// @source inline("flex flex-col flex-1 flex-wrap items-center justify-between gap-1 gap-2 h-full min-h-0 w-full w-72 w-6 h-6 overflow-y-auto p-2 p-3 p-4 space-y-3 space-y-2");
 /// @source inline("border-t border-b border-base-300 text-xs text-sm opacity-50 opacity-60 text-right whitespace-pre-wrap resize-none max-h-[320px] text-[10px]");
 /// @source inline("btn btn-primary btn-error btn-ghost btn-sm btn-xs textarea textarea-bordered loading loading-dots loading-sm rounded-full");
@@ -520,7 +520,7 @@ fn MessageBubble(msg: ChatMessage) -> impl IntoView {
 
     view! {
         <div class=move || merge_classes!("chat ld-aichat-msg-in", side)>
-            <div class="chat-image avatar placeholder">
+            <div class="chat-image avatar avatar-placeholder">
                 <div class=move || {
                     merge_classes!("w-6 h-6 rounded-full", avatar_bg)
                 }>

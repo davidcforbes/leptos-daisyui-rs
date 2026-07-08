@@ -28,7 +28,7 @@ use leptos::{html, prelude::*};
 /// @source inline("w-8 w-10 w-12 w-16 w-24 rounded-full");
 /// @source inline("text-xs text-sm text-base text-lg text-xl");
 /// @source inline("font-semibold text-base-content opacity-60");
-/// @source inline("avatar placeholder");
+/// @source inline("avatar avatar-placeholder");
 /// ```
 #[component]
 pub fn Persona(
@@ -89,7 +89,7 @@ pub fn Persona(
             node_ref=node_ref
             class=container_class
         >
-            <div class="avatar placeholder">
+            <div class="avatar avatar-placeholder">
                 <Show
                     when=move || !image_url.get().is_empty()
                     fallback=move || view! {
