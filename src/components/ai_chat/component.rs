@@ -179,14 +179,26 @@ pub fn AiChat(
     let show_chips = move || show_welcome_chips(message_count(), welcome_prompts.get().len());
 
     // Auto-stick-to-bottom: after each transcript change, if the user is pinned
-    // to the bottom, scroll the list all the way down. Runs after DOM paint.
+    // to the bottom, scroll the list all the way down.
+    //
+    // Leptos `Effect`s run after the reactive update but *before* the browser
+    // has laid out newly-appended DOM (e.g. a fresh `MessageBubble`). Reading
+    // `scroll_height` synchronously here would observe a stale, too-small
+    // value and under-scroll — leaving the newest message partly below the
+    // fold, and potentially causing the `on:scroll` handler to see a large
+    // remaining distance and flip `stick` to `false`, disengaging future
+    // auto-scroll. Deferring the read+write to a `request_animation_frame`
+    // callback runs it after the browser has painted the new layout, so
+    // `scroll_height` reflects the settled content size.
     Effect::new(move |_| {
         version.track();
         thinking(); // also follow the thinking indicator's appearance
-        if stick.get_untracked()
-            && let Some(el) = list_ref.get()
-        {
-            el.set_scroll_top(el.scroll_height());
+        if stick.get_untracked() {
+            request_animation_frame(move || {
+                if let Some(el) = list_ref.get() {
+                    el.set_scroll_top(el.scroll_height());
+                }
+            });
         }
     });
 
