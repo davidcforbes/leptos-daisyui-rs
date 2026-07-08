@@ -275,10 +275,19 @@
 /* The tilted content keeps `flat` (not `preserve-3d`): it still tilts via the
    host's inherited `perspective`, but staying out of a shared 3D context stops
    it z-fighting with the coplanar z-index hover zones, which caused the
-   on-hover flicker (ldui-tuu). */
+   on-hover flicker (ldui-tuu). Hardened further: promote the content to its
+   OWN compositing layer (`will-change` + `backface-visibility: hidden`) so the
+   compositor composites its tilt independently of the zones instead of
+   repainting the shared context every frame, and make it non-interactive so
+   only the stationary zones hit-test — the component is documented
+   "non-interactive content only", so no real click target is lost, and this
+   removes any residual per-frame re-tilt path. */
 .hover-3d > *:not(div:empty) {
   transform-style: flat;
   transition: transform 0.1s ease-out;
+  will-change: transform;
+  backface-visibility: hidden;
+  pointer-events: none;
 }
 
 /* Hover zones - hidden overlay grid */
