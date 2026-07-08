@@ -89,3 +89,10 @@ pub fn is_thinking(waiting: bool, has_streaming_message: bool) -> bool {
 pub fn show_welcome_chips(message_count: usize, prompt_count: usize) -> bool {
     message_count == 0 && prompt_count > 0
 }
+
+/// Composer auto-grow: clamp the textarea's natural `scrollHeight` between a
+/// collapsed `base_height` and a `max_height`, beyond which the textarea
+/// stops growing and scrolls internally instead (`overflow-y-auto`).
+pub fn clamp_composer_height(scroll_height: f64, base_height: f64, max_height: f64) -> f64 {
+    scroll_height.max(base_height).min(max_height)
+}

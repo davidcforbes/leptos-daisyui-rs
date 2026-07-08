@@ -1,17 +1,21 @@
 use super::style::{
-    ComposerAction, composer_key_action, is_markdown, is_thinking, role_classes, role_label,
-    should_stick_to_bottom, show_welcome_chips,
+    ComposerAction, clamp_composer_height, composer_key_action, is_markdown, is_thinking,
+    role_classes, role_label, should_stick_to_bottom, show_welcome_chips,
 };
 use super::types::format_usage;
 use crate::markdown::MarkdownView;
 use crate::merge_classes;
 use ai_chat_core::{ChatMessage, ChatRequest, ChatSession};
-use leptos::html::Div;
+use leptos::html::{Div, Textarea};
 use leptos::prelude::*;
 use std::time::Duration;
 
 /// Distance (px) from the bottom within which the transcript keeps auto-scrolling.
 const STICK_THRESHOLD_PX: f64 = 40.0;
+/// Composer's collapsed height (px) — matches the old `rows="2"` sizing.
+const COMPOSER_BASE_HEIGHT_PX: f64 = 48.0;
+/// Composer's max auto-grow height (px) before it scrolls internally.
+const COMPOSER_MAX_HEIGHT_PX: f64 = 320.0;
 
 /// # AiChat
 ///
@@ -53,7 +57,7 @@ const STICK_THRESHOLD_PX: f64 = 40.0;
 /// ```css
 /// @source inline("chat chat-start chat-end chat-header chat-bubble chat-bubble-primary chat-bubble-info chat-bubble-neutral chat-bubble-ghost");
 /// @source inline("flex flex-col flex-1 flex-wrap items-center justify-between gap-2 h-full min-h-0 w-full overflow-y-auto p-2 p-3 p-4 px-3 pb-2 space-y-3");
-/// @source inline("border-t border-b border-base-300 text-xs text-sm opacity-50 opacity-60 text-right whitespace-pre-wrap resize-none");
+/// @source inline("border-t border-b border-base-300 text-xs text-sm opacity-50 opacity-60 text-right whitespace-pre-wrap resize-none max-h-[320px]");
 /// @source inline("btn btn-primary btn-error btn-ghost btn-sm btn-xs textarea textarea-bordered loading loading-dots loading-sm");
 /// ```
 #[component]
@@ -98,7 +102,36 @@ pub fn AiChat(
     // Whether the transcript should follow new content; toggled by the user's scroll.
     let stick = RwSignal::new(true);
     let list_ref: NodeRef<Div> = NodeRef::new();
+    let textarea_ref: NodeRef<Textarea> = NodeRef::new();
     let interval = poll_ms.unwrap_or(100);
+
+    // Auto-grow the composer to fit its content, up to `COMPOSER_MAX_HEIGHT_PX`
+    // (beyond which it scrolls internally via the `overflow-y-auto` class).
+    // Reset `height:auto` first so `scroll_height` reflects a shrink (e.g. a
+    // deleted line), not just growth.
+    let resize_textarea = move || {
+        if let Some(el) = textarea_ref.get() {
+            // `.style()` is ambiguous between `web_sys::HtmlElement`'s inherent
+            // getter and tachys' `ElementExt::style` (a setter); UFCS picks the
+            // web_sys inherent method unambiguously.
+            let style = web_sys::HtmlElement::style(&el);
+            let _ = style.set_property("height", "auto");
+            let clamped = clamp_composer_height(
+                el.scroll_height() as f64,
+                COMPOSER_BASE_HEIGHT_PX,
+                COMPOSER_MAX_HEIGHT_PX,
+            );
+            let _ = style.set_property("height", &format!("{clamped}px"));
+        }
+    };
+    // Collapse back to the base height after a turn is sent/the composer is
+    // cleared, rather than leaving a tall empty textarea.
+    let reset_textarea_height = move || {
+        if let Some(el) = textarea_ref.get() {
+            let _ = web_sys::HtmlElement::style(&el)
+                .set_property("height", &format!("{COMPOSER_BASE_HEIGHT_PX}px"));
+        }
+    };
 
     let interval_handle = leptos::leptos_dom::helpers::set_interval_with_handle(
         move || {
@@ -139,6 +172,7 @@ pub fn AiChat(
             })
         });
         input.set(String::new());
+        reset_textarea_height();
         stick.set(true); // a fresh turn always pins to the bottom
         version.update(|n| *n += 1);
     };
@@ -153,6 +187,7 @@ pub fn AiChat(
     let restart = move || {
         let _ = session.try_update_value(|s| s.restart());
         input.set(String::new());
+        reset_textarea_height();
         stick.set(true);
         version.update(|n| *n += 1);
         if let Some(cb) = on_restart {
@@ -281,14 +316,18 @@ pub fn AiChat(
 
             <div class="lds-aichat-input border-t border-base-300 p-3 flex gap-2">
                 <textarea
-                    class="textarea textarea-bordered flex-1 resize-none"
+                    node_ref=textarea_ref
+                    class="textarea textarea-bordered flex-1 resize-none max-h-[320px] overflow-y-auto"
                     rows="2"
                     placeholder=move || {
                         let p = placeholder.get();
                         if p.is_empty() { "Ask Claude about this document\u{2026}".to_string() } else { p }
                     }
                     prop:value=move || input.get()
-                    on:input=move |e| input.set(event_target_value(&e))
+                    on:input=move |e| {
+                        input.set(event_target_value(&e));
+                        resize_textarea();
+                    }
                     on:keydown=move |e| {
                         match composer_key_action(&e.key(), e.shift_key(), e.is_composing()) {
                             ComposerAction::Send => {

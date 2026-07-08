@@ -1,6 +1,6 @@
 use super::style::{
-    ComposerAction, composer_key_action, is_markdown, is_thinking, role_classes, role_label,
-    should_stick_to_bottom, show_welcome_chips,
+    ComposerAction, clamp_composer_height, composer_key_action, is_markdown, is_thinking,
+    role_classes, role_label, should_stick_to_bottom, show_welcome_chips,
 };
 use super::types::format_usage;
 use ai_chat_core::{ChatRole, Usage};
@@ -195,4 +195,27 @@ fn format_usage_small_token_counts_have_no_commas() {
         output_tokens: 3,
     };
     assert_eq!(format_usage(Some(u)), Some("$0.0001 · 12 in · 3 out".to_string()));
+}
+
+// --- Composer auto-grow clamp math ---
+
+#[test]
+fn clamp_composer_height_below_base_uses_base() {
+    assert_eq!(clamp_composer_height(20.0, 48.0, 320.0), 48.0);
+}
+
+#[test]
+fn clamp_composer_height_within_range_passes_through() {
+    assert_eq!(clamp_composer_height(150.0, 48.0, 320.0), 150.0);
+}
+
+#[test]
+fn clamp_composer_height_above_max_uses_max() {
+    assert_eq!(clamp_composer_height(500.0, 48.0, 320.0), 320.0);
+}
+
+#[test]
+fn clamp_composer_height_exactly_at_bounds_is_inclusive() {
+    assert_eq!(clamp_composer_height(48.0, 48.0, 320.0), 48.0);
+    assert_eq!(clamp_composer_height(320.0, 48.0, 320.0), 320.0);
 }
