@@ -95,13 +95,8 @@ args = ["-NoProfile", "-File", "scripts/test-visual.ps1"]
 # ============================================================================
 
 [tasks.verify-all]
-description = "Verify everything: build, test, and lint"
-dependencies = [
-    "fmt-check",
-    "build",
-    "test-quiet",
-    "clippy",
-]
+description = "Deprecated alias — routes to the xtask gate (`verify`)"
+alias = "verify"
 
 [tasks.fix-all]
 description = "Fix all auto-fixable issues (clippy + fmt)"
@@ -175,9 +170,39 @@ command = "cargo"
 args = ["doc", "--no-deps", "--open"]
 
 # ============================================================================
+# CI/CD gate — thin pass-throughs to the xtask (logic lives there; see
+# doc/ci-cd.md). The granular cargo tasks above remain for convenience.
+# ============================================================================
+
+[tasks.verify]
+description = "Local CI gate (advisory): fmt/clippy/build/check-demo/test"
+command = "cargo"
+args = ["xtask", "verify"]
+
+[tasks.verify-full]
+description = "verify + the real trunk wasm build"
+command = "cargo"
+args = ["xtask", "verify-full"]
+
+[tasks.bump-patch]
+description = "Bump the library patch version"
+command = "cargo"
+args = ["xtask", "bump", "patch"]
+
+[tasks.bump-minor]
+description = "Bump the library minor version"
+command = "cargo"
+args = ["xtask", "bump", "minor"]
+
+[tasks.bump-major]
+description = "Bump the library major version"
+command = "cargo"
+args = ["xtask", "bump", "major"]
+
+# ============================================================================
 # Default Task
 # ============================================================================
 
 [tasks.default]
-description = "Default task: verify-all"
-alias = "verify-all"
+description = "Default task: the local CI gate"
+alias = "verify"

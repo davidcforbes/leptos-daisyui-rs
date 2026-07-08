@@ -132,7 +132,7 @@ function Show-Menu {
     Write-Host "  [5]  Build Release              (cargo build --release)"
     Write-Host "  [6]  Run Tests                  (cargo test with output)"
     Write-Host "  [7]  Check Code                 (cargo check)"
-    Write-Host "  [8]  Verify All                 (format + build + test + clippy)"
+    Write-Host "  [8]  Verify                     (local CI gate via xtask)"
     Write-Host ""
 
     Write-Host "  CODE QUALITY" -ForegroundColor Yellow
@@ -210,7 +210,7 @@ function Invoke-Task {
             Invoke-CargoMake "check" "Check Code"
         }
         "8" {
-            Invoke-CargoMake "verify-all" "Verify All (Format + Build + Test + Clippy)"
+            Invoke-CargoMake "verify" "Verify (local CI gate via xtask: fmt/clippy/build/check-demo/test)"
         }
         "9" {
             Invoke-CargoMake "fmt" "Format Code"
