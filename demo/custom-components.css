@@ -266,10 +266,18 @@
   transform-style: preserve-3d;
   perspective: 1000px;
   transition: transform 0.1s ease-out;
+  /* The perspective-projected card renders slightly outside its host box; a
+     vertical margin keeps the tilt from colliding with adjacent content
+     (e.g. section headers) — ldui-tuu. */
+  margin-block: 1.5rem;
 }
 
+/* The tilted content keeps `flat` (not `preserve-3d`): it still tilts via the
+   host's inherited `perspective`, but staying out of a shared 3D context stops
+   it z-fighting with the coplanar z-index hover zones, which caused the
+   on-hover flicker (ldui-tuu). */
 .hover-3d > *:not(div:empty) {
-  transform-style: preserve-3d;
+  transform-style: flat;
   transition: transform 0.1s ease-out;
 }
 
