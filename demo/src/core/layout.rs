@@ -311,12 +311,12 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     value: "data-table",
                 },
                 ComponentItem {
-                    name: "Day Scheduler",
+                    name: "Day Scheduler (Calendar · Day)",
                     href: "/components/day-scheduler",
                     value: "day-scheduler",
                 },
                 ComponentItem {
-                    name: "Week View",
+                    name: "Week View (Calendar · Week)",
                     href: "/components/week-view",
                     value: "week-view",
                 },
@@ -536,7 +536,7 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     value: "auto-complete",
                 },
                 ComponentItem {
-                    name: "Calendar",
+                    name: "Calendar (Month · 3rd-party)",
                     href: "/components/calendar",
                     value: "calendar",
                 },
