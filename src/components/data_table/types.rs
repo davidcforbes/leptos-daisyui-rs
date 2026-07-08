@@ -224,6 +224,12 @@ pub struct DataTableClasses {
     pub pagination_button: &'static str,
     /// Page indicator class
     pub page_indicator: &'static str,
+    /// Numbered pagination page-button class (non-active pages)
+    pub pagination_page_button: &'static str,
+    /// Numbered pagination page-button class for the current/active page
+    pub pagination_active_page_button: &'static str,
+    /// Row-range caption class (e.g. "Showing 1-10 of 42")
+    pub row_range: &'static str,
 }
 
 impl Default for DataTableClasses {
@@ -239,6 +245,9 @@ impl Default for DataTableClasses {
             pagination: "flex justify-between items-center mt-4",
             pagination_button: "btn btn-sm",
             page_indicator: "text-sm",
+            pagination_page_button: "btn btn-sm join-item",
+            pagination_active_page_button: "btn btn-sm join-item btn-active",
+            row_range: "text-sm text-base-content/60",
         }
     }
 }
@@ -258,6 +267,8 @@ pub struct DataTableTexts {
     pub page_indicator: &'static str,
     /// Search input placeholder text
     pub search_placeholder: &'static str,
+    /// Row-range caption format (use {start}, {end}, and {total} placeholders)
+    pub row_range: &'static str,
 }
 
 impl Default for DataTableTexts {
@@ -269,6 +280,7 @@ impl Default for DataTableTexts {
             next: "Next",
             page_indicator: "Page {current} of {total}",
             search_placeholder: "Search...",
+            row_range: "Showing {start}\u{2013}{end} of {total}",
         }
     }
 }
@@ -487,6 +499,12 @@ mod tests {
         assert_eq!(classes.pagination, "flex justify-between items-center mt-4");
         assert_eq!(classes.pagination_button, "btn btn-sm");
         assert_eq!(classes.page_indicator, "text-sm");
+        assert_eq!(classes.pagination_page_button, "btn btn-sm join-item");
+        assert_eq!(
+            classes.pagination_active_page_button,
+            "btn btn-sm join-item btn-active"
+        );
+        assert_eq!(classes.row_range, "text-sm text-base-content/60");
     }
 
     // ── DataTableTexts::default ──
@@ -500,6 +518,7 @@ mod tests {
         assert_eq!(texts.next, "Next");
         assert_eq!(texts.page_indicator, "Page {current} of {total}");
         assert_eq!(texts.search_placeholder, "Search...");
+        assert_eq!(texts.row_range, "Showing {start}\u{2013}{end} of {total}");
     }
 
     // ── Column PartialEq ──

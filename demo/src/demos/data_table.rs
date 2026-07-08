@@ -357,6 +357,8 @@ pub fn DataTableDemo() -> impl IntoView {
             <Section title="Performance Test: 10,000 Rows">
                 <p class="text-sm opacity-70 mb-4">
                     "Efficient index-based operations handle large datasets smoothly. Try sorting by different columns."
+                    " With 10,000 rows at 50 per page (200 pages), the pagination bar below shows the numbered "
+                    "page-button windowing with ellipsis, plus the \"Showing X\u{2013}Y of Z\" row-range caption."
                 </p>
                 <div class="alert alert-info mb-4">
                     <svg
@@ -413,6 +415,7 @@ pub fn DataTableDemo() -> impl IntoView {
                         previous: "Anterior",
                         next: "Siguiente",
                         search_placeholder: "Buscar...",
+                        row_range: "Mostrando {start}\u{2013}{end} de {total}",
                     }
                 />
             </Section>

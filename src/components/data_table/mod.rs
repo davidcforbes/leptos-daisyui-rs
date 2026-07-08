@@ -47,6 +47,7 @@ mod clipboard;
 mod component;
 mod controls;
 mod header;
+mod pagination;
 mod resize;
 mod selection;
 mod server_component;

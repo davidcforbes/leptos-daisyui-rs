@@ -65,6 +65,10 @@ use web_sys::wasm_bindgen::JsCast;
 /// // Typed cells (Column::with_typed_cell -> TypedCell::Badge / TypedCell::Icon)
 /// @source inline("badge badge-neutral badge-primary badge-secondary badge-accent badge-info badge-success badge-warning badge-error");
 /// @source inline("inline-block w-4 h-4 w-5 h-5 w-6 h-6 w-8 h-8 w-12 h-12");
+/// // Pagination: numbered page buttons (join) + row-range caption (controls.rs)
+/// @source inline("flex justify-between items-center mt-4 gap-2");
+/// @source inline("btn btn-sm join join-item btn-active btn-disabled");
+/// @source inline("text-sm text-base-content/60");
 /// ```
 ///
 /// ## Node References
@@ -454,10 +458,14 @@ pub fn DataTable(
                                 current_page=Signal::derive(move || current_page.get())
                                 set_current_page=set_current_page
                                 total_pages=Signal::derive(move || total_pages.get())
+                                total_items=Signal::derive(move || sorted_indices.get().len())
+                                page_size=page_size
                                 texts=texts_for_controls.clone()
                                 pagination_class=classes.pagination
                                 button_class=classes.pagination_button
-                                indicator_class=classes.page_indicator
+                                page_button_class=classes.pagination_page_button
+                                active_page_button_class=classes.pagination_active_page_button
+                                range_class=classes.row_range
                             />
                         </div>
                     })
