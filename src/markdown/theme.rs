@@ -15,6 +15,8 @@
 
 use editmark_core::{Color, ColorScheme, Palette, all_builtin_schemes};
 use leptos::prelude::*;
+use leptos::reactive::owner::Owner;
+use std::cell::RefCell;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
 
@@ -86,24 +88,118 @@ pub fn daisyui_theme_to_scheme(daisy: &str) -> (&'static str, ThemeMode) {
     }
 }
 
-/// Install the global theme observer + base stylesheet if it hasn't been
-/// installed already, then return a [`ThemeContext`] reflecting current state.
+thread_local! {
+    /// The document-lifetime [`ThemeContext`] singleton.
+    ///
+    /// `use_theme()` may be called from many different, frequently-rebuilt
+    /// component subtrees (e.g. every `MessageBubble`/`MarkdownView` in
+    /// `AiChat`'s poll loop creates its own). `use_context` alone is not a
+    /// safe way to share the context across those calls: context lookups
+    /// are scoped to the *reactive owner tree*, and a subtree that doesn't
+    /// happen to inherit the context from a still-alive ancestor would fall
+    /// through and mint a brand-new `ThemeContext` — including brand-new
+    /// signals registered under *that* transient owner. Those signals get
+    /// disposed the moment their owning component is torn down, yet the
+    /// global `MutationObserver` installed by [`install_theme_observer`]
+    /// (deliberately leaked for the document's lifetime) keeps calling
+    /// `.set()` on whichever signals it captured first — a disposed-signal
+    /// access, which panics and kills the whole reactive runtime.
+    ///
+    /// Caching the resolved `ThemeContext` here, keyed to nothing but the
+    /// thread (i.e. the single-threaded WASM document), makes every caller
+    /// — regardless of where in the component tree it lives or how often
+    /// its own owner gets rebuilt — observe the exact same signals.
+    static THEME_CTX: RefCell<Option<ThemeContext>> = const { RefCell::new(None) };
+
+    /// The root [`Owner`] the singleton's signals are registered under.
+    ///
+    /// Held here so it is *never dropped*: dropping an `Owner` cleans up
+    /// (and thus disposes) every arena node registered while it was the
+    /// current owner, which is exactly what would tear the signals above
+    /// down.
+    static THEME_OWNER: RefCell<Option<Owner>> = const { RefCell::new(None) };
+}
+
+/// Build (or reuse) a reactive-graph [`Owner`] that outlives every
+/// component: one with **no parent**.
 ///
-/// Idempotent — calling this many times is safe; the stylesheet and observer
-/// install exactly once per document.
-pub fn use_theme() -> ThemeContext {
-    if let Some(ctx) = use_context::<ThemeContext>() {
+/// `Owner::new()` parents itself to whatever `Owner` is "current" on this
+/// thread at the moment it's called — normally the calling component's own
+/// owner. If `use_theme()` created its signals directly under that owner
+/// (or under a plain `Owner::new()` child of it), the signals would be torn
+/// down the moment that *calling* component's owner is cleaned up (e.g. a
+/// rebuilt `MessageBubble`), because owner cleanup cascades to every
+/// descendant owner.
+///
+/// To avoid inheriting a doomed parent, we briefly clear reactive_graph's
+/// notion of the "current owner" (`Owner::unset` only clears that
+/// thread-local pointer — it does not run cleanup or otherwise touch the
+/// owner), construct our root while nothing is current (so it is
+/// genuinely parentless), then restore the caller's owner so we don't
+/// disturb its reactive context.
+///
+/// (`reactive_graph`'s hydration-gated `Owner::new_root` would do this more
+/// directly, but this crate only enables the plain `csr` feature, so that
+/// constructor isn't available here.)
+fn document_root_owner() -> Owner {
+    let previous = Owner::current();
+    if let Some(previous) = previous.clone() {
+        previous.unset();
+    }
+    let owner = Owner::new();
+    if let Some(previous) = previous {
+        previous.set();
+    }
+    owner
+}
+
+/// Get-or-init the [`ThemeContext`] singleton, running `init` (under a
+/// freshly detached document-root [`Owner`]) only on the very first call.
+///
+/// Split out from [`use_theme`] so the memoization behavior is unit
+/// testable without touching the DOM: `init` is where all
+/// `web_sys`/`wasm_bindgen` calls live.
+fn get_or_init_theme_ctx(init: impl FnOnce(Owner) -> ThemeContext) -> ThemeContext {
+    if let Some(ctx) = THEME_CTX.with(|cell| cell.borrow().clone()) {
         return ctx;
     }
 
-    let (initial_scheme, initial_mode) = resolve_theme_from_dom();
-    let scheme = RwSignal::new(initial_scheme);
-    let mode = RwSignal::new(initial_mode);
-    let ctx = ThemeContext { scheme, mode };
-    provide_context(ctx.clone());
+    let owner = document_root_owner();
+    let ctx = init(owner.clone());
 
-    install_global_styles_once();
-    install_theme_observer(scheme, mode);
+    // Keep the owner alive forever: dropping it would dispose `ctx`'s
+    // signals right back out from under this singleton.
+    THEME_OWNER.with(|cell| *cell.borrow_mut() = Some(owner));
+    THEME_CTX.with(|cell| *cell.borrow_mut() = Some(ctx.clone()));
+    ctx
+}
+
+/// Install the global theme observer + base stylesheet if it hasn't been
+/// installed already, then return a [`ThemeContext`] reflecting current state.
+///
+/// Idempotent — calling this many times is safe; the stylesheet, observer,
+/// and underlying signals install exactly once per document, no matter how
+/// many different component subtrees call this function or how often those
+/// subtrees themselves get torn down and rebuilt.
+pub fn use_theme() -> ThemeContext {
+    let ctx = get_or_init_theme_ctx(|owner| {
+        owner.with(|| {
+            let (initial_scheme, initial_mode) = resolve_theme_from_dom();
+            let scheme = RwSignal::new(initial_scheme);
+            let mode = RwSignal::new(initial_mode);
+
+            install_global_styles_once();
+            install_theme_observer(scheme, mode);
+
+            ThemeContext { scheme, mode }
+        })
+    });
+
+    // Also provide via Leptos context for any subtree that looks it up
+    // directly with `use_context::<ThemeContext>()`. The thread-local
+    // singleton above remains the actual source of truth — this is purely
+    // an ergonomic mirror and is never itself read back by `use_theme()`.
+    provide_context(ctx.clone());
 
     ctx
 }
@@ -600,3 +696,74 @@ const BASE_STYLES: &str = r#"
 .lds-syn-op  { color: #56b6c2; }
 .lds-syn-pp  { color: #c678dd; }
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // NOTE: these tests exercise only the pure reactive-ownership plumbing.
+    // Anything that touches `web_sys`/`wasm_bindgen` (e.g.
+    // `resolve_theme_from_dom`, `install_global_styles_once`,
+    // `install_theme_observer`) panics on a native (non-wasm32) test target
+    // — `web_sys::window()` calls `cannot access imported statics on
+    // non-wasm targets` — so `use_theme()` itself cannot be unit tested
+    // here; that's exactly why the DOM-touching bits are isolated inside
+    // the `init` closure passed to `get_or_init_theme_ctx`.
+
+    #[test]
+    fn document_root_owner_has_no_parent_even_under_a_caller_owner() {
+        let caller = Owner::new();
+        caller.with(|| {
+            let root = document_root_owner();
+            assert!(
+                root.parent().is_none(),
+                "the document-lifetime owner must never inherit the calling \
+                 component's owner as a parent, or it would be disposed \
+                 along with that component"
+            );
+        });
+    }
+
+    #[test]
+    fn document_root_owner_restores_the_caller_as_current() {
+        let caller = Owner::new();
+        caller.with(|| {
+            let _root = document_root_owner();
+            assert_eq!(
+                Owner::current(),
+                Some(caller.clone()),
+                "detaching to build the root owner must not leak: the \
+                 caller's owner has to still be current afterward"
+            );
+        });
+    }
+
+    #[test]
+    fn use_theme_singleton_shares_signals_across_calls() {
+        let ctx1 = get_or_init_theme_ctx(|owner| {
+            owner.with(|| ThemeContext {
+                scheme: RwSignal::new(
+                    all_builtin_schemes()
+                        .into_iter()
+                        .next()
+                        .expect("editmark-core ships at least one built-in scheme"),
+                ),
+                mode: RwSignal::new(ThemeMode::Dark),
+            })
+        });
+
+        let ctx2 = get_or_init_theme_ctx(|_owner| {
+            panic!("init must not run twice — the singleton should short-circuit");
+        });
+
+        // If these are really the same underlying signal, a write through
+        // one handle must be visible through the other.
+        ctx1.mode.set(ThemeMode::Light);
+        assert_eq!(
+            ctx2.mode.get(),
+            ThemeMode::Light,
+            "get_or_init_theme_ctx must return the same signals on every \
+             call, not mint a fresh ThemeContext per caller"
+        );
+    }
+}

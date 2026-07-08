@@ -29,6 +29,7 @@ web-sys = { version = "0.3", features = [
     "CssStyleDeclaration",
     "Navigator",
     "Clipboard",
+    "Performance",
 ] }
 
 console_log = "1.0.0"

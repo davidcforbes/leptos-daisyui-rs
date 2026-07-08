@@ -5,11 +5,20 @@ use leptos_router::{components::Outlet, hooks::use_location};
 use leptos_use::use_interval_fn;
 use wasm_bindgen::prelude::*;
 
-// External JavaScript interface for performance.memory (Chrome only)
-#[wasm_bindgen]
-extern "C" {
-    #[wasm_bindgen(js_namespace = performance, js_name = memory, getter)]
-    fn get_memory() -> JsValue;
+/// Read the non-standard, Chrome-only `performance.memory` **property**.
+///
+/// `performance.memory` is a plain object property, not a method — calling
+/// it as a function (as a naive `#[wasm_bindgen(js_namespace = performance,
+/// getter)] fn memory() -> JsValue` extern would, since `getter` only takes
+/// effect on a `method`-style binding with a `this` receiver, not on a bare
+/// namespace-qualified function) throws `TypeError: performance.memory is
+/// not a function` in every browser, including Chrome. Firefox and Safari
+/// don't implement the property at all. `js_sys::Reflect::get` reads it as
+/// a property lookup and simply returns `undefined` (never throws) when the
+/// property is absent, so this degrades silently everywhere.
+fn read_performance_memory() -> Option<JsValue> {
+    let performance = web_sys::window()?.performance()?;
+    js_sys::Reflect::get(&performance, &JsValue::from_str("memory")).ok()
 }
 
 /// Layout component for the demos
@@ -59,7 +68,7 @@ pub fn Layout() -> impl IntoView {
             set_current_time.set(time_str);
 
             // Update memory usage (Chrome only, graceful degradation)
-            let memory_obj = get_memory();
+            let memory_obj = read_performance_memory().unwrap_or(JsValue::UNDEFINED);
             if !memory_obj.is_undefined() && !memory_obj.is_null() {
                 // Try to get usedJSHeapSize and jsHeapSizeLimit
                 if let Ok(used) = js_sys::Reflect::get(&memory_obj, &JsValue::from_str("usedJSHeapSize")) {
