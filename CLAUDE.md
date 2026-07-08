@@ -36,6 +36,23 @@ The project includes a comprehensive PowerShell launcher with an interactive men
 
 See [`LAUNCHER.md`](./LAUNCHER.md) for complete guide.
 
+### Local CI gate (the primary check — see [`doc/ci-cd.md`](./doc/ci-cd.md))
+
+CI/CD is **local-only, two-layer**: logic lives in the `xtask/` crate; cargo-make
+just delegates. Run the gate before committing:
+
+```bash
+cargo xtask verify        # advisory gate: fmt/clippy/build/check-demo/test (exit = # failures)
+cargo make verify         # same, via cargo-make
+cargo xtask verify-full   # + the real trunk wasm build (needs npm/trunk)
+cargo xtask bump patch|minor|major   # bump the library version (human-chosen level)
+```
+
+**Repo-specific gotchas the gate encodes (do NOT run these directly):**
+`cargo fmt --all` reaches into sibling repos — fmt **per-package**
+(`-p leptos-daisyui-rs -p leptos-daisyui-showcase -p xtask`). `cargo clippy
+--workspace` fails on leptos-`csr` feature unification — clippy **per-crate**.
+
 ### Using cargo-make (Recommended for CI/Scripts)
 
 The project includes a comprehensive `Makefile.toml` with automated workflows:
