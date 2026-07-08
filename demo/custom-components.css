@@ -136,27 +136,35 @@
   100% { opacity: 1; transform: translateY(0); }
 }
 
+/* Stack all rotating items in a single inline-grid cell. `display: contents`
+   flattens the middle container so the items become grid children of
+   `.text-rotate`; each shares grid cell 1/1 so they overlap in place, the box
+   sizes to the widest item, and the visible word sits on the text baseline.
+   (The previous absolute/relative model let the container grow to ~3 line
+   heights, pushing the words above the visible band where overflow clipped
+   them — ldui-mys.) */
 .text-rotate {
-  position: relative;
-  display: inline-block;
+  display: inline-grid;
+  overflow: hidden;
+  vertical-align: bottom;
+  align-items: center;
 }
 
 .text-rotate > span {
-  position: relative;
-  display: inline-block;
+  display: contents;
 }
 
 .text-rotate > span > span {
-  position: absolute;
-  left: 0;
-  top: 0;
+  grid-column: 1;
+  grid-row: 1;
+  justify-self: start;
+  align-self: center;
   opacity: 0;
   white-space: nowrap;
 }
 
 /* Show first item by default */
 .text-rotate > span > span:first-child {
-  position: relative;
   opacity: 1;
 }
 
