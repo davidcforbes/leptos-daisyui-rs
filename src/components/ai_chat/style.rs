@@ -120,3 +120,17 @@ pub fn role_avatar_bg(role: &ChatRole) -> &'static str {
         ChatRole::Tool => "bg-neutral text-neutral-content",
     }
 }
+
+/// Avatar glyph for a role. Mirrors [`role_label`]'s first letter for most
+/// roles, except `Thinking`/`Tool` — both of which would otherwise collide on
+/// "T" — which get distinct glyphs instead (an ellipsis for the ephemeral
+/// reasoning indicator, a gear for tool-call output).
+pub fn role_avatar_initial(role: &ChatRole) -> &'static str {
+    match role {
+        ChatRole::User => "Y",
+        ChatRole::Assistant => "C",
+        ChatRole::System => "S",
+        ChatRole::Thinking => "\u{2026}",
+        ChatRole::Tool => "\u{2699}",
+    }
+}

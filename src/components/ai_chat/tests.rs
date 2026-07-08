@@ -1,7 +1,7 @@
 use super::style::{
     ComposerAction, clamp_composer_height, composer_hint, composer_key_action, is_markdown,
-    is_thinking, role_avatar_bg, role_classes, role_label, should_stick_to_bottom,
-    show_welcome_chips,
+    is_thinking, role_avatar_bg, role_avatar_initial, role_classes, role_label,
+    should_stick_to_bottom, show_welcome_chips,
 };
 use super::types::{
     format_allowed_tools, format_usage, parse_allowed_tools, settings_from_form_fields,
@@ -66,8 +66,14 @@ fn shift_enter_inserts_newline() {
 
 #[test]
 fn other_keys_are_ignored() {
-    assert_eq!(composer_key_action("a", false, false), ComposerAction::Ignore);
-    assert_eq!(composer_key_action("a", true, false), ComposerAction::Ignore);
+    assert_eq!(
+        composer_key_action("a", false, false),
+        ComposerAction::Ignore
+    );
+    assert_eq!(
+        composer_key_action("a", true, false),
+        ComposerAction::Ignore
+    );
     assert_eq!(
         composer_key_action("Escape", false, false),
         ComposerAction::Ignore
@@ -187,7 +193,10 @@ fn format_usage_formats_cost_and_tokens() {
         input_tokens: 1234,
         output_tokens: 567,
     };
-    assert_eq!(format_usage(Some(u)), Some("$0.0021 · 1,234 in · 567 out".to_string()));
+    assert_eq!(
+        format_usage(Some(u)),
+        Some("$0.0021 · 1,234 in · 567 out".to_string())
+    );
 }
 
 #[test]
@@ -197,7 +206,10 @@ fn format_usage_small_token_counts_have_no_commas() {
         input_tokens: 12,
         output_tokens: 3,
     };
-    assert_eq!(format_usage(Some(u)), Some("$0.0001 · 12 in · 3 out".to_string()));
+    assert_eq!(
+        format_usage(Some(u)),
+        Some("$0.0001 · 12 in · 3 out".to_string())
+    );
 }
 
 // --- Composer auto-grow clamp math ---
@@ -229,7 +241,11 @@ fn clamp_composer_height_exactly_at_bounds_is_inclusive() {
 fn parse_allowed_tools_splits_and_trims() {
     assert_eq!(
         parse_allowed_tools(" read, write , search"),
-        Some(vec!["read".to_string(), "write".to_string(), "search".to_string()])
+        Some(vec![
+            "read".to_string(),
+            "write".to_string(),
+            "search".to_string()
+        ])
     );
 }
 
@@ -297,7 +313,10 @@ fn settings_from_form_fields_trims_and_populates() {
 
 #[test]
 fn composer_hint_idle_shows_keybindings() {
-    assert_eq!(composer_hint(false), "Enter to send · Shift+Enter for newline");
+    assert_eq!(
+        composer_hint(false),
+        "Enter to send · Shift+Enter for newline"
+    );
 }
 
 #[test]
@@ -309,7 +328,10 @@ fn composer_hint_busy_shows_generating() {
 
 #[test]
 fn avatar_bg_distinguishes_user_from_agent() {
-    assert_ne!(role_avatar_bg(&ChatRole::User), role_avatar_bg(&ChatRole::Assistant));
+    assert_ne!(
+        role_avatar_bg(&ChatRole::User),
+        role_avatar_bg(&ChatRole::Assistant)
+    );
 }
 
 #[test]
@@ -326,4 +348,34 @@ fn avatar_bg_is_a_daisyui_bg_class_for_every_role() {
             "{r:?} avatar bg class should start with bg-"
         );
     }
+}
+
+// --- Per-role avatar initial glyph ---
+
+#[test]
+fn avatar_initial_is_unique_per_role() {
+    let roles = [
+        ChatRole::User,
+        ChatRole::Assistant,
+        ChatRole::System,
+        ChatRole::Thinking,
+        ChatRole::Tool,
+    ];
+    for (i, a) in roles.iter().enumerate() {
+        for b in &roles[i + 1..] {
+            assert_ne!(
+                role_avatar_initial(a),
+                role_avatar_initial(b),
+                "{a:?} and {b:?} should not share an avatar initial"
+            );
+        }
+    }
+}
+
+#[test]
+fn avatar_initial_distinguishes_thinking_from_tool() {
+    assert_ne!(
+        role_avatar_initial(&ChatRole::Thinking),
+        role_avatar_initial(&ChatRole::Tool)
+    );
 }

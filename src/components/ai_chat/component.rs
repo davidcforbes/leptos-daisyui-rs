@@ -1,9 +1,9 @@
 use super::style::{
     ComposerAction, clamp_composer_height, composer_hint, composer_key_action, is_markdown,
-    is_thinking, role_avatar_bg, role_classes, role_label, should_stick_to_bottom,
-    show_welcome_chips,
+    is_thinking, role_avatar_bg, role_avatar_initial, role_classes, role_label,
+    should_stick_to_bottom, show_welcome_chips,
 };
-use super::types::{format_usage, format_allowed_tools, settings_from_form_fields};
+use super::types::{format_allowed_tools, format_usage, settings_from_form_fields};
 use crate::components::{Dropdown, DropdownAlignment, DropdownContent, Input, Textarea, Toggle};
 use crate::markdown::MarkdownView;
 use crate::merge_classes;
@@ -58,7 +58,7 @@ const COMPOSER_MAX_HEIGHT_PX: f64 = 320.0;
 /// Every literal class this component can render (add to your `input.css`):
 /// ```css
 /// @source inline("chat chat-start chat-end chat-header chat-bubble chat-bubble-primary chat-bubble-info chat-bubble-neutral chat-bubble-ghost chat-image avatar placeholder");
-/// @source inline("flex flex-col flex-1 flex-wrap items-center justify-between gap-1 gap-2 h-full min-h-0 w-full w-72 w-6 h-6 overflow-y-auto p-2 p-3 p-4 px-3 pb-2 space-y-3 space-y-2");
+/// @source inline("flex flex-col flex-1 flex-wrap items-center justify-between gap-1 gap-2 h-full min-h-0 w-full w-72 w-6 h-6 overflow-y-auto p-2 p-3 p-4 space-y-3 space-y-2");
 /// @source inline("border-t border-b border-base-300 text-xs text-sm opacity-50 opacity-60 text-right whitespace-pre-wrap resize-none max-h-[320px] text-[10px]");
 /// @source inline("btn btn-primary btn-error btn-ghost btn-sm btn-xs textarea textarea-bordered loading loading-dots loading-sm rounded-full");
 /// @source inline("dropdown-content bg-base-100 rounded-box z-10 shadow border");
@@ -144,8 +144,9 @@ pub fn AiChat(
     };
 
     // Settings popover form state, seeded once from the session's current
-    // `ChatSettings` at creation time. `show_settings=false` (the default)
-    // never touches any of this.
+    // `ChatSettings` at creation time. This seed read runs unconditionally on
+    // every mount regardless of `show_settings`; only the popover UI itself is
+    // gated behind that prop.
     let initial_settings = session.with_value(|s| s.settings().clone());
     let settings_model = RwSignal::new(initial_settings.model.clone().unwrap_or_default());
     let settings_system_prompt =
@@ -183,9 +184,7 @@ pub fn AiChat(
             if changed {
                 version.update(|n| *n += 1);
             }
-            if doc_changed
-                && let Some(cb) = on_document_changed
-            {
+            if doc_changed && let Some(cb) = on_document_changed {
                 cb.run(());
             }
         },
@@ -245,9 +244,8 @@ pub fn AiChat(
     };
     let thinking = move || {
         version.track();
-        session.with_value(|s| {
-            is_thinking(s.is_waiting(), s.messages().iter().any(|m| m.streaming))
-        })
+        session
+            .with_value(|s| is_thinking(s.is_waiting(), s.messages().iter().any(|m| m.streaming)))
     };
     let message_count = move || {
         version.track();
@@ -340,7 +338,7 @@ pub fn AiChat(
                                     <span class="opacity-60">"Show thinking"</span>
                                     <Toggle
                                         size=crate::components::ToggleSize::Sm
-                                        attr:checked=move || settings_show_thinking.get()
+                                        prop:checked=move || settings_show_thinking.get()
                                         on:change=move |e| {
                                             settings_show_thinking.set(event_target_checked(&e))
                                         }
@@ -350,7 +348,7 @@ pub fn AiChat(
                                     <span class="opacity-60">"Show tool calls"</span>
                                     <Toggle
                                         size=crate::components::ToggleSize::Sm
-                                        attr:checked=move || settings_show_tool_calls.get()
+                                        prop:checked=move || settings_show_tool_calls.get()
                                         on:change=move |e| {
                                             settings_show_tool_calls.set(event_target_checked(&e))
                                         }
@@ -496,7 +494,7 @@ fn MessageBubble(msg: ChatMessage) -> impl IntoView {
     let (side, bubble) = role_classes(&msg.role);
     let label = role_label(&msg.role);
     let avatar_bg = role_avatar_bg(&msg.role);
-    let avatar_initial = label.chars().next().unwrap_or('?').to_string();
+    let avatar_initial = role_avatar_initial(&msg.role);
     let md = is_markdown(&msg.role);
     let streaming = msg.streaming;
     let content = msg.content.clone();
