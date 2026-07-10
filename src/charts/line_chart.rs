@@ -25,6 +25,12 @@ pub fn LineChart(
     /// Optional label for the y-axis.
     #[prop(optional)]
     y_label: Option<String>,
+    /// Optional categorical x-axis tick labels (e.g. week-ending dates). When
+    /// non-empty, the five x ticks show labels sampled evenly from this list
+    /// instead of the raw fractional data value — so a chart plotted against a
+    /// synthetic 0,1,2… index no longer prints meaningless "0.0/0.2/…" ticks.
+    #[prop(optional)]
+    x_labels: Vec<String>,
 ) -> impl IntoView {
     if data.is_empty() {
         return view! {
@@ -125,11 +131,17 @@ pub fn LineChart(
     let x_tick_views = (0..=4)
         .map(|i| {
             let frac = i as f64 / 4.0;
-            let val = x_min + frac * x_range;
             let sx = pad_left + frac * chart_w;
             let x_pos = format!("{sx:.2}");
             let y_pos = format!("{:.2}", pad_top + chart_h + 15.0);
-            let label = format!("{val:.1}");
+            let label = if x_labels.is_empty() {
+                let val = x_min + frac * x_range;
+                format!("{val:.1}")
+            } else {
+                // Sample the supplied labels at the same five tick fractions.
+                let idx = (frac * (x_labels.len().saturating_sub(1)) as f64).round() as usize;
+                x_labels.get(idx).cloned().unwrap_or_default()
+            };
             view! {
                 <text x=x_pos y=y_pos text-anchor="middle"
                     fill="currentColor" font-size="10" opacity="0.6">

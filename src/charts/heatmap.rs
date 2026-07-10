@@ -86,6 +86,17 @@ pub fn Heatmap(
     /// (for wide grids, e.g. a 16-column VaR matrix).
     #[prop(default = false)]
     slant_col_labels: bool,
+    /// Optional left-padding override (space reserved for row labels).
+    /// Defaults to 100.0; raise it when row labels are long enough to clip
+    /// (e.g. the VaR matrix's "U-Visa Investigation" / "*Est." prefixes).
+    /// bd_4iiz-inventory-43e.
+    #[prop(optional)]
+    pad_left: Option<f64>,
+    /// Optional top-padding override (space reserved for column headers).
+    /// Defaults to 70.0 when `slant_col_labels` else 30.0; raise it when
+    /// slanted headers overlap the first cell row. bd_4iiz-inventory-43e.
+    #[prop(optional)]
+    pad_top: Option<f64>,
 ) -> impl IntoView {
     let viewbox = format!("0 0 {width} {height}");
 
@@ -104,9 +115,9 @@ pub fn Heatmap(
     let n_rows = row_labels.len();
     let n_cols = col_labels.len();
 
-    let pad_left: f64 = 100.0;
+    let pad_left: f64 = pad_left.unwrap_or(100.0);
     let pad_right: f64 = 10.0;
-    let pad_top: f64 = if slant_col_labels { 70.0 } else { 30.0 };
+    let pad_top: f64 = pad_top.unwrap_or(if slant_col_labels { 70.0 } else { 30.0 });
     let pad_bottom: f64 = 10.0;
 
     let chart_w = width as f64 - pad_left - pad_right;
@@ -166,7 +177,11 @@ pub fn Heatmap(
             let x_str = format!("{x:.2}");
             let y_str = format!("{y:.2}");
             if slant_col_labels {
-                let t = format!("rotate(-45, {x:.2}, {y:.2})");
+                // Rise UP-left from just above each column (positive rotate +
+                // end-anchor sends the text body to negative-y), so long
+                // headers never dip DOWN into the first cell row — the
+                // `rotate(-45)` overlap bug (bd_4iiz-inventory-43e).
+                let t = format!("rotate(45, {x:.2}, {y:.2})");
                 view! {
                     <text x=x_str y=y_str text-anchor="end" fill="currentColor"
                         font-size="10" transform=t>
