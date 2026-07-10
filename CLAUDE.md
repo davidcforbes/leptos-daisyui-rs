@@ -44,7 +44,8 @@ just delegates. Run the gate before committing:
 ```bash
 cargo xtask verify        # advisory gate: fmt/clippy/build/check-demo/test (exit = # failures)
 cargo make verify         # same, via cargo-make
-cargo xtask verify-full   # + the real trunk wasm build (needs npm/trunk)
+cargo xtask verify-full   # + reactivity suite + the real trunk wasm build (needs npm/trunk/Chrome)
+cargo xtask test-reactivity          # reactivity/DOM-oracle suite alone (self-spawns a demo server)
 cargo xtask bump patch|minor|major   # bump the library version (human-chosen level)
 ```
 

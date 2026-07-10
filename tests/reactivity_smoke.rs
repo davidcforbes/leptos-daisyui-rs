@@ -2,13 +2,21 @@
 //! demo app and asserts internal Leptos state through the
 //! `window.__APP_DEBUG__` oracle (ldui-49w.3), not through pixels.
 //!
-//! `#[ignore]`d because it needs the demo dev server running:
+//! No screenshots, so this suite is deterministic across machines and is
+//! **auto-gated** — it runs as the `test-reactivity` step of
+//! `cargo xtask verify-full`. (Its sibling `visual_smoke.rs` compares pixels
+//! against baselines and stays manual; see `doc/ci-cd.md`.)
+//!
+//! The `#[ignore]` attributes mean "needs the demo dev server", not "manual":
+//! the gate spawns a server on a free port and passes `--ignored` explicitly,
+//! so a bare `cargo test` with no server still passes.
 //!
 //! ```text
-//! cargo make test-visual                    # orchestrated (server + tests)
-//! # or manually:
+//! cargo xtask test-reactivity               # spawns its own server, then tears it down
+//! cargo make test-reactivity                # same, via cargo-make
+//! # or against a server you already have running:
 //! trunk serve                               # in demo/ (npm install once first)
-//! cargo test --test reactivity_smoke -- --ignored
+//! cargo test --test reactivity_smoke -- --ignored --test-threads=1
 //! ```
 //!
 //! Oracle shape (see `demo/src/debug.rs` and the ldui-49w.3 contract notes):

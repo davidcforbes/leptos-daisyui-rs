@@ -80,33 +80,69 @@ Each step is scoped per-crate; that scoping **is** the xtask's logic.
 | `check-demo` | `cargo check -p leptos-daisyui-showcase` | Fast native check of the demo — catches ~all compile breakage without npm/trunk. |
 | `test` | `cargo test -p leptos-daisyui-rs --lib` + `cargo test -p xtask` | The library's unit-test suite (~1766 tests) plus the xtask's own pure-function tests (SemVer bump, etc.). Non-`#[ignore]`d tests only. |
 
-### `cargo xtask verify-full` — with the real wasm build
+### `cargo xtask verify-full` — with the reactivity suite and the real wasm build
 
-`verify-full` runs `verify` and then `trunk build --release` in `demo/`, which
-performs the real `wasm32-unknown-unknown` compile plus the Tailwind CSS build.
-It is a **separate task**, not part of the default gate, because it needs `npm`
-+ `trunk` + `tailwindcss` installed and takes minutes — keeping `verify` fast and
+`verify-full` runs `verify`, then the reactivity/DOM-oracle suite
+(`test-reactivity`, below), then `trunk build --release` in `demo/` — the real
+`wasm32-unknown-unknown` compile plus the Tailwind CSS build. It is a **separate
+task**, not part of the default gate, because it needs `npm` + `trunk` +
+`tailwindcss` + Chrome installed and takes minutes — keeping `verify` fast and
 zero-tooling. Run `verify-full` before a release or when touching wasm-only /
 CSS-affecting code.
 
 ## Testing policy — screenshot vs. no-screenshot
 
-The dividing line for what the gate runs automatically is **screenshot vs. no
+The dividing line for what a gate runs automatically is **screenshot vs. no
 screenshot**, not headed-vs-headless (the same rule Rust-DeskApp uses):
 
-- **No screenshot → auto-gated.** The library's `cargo test --lib` suite is pure
-  logic (enum/`as_str` mappings, layout/date math, pagination windowing, class
-  building, queue behavior) and runs headlessly in `verify`.
-- **Screenshot / live-browser → manual.** The committed PixelProof suite
-  (`tests/visual/**`, baselines under `tests/visual/baselines`) is `#[ignore]`d
-  and run on demand via `cargo make test-visual` (`scripts/test-visual.ps1`:
-  idempotent `npm install`, `trunk serve` on :3010, run the ignored tests, tear
-  down; refresh baselines with `VISUAL_TEST_MODE=capture`). SSIM/baseline
-  comparisons are DPI/monitor-specific, so they stay out of `verify` (which runs
-  only non-`#[ignore]`d tests). The reactivity/DOM-oracle subset (no screenshot)
-  is a candidate to un-ignore and auto-gate in a future pass, mirroring
-  Rust-DeskApp. Ad-hoc visual checks also use the `run` / `visual-ui-testing`
-  flow against a live `trunk serve` + Chrome DevTools MCP.
+- **No screenshot → auto-gated.** Two suites qualify:
+  - The library's `cargo test --lib` suite is pure logic (enum/`as_str`
+    mappings, layout/date math, pagination windowing, class building, queue
+    behavior) and runs headlessly in `verify`.
+  - The **reactivity/DOM-oracle** suite (`tests/reactivity_smoke.rs`) drives real
+    CDP input at the demo app and asserts internal Leptos state through the
+    `window.__APP_DEBUG__` oracle — no pixels, so it is deterministic across
+    machines. It is gated by `cargo xtask test-reactivity`, and runs as a step of
+    `verify-full`. It lands in `verify-full` rather than `verify` because it
+    needs npm/trunk/Chrome and a wasm build; `verify` stays zero-tooling.
+- **Screenshot / live-browser → manual.** The screenshot suite
+  (`tests/visual_smoke.rs`, baselines under `tests/visual/baselines`) is
+  `#[ignore]`d and run on demand via `cargo make test-visual`
+  (`scripts/test-visual.ps1`: idempotent `npm install`, `trunk serve` on :3010,
+  run the ignored tests, tear down; refresh baselines with
+  `VISUAL_TEST_MODE=capture`). SSIM/baseline comparisons are DPI/monitor-specific
+  and stay out of every gate. Ad-hoc visual checks also use the `run` /
+  `visual-ui-testing` flow against a live `trunk serve` + Chrome DevTools MCP.
+
+### `cargo xtask test-reactivity` — the self-spawning subset
+
+The step owns the whole server lifecycle in Rust (logic in the xtask; the
+PowerShell script stays the manual/screenshot path):
+
+1. `npm install` in `demo/` if `demo/node_modules` is missing (Trunk's Tailwind
+   pre-build hook needs it).
+2. Reserve a **free port from the OS** (bind `127.0.0.1:0`, read it back, release
+   it) and `trunk serve` on it. Each invocation gets its own port rather than
+   contending on the shared `:3010` — the shared-port flake documented in
+   Rust-DeskApp's `doc/ci-cd.md`.
+3. Poll `GET /` until it answers `200`, which means Trunk finished the first wasm
+   build and wrote `index.html` (a stricter signal than "the port is bound",
+   which Trunk does *before* building). 15-minute budget; aborts early if the
+   `trunk` child exits.
+4. Run `cargo test -p leptos-daisyui-rs --test reactivity_smoke -- --ignored
+   --test-threads=1` with `VISUAL_TEST_BASE_URL` pointed at that port.
+   `--test-threads=1` because each test drives its own headless Chrome loading
+   the ~60 MB dev wasm; parallel instances starve each other past the mount-wait
+   budget.
+5. Kill the `trunk` process tree on drop (`taskkill /T /F` on Windows — Trunk
+   spawns cargo/wasm-bindgen children).
+
+Setting `VISUAL_TEST_BASE_URL` yourself skips steps 1-3 and 5 and reuses your
+already-running dev server.
+
+The suite keeps its `#[ignore]` attributes (the gate passes `--ignored`
+explicitly) so that a bare `cargo test` with no server running still passes.
+`#[ignore]` here means "needs a server", not "is manual".
 
 ## Versioning — the automated bump
 

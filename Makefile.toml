@@ -180,9 +180,16 @@ command = "cargo"
 args = ["xtask", "verify"]
 
 [tasks.verify-full]
-description = "verify + the real trunk wasm build"
+description = "verify + the reactivity suite + the real trunk wasm build"
 command = "cargo"
 args = ["xtask", "verify-full"]
+
+[tasks.test-reactivity]
+description = """Run the reactivity/DOM-oracle suite (no screenshots) against a
+self-spawned demo dev server on a free port. Also a step of verify-full.
+Needs npm + trunk + Chrome. The screenshot suite stays manual: test-visual."""
+command = "cargo"
+args = ["xtask", "test-reactivity"]
 
 [tasks.bump-patch]
 description = "Bump the library patch version"
