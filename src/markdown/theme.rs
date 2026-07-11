@@ -639,6 +639,25 @@ const BASE_STYLES: &str = r#"
     color: white !important;
 }
 
+/* Graphic-mode Find (em-i8j9.3) — a floating bar anchored top-right of the
+   contenteditable. The current match is shown via the browser's native text
+   Selection (set by set_find_highlights), so no custom paint rule is needed. */
+.lds-graphic-find {
+    position: absolute;
+    top: 0.5em;
+    right: 0.5em;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    gap: 0.3em;
+    padding: 0.35em 0.5em;
+    background: var(--lds-bg, #1f1f1f);
+    border: 1px solid rgba(127,127,127,0.3);
+    border-radius: 6px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.25);
+}
+.lds-graphic-find .lds-find-input { min-width: 12em; flex: 0 1 auto; }
+
 /* Image dialog */
 .lds-image-dialog-backdrop {
     position: fixed;

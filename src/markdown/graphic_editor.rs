@@ -60,6 +60,7 @@ use web_sys::{ClipboardEvent, CompositionEvent, Element, HtmlElement, MouseEvent
 
 use super::asset_upload::{AssetUploadRequest, AssetUploader};
 use super::file_io::read_file_bytes;
+use super::find;
 use super::ime_state::ImeState;
 use super::paste_normalizer::normalize_clipboard_event;
 use super::table_ui::{CellCoord, resolve_cell_in_dom};
@@ -629,6 +630,134 @@ pub fn MarkdownGraphicEditor(
         }));
     };
 
+    // -- Graphic-mode Find (em-i8j9.3) -----------------------------------
+    //
+    // Only 'static/Copy scalars live in signals; the `Vec<web_sys::Range>`
+    // is recomputed from the live DOM inside each handler (Range is !Send
+    // and awkward to store).  `find_current` is a 0-based index into the
+    // recomputed matches; `find_count` mirrors its length for the "n/m"
+    // readout.
+    let find_open: RwSignal<bool> = RwSignal::new(false);
+    let find_query: RwSignal<String> = RwSignal::new(String::new());
+    let find_current: RwSignal<usize> = RwSignal::new(0);
+    let find_count: RwSignal<usize> = RwSignal::new(0);
+    let find_case: RwSignal<bool> = RwSignal::new(false);
+    let find_input: NodeRef<leptos::html::Input> = NodeRef::new();
+
+    // Autofocus the query input whenever the bar opens.  The Show renders
+    // the input asynchronously, so `find_input.get()` starts `None`; the
+    // NodeRef read is tracked, so the Effect re-runs and focuses once it
+    // mounts.
+    Effect::new(move |_| {
+        if find_open.get()
+            && let Some(input) = find_input.get()
+        {
+            let el: &web_sys::HtmlInputElement = input.as_ref();
+            let _ = el.focus();
+        }
+    });
+
+    // Recompute matches from the live DOM for `desired`-th current match,
+    // repaint highlights, sync the count/current signals, and scroll the
+    // current match into view.  Shared by the query-input, next, prev, and
+    // case-toggle handlers.  `desired` is clamped/wrapped against the live
+    // match count.
+    let refresh_find = move |desired: usize| {
+        let Some(el) = host.get_untracked() else {
+            return;
+        };
+        let html_el: &HtmlElement = el.as_ref();
+        let query = find_query.get_untracked();
+        let ranges = compute_match_ranges(html_el, &query, find_case.get_untracked());
+        find_count.set(ranges.len());
+        if ranges.is_empty() {
+            find_current.set(0);
+            clear_find_highlights();
+            return;
+        }
+        let current = desired % ranges.len();
+        find_current.set(current);
+        set_find_highlights(&ranges, current);
+        scroll_range_into_view(&ranges[current]);
+    };
+
+    // Typing in the query box: re-search from match 0.
+    let on_find_input = move |ev: leptos::ev::Event| {
+        find_query.set(event_target_value(&ev));
+        refresh_find(0);
+    };
+    let on_find_next = move || {
+        let total = find_count.get_untracked();
+        let next = if total == 0 {
+            0
+        } else {
+            (find_current.get_untracked() + 1) % total
+        };
+        refresh_find(next);
+    };
+    let on_find_prev = move || {
+        let total = find_count.get_untracked();
+        let prev = if total == 0 {
+            0
+        } else {
+            (find_current.get_untracked() + total - 1) % total
+        };
+        refresh_find(prev);
+    };
+    let on_find_toggle_case = move || {
+        find_case.update(|c| *c = !*c);
+        refresh_find(find_current.get_untracked());
+    };
+    // Close + clear: drop highlights, reset state, and return focus to the
+    // editable surface so the caret is live again.
+    let close_find = move || {
+        clear_find_highlights();
+        find_open.set(false);
+        find_query.set(String::new());
+        find_current.set(0);
+        find_count.set(0);
+        if let Some(el) = host.get_untracked() {
+            let html_el: &HtmlElement = el.as_ref();
+            let _ = html_el.focus();
+        }
+    };
+    // Open (or re-focus) the bar; re-run any existing query so highlights
+    // and the count come back.
+    let open_find = move || {
+        find_open.set(true);
+        if !find_query.get_untracked().is_empty() {
+            refresh_find(find_current.get_untracked());
+        }
+    };
+
+    // Enter = next, Shift+Enter = prev, Esc = close, all within the input.
+    let on_find_keydown = move |ev: leptos::ev::KeyboardEvent| match ev.key().as_str() {
+        "Enter" => {
+            ev.prevent_default();
+            if ev.shift_key() {
+                on_find_prev();
+            } else {
+                on_find_next();
+            }
+        }
+        "Escape" => {
+            ev.prevent_default();
+            ev.stop_propagation();
+            close_find();
+        }
+        _ => {}
+    };
+
+    let find_count_label = move || {
+        let total = find_count.get();
+        if total == 0 {
+            "0/0".to_string()
+        } else {
+            format!("{}/{}", find_current.get() + 1, total)
+        }
+    };
+    let find_case_on = move || find_case.get();
+
     // keydown handler: format shortcuts (Ctrl+B / Ctrl+I) and
     // undo / redo (Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z).  We bypass the
     // browser's native execCommand path (deprecated, inconsistent
@@ -641,6 +770,23 @@ pub fn MarkdownGraphicEditor(
         let shift = ev.shift_key();
         let key_raw = ev.key();
         let key = key_raw.to_ascii_lowercase();
+
+        // Graphic-mode Find (em-i8j9.3).  Ctrl/Cmd+F opens the find bar and
+        // preempts the browser's native find; Esc closes it when open.
+        // stop_propagation keeps any source-mode Ctrl+F handler (editor.rs)
+        // from also firing when both surfaces are mounted.
+        if ctrl && key == "f" {
+            ev.prevent_default();
+            ev.stop_propagation();
+            open_find();
+            return;
+        }
+        if key == "escape" && find_open.get_untracked() {
+            ev.prevent_default();
+            ev.stop_propagation();
+            close_find();
+            return;
+        }
 
         // Table-cell key handling (em-berj.3): when the caret sits
         // inside a `<td>` / `<th>`, Enter is silently rejected (a
@@ -886,22 +1032,71 @@ pub fn MarkdownGraphicEditor(
             <style>
                 {include_str!("graphic_editor.css")}
             </style>
-            <div
-                class="lds-graphic lds-root"
-                contenteditable="true"
-                spellcheck="true"
-                style=style
-                node_ref=host
-                on:input=on_input
-                on:keydown=on_keydown
-                on:compositionstart=on_composition_start
-                on:compositionend=on_composition_end
-                on:paste=on_paste
-                on:contextmenu=on_contextmenu
-                on:dblclick=on_dblclick
-                on:dragover=on_dragover
-                on:drop=on_drop
-            ></div>
+            // Relative wrapper so the find bar can anchor top-right of the
+            // editable surface via position:absolute.  The find bar is a
+            // SIBLING of the contenteditable (never a child) so it can't
+            // corrupt the editable content or the dom→markdown round-trip.
+            <div style="position:relative;">
+                <div
+                    class="lds-graphic lds-root"
+                    contenteditable="true"
+                    spellcheck="true"
+                    style=style
+                    node_ref=host
+                    on:input=on_input
+                    on:keydown=on_keydown
+                    on:compositionstart=on_composition_start
+                    on:compositionend=on_composition_end
+                    on:paste=on_paste
+                    on:contextmenu=on_contextmenu
+                    on:dblclick=on_dblclick
+                    on:dragover=on_dragover
+                    on:drop=on_drop
+                ></div>
+                <Show when=move || find_open.get()>
+                    <div class="lds-graphic-find">
+                        <input
+                            type="text"
+                            class="lds-find-input"
+                            placeholder="Find"
+                            prop:value=move || find_query.get()
+                            on:input=on_find_input
+                            on:keydown=on_find_keydown
+                            node_ref=find_input
+                        />
+                        <span class="lds-find-count">{find_count_label}</span>
+                        <button
+                            class="btn btn-xs btn-ghost"
+                            title="Previous match (Shift+Enter)"
+                            on:click=move |_| on_find_prev()
+                        >
+                            "◀"
+                        </button>
+                        <button
+                            class="btn btn-xs btn-ghost"
+                            title="Next match (Enter)"
+                            on:click=move |_| on_find_next()
+                        >
+                            "▶"
+                        </button>
+                        <button
+                            class="btn btn-xs btn-ghost"
+                            title="Case sensitive"
+                            class:lds-find-toggle-on=find_case_on
+                            on:click=move |_| on_find_toggle_case()
+                        >
+                            "Aa"
+                        </button>
+                        <button
+                            class="btn btn-xs btn-ghost"
+                            title="Close (Esc)"
+                            on:click=move |_| close_find()
+                        >
+                            "✕"
+                        </button>
+                    </div>
+                </Show>
+            </div>
             <div
                 style=backdrop_style
                 on:mousedown=move |_| menu_state.set(None)
@@ -1095,4 +1290,128 @@ fn wrap_selection_in_tag(tag: &str) {
     let _ = range.set_end_after(&wrapper);
     let _ = selection.remove_all_ranges();
     let _ = selection.add_range(&range);
+}
+
+// -- Graphic-mode Find (em-i8j9.3) ----------------------------------------
+//
+// Find-only search over the RENDERED text of the contenteditable, painted
+// via the CSS Custom Highlight API so matches are highlighted WITHOUT
+// mutating the editable DOM (which would corrupt both the editable content
+// and the dom→markdown round-trip).  State lives in plain signals; the
+// `web_sys::Range` vec is recomputed from the live DOM inside each handler
+// rather than stored (Range is `!Send` and awkward to hold in a signal).
+
+/// Recursively collect the `web_sys::Text` descendants of `node` in
+/// document order.
+fn collect_text_nodes(node: &web_sys::Node, out: &mut Vec<web_sys::Text>) {
+    let children = node.child_nodes();
+    for i in 0..children.length() {
+        let Some(child) = children.item(i) else {
+            continue;
+        };
+        if child.node_type() == web_sys::Node::TEXT_NODE {
+            if let Some(text) = child.dyn_ref::<web_sys::Text>() {
+                out.push(text.clone());
+            }
+        } else {
+            collect_text_nodes(&child, out);
+        }
+    }
+}
+
+/// Recompute the per-text-node match ranges for `query` over the rendered
+/// text under `host`, in document order.
+///
+/// LIMITATION: matches are found per text node only.  A query that
+/// straddles an inline-element boundary (e.g. a match spanning the end of a
+/// `<strong>` and the following plain text — two separate text nodes) is
+/// acceptably skipped in this v1; single-node ranges keep the DOM Range
+/// construction simple and robust.
+fn compute_match_ranges(
+    host: &HtmlElement,
+    query: &str,
+    case_sensitive: bool,
+) -> Vec<web_sys::Range> {
+    let mut ranges = Vec::new();
+    if query.is_empty() {
+        return ranges;
+    }
+    let Some(document) = web_sys::window().and_then(|w| w.document()) else {
+        return ranges;
+    };
+    let mut texts: Vec<web_sys::Text> = Vec::new();
+    collect_text_nodes(host.unchecked_ref::<web_sys::Node>(), &mut texts);
+    for text in &texts {
+        // `data()` lives on CharacterData; Text derefs to it.
+        let data = text.data();
+        for br in find::find_all_matches(&data, query, case_sensitive) {
+            // DOM Range offsets are UTF-16 code units, but `find` returns
+            // UTF-8 byte ranges — convert by counting UTF-16 code units in
+            // the leading slices.
+            let start_u16 = data[..br.start].encode_utf16().count() as u32;
+            let end_u16 = data[..br.end].encode_utf16().count() as u32;
+            let Ok(range) = document.create_range() else {
+                continue;
+            };
+            let node = text.unchecked_ref::<web_sys::Node>();
+            if range.set_start(node, start_u16).is_err() {
+                continue;
+            }
+            if range.set_end(node, end_u16).is_err() {
+                continue;
+            }
+            ranges.push(range);
+        }
+    }
+    ranges
+}
+
+/// Highlight the current match by selecting its `Range` via the stable
+/// Selection API — the browser paints the selection. Consistent with
+/// Source-mode find (which uses the textarea selection). Only the current match
+/// is shown (a Selection holds one range); next/prev move it.
+///
+/// This deliberately avoids the CSS Custom Highlight API: its web-sys bindings
+/// (`css::highlights` / `Highlight` / `HighlightRegistry`) are gated behind
+/// `--cfg web_sys_unstable_apis`, a GLOBAL flag that flips other web-sys
+/// signatures (`client_x`, `scroll_top`, …) from `i32` to `f64` and breaks the
+/// rest of this crate's components. Selecting the range needs no such flag.
+fn set_find_highlights(ranges: &[web_sys::Range], current: usize) {
+    let Some(win) = web_sys::window() else {
+        return;
+    };
+    let Ok(Some(sel)) = win.get_selection() else {
+        return;
+    };
+    let _ = sel.remove_all_ranges();
+    if let Some(cur) = ranges.get(current) {
+        let _ = sel.add_range(cur);
+    }
+}
+
+/// Drop the find selection.
+fn clear_find_highlights() {
+    if let Some(win) = web_sys::window()
+        && let Ok(Some(sel)) = win.get_selection()
+    {
+        let _ = sel.remove_all_ranges();
+    }
+}
+
+/// Scroll the current match into view.  `web_sys::Range` has no scroll
+/// method, so we scroll the nearest ancestor `Element` of the match's start
+/// container (the text node's parent element).
+fn scroll_range_into_view(range: &web_sys::Range) {
+    let Ok(container) = range.start_container() else {
+        return;
+    };
+    let element = container
+        .dyn_ref::<Element>()
+        .cloned()
+        .or_else(|| container.parent_element());
+    if let Some(el) = element {
+        let opts = web_sys::ScrollIntoViewOptions::new();
+        opts.set_block(web_sys::ScrollLogicalPosition::Nearest);
+        el.scroll_into_view_with_scroll_into_view_options(&opts);
+    }
 }
