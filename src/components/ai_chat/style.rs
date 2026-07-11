@@ -8,7 +8,10 @@ use ai_chat_core::ChatRole;
 /// sits on the left (`chat-start`).
 pub fn role_classes(role: &ChatRole) -> (&'static str, &'static str) {
     match role {
-        ChatRole::User => ("chat-end", "chat-bubble-primary"),
+        // Both user and assistant use chat-start so every bubble is a
+        // full-width row (see the .lds-aichat .chat override in theme.rs);
+        // the colour (primary vs default) still distinguishes the two.
+        ChatRole::User => ("chat-start", "chat-bubble-primary"),
         ChatRole::Assistant => ("chat-start", ""),
         ChatRole::System => ("chat-start", "chat-bubble-info"),
         ChatRole::Thinking => ("chat-start", "chat-bubble-ghost"),

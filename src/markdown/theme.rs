@@ -658,6 +658,25 @@ const BASE_STYLES: &str = r#"
 }
 .lds-graphic-find .lds-find-input { min-width: 12em; flex: 0 1 auto; }
 
+/* AI chat — full-width message bubbles on BOTH sides. daisyUI lays each `.chat`
+   out as a 2-column grid with a `.chat-bubble` capped at max-width:90% and
+   aligned left/right; the chat panel is narrow, so that wastes width. Stack the
+   message parts in a flex column and let the bubble fill the panel. Injected
+   once with the markdown BASE_STYLES (AiChat renders assistant messages through
+   MarkdownView, which injects this stylesheet). */
+.lds-aichat .chat {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.2rem;
+  width: 100%;
+}
+.lds-aichat .chat-image { align-self: flex-start; }
+.lds-aichat .chat-bubble {
+  max-width: 100%;
+  width: 100%;
+}
+
 /* Image dialog */
 .lds-image-dialog-backdrop {
     position: fixed;
