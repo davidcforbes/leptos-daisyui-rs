@@ -1171,6 +1171,15 @@ fn render_into(host: &HtmlElement, source: &str) {
     let html = render_html(&nodes);
     host.set_inner_html(&html);
     stamp_block_sources(host, source);
+    // Render mermaid placeholders to SVG, same as read-only MarkdownView.
+    // The atomic-widget attributes (data-em-atomic / data-em-src /
+    // contenteditable=false) live on the <div class="mermaid"> and survive the
+    // inner-HTML swap; the double-click editor reads the source from the
+    // data-em-src markdown range, not the div's DOM, so the injected SVG is
+    // display-only and editing still works. (Runs only on external source
+    // changes — see the is_self_set guard at the render_into call site — so it
+    // is not a per-keystroke cost.)
+    super::view::process_mermaid(host);
 }
 
 /// Walk the top-level children of `host` and tag each with the source

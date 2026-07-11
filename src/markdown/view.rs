@@ -89,7 +89,7 @@ fn post_process(host: &HtmlElement, on_link_click: Option<Callback<String>>) {
     super::math::render_math(host);
 }
 
-fn process_mermaid(host: &HtmlElement) {
+pub(crate) fn process_mermaid(host: &HtmlElement) {
     let Ok(nodes) = host.query_selector_all(".mermaid") else {
         return;
     };
