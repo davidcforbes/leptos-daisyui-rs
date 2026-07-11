@@ -26,8 +26,23 @@ use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{Element, HtmlElement};
 
 /// Render every `.math-inline` and `.math-display` inside `host` via KaTeX
-/// if it's available.  No-op when `window.katex` is undefined.
+/// if it's available.  No-op when `window.katex` is undefined. Use this in
+/// read-only render surfaces (MarkdownView).
 pub fn render_math(host: &HtmlElement) {
+    render_math_impl(host, true);
+}
+
+/// Render only `.math-display` (block `$$…$$`) via KaTeX, leaving inline
+/// `$…$` as editable source. Use this in the WYSIWYG editor: display math is
+/// an atomic, `contenteditable=false` block (edited via the source overlay), so
+/// rendering it is display-only and safe — but inline math lives inside
+/// editable text, and replacing `$E=mc^2$` with KaTeX markup would corrupt the
+/// DOM→markdown round-trip on the next edit of that paragraph.
+pub fn render_math_display_only(host: &HtmlElement) {
+    render_math_impl(host, false);
+}
+
+fn render_math_impl(host: &HtmlElement, include_inline: bool) {
     let Some(katex) = katex_global() else {
         return;
     };
@@ -38,13 +53,15 @@ pub fn render_math(host: &HtmlElement) {
         return;
     };
 
-    if let Ok(nodes) = host.query_selector_all(".math-inline") {
-        for i in 0..nodes.length() {
-            let Some(n) = nodes.item(i) else { continue };
-            let Ok(el) = n.dyn_into::<Element>() else {
-                continue;
-            };
-            render_one(&render_fn, &katex, &el, false);
+    if include_inline {
+        if let Ok(nodes) = host.query_selector_all(".math-inline") {
+            for i in 0..nodes.length() {
+                let Some(n) = nodes.item(i) else { continue };
+                let Ok(el) = n.dyn_into::<Element>() else {
+                    continue;
+                };
+                render_one(&render_fn, &katex, &el, false);
+            }
         }
     }
     if let Ok(nodes) = host.query_selector_all(".math-display") {

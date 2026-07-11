@@ -1180,6 +1180,12 @@ fn render_into(host: &HtmlElement, source: &str) {
     // changes — see the is_self_set guard at the render_into call site — so it
     // is not a per-keystroke cost.)
     super::view::process_mermaid(host);
+    // Render block ($$...$$) math via KaTeX. Display math is also an atomic,
+    // contenteditable=false widget, so this is display-only + source-overlay
+    // editing, exactly like mermaid. Inline ($...$) math is deliberately left
+    // as editable source: it lives in editable text, and replacing it with
+    // KaTeX markup would corrupt the DOM->markdown round-trip on the next edit.
+    super::math::render_math_display_only(host);
 }
 
 /// Walk the top-level children of `host` and tag each with the source
