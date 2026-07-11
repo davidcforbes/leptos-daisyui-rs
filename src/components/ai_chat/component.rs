@@ -19,6 +19,28 @@ const COMPOSER_BASE_HEIGHT_PX: f64 = 48.0;
 /// Composer's max auto-grow height (px) before it scrolls internally.
 const COMPOSER_MAX_HEIGHT_PX: f64 = 320.0;
 
+/// One option in the chat scope selector (e.g. "This file" / "This folder" /
+/// "Whole workspace"). `id` is opaque to the component — the host interprets it
+/// in `on_scope_change` (e.g. maps it to a grounding / `DocMode`). `label` is
+/// what the user sees.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChatScopeOption {
+    /// Opaque scope id passed back to the host via `on_scope_change`.
+    pub id: String,
+    /// User-visible label shown in the selector.
+    pub label: String,
+}
+
+impl ChatScopeOption {
+    /// Construct a scope option from an `id` and a display `label`.
+    pub fn new(id: impl Into<String>, label: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            label: label.into(),
+        }
+    }
+}
+
 /// # AiChat
 ///
 /// A reusable Leptos chat panel rendering the shared `ai_chat_core` presentation
@@ -58,7 +80,7 @@ const COMPOSER_MAX_HEIGHT_PX: f64 = 320.0;
 /// Every literal class this component can render (add to your `input.css`):
 /// ```css
 /// @source inline("chat chat-start chat-end chat-header chat-bubble chat-bubble-primary chat-bubble-info chat-bubble-neutral chat-bubble-ghost chat-image avatar avatar-placeholder");
-/// @source inline("flex flex-col flex-1 flex-wrap items-center justify-between gap-1 gap-2 h-full min-h-0 w-full w-72 w-6 h-6 overflow-y-auto p-2 p-3 p-4 space-y-3 space-y-2");
+/// @source inline("flex flex-col flex-1 flex-wrap items-center justify-between justify-start gap-1 gap-2 h-full min-h-0 w-full w-72 w-52 w-6 h-6 overflow-y-auto p-1 p-2 p-3 p-4 space-y-3 space-y-2");
 /// @source inline("border-t border-b border-base-300 text-xs text-sm opacity-50 opacity-60 text-right whitespace-pre-wrap resize-none max-h-[320px] text-[10px]");
 /// @source inline("btn btn-primary btn-error btn-ghost btn-sm btn-xs textarea textarea-bordered loading loading-dots loading-sm rounded-full");
 /// @source inline("dropdown-content bg-base-100 rounded-box z-10 shadow border");
@@ -93,6 +115,16 @@ pub fn AiChat(
     /// consumers are unchanged.
     #[prop(optional, into)]
     show_settings: Signal<bool>,
+    /// Scope options for the header scope selector (e.g. This file / This
+    /// folder / Whole workspace). Empty (default) hides the selector. The
+    /// component tracks the active option internally and shows its label; the
+    /// host interprets the selected `id` via `on_scope_change`.
+    #[prop(optional, into)]
+    scopes: Signal<Vec<ChatScopeOption>>,
+    /// Fired with the selected scope `id` when the user changes the scope. The
+    /// host maps it to a grounding (e.g. `DocMode`) and restarts the session.
+    #[prop(optional, into)]
+    on_scope_change: Option<Callback<String>>,
     /// Extra classes for the root element.
     #[prop(optional, into)]
     class: &'static str,
@@ -291,11 +323,67 @@ pub fn AiChat(
         }
     });
 
+    // Active scope id for the selector; defaults to the first option once
+    // `scopes` is populated. The host is notified via `on_scope_change`.
+    let active_scope: RwSignal<String> = RwSignal::new(String::new());
+    Effect::new(move |_| {
+        let opts = scopes.get();
+        if active_scope.with_untracked(|a| a.is_empty()) {
+            if let Some(first) = opts.first() {
+                active_scope.set(first.id.clone());
+            }
+        }
+    });
+    let scope_label = move || {
+        let id = active_scope.get();
+        scopes
+            .get()
+            .into_iter()
+            .find(|o| o.id == id)
+            .map(|o| o.label)
+            .unwrap_or_else(|| "Scope".to_string())
+    };
+
     view! {
         <div class=move || merge_classes!("lds-aichat flex flex-col h-full min-h-0", class)>
             <div class="lds-aichat-header border-b border-base-300 p-2 flex items-center justify-between gap-2">
                 <span class="text-sm opacity-60 truncate">{move || subtitle.get()}</span>
                 <div class="flex items-center gap-2">
+                    <Show when=move || !scopes.get().is_empty()>
+                        <Dropdown alignment=DropdownAlignment::End class="lds-aichat-scope">
+                            <button
+                                type="button"
+                                class="btn btn-ghost btn-xs"
+                                title="Chat scope"
+                                aria-label="Chat scope"
+                            >
+                                {scope_label}
+                                " \u{25be}"
+                            </button>
+                            <DropdownContent class="dropdown-content bg-base-100 rounded-box z-10 w-52 p-1 shadow border border-base-300">
+                                <For each=move || scopes.get() key=|o| o.id.clone() let:opt>
+                                    {
+                                        let id = opt.id.clone();
+                                        let label = opt.label.clone();
+                                        view! {
+                                            <button
+                                                type="button"
+                                                class="btn btn-ghost btn-xs w-full justify-start"
+                                                on:click=move |_| {
+                                                    active_scope.set(id.clone());
+                                                    if let Some(cb) = on_scope_change {
+                                                        cb.run(id.clone());
+                                                    }
+                                                }
+                                            >
+                                                {label}
+                                            </button>
+                                        }
+                                    }
+                                </For>
+                            </DropdownContent>
+                        </Dropdown>
+                    </Show>
                     <Show when=move || show_settings.get()>
                         <Dropdown alignment=DropdownAlignment::End class="lds-aichat-settings">
                             <button

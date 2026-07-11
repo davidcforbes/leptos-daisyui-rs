@@ -11,7 +11,7 @@ mod style;
 mod tests;
 mod types;
 
-pub use component::AiChat;
+pub use component::{AiChat, ChatScopeOption};
 pub use style::{
     ComposerAction, composer_key_action, is_markdown, is_thinking, role_classes, role_label,
     should_stick_to_bottom, show_welcome_chips,
