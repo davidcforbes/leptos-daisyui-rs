@@ -53,15 +53,13 @@ fn render_math_impl(host: &HtmlElement, include_inline: bool) {
         return;
     };
 
-    if include_inline {
-        if let Ok(nodes) = host.query_selector_all(".math-inline") {
-            for i in 0..nodes.length() {
-                let Some(n) = nodes.item(i) else { continue };
-                let Ok(el) = n.dyn_into::<Element>() else {
-                    continue;
-                };
-                render_one(&render_fn, &katex, &el, false);
-            }
+    if include_inline && let Ok(nodes) = host.query_selector_all(".math-inline") {
+        for i in 0..nodes.length() {
+            let Some(n) = nodes.item(i) else { continue };
+            let Ok(el) = n.dyn_into::<Element>() else {
+                continue;
+            };
+            render_one(&render_fn, &katex, &el, false);
         }
     }
     if let Ok(nodes) = host.query_selector_all(".math-display") {

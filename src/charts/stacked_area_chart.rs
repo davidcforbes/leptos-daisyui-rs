@@ -395,7 +395,10 @@ mod tests {
         );
         // The old bug: a fixed 100px slot would place the second entry well
         // BEFORE the first (27-char) label's estimated end.
-        assert!(100.0 < first_label_end, "sanity: the old fixed slot did overlap");
+        assert!(
+            100.0 < first_label_end,
+            "sanity: the old fixed slot did overlap"
+        );
     }
 
     #[test]

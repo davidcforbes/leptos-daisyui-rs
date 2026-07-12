@@ -328,10 +328,10 @@ pub fn AiChat(
     let active_scope: RwSignal<String> = RwSignal::new(String::new());
     Effect::new(move |_| {
         let opts = scopes.get();
-        if active_scope.with_untracked(|a| a.is_empty()) {
-            if let Some(first) = opts.first() {
-                active_scope.set(first.id.clone());
-            }
+        if active_scope.with_untracked(|a| a.is_empty())
+            && let Some(first) = opts.first()
+        {
+            active_scope.set(first.id.clone());
         }
     });
     let scope_label = move || {

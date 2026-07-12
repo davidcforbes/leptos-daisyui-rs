@@ -9,9 +9,12 @@ use super::types::{
 use ai_chat_core::{ChatRole, Usage};
 
 #[test]
-fn user_sits_end_agent_sits_start() {
-    assert_eq!(role_classes(&ChatRole::User).0, "chat-end");
+fn every_role_sits_start_for_full_width_rows() {
+    // Bubbles span the full row (the .lds-aichat .chat override in theme.rs
+    // stretches them to width:100%), so no role sits on the right. Colour, not
+    // side, distinguishes the speaker -- see user_bubble_is_primary.
     for r in [
+        ChatRole::User,
         ChatRole::Assistant,
         ChatRole::System,
         ChatRole::Thinking,
