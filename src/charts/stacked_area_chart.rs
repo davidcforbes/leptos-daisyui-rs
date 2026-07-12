@@ -2,6 +2,36 @@ use leptos::prelude::*;
 
 use super::stacked_bar_chart::ChartSeries;
 
+/// Estimated on-screen width (SVG user units) of a `font-size="10"` text
+/// label, used to lay out the legend row without a fixed per-entry slot. A
+/// fixed 100px slot per legend entry overlapped a long series name (e.g.
+/// "Inventory Before Submission", 27 chars) into the next swatch/label,
+/// rendering as garbled overlapping text (visual-parity audit finding —
+/// `inventory-web`'s Trends CFD legend). ~6px/character matches the desktop
+/// GUI's own `draw_cfd` legend layout formula
+/// (`crates/inventory-gui/src/screens/trends.rs`, `8.0 + name.len() as f32 *
+/// 7.0`), which solves the identical fixed-slot overlap problem — there is
+/// no text-measurement API available at render time (no live DOM to query
+/// before paint).
+fn legend_label_width(name: &str) -> f64 {
+    name.chars().count() as f64 * 6.0
+}
+
+/// The x offset (from `pad_left`) of each legend entry's swatch, laid out
+/// left-to-right with each entry's width derived from
+/// [`legend_label_width`] rather than a fixed slot.
+fn legend_x_offsets(names: &[String]) -> Vec<f64> {
+    let mut x = 0.0;
+    names
+        .iter()
+        .map(|name| {
+            let offset = x;
+            x += 14.0 + legend_label_width(name) + 16.0; // swatch + gap, text, gap to next
+            offset
+        })
+        .collect()
+}
+
 /// The number of `(category, value)` pairs usable across all series: the
 /// shortest of `categories.len()` and every series' `values.len()`. Extra
 /// category labels or series values beyond this length are ignored
@@ -162,11 +192,16 @@ pub fn StackedAreaChart(
 
     let legend_y = height as f64 - legend_height;
     let legend_views = if show_legend {
+        // Each entry's x offset is DERIVED from the previous entries' actual
+        // (estimated) text width via [`legend_x_offsets`], not a fixed 100px
+        // slot (visual-parity audit fix — see that fn's doc comment).
+        let names: Vec<String> = series.iter().map(|s| s.name.clone()).collect();
+        let offsets = legend_x_offsets(&names);
         series
             .iter()
-            .enumerate()
-            .map(|(i, s)| {
-                let lx = pad_left + i as f64 * 100.0;
+            .zip(offsets)
+            .map(|(s, offset)| {
+                let lx = pad_left + offset;
                 let lx_str = format!("{lx:.2}");
                 let ly_str = format!("{legend_y:.2}");
                 let col = s.color.clone();
@@ -298,5 +333,54 @@ mod tests {
     fn y_for_value_max_value_touches_top() {
         let y = y_for_value(100.0, 100.0, 0.0, 100.0);
         assert_eq!(y, 0.0);
+    }
+
+    // --- legend layout (visual-parity audit fix) ---
+
+    #[test]
+    fn legend_label_width_scales_with_char_count() {
+        assert_eq!(legend_label_width(""), 0.0);
+        assert_eq!(legend_label_width("IBS"), 18.0); // 3 chars * 6.0
+        assert_eq!(legend_label_width("Submitted"), 54.0); // 9 chars * 6.0
+    }
+
+    #[test]
+    fn legend_x_offsets_starts_at_zero_and_is_monotonically_increasing() {
+        let names = vec!["IBS".to_string(), "Submitted".to_string()];
+        let offsets = legend_x_offsets(&names);
+        assert_eq!(offsets.len(), 2);
+        assert_eq!(offsets[0], 0.0);
+        assert!(offsets[1] > offsets[0]);
+    }
+
+    /// Pins the exact bug from the visual-parity audit: with the OLD fixed
+    /// 100px-per-entry layout, "Inventory Before Submission" (27 chars) at
+    /// ~6px/char is ~162px + swatch/gaps wide -- well past the 100px slot --
+    /// so the second entry's swatch/label at x=100 would land INSIDE the
+    /// first entry's still-rendering text, garbling it
+    /// ("Inventory Before Su[chip]Sabmitted"). The second entry's offset
+    /// must now clear the first entry's full estimated width.
+    #[test]
+    fn legend_x_offsets_long_first_label_pushes_second_entry_past_it() {
+        let names = vec![
+            "Inventory Before Submission".to_string(),
+            "Submitted".to_string(),
+        ];
+        let offsets = legend_x_offsets(&names);
+        let first_label_end = 14.0 + legend_label_width(&names[0]); // swatch+gap + text
+        assert!(
+            offsets[1] >= first_label_end,
+            "second legend entry (x={}) must start at/after the first label's \
+             estimated end (x={first_label_end}), never overlapping it",
+            offsets[1]
+        );
+        // The old bug: a fixed 100px slot would place the second entry well
+        // BEFORE the first (27-char) label's estimated end.
+        assert!(100.0 < first_label_end, "sanity: the old fixed slot did overlap");
+    }
+
+    #[test]
+    fn legend_x_offsets_empty_input_is_empty() {
+        assert!(legend_x_offsets(&[]).is_empty());
     }
 }
