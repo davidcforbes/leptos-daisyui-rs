@@ -81,6 +81,24 @@ fn y_for_value(value: f64, max: f64, pad_top: f64, chart_h: f64) -> f64 {
     pad_top + chart_h - (value / range) * chart_h
 }
 
+/// SVG `text-anchor` for the x-axis category label at index `i` of `n`: the
+/// first label anchors toward the plot interior (`"start"`) and the last
+/// toward it from the other side (`"end"`), so a wide label (e.g. a full
+/// `"YYYY-MM-DD"` week-ending date) at the plot's left/right edge never
+/// overflows the SVG viewBox and gets clipped in a screenshot (visual-parity
+/// audit finding — `inventory-web`'s Trends CFD showed a right-edge
+/// "2026-06-2[2]" clip). Interior labels stay centered (`"middle"`). Mirrors
+/// `line_chart::tick_anchor`.
+fn x_label_anchor(i: usize, n: usize) -> &'static str {
+    if n > 1 && i == 0 {
+        "start"
+    } else if n > 1 && i == n - 1 {
+        "end"
+    } else {
+        "middle"
+    }
+}
+
 /// SVG-based stacked area chart component.
 ///
 /// Renders `series` as cumulative, bottom-up filled bands over `categories`
@@ -181,8 +199,9 @@ pub fn StackedAreaChart(
             let x = x_for_index(i, n, pad_left, chart_w);
             let x_str = format!("{x:.2}");
             let y_str = format!("{:.2}", baseline_y + 15.0);
+            let anchor = x_label_anchor(i, n);
             view! {
-                <text x=x_str y=y_str text-anchor="middle"
+                <text x=x_str y=y_str text-anchor=anchor
                     fill="currentColor" font-size="10" opacity="0.6">
                     {label.clone()}
                 </text>
@@ -382,5 +401,19 @@ mod tests {
     #[test]
     fn legend_x_offsets_empty_input_is_empty() {
         assert!(legend_x_offsets(&[]).is_empty());
+    }
+
+    #[test]
+    fn x_label_anchor_edges_avoid_viewbox_clipping() {
+        // Endpoints anchor inward so a wide date label can't overflow the
+        // viewBox edge and clip (the "2026-06-2[2]" bug).
+        assert_eq!(x_label_anchor(0, 5), "start");
+        assert_eq!(x_label_anchor(4, 5), "end");
+        assert_eq!(x_label_anchor(2, 5), "middle");
+        // A single label has no edge to avoid -- stays centered.
+        assert_eq!(x_label_anchor(0, 1), "middle");
+        // Two labels: both are edges.
+        assert_eq!(x_label_anchor(0, 2), "start");
+        assert_eq!(x_label_anchor(1, 2), "end");
     }
 }
