@@ -20,10 +20,14 @@
 
 set -euo pipefail
 
-# Self-locate the bd-tracked repo root.
+# Self-locate the bd-tracked repo root. Stop if dirname stops making progress
+# (it is idempotent at a root): on some path forms that fixpoint is not "/", and
+# looping there would hang every status refresh.
 dir="${PWD}"
-while [ "$dir" != "/" ] && [ ! -d "$dir/.beads" ]; do
-    dir="$(dirname "$dir")"
+while [ ! -d "$dir/.beads" ]; do
+    parent="$(dirname "$dir")"
+    [ "$parent" != "$dir" ] || break
+    dir="$parent"
 done
 
 # Graceful no-op when prerequisites are missing.
@@ -33,11 +37,34 @@ command -v jq >/dev/null 2>&1 || exit 0
 
 repo="$(basename "$dir")"
 
-# Pull stats. If bd is misconfigured or the DB is missing, exit quietly.
-stats="$(cd "$dir" && bd stats --json 2>/dev/null)" || exit 0
-total="$(printf '%s' "$stats"  | jq -r '.summary.total_issues  // empty')"
-closed="$(printf '%s' "$stats" | jq -r '.summary.closed_issues // empty')"
-[ -n "$total" ] && [ -n "$closed" ] || exit 0
+# Pull stats. On failure bd exits non-zero, leaves stdout empty, and describes
+# the cause as a JSON object on *stderr* -- that is how the remote-migrate gate
+# reports itself, and it blocks every read until an operator resolves it. This
+# used to fall through to a silent `exit 0`, which renders as an empty status
+# line: indistinguishable from a broken harness, and it hides the very state you
+# need to act on. So keep stderr and report it. Past this point we are in a bd
+# repo with bd installed, so always print something.
+errfile="$(mktemp)"
+trap 'rm -f "$errfile"' EXIT
+stats="$(cd "$dir" && bd stats --json 2>"$errfile")" || stats=""
+
+total="$(printf  '%s' "$stats" | jq -r '.summary.total_issues  // empty' 2>/dev/null)" || total=""
+closed="$(printf '%s' "$stats" | jq -r '.summary.closed_issues // empty' 2>/dev/null)" || closed=""
+
+if [ -z "$total" ] || [ -z "$closed" ]; then
+    # The migrate-or-adopt choice is the operator's (migrating a second clone
+    # forks the schema unrecoverably), so name the versions and both exits
+    # rather than implying a single fix.
+    cur="$(jq    -r '.remote_migrate_gate.current_version // empty' "$errfile" 2>/dev/null)" || cur=""
+    latest="$(jq -r '.remote_migrate_gate.latest_version  // empty' "$errfile" 2>/dev/null)" || latest=""
+    if [ -n "$cur" ] && [ -n "$latest" ]; then
+        printf '📋 %s · ⚠ bd schema gate v%s→v%s · bd migrate (designated clone) | bd bootstrap (adopt)\n' \
+            "$repo" "$cur" "$latest"
+    else
+        printf '📋 %s · ⚠ bd unavailable\n' "$repo"
+    fi
+    exit 0
+fi
 
 # bd ready returns ready issues sorted by priority ascending (P0 first).
 ready="$(cd "$dir" && bd ready --json 2>/dev/null)" || ready="[]"
