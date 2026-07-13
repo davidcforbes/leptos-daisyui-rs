@@ -161,6 +161,26 @@ pub fn StackedAreaChart(
 
     let baseline_y = pad_top + chart_h;
 
+    // Y-axis min/max value labels (bd_4iiz-inventory-toe.5): the desktop CFD
+    // prints the max stacked total at the top-left and "0" at the baseline for
+    // scale context — the web chart previously showed no y-scale at all.
+    let y_axis_label_views = {
+        let x_pos = format!("{:.2}", pad_left - 5.0);
+        let max_lbl = format!("{max_total:.0}");
+        let top_y = format!("{:.2}", pad_top);
+        let base_y = format!("{baseline_y:.2}");
+        view! {
+            <text x=x_pos.clone() y=top_y text-anchor="end" dominant-baseline="hanging"
+                fill="currentColor" font-size="10" opacity="0.6">
+                {max_lbl}
+            </text>
+            <text x=x_pos y=base_y text-anchor="end" dominant-baseline="middle"
+                fill="currentColor" font-size="10" opacity="0.6">
+                "0"
+            </text>
+        }
+    };
+
     let band_views = cumulative_rows
         .iter()
         .enumerate()
@@ -257,6 +277,7 @@ pub fn StackedAreaChart(
                 stroke-width="1"
             />
             {band_views}
+            {y_axis_label_views}
             {x_tick_views}
             {legend_views}
         </svg>

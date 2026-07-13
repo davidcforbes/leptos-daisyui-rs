@@ -74,6 +74,14 @@ pub fn LineChart(
     /// synthetic 0,1,2… index no longer prints meaningless "0.0/0.2/…" ticks.
     #[prop(optional)]
     x_labels: Vec<String>,
+    /// Minimal "sparkline" mode matching the desktop GUI's Trends line chart
+    /// (bd_4iiz-inventory-toe.5): drops the vertical y-axis, the multi-tick
+    /// y-scale, and both axis TITLE labels, keeping only a single bottom
+    /// baseline, the endpoint x-labels, small square markers, and a value
+    /// label printed next to the first and last data points. `false` keeps the
+    /// full-axis chart.
+    #[prop(default = false)]
+    minimal: bool,
 ) -> impl IntoView {
     if data.is_empty() {
         return view! {
@@ -91,11 +99,30 @@ pub fn LineChart(
         .into_any();
     }
 
-    // Padding around the chart area for axes and labels
-    let pad_left: f64 = if y_label.is_some() { 60.0 } else { 40.0 };
-    let pad_right: f64 = 20.0;
+    // Minimal/sparkline mode suppresses the axis TITLE labels entirely
+    // (bd_4iiz-inventory-toe.5) — endpoint value labels stand in for the
+    // y-scale, and the x-labels remain the only axis annotation.
+    let (x_label, y_label) = if minimal { (None, None) } else { (x_label, y_label) };
+
+    // Padding around the chart area for axes and labels. Minimal mode needs
+    // no left gutter for a y-scale, and reserves a little right/top room so
+    // the first/last value labels don't clip.
+    let pad_left: f64 = if minimal {
+        30.0
+    } else if y_label.is_some() {
+        60.0
+    } else {
+        40.0
+    };
+    let pad_right: f64 = if minimal { 40.0 } else { 20.0 };
     let pad_top: f64 = 20.0;
-    let pad_bottom: f64 = if x_label.is_some() { 50.0 } else { 35.0 };
+    let pad_bottom: f64 = if minimal {
+        28.0
+    } else if x_label.is_some() {
+        50.0
+    } else {
+        35.0
+    };
 
     let chart_w = width as f64 - pad_left - pad_right;
     let chart_h = height as f64 - pad_top - pad_bottom;
@@ -134,16 +161,21 @@ pub fn LineChart(
         .collect::<Vec<_>>()
         .join(" ");
 
-    // Build dot circle views
+    // Build marker views: small squares in minimal mode (matching desktop's
+    // understated endpoint markers), circles otherwise.
     let dot_views = if show_dots {
         data.iter()
             .map(|&(x, y)| {
                 let (sx, sy) = to_svg(x, y);
-                let cx_str = format!("{sx:.2}");
-                let cy_str = format!("{sy:.2}");
                 let c = color.clone();
-                view! {
-                    <circle cx=cx_str cy=cy_str r="3" fill=c />
+                if minimal {
+                    let rx = format!("{:.2}", sx - 2.0);
+                    let ry = format!("{:.2}", sy - 2.0);
+                    view! { <rect x=rx y=ry width="4" height="4" fill=c /> }.into_any()
+                } else {
+                    let cx_str = format!("{sx:.2}");
+                    let cy_str = format!("{sy:.2}");
+                    view! { <circle cx=cx_str cy=cy_str r="3" fill=c /> }.into_any()
                 }
             })
             .collect_view()
@@ -152,24 +184,67 @@ pub fn LineChart(
         ().into_any()
     };
 
-    // Axis tick views
-    let y_tick_views = (0..=4)
-        .map(|i| {
-            let frac = i as f64 / 4.0;
-            let val = y_min + frac * y_range;
-            let sy = pad_top + chart_h - frac * chart_h;
-            let x_pos = format!("{:.2}", pad_left - 5.0);
-            let y_pos = format!("{sy:.2}");
-            let label = format!("{val:.1}");
-            view! {
-                <text x=x_pos y=y_pos text-anchor="end"
-                    dominant-baseline="middle" fill="currentColor"
-                    font-size="10" opacity="0.6">
-                    {label}
-                </text>
+    // Endpoint value labels (minimal mode): print the first and last y-values
+    // next to their markers instead of a full y-axis scale — the desktop
+    // sparkline's "40"/"42" endpoint annotations (bd_4iiz-inventory-toe.5).
+    let endpoint_label_views = if minimal {
+        let fmt = |v: f64| {
+            if v.fract().abs() < 1e-9 {
+                format!("{v:.0}")
+            } else {
+                format!("{v:.1}")
             }
-        })
-        .collect_view();
+        };
+        let mut views = Vec::new();
+        if let Some(&(x, y)) = data.first() {
+            let (sx, sy) = to_svg(x, y);
+            views.push(view! {
+                <text x=format!("{:.2}", sx) y=format!("{:.2}", sy - 8.0)
+                    text-anchor="start" fill=color.clone() font-size="12" font-weight="600">
+                    {fmt(y)}
+                </text>
+            });
+        }
+        if data.len() > 1 {
+            if let Some(&(x, y)) = data.last() {
+                let (sx, sy) = to_svg(x, y);
+                views.push(view! {
+                    <text x=format!("{:.2}", sx) y=format!("{:.2}", sy - 8.0)
+                        text-anchor="end" fill=color.clone() font-size="12" font-weight="600">
+                        {fmt(y)}
+                    </text>
+                });
+            }
+        }
+        views.collect_view().into_any()
+    } else {
+        ().into_any()
+    };
+
+    // Axis tick views — suppressed in minimal mode (endpoint value labels
+    // stand in for the y-scale).
+    let y_tick_views = if minimal {
+        ().into_any()
+    } else {
+        (0..=4)
+            .map(|i| {
+                let frac = i as f64 / 4.0;
+                let val = y_min + frac * y_range;
+                let sy = pad_top + chart_h - frac * chart_h;
+                let x_pos = format!("{:.2}", pad_left - 5.0);
+                let y_pos = format!("{sy:.2}");
+                let label = format!("{val:.1}");
+                view! {
+                    <text x=x_pos y=y_pos text-anchor="end"
+                        dominant-baseline="middle" fill="currentColor"
+                        font-size="10" opacity="0.6">
+                        {label}
+                    </text>
+                }
+            })
+            .collect_view()
+            .into_any()
+    };
 
     // Tick count/position/anchor math lives in the pure fns above (visual-
     // parity audit fix — see [`tick_count`]'s doc comment for the bug this
@@ -233,8 +308,12 @@ pub fn LineChart(
         })
         .into_any();
 
-    view! {
-        <svg viewBox=viewbox class="w-full h-auto" xmlns="http://www.w3.org/2000/svg">
+    // The vertical y-axis line is suppressed in minimal mode; the horizontal
+    // bottom baseline is kept as the sparkline's single gridline.
+    let y_axis_line = if minimal {
+        ().into_any()
+    } else {
+        view! {
             <line
                 x1=pad_left_str.clone()
                 y1=pad_top_str
@@ -244,6 +323,13 @@ pub fn LineChart(
                 stroke-opacity="0.3"
                 stroke-width="1"
             />
+        }
+        .into_any()
+    };
+
+    view! {
+        <svg viewBox=viewbox class="w-full h-auto" xmlns="http://www.w3.org/2000/svg">
+            {y_axis_line}
             <line
                 x1=pad_left_str
                 y1=axis_y_end.clone()
@@ -264,6 +350,7 @@ pub fn LineChart(
                 stroke-linecap="round"
             />
             {dot_views}
+            {endpoint_label_views}
             {x_label_view}
             {y_label_view}
         </svg>

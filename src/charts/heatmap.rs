@@ -23,6 +23,18 @@ fn heat_alpha(intensity: f64) -> f64 {
     intensity.clamp(0.0, 1.0) * 0.55
 }
 
+/// Chooses the per-row cell height. When `max_cell_h` is set and the natural
+/// stretch-to-fill height exceeds it, the row is capped at `max_cell_h` so a
+/// few-row grid in a tall viewport renders as compact tiles rather than giant
+/// stretched bricks (bd_4iiz-inventory-toe.4). `None`, or a natural height
+/// already within the cap, keeps the natural height.
+fn clamp_cell_h(natural_cell_h: f64, max_cell_h: Option<f64>) -> f64 {
+    match max_cell_h {
+        Some(m) if natural_cell_h > m => m,
+        _ => natural_cell_h,
+    }
+}
+
 /// Pixel geometry of a [`Heatmap`]'s grid area: dimensions plus the offset
 /// of the grid's top-left corner within the SVG viewport. Bundled into a
 /// struct (rather than passed as loose args) to keep [`cell_rect`] under
@@ -97,12 +109,18 @@ pub fn Heatmap(
     /// slanted headers overlap the first cell row. bd_4iiz-inventory-43e.
     #[prop(optional)]
     pad_top: Option<f64>,
+    /// Optional per-row height cap in px. When set, each row is drawn at
+    /// `min(natural_row_height, max_cell_h)` and the SVG viewBox height shrinks
+    /// to fit exactly `pad_top + n_rows*row_h + pad_bottom` — so a grid with
+    /// few rows in a tall viewport renders compact tiles instead of giant
+    /// stretched bricks with large inter-row gaps (bd_4iiz-inventory-toe.4).
+    /// `None` keeps the legacy stretch-to-fill behavior.
+    #[prop(optional)]
+    max_cell_h: Option<f64>,
 ) -> impl IntoView {
-    let viewbox = format!("0 0 {width} {height}");
-
     if row_labels.is_empty() || col_labels.is_empty() {
         return view! {
-            <svg viewBox=viewbox class="w-full h-auto" xmlns="http://www.w3.org/2000/svg">
+            <svg viewBox=format!("0 0 {width} {height}") class="w-full h-auto" xmlns="http://www.w3.org/2000/svg">
                 <text x=format!("{}", width / 2) y=format!("{}", height / 2)
                     text-anchor="middle" fill="currentColor" font-size="14">
                     "No data"
@@ -121,10 +139,16 @@ pub fn Heatmap(
     let pad_bottom: f64 = 10.0;
 
     let chart_w = width as f64 - pad_left - pad_right;
-    let chart_h = height as f64 - pad_top - pad_bottom;
+    let natural_chart_h = height as f64 - pad_top - pad_bottom;
+
+    // Cap the per-row height (if requested) and shrink the SVG to fit so a
+    // few-row grid doesn't stretch into tall bricks — bd_4iiz-inventory-toe.4.
+    let cell_h = clamp_cell_h(natural_chart_h / n_rows as f64, max_cell_h);
+    let chart_h = cell_h * n_rows as f64;
+    let height_eff = pad_top + chart_h + pad_bottom;
+    let viewbox = format!("0 0 {width} {height_eff:.0}");
 
     let cell_w = chart_w / n_cols as f64;
-    let cell_h = chart_h / n_rows as f64;
 
     let layout = GridLayout {
         n_rows,
@@ -233,6 +257,23 @@ mod tests {
     #[test]
     fn heat_alpha_zero_intensity_is_zero_alpha() {
         assert_eq!(heat_alpha(0.0), 0.0);
+    }
+
+    #[test]
+    fn clamp_cell_h_none_keeps_natural() {
+        assert_eq!(clamp_cell_h(97.5, None), 97.5);
+    }
+
+    #[test]
+    fn clamp_cell_h_caps_when_natural_exceeds_max() {
+        // VaR case: 4 rows in a 520px viewport → ~97px natural, capped to 44.
+        assert_eq!(clamp_cell_h(97.5, Some(44.0)), 44.0);
+    }
+
+    #[test]
+    fn clamp_cell_h_keeps_natural_when_already_within_cap() {
+        // A dense grid whose natural rows are already compact is left alone.
+        assert_eq!(clamp_cell_h(30.0, Some(44.0)), 30.0);
     }
 
     fn layout(n_rows: usize, n_cols: usize, chart_w: f64, chart_h: f64) -> GridLayout {
