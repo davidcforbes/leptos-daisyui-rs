@@ -16,11 +16,15 @@ use leptos::{html::Div, prelude::*};
 /// (`bd_4iiz-inventory-xsa`/`4gj`).
 ///
 /// Segment widths are normalized to the SUM of every segment's value, not to
-/// a fixed 100 -- passing `[(4.0, "bg-success"), (3.0, "bg-warning"), (3.0,
-/// "bg-error")]` (raw counts) or the pre-normalized `[(0.4, ..), (0.3, ..),
-/// (0.3, ..)]` (fractions) renders identically. A non-positive total (every
-/// value zero/negative, or an empty `segments` list) renders an empty track
-/// -- never a divide-by-zero panic or a misleadingly full bar.
+/// a fixed 100 -- raw counts and the equivalent pre-normalized fractions render
+/// identically (a 4/3/3 count split draws the same bar as 0.4/0.3/0.3).
+/// A non-positive total (every value zero/negative, or an empty `segments`
+/// list) renders an empty track -- never a divide-by-zero panic or a
+/// misleadingly full bar.
+///
+/// (Keep every inline code span on ONE line in this doc comment: a span that
+/// wraps across two `///` lines ICEs clippy's `doc::include_in_doc_without_cfg`
+/// lint on 1.95, which takes the whole gate down.)
 ///
 /// ```rust
 /// use leptos::prelude::*;

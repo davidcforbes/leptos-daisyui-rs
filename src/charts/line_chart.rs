@@ -102,7 +102,11 @@ pub fn LineChart(
     // Minimal/sparkline mode suppresses the axis TITLE labels entirely
     // (bd_4iiz-inventory-toe.5) — endpoint value labels stand in for the
     // y-scale, and the x-labels remain the only axis annotation.
-    let (x_label, y_label) = if minimal { (None, None) } else { (x_label, y_label) };
+    let (x_label, y_label) = if minimal {
+        (None, None)
+    } else {
+        (x_label, y_label)
+    };
 
     // Padding around the chart area for axes and labels. Minimal mode needs
     // no left gutter for a y-scale, and reserves a little right/top room so
@@ -205,16 +209,16 @@ pub fn LineChart(
                 </text>
             });
         }
-        if data.len() > 1 {
-            if let Some(&(x, y)) = data.last() {
-                let (sx, sy) = to_svg(x, y);
-                views.push(view! {
-                    <text x=format!("{:.2}", sx) y=format!("{:.2}", sy - 8.0)
-                        text-anchor="end" fill=color.clone() font-size="12" font-weight="600">
-                        {fmt(y)}
-                    </text>
-                });
-            }
+        if data.len() > 1
+            && let Some(&(x, y)) = data.last()
+        {
+            let (sx, sy) = to_svg(x, y);
+            views.push(view! {
+                <text x=format!("{:.2}", sx) y=format!("{:.2}", sy - 8.0)
+                    text-anchor="end" fill=color.clone() font-size="12" font-weight="600">
+                    {fmt(y)}
+                </text>
+            });
         }
         views.collect_view().into_any()
     } else {
