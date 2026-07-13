@@ -1,4 +1,4 @@
-use super::style::{app_shell_root_class, nav_group_class};
+use super::style::{app_shell_root_class, icon_nav_background_style, nav_group_class};
 use crate::merge_classes;
 use crate::utils::{badge_text, badge_visible};
 use leptos::{
@@ -136,6 +136,42 @@ pub fn AppShell(
 /// bottom-pinned Settings item) -- this component itself is unchanged and
 /// simply renders whatever it's given in a vertical flex column.
 ///
+/// ## Branded background (`bg_color` / `bg_gradient` / `bg_image`)
+///
+/// The rail's background is composed of up to three layers, from back to
+/// front: a **solid colour**, an optional **gradient**, and an optional
+/// **texture image** on top. That is what a branded rail (dark navy base +
+/// vertical gradient + a brand dot-wave PNG) needs:
+///
+/// ```rust,ignore
+/// <AppShellIconNav
+///     class="w-16"
+///     bg_color="#0b1e3a"
+///     bg_gradient="linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.25))"
+///     bg_image="/assets/brand/sidebar-bg.png"
+/// >
+/// ```
+///
+/// Set the base colour with `bg_color`, **not** a `bg-[#0b1e3a]` class: the
+/// rail already carries `bg-base-300`, and between two plain utility classes
+/// the winner is whichever the generated sheet emits last (in practice
+/// `bg-base-300`, leaving the rail grey). `bg_color` is an inline style, so it
+/// outranks any class.
+///
+/// All three layers land on the `<nav>`'s own background, which always paints
+/// *beneath* its content -- so item hover/active states and count badges stay
+/// fully legible on top of the texture with no overlay element in the way.
+/// All default to empty, and an unbranded rail renders exactly the markup it
+/// did before, with no `style` attribute at all.
+///
+/// A repeating pattern (rather than one image stretched over the rail) wants
+/// `bg_repeat="repeat"` together with `bg_size="auto"` -- the default
+/// `cover` scales a single copy to fill the rail, which would defeat the tile.
+///
+/// `bg_gradient` is raw CSS (it has to be -- it is a `linear-gradient(...)`
+/// expression), so treat it exactly like `class`: author it, never build it
+/// from user input. `bg_image` is a URL and is escaped for you.
+///
 /// ### Add to `input.css`
 /// ```css
 /// @source inline("flex flex-col items-center bg-base-300");
@@ -148,6 +184,39 @@ pub fn AppShellIconNav(
     /// Additional CSS classes
     #[prop(optional, into)]
     class: &'static str,
+
+    /// Optional base background colour for the rail (e.g. `"#0b1e3a"`,
+    /// `"var(--brand-navy)"`), the bottom layer under `bg_gradient` and
+    /// `bg_image`. Empty (default) = keep the `bg-base-300` class.
+    ///
+    /// This exists because a `bg-[#0b1e3a]` *class* does not reliably beat the
+    /// rail's own `bg-base-300` class -- same cascade layer, and the sheet order
+    /// decides. Set the colour here and it wins.
+    #[prop(optional, into)]
+    bg_color: Signal<String>,
+
+    /// Optional background texture/pattern URL for the rail, painted on top of
+    /// `bg_gradient` and `bg_color`, and beneath the nav items. Empty (default)
+    /// = no image. Escaped before it reaches CSS.
+    #[prop(optional, into)]
+    bg_image: Signal<String>,
+
+    /// Optional CSS gradient for the rail (e.g.
+    /// `"linear-gradient(180deg, #0b1e3a, #071429)"`), painted beneath
+    /// `bg_image`. Empty (default) = no gradient. Raw CSS -- trusted input,
+    /// like `class`.
+    #[prop(optional, into)]
+    bg_gradient: Signal<String>,
+
+    /// `background-size` for `bg_image` (default `"cover"`). Use `"auto"` for
+    /// a repeating tile.
+    #[prop(optional, into, default = Signal::derive(|| "cover".to_string()))]
+    bg_size: Signal<String>,
+
+    /// `background-repeat` for `bg_image` (default `"no-repeat"`). Use
+    /// `"repeat"` for a tiling pattern.
+    #[prop(optional, into, default = Signal::derive(|| "no-repeat".to_string()))]
+    bg_repeat: Signal<String>,
 
     /// Reference to the nav element
     #[prop(optional)]
@@ -165,6 +234,18 @@ pub fn AppShellIconNav(
                     "flex flex-col items-center bg-base-300",
                     class
                 )
+            }
+            // `None` when the rail is unbranded, so no empty `style` attribute
+            // appears on markup that never asked for one.
+            style=move || {
+                let style = icon_nav_background_style(
+                    &bg_color.get(),
+                    &bg_image.get(),
+                    &bg_gradient.get(),
+                    &bg_size.get(),
+                    &bg_repeat.get(),
+                );
+                (!style.is_empty()).then_some(style)
             }
         >
             {children()}

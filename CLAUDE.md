@@ -54,6 +54,18 @@ cargo xtask bump patch|minor|major   # bump the library version (human-chosen le
 (`-p leptos-daisyui-rs -p leptos-daisyui-showcase -p xtask`). `cargo clippy
 --workspace` fails on leptos-`csr` feature unification — clippy **per-crate**.
 
+**Doc comments: keep every inline code span on ONE `///` line.** A backtick span
+that wraps across two `///` lines ICEs clippy 1.95 (panic in
+`doc/include_in_doc_without_cfg.rs`). The failure is silent-by-omission: clippy
+reports only "the compiler unexpectedly panicked" and lints *nothing* for that
+crate, so the gate's clippy step is effectively off while real lints pile up
+behind it. If `cargo xtask verify` shows clippy FAIL with no lint output, suspect
+this and run `cargo clippy -p <crate> --all-targets -- -D warnings` to see the panic.
+
+**Running the demo needs `npm install` in `demo/` first** (`node_modules` is not
+committed). Without it, trunk's Tailwind pre-build hook fails and trunk serves a
+**stale** build — the page loads fine but your changes aren't in it.
+
 ### Using cargo-make (Recommended for CI/Scripts)
 
 The project includes a comprehensive `Makefile.toml` with automated workflows:

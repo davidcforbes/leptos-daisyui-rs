@@ -3,6 +3,15 @@ use leptos::prelude::*;
 use leptos_daisyui_rs::components::*;
 use leptos_icons::Icon;
 
+/// A cyan dot-wave brand texture, standing in for the PNG a real app would
+/// ship. Inlined as a data URI so the demo needs no binary asset; `#` is
+/// percent-encoded (`%23`) because a raw `#` would start a URL fragment.
+const DOT_WAVE_TEXTURE: &str = "data:image/svg+xml,\
+%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='40'%20height='40'%3E\
+%3Ccircle%20cx='8'%20cy='10'%20r='1.5'%20fill='%2322d3ee'%20fill-opacity='0.45'/%3E\
+%3Ccircle%20cx='28'%20cy='26'%20r='1.5'%20fill='%2322d3ee'%20fill-opacity='0.30'/%3E\
+%3C/svg%3E";
+
 #[component]
 pub fn AppShellDemo() -> impl IntoView {
     let section = RwSignal::new(Some("home".to_string()));
@@ -202,6 +211,61 @@ pub fn AppShellDemo() -> impl IntoView {
                         <AppShellContent class="p-6">
                             <p class="text-base-content/70">
                                 "The rail above narrows to icon-only when labels are hidden -- the item buttons still carry an aria-label from the label prop."
+                            </p>
+                        </AppShellContent>
+                    </AppShell>
+                </div>
+            </Section>
+
+            <Section title="Branded Rail (background image + gradient)" col=true>
+                <p class="text-sm text-base-content/70 mb-4">
+                    "The rail's background stacks three layers, back to front: "<code>"bg_color"</code>
+                    ", an optional "<code>"bg_gradient"</code>", and an optional "<code>"bg_image"</code>
+                    " texture. They paint beneath the nav items, so hover and active states (and count badges) stay legible on top of the texture. "
+                    "Set the base colour via "<code>"bg_color"</code>" rather than a "<code>"bg-[#0b1e3a]"</code>
+                    " class -- the rail already carries "<code>"bg-base-300"</code>
+                    ", and between two utility classes the sheet order decides the winner; an inline colour always wins. "
+                    "The dot-wave below is a tiling pattern, so it pairs "<code>"bg_repeat=\"repeat\""</code>
+                    " with "<code>"bg_size=\"auto\""</code>"."
+                </p>
+                <div class="h-56 bg-base-200 rounded-lg overflow-hidden border border-base-300">
+                    <AppShell>
+                        <AppShellIconNav
+                            class="w-20 text-white"
+                            bg_color="#0b1e3a"
+                            bg_gradient="linear-gradient(180deg, rgba(255,255,255,0.08), rgba(0,0,0,0.35))"
+                            bg_image=DOT_WAVE_TEXTURE
+                            bg_repeat="repeat"
+                            bg_size="auto"
+                        >
+                            <AppShellIconNavItem
+                                value="home"
+                                label="Home"
+                                class="py-3 [&.active]:bg-white/15 hover:bg-white/10"
+                            >
+                                <Icon icon=icondata::AiHomeFilled />
+                            </AppShellIconNavItem>
+                            <AppShellIconNavItem
+                                value="alerts"
+                                label="Alerts"
+                                badge=Some(7)
+                                class="py-3 [&.active]:bg-white/15 hover:bg-white/10"
+                            >
+                                <Icon icon=icondata::AiBellFilled />
+                            </AppShellIconNavItem>
+                            <AppShellIconNavGroup pinned=true>
+                                <AppShellIconNavItem
+                                    value="settings"
+                                    label="Settings"
+                                    class="py-3 [&.active]:bg-white/15 hover:bg-white/10"
+                                >
+                                    <Icon icon=icondata::AiSettingOutlined />
+                                </AppShellIconNavItem>
+                            </AppShellIconNavGroup>
+                        </AppShellIconNav>
+                        <AppShellContent class="p-6">
+                            <p class="text-base-content/70">
+                                "Hover the rail's items: the texture never sits over an item's hover/active background or its count badge."
                             </p>
                         </AppShellContent>
                     </AppShell>
