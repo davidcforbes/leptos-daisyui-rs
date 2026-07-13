@@ -91,8 +91,9 @@ pub fn DataTable(
     #[prop(optional, into)]
     loading: Signal<bool>,
 
-    /// Enable pagination (default: true)
-    #[prop(optional, into)]
+    /// Enable pagination (default: true). Pass `paginate=false` to hide the
+    /// pagination controls entirely (e.g. a 1–2 row table that needs no pager).
+    #[prop(into, default = Signal::derive(|| true))]
     paginate: Signal<bool>,
 
     /// Custom CSS classes
@@ -185,11 +186,10 @@ pub fn DataTable(
         if size == 0 { 10 } else { size }
     });
 
-    // Default paginate to true
-    let paginate = Signal::derive(move || {
-        let p = paginate.get();
-        if p { p } else { true }
-    });
+    // `paginate` comes straight from the prop (default `true` — see its
+    // declaration). The old `if p { p } else { true }` re-derive here forced
+    // it ALWAYS true, silently ignoring an explicit `paginate=false`
+    // (bd_4iiz-inventory-toe.6) — removed.
 
     // Pagination state
     let (current_page, set_current_page) = signal(0_usize);
