@@ -52,6 +52,42 @@ pub fn DataTableDemo() -> impl IntoView {
         Column::new("joined", "Joined Date"),
     ]);
 
+    // Typed sorting: money / duration / date columns whose display strings do
+    // not sort correctly as text ("$1,000" < "$900" because '1' < '9'). The em
+    // dash means "not measured" and must not sort as 0.
+    let typed_sort_data = RwSignal::new(vec![
+        HashMap::from([
+            ("account", "Northwind".to_string()),
+            ("balance", "$900".to_string()),
+            ("days", "9".to_string()),
+            ("opened", "2026-03-04".to_string()),
+        ]),
+        HashMap::from([
+            ("account", "Contoso".to_string()),
+            ("balance", "$1,000".to_string()),
+            ("days", "525".to_string()),
+            ("opened", "2025-11-30".to_string()),
+        ]),
+        HashMap::from([
+            ("account", "Fabrikam".to_string()),
+            ("balance", "$85".to_string()),
+            ("days", "10".to_string()),
+            ("opened", "2026-07-01".to_string()),
+        ]),
+        HashMap::from([
+            ("account", "Tailspin".to_string()),
+            ("balance", "($1,250.50)".to_string()),
+            ("days", "\u{2014}".to_string()),
+            ("opened", "2024-01-15".to_string()),
+        ]),
+    ]);
+    let typed_sort_columns = RwSignal::new(vec![
+        Column::new("account", "Account"),
+        Column::new("balance", "Balance").with_sort_as(SortAs::Number),
+        Column::new("days", "Days in Stage").with_sort_as(SortAs::Number),
+        Column::new("opened", "Opened").with_sort_as(SortAs::Date),
+    ]);
+
     // Data sets (store in RwSignal for multiple use)
     let small_data = RwSignal::new(generate_users(5));
     let medium_data = RwSignal::new(generate_users(25));
@@ -196,6 +232,24 @@ pub fn DataTableDemo() -> impl IntoView {
                     data=small_data
                     columns=mixed_columns
                     page_size=5
+                />
+            </Section>
+
+            // Typed sorting (SortAs)
+            <Section title="Typed Sorting (Number and Date columns)">
+                <p class="text-sm opacity-70 mb-4">
+                    "Columns sort as text by default, which is wrong for formatted numbers: "
+                    <code>"\"$1,000\""</code>" would sort before "<code>"\"$900\""</code>
+                    " on its first digit. "<code>"Column::with_sort_as(SortAs::Number)"</code>
+                    " compares the parsed value instead — currency symbols, thousands separators, "
+                    "percent signs and accounting parentheses are all understood. "
+                    <code>"SortAs::Date"</code>" does the same for dates. A cell that holds no value "
+                    "(the em dash below) is not zero, so it sorts last in both directions."
+                </p>
+                <DataTable
+                    data=typed_sort_data
+                    columns=typed_sort_columns
+                    paginate=false
                 />
             </Section>
 

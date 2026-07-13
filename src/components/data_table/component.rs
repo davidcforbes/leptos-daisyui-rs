@@ -2,6 +2,7 @@ use crate::components::data_table::body::DataTableBody;
 use crate::components::data_table::controls::DataTableControls;
 use crate::components::data_table::header::DataTableHeader;
 use crate::components::data_table::selection::handle_row_click;
+use crate::components::data_table::sort::{column_sort_as, compare_cells};
 use crate::components::data_table::types::{
     CellRenderer, Column, DataTableClasses, DataTableTexts, SortOrder, TableRow, TypedCellFn,
 };
@@ -17,11 +18,31 @@ use web_sys::wasm_bindgen::JsCast;
 /// and efficient handling of large datasets (10,000+ rows).
 ///
 /// ## Features
-/// - Column-based sorting (click headers to toggle Asc/Desc)
+/// - Column-based sorting (click headers to toggle Asc/Desc), typed per column
+///   via [`Column::with_sort_as`] -- see below
 /// - Pagination with customizable page size
 /// - Loading and empty states
 /// - Fully themed with daisyUI
 /// - Efficient index-based operations for large datasets
+///
+/// ## Sorting
+///
+/// Sorting reorders an index permutation, never the `data` itself, so row
+/// identity (and therefore `selected_rows`) survives a sort by construction.
+///
+/// Cells are `String`s and compare as text by default. A column holding
+/// formatted numbers must say so with [`SortAs::Number`], or it sorts by first
+/// digit (`"$1,000"` before `"$900"`):
+///
+/// ```rust
+/// use leptos_daisyui_rs::components::{Column, SortAs};
+///
+/// let columns = vec![
+///     Column::new("account", "Account"),                             // text
+///     Column::new("balance", "Balance").with_sort_as(SortAs::Number), // $85 < $900 < $1,000
+///     Column::new("opened", "Opened").with_sort_as(SortAs::Date),
+/// ];
+/// ```
 ///
 /// ## Example
 /// ```rust,no_run
@@ -269,26 +290,27 @@ pub fn DataTable(
         }
     });
 
-    // Sorted indices
+    // Sorted indices. Sorting an index permutation (never the data) is what
+    // keeps row identity -- and therefore `selected_rows` -- intact.
     let sorted_indices = Memo::new(move |_| {
         let mut indices = filtered_indices.get();
         if let Some(col_id) = sort_column.get() {
             let data_vec = data.get();
+            let order = sort_order.get();
+            // Columns declare how their cells compare; the default is Text,
+            // which is the plain lexicographic order. Money and duration
+            // columns opt into `SortAs::Number` so "$900" does not outrank
+            // "$1,000" on its first digit.
+            let sort_as = column_sort_as(&columns.get(), col_id);
             indices.sort_by(|&a, &b| {
-                let a_val = data_vec
-                    .get(a)
-                    .and_then(|row| row.get(col_id))
-                    .map(|s| s.as_str())
-                    .unwrap_or("");
-                let b_val = data_vec
-                    .get(b)
-                    .and_then(|row| row.get(col_id))
-                    .map(|s| s.as_str())
-                    .unwrap_or("");
-                match sort_order.get() {
-                    SortOrder::Asc => a_val.cmp(b_val),
-                    SortOrder::Desc => b_val.cmp(a_val),
-                }
+                let cell = |i: usize| {
+                    data_vec
+                        .get(i)
+                        .and_then(|row| row.get(col_id))
+                        .map(|s| s.as_str())
+                        .unwrap_or("")
+                };
+                compare_cells(cell(a), cell(b), sort_as, order)
             });
         }
         indices

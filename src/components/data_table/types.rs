@@ -1,4 +1,5 @@
 use crate::components::badge::BadgeColor;
+use crate::components::data_table::sort::SortAs;
 use leptos::prelude::{AnyView, Callback};
 use std::collections::HashMap;
 
@@ -84,10 +85,19 @@ pub struct Column {
     /// rendering (`None` = no typed cell). Checked only when `renderer_index`
     /// is `None` or out of bounds -- `renderer_index` always wins.
     pub typed_cell_index: Option<usize>,
+    /// How this column's cells are compared when sorting (default:
+    /// [`SortAs::Text`], the plain lexicographic comparison). Set
+    /// [`SortAs::Number`] on money/duration/percentage columns, whose display
+    /// strings otherwise sort by first digit (`"$1,000" < "$900"`).
+    pub sort_as: SortAs,
 }
 
 impl Column {
-    /// Create a new sortable column
+    /// Create a new sortable column.
+    ///
+    /// Sorts as text. If the column holds formatted numbers (money, percentages,
+    /// day counts), add [`with_sort_as(SortAs::Number)`](Column::with_sort_as) --
+    /// text order puts `"$1,000"` before `"$900"`.
     pub fn new(id: &'static str, header: &'static str) -> Self {
         Self {
             id,
@@ -100,6 +110,7 @@ impl Column {
             renderer_index: None,
             resizable: true,
             typed_cell_index: None,
+            sort_as: SortAs::Text,
         }
     }
 
@@ -116,6 +127,7 @@ impl Column {
             renderer_index: None,
             resizable: true,
             typed_cell_index: None,
+            sort_as: SortAs::Text,
         }
     }
 
@@ -161,6 +173,19 @@ impl Column {
     /// [`CellRenderer`].
     pub fn with_typed_cell(mut self, index: usize) -> Self {
         self.typed_cell_index = Some(index);
+        self
+    }
+
+    /// Declare how this column's cells are compared when sorting.
+    ///
+    /// ```
+    /// use leptos_daisyui_rs::components::{Column, SortAs};
+    ///
+    /// let balance = Column::new("balance", "Balance").with_sort_as(SortAs::Number);
+    /// let opened = Column::new("opened", "Opened").with_sort_as(SortAs::Date);
+    /// ```
+    pub fn with_sort_as(mut self, sort_as: SortAs) -> Self {
+        self.sort_as = sort_as;
         self
     }
 }
@@ -324,6 +349,11 @@ mod tests {
         assert!(col.resizable);
     }
 
+    #[test]
+    fn column_new_sorts_as_text_by_default() {
+        assert_eq!(Column::new("x", "X").sort_as, SortAs::Text);
+    }
+
     // ── Column::new_non_sortable ──
 
     #[test]
@@ -398,6 +428,19 @@ mod tests {
     fn with_typed_cell_sets_typed_cell_index() {
         let col = Column::new("status", "Status").with_typed_cell(3);
         assert_eq!(col.typed_cell_index, Some(3));
+    }
+
+    #[test]
+    fn with_sort_as_sets_sort_as() {
+        let col = Column::new("balance", "Balance").with_sort_as(SortAs::Number);
+        assert_eq!(col.sort_as, SortAs::Number);
+    }
+
+    #[test]
+    fn columns_with_different_sort_as_are_not_equal() {
+        let a = Column::new("x", "X");
+        let b = Column::new("x", "X").with_sort_as(SortAs::Number);
+        assert_ne!(a, b);
     }
 
     #[test]

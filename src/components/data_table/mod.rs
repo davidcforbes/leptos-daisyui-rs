@@ -52,6 +52,8 @@ mod resize;
 mod selection;
 mod server_component;
 
+/// Typed column sorting: `SortAs` plus the cell parsers/comparator behind it
+pub mod sort;
 /// Types for DataTable component including Column, SortOrder, and configuration structs
 pub mod types;
 
@@ -59,4 +61,5 @@ pub use clipboard::{cell_text, row_text, row_with_headers_text};
 pub use component::*;
 pub use selection::handle_row_click;
 pub use server_component::*;
+pub use sort::{SortAs, column_sort_as, compare_cells, parse_date, parse_number};
 pub use types::*;
