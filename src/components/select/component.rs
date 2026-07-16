@@ -35,6 +35,11 @@ pub fn Select(
     #[prop(optional, into)]
     disabled: Signal<bool>,
 
+    /// The `name` attribute used when submitting an enclosing form (and the
+    /// form-field a11y identifier). Omitted when `None`.
+    #[prop(optional, into)]
+    name: Signal<Option<String>>,
+
     /// Additional CSS classes
     #[prop(optional, into)]
     class: &'static str,
@@ -58,6 +63,7 @@ pub fn Select(
                 class
                 )
             }
+            name=move || name.get()
             disabled=disabled
         >
             {children()}
