@@ -140,13 +140,34 @@ The demo automatically:
 
 The crate has two main modules:
 - `src/components/` - daisyUI component wrappers (109 components: full daisyUI 5 coverage plus custom additions)
-- `src/utils/` - Utility code including `ClassAttributes` for dynamic class management
+- `src/utils/` - Utility code: `ClassAttributes` for dynamic class management, plus
+  reusable framework hooks (`DebouncedSignal`, `use_swr_resource`)
 - `src/motion/` - Animation primitives (`Lerp`, `Transition`, `Keyframe`/`Track`, easing, spring, `use_animated` hook)
 
 ### Recent additions (2026-07)
 - `sparkline/`, `empty_state/`, `icon_tile/`, `metric_row/`, `capacity_bar/`, `sla_chip/`, `nav_rail/`, `result_list/`, `day_scheduler/`, `toolbar/`, `tree/`, `week_view/` - new app-shell/data/scheduling components
 - `vertical_steps/` - extended with additional layout options
 - `src/motion/` - new animation module (see above)
+- `src/utils/swr.rs` - stale-while-revalidate keyed resource cache
+  (`use_swr_resource` / `SwrCache` / `provide_swr_cache`). Renders the cached value
+  for a key instantly while a background fetch revalidates, so back-navigation
+  doesn't spinner over data the user just saw. Demo: `/components/swr`.
+- `data_table/auto_page.rs` + the `auto_page_size` prop - responsive paging: rows
+  per page derived from the table's rendered height via a `ResizeObserver`.
+- `data_table/filter.rs` + `Column::filterable()` - opt-in per-column filter row
+  of dropdowns, ANDed with each other and with the existing `searchable` box.
+- `data_table` `on_row_activate` + `row_click_kind()`/`RowClickKind` - opt-in row
+  activation: a plain click activates (navigate/act on the row), a Ctrl/Shift
+  click still feeds the selection state machine. With no callback registered,
+  every click selects exactly as before.
+
+### Framework-purity rule (why `utils/` keeps growing)
+
+When a host app (EUC, inventory-web, Rust-DeskApp) hand-rolls a **generic**
+reactive pattern, promote it here rather than letting each screen re-derive it.
+`utils/debounce.rs` and `utils/swr.rs` were both extracted after a host app
+re-implemented them for the second/third time. App-specific logic stays in the app;
+framework primitives live here.
 
 ### Component Pattern
 

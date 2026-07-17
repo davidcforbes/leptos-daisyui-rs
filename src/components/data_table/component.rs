@@ -1,7 +1,14 @@
+use crate::components::data_table::auto_page::{
+    FALLBACK_HEADER_HEIGHT, FALLBACK_ROW_HEIGHT, rows_per_page_for_height,
+};
 use crate::components::data_table::body::DataTableBody;
 use crate::components::data_table::controls::DataTableControls;
+use crate::components::data_table::filter::{
+    ColumnFilters, DataTableFilterRow, distinct_values, has_filterable_columns,
+    prune_stale_filters, row_matches_filters,
+};
 use crate::components::data_table::header::DataTableHeader;
-use crate::components::data_table::selection::handle_row_click;
+use crate::components::data_table::selection::{RowClickKind, handle_row_click, row_click_kind};
 use crate::components::data_table::sort::{column_sort_as, compare_cells};
 use crate::components::data_table::types::{
     CellRenderer, Column, DataTableClasses, DataTableTexts, SortOrder, TableRow, TypedCellFn,
@@ -20,7 +27,8 @@ use web_sys::wasm_bindgen::JsCast;
 /// ## Features
 /// - Column-based sorting (click headers to toggle Asc/Desc), typed per column
 ///   via [`Column::with_sort_as`] -- see below
-/// - Pagination with customizable page size
+/// - Pagination with customizable page size, or `auto_page_size` to grow the
+///   row count with the window -- see below
 /// - Loading and empty states
 /// - Fully themed with daisyUI
 /// - Efficient index-based operations for large datasets
@@ -43,6 +51,30 @@ use web_sys::wasm_bindgen::JsCast;
 ///     Column::new("opened", "Opened").with_sort_as(SortAs::Date),
 /// ];
 /// ```
+///
+/// ## Responsive paging
+///
+/// By default `page_size` is fixed. Pass `auto_page_size=true` *together with*
+/// `max_height` to derive the row count from the rendered height instead, so a
+/// taller window shows more rows:
+///
+/// ```rust,no_run
+/// # use leptos::prelude::*;
+/// # use leptos_daisyui_rs::components::*;
+/// # fn f(columns: Signal<Vec<Column>>, data: Signal<Vec<TableRow>>) -> impl IntoView {
+/// view! {
+///     <DataTable
+///         columns=columns
+///         data=data
+///         auto_page_size=true
+///         max_height="calc(100vh - 260px)"
+///     />
+/// }
+/// # }
+/// ```
+///
+/// The table needs a definite height -- `max_height` (promoted to `height`
+/// here) or a parent that fixes it. See the `auto_page_size` prop docs for why.
 ///
 /// ## Example
 /// ```rust,no_run
@@ -90,6 +122,8 @@ use web_sys::wasm_bindgen::JsCast;
 /// @source inline("flex justify-between items-center mt-4 gap-2");
 /// @source inline("btn btn-sm join join-item btn-active btn-disabled");
 /// @source inline("text-sm text-base-content/60");
+/// // Per-column filter row (Column::filterable -> filter.rs)
+/// @source inline("select select-bordered select-xs w-full font-normal p-1");
 /// ```
 ///
 /// ## Node References
@@ -104,9 +138,34 @@ pub fn DataTable(
     #[prop(into)]
     columns: Signal<Vec<Column>>,
 
-    /// Number of rows per page (default: 10)
+    /// Number of rows per page (default: 10). Ignored when `auto_page_size` is
+    /// on, which derives the row count from the table's rendered height.
     #[prop(optional, into)]
     page_size: Signal<usize>,
+
+    /// Opt-in responsive paging: derive rows-per-page from the table's rendered
+    /// height instead of the fixed `page_size`, so a taller window shows more
+    /// rows (default: `false`, i.e. `page_size` is authoritative).
+    ///
+    /// A `ResizeObserver` on the table's scroll wrapper re-measures on every
+    /// resize and feeds [`rows_per_page_for_height`] — the same arithmetic
+    /// d2d-ui's desktop table uses.
+    ///
+    /// ## Requires a definite height
+    ///
+    /// The table must get its height from its layout context, not from its own
+    /// rows -- otherwise the height being measured is a function of the row
+    /// count being derived from it, and the count can never grow. Either:
+    ///
+    /// - pass `max_height`, which this prop promotes to a definite `height`
+    ///   (a bare `max-height` is only a ceiling and would leave the table
+    ///   shrink-wrapping its rows); or
+    /// - give the table a parent with a definite height, which it then fills.
+    ///
+    /// The pager and search box are laid out as flex siblings of the scroll
+    /// area, so they are excluded from the measurement automatically.
+    #[prop(optional, into)]
+    auto_page_size: Signal<bool>,
 
     /// Loading state
     #[prop(optional, into)]
@@ -166,6 +225,15 @@ pub fn DataTable(
     #[prop(optional)]
     selection_anchor: Option<RwSignal<Option<usize>>>,
 
+    /// Optional callback fired on a **plain** row click (no Ctrl/Shift),
+    /// receiving the row's absolute index (same index space as
+    /// `selected_rows` -- survives pagination/sort). Opt-in: when unset,
+    /// every click feeds the existing Ctrl/Shift selection semantics
+    /// unchanged. When set, a plain click calls this instead of selecting
+    /// (e.g. to navigate to a detail page); a modified click still selects.
+    #[prop(optional, into)]
+    on_row_activate: Option<Callback<usize>>,
+
     /// Node reference to container element
     #[prop(optional)]
     node_ref: NodeRef<Div>,
@@ -201,8 +269,24 @@ pub fn DataTable(
     // column id. Shared between the header (writer) and body (reader) so
     // resized columns stay aligned.
     let column_widths = RwSignal::new(HashMap::<&'static str, f64>::new());
-    // Default page size to 10 if not set
+
+    // Rows measured to fit the scroll wrapper, written by the `ResizeObserver`
+    // below. `None` until the first measurement lands, so the first paint uses
+    // the caller's `page_size` rather than flashing a guessed row count.
+    let auto_rows = RwSignal::new(Option::<usize>::None);
+    // The table's scroll wrapper -- the element whose height *is* the space
+    // available to rows (the search box and pager are its flex siblings, not
+    // its children, so they're already excluded).
+    let table_wrapper_ref = NodeRef::<Div>::new();
+
+    // Effective rows per page: the measured fit when `auto_page_size` is on and
+    // a measurement exists, else the `page_size` prop (defaulting to 10).
     let page_size = Signal::derive(move || {
+        if auto_page_size.get()
+            && let Some(rows) = auto_rows.get()
+        {
+            return rows;
+        }
         let size = page_size.get();
         if size == 0 { 10 } else { size }
     });
@@ -264,30 +348,75 @@ pub fn DataTable(
         }
     };
 
+    // ── Per-column filter row (opt-in via `Column::filterable`) ──
+
+    // Active dropdown selections, shared with `DataTableFilterRow`.
+    let column_filters = RwSignal::new(ColumnFilters::new());
+    // Whether to render the filter row at all — no `filterable` column means
+    // no row, so callers that never opt in are untouched.
+    let show_filter_row = Memo::new(move |_| columns.with(|c| has_filterable_columns(c)));
+
+    // Option lists per filterable column, derived from the *unfiltered* data so
+    // that choosing one option never removes the others from their dropdowns.
+    let filter_options = Memo::new(move |_| {
+        let all_data = data.get();
+        columns.with(|cols| {
+            cols.iter()
+                .filter(|c| c.filterable)
+                .map(|c| (c.id, distinct_values(&all_data, c.id)))
+                .collect::<HashMap<&'static str, Vec<String>>>()
+        })
+    });
+
+    // Drop selections whose value disappeared from the new data; a filter
+    // pinned to a value that no longer exists silently matches zero rows.
+    Effect::new(move |_| {
+        let options = filter_options.get();
+        column_filters.update(|f| {
+            if prune_stale_filters(f, &options) {
+                set_current_page.set(0);
+            }
+        });
+    });
+
     // Reset to page 1 when data changes
     Effect::new(move |_| {
         let _ = data.get();
         set_current_page.set(0);
     });
 
-    // Filtered indices — applies search filter when searchable
+    // Back to page 1 whenever a filter selection changes — the row the user was
+    // looking at on page 5 probably isn't there any more.
+    Effect::new(move |prev: Option<()>| {
+        let _ = column_filters.get();
+        if prev.is_some() {
+            set_current_page.set(0);
+        }
+    });
+
+    // Filtered indices — applies the per-column filters and, when `searchable`,
+    // the free-text query. The two combine with AND: the search box narrows
+    // what the dropdowns already selected.
     let filtered_indices = Memo::new(move |_| {
         let all_data = data.get();
         let query = debounced_search.get();
-        if query.is_empty() {
-            (0..all_data.len()).collect::<Vec<usize>>()
-        } else {
-            let q = query.to_lowercase();
-            (0..all_data.len())
-                .filter(|&i| {
-                    if let Some(row) = all_data.get(i) {
-                        row.values().any(|v| v.to_lowercase().contains(&q))
-                    } else {
-                        false
-                    }
-                })
-                .collect::<Vec<usize>>()
-        }
+        let filters = column_filters.get();
+        let q = query.to_lowercase();
+
+        (0..all_data.len())
+            .filter(|&i| {
+                let Some(row) = all_data.get(i) else {
+                    return false;
+                };
+                if !filters.is_empty() && !row_matches_filters(row, &filters) {
+                    return false;
+                }
+                if q.is_empty() {
+                    return true;
+                }
+                row.values().any(|v| v.to_lowercase().contains(&q))
+            })
+            .collect::<Vec<usize>>()
     });
 
     // Sorted indices. Sorting an index permutation (never the data) is what
@@ -382,39 +511,190 @@ pub fn DataTable(
         }
     });
 
-    // Row-click callback wiring multi-select semantics.
+    // Row-click callback: a plain click activates (when the consumer opted
+    // in via `on_row_activate`); a modified click always feeds the existing
+    // Ctrl/Shift multi-select semantics.
     let on_row_click = Callback::new(move |(abs_idx, ev): (usize, web_sys::MouseEvent)| {
-        let total = data.with(|d| d.len());
         let ctrl = ev.ctrl_key() || ev.meta_key();
         let shift = ev.shift_key();
-        let mut next = selected_rows.get_untracked();
-        let mut anchor = selection_anchor.get_untracked();
-        handle_row_click(abs_idx, ctrl, shift, &mut next, &mut anchor, total);
-        selected_rows.set(next);
-        selection_anchor.set(anchor);
+        match row_click_kind(ctrl, shift, on_row_activate.is_some()) {
+            RowClickKind::Activate => {
+                if let Some(cb) = on_row_activate {
+                    cb.run(abs_idx);
+                }
+            }
+            RowClickKind::Select => {
+                let total = data.with(|d| d.len());
+                let mut next = selected_rows.get_untracked();
+                let mut anchor = selection_anchor.get_untracked();
+                handle_row_click(abs_idx, ctrl, shift, &mut next, &mut anchor, total);
+                selected_rows.set(next);
+                selection_anchor.set(anchor);
+            }
+        }
+    });
+
+    // ── Responsive paging (`auto_page_size`) ──
+    //
+    // Measure the scroll wrapper and the *rendered* header/row heights, rather
+    // than assuming d2d-ui's fixed pixel constants: on the web a row's height
+    // depends on the daisyUI table size, theme and cell content. The constants
+    // are only fallbacks for when there is nothing to measure (empty table, or
+    // the first paint before rows exist).
+    let measure_rows = move || {
+        if !auto_page_size.get_untracked() {
+            return;
+        }
+        let Some(wrapper) = table_wrapper_ref.get_untracked() else {
+            return;
+        };
+
+        let measure = |selector: &str, fallback: f64| -> f64 {
+            wrapper
+                .query_selector(selector)
+                .ok()
+                .flatten()
+                .and_then(|el| el.dyn_into::<web_sys::HtmlElement>().ok())
+                .map(|el| el.offset_height() as f64)
+                .filter(|h| *h > 0.0)
+                .unwrap_or(fallback)
+        };
+
+        // `offset_height`, deliberately, not `client_height`: the wrapper is an
+        // `overflow-y: auto` box, so a *horizontal* scrollbar -- which appears
+        // when the widest rendered cell makes the table wider than the wrapper
+        // -- is subtracted from `client_height`. That made the viewport a
+        // function of which rows were on screen, and therefore of the row count
+        // being derived from it. The two then chase each other with no fixed
+        // point: a container of 124px oscillated forever between 5 rows @ 37px
+        // and 1 row @ 52px (the 15px delta being exactly the scrollbar).
+        // `offset_height` is the wrapper's flex-allocated border-box height,
+        // which no scrollbar or cell content can move, so the measurement
+        // depends only on the layout context and the fixed point is unique.
+        let viewport = wrapper.offset_height() as f64;
+        let header_height = measure("thead", FALLBACK_HEADER_HEIGHT);
+        let row_height = measure("tbody tr", FALLBACK_ROW_HEIGHT);
+
+        let rows = rows_per_page_for_height(viewport, header_height, row_height);
+        // Write only on a real change. This is what ends the settle pass below:
+        // with `viewport` independent of the row count, the second measurement
+        // agrees with the first, writes nothing, and nothing re-renders.
+        if auto_rows.get_untracked() != Some(rows) {
+            auto_rows.set(Some(rows));
+        }
+    };
+
+    // Measure on a fresh macrotask rather than inline: a `ResizeObserver`
+    // callback can run before the surrounding layout has settled, and latching
+    // a mid-reflow height leaves the table a row short with no further resize
+    // to correct it.
+    let schedule_measure = move || {
+        if set_timeout_with_handle(measure_rows, std::time::Duration::ZERO).is_err() {
+            // No `window` to schedule against (non-browser context): measuring
+            // now is better than not at all.
+            measure_rows();
+        }
+    };
+
+    // Re-measure when anything that moves the arithmetic changes: the opt-in
+    // itself, row height (table size / density), the rows available to measure,
+    // and `page_size` -- the last of which is what drives the settle loop.
+    // Re-measure when anything that moves the arithmetic changes: the opt-in
+    // itself, row height (table size / density), and the rows available to
+    // measure. Reading `page_size` also re-measures once after the count
+    // changes, which corrects a height latched from an unsettled layout.
+    Effect::new(move |_| {
+        let _ = auto_page_size.get();
+        let _ = table_size.get();
+        let _ = data.get();
+        let _ = page_size.get();
+        schedule_measure();
+    });
+
+    // Attach the `ResizeObserver` once, when the wrapper first enters the DOM
+    // (CSR-only -- a browser is always present). Reading `table_wrapper_ref.get()`
+    // is what makes this effect re-run the one time it flips `None` -> `Some`;
+    // it never flips back, so the setup branch never runs twice.
+    //
+    // No-feedback-loop precondition: the measurement only *reads* the wrapper's
+    // height and changes how many rows are inside it. That is safe exactly when
+    // the wrapper's height comes from its layout context rather than its own
+    // content -- which is why `container_style` gives the container a definite
+    // `height` (not just `max-height`) whenever `auto_page_size` is on.
+    Effect::new(move |_| {
+        let Some(wrapper) = table_wrapper_ref.get() else {
+            return;
+        };
+
+        schedule_measure();
+
+        let closure = wasm_bindgen::closure::Closure::wrap(Box::new(
+            move |_entries: js_sys::Array, _observer: web_sys::ResizeObserver| {
+                // A real resize: start a fresh settle episode, so revisiting a
+                // height the loop saw earlier is not mistaken for a cycle.
+                schedule_measure();
+            },
+        )
+            as Box<dyn FnMut(js_sys::Array, web_sys::ResizeObserver)>);
+
+        match web_sys::ResizeObserver::new(closure.as_ref().unchecked_ref()) {
+            Ok(observer) => {
+                observer.observe(wrapper.unchecked_ref::<web_sys::Element>());
+                // `Closure`/`ResizeObserver` wrap JS values and are neither
+                // `Send` nor `Sync`, but `on_cleanup` requires both (the
+                // reactive graph is generic over native multithreaded use).
+                // This component only ever runs single-threaded (wasm32 in the
+                // browser); `SendWrapper` encodes that assumption explicitly
+                // rather than working around it silently. Same rationale as
+                // `toolbar::Toolbar`.
+                let guard = send_wrapper::SendWrapper::new((closure, observer));
+                on_cleanup(move || {
+                    let (closure, observer) = guard.take();
+                    observer.disconnect();
+                    drop(closure);
+                });
+            }
+            Err(_) => drop(closure),
+        }
     });
 
     let container_class = merge_classes!(classes.container, class);
     let texts_for_body = texts.clone();
     let texts_for_controls = texts.clone();
     let search_placeholder = texts.search_placeholder;
+    let filter_all_label = texts.filter_all;
 
-    // Container style for viewport-constrained scrolling
-    let container_style =
-        max_height.map(|h| format!("display: flex; flex-direction: column; max-height: {}", h));
+    // Container style for viewport-constrained scrolling.
+    //
+    // `auto_page_size` needs a *definite* height here, not just a ceiling.
+    // `max-height` alone leaves the flex column shrink-wrapping its rows, so
+    // the wrapper's measured height would be a function of the row count we are
+    // deriving from it: the count can only ever stay where it is (it settles at
+    // 1 row and never grows). Promoting `max_height` to `height` breaks that
+    // circularity -- the wrapper's height then comes from the layout context,
+    // independent of how many rows are inside it.
+    //
+    // With no `max_height` to promote, fall back to `height: 100%` so the table
+    // fills whatever definite height its parent provides.
+    let has_max_height = max_height.is_some();
+    let container_style = move || match (auto_page_size.get(), max_height.as_deref()) {
+        (true, Some(h)) => Some(format!(
+            "display: flex; flex-direction: column; height: {h}; max-height: {h}"
+        )),
+        (true, None) => Some("display: flex; flex-direction: column; height: 100%".to_string()),
+        (false, Some(h)) => Some(format!(
+            "display: flex; flex-direction: column; max-height: {h}"
+        )),
+        (false, None) => None,
+    };
 
-    // Table wrapper style when max_height is set
-    let has_max_height = container_style.is_some();
-    let table_wrapper_style = if has_max_height {
-        Some("flex: 1; overflow-y: auto; min-height: 0")
-    } else {
-        None
-    };
-    let controls_style = if has_max_height {
-        Some("flex-shrink: 0; padding: 12px 0")
-    } else {
-        None
-    };
+    // The wrapper is the scroll viewport whenever the container is a flex
+    // column -- i.e. when `max_height` is set, or `auto_page_size` made the
+    // container definite-height on its own.
+    let is_flex_column = move || has_max_height || auto_page_size.get();
+    let table_wrapper_style =
+        move || is_flex_column().then_some("flex: 1; overflow-y: auto; min-height: 0");
+    let controls_style = move || is_flex_column().then_some("flex-shrink: 0; padding: 12px 0");
 
     view! {
         <div class=container_class node_ref=node_ref style=container_style>
@@ -437,7 +717,7 @@ pub fn DataTable(
                 }
             }}
 
-            <div style=table_wrapper_style>
+            <div style=table_wrapper_style node_ref=table_wrapper_ref>
                 <Table
                     size=table_size
                     zebra=zebra
@@ -451,7 +731,18 @@ pub fn DataTable(
                         on_sort=on_sort
                         header_cell_class=classes.header_cell
                         column_widths=column_widths
-                    />
+                    >
+                        {move || {
+                            show_filter_row.get().then(|| view! {
+                                <DataTableFilterRow
+                                    columns=columns
+                                    options=Signal::derive(move || filter_options.get())
+                                    filters=column_filters
+                                    all_label=filter_all_label
+                                />
+                            })
+                        }}
+                    </DataTableHeader>
                     <DataTableBody
                         columns=columns
                         rows=Signal::derive(move || current_page_rows.get())

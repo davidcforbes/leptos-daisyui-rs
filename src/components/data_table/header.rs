@@ -44,6 +44,15 @@ pub fn DataTableHeader(
     /// the *same* signal instance passed to `DataTableBody`'s
     /// `column_widths` prop.
     column_widths: RwSignal<HashMap<&'static str, f64>>,
+
+    /// Extra rows rendered inside this `<thead>` beneath the sortable header
+    /// row -- `DataTable` passes its filter row here when any column is
+    /// [`filterable`](Column::filterable).
+    ///
+    /// Must resolve to `<tr>` elements: they are children of a `<thead>`, and a
+    /// browser will hoist anything else out of the table.
+    #[prop(optional)]
+    children: Option<Children>,
 ) -> impl IntoView {
     // Local drag state -- not shared outside this header instance.
     let resize_drag = RwSignal::new(Option::<ResizeDrag>::None);
@@ -184,6 +193,7 @@ pub fn DataTableHeader(
                     }).collect_view()
                 }}
             </tr>
+            {children.map(|c| c())}
         </thead>
     }
 }

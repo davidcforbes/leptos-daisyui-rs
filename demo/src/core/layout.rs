@@ -250,6 +250,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     value: "theme_controller",
                 },
                 ComponentItem {
+                    name: "SWR Cache",
+                    href: "/components/swr",
+                    value: "swr",
+                },
+                ComponentItem {
                     name: "Toolbar",
                     href: "/components/toolbar",
                     value: "toolbar",

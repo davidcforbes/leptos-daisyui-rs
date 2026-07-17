@@ -90,6 +90,10 @@ pub struct Column {
     /// [`SortAs::Number`] on money/duration/percentage columns, whose display
     /// strings otherwise sort by first digit (`"$1,000" < "$900"`).
     pub sort_as: SortAs,
+    /// Whether this column gets a dropdown in the filter row (default:
+    /// `false`). Opt in with [`Column::filterable`]. When no column opts in,
+    /// no filter row is rendered at all.
+    pub filterable: bool,
 }
 
 impl Column {
@@ -111,6 +115,7 @@ impl Column {
             resizable: true,
             typed_cell_index: None,
             sort_as: SortAs::Text,
+            filterable: false,
         }
     }
 
@@ -128,6 +133,7 @@ impl Column {
             resizable: true,
             typed_cell_index: None,
             sort_as: SortAs::Text,
+            filterable: false,
         }
     }
 
@@ -186,6 +192,27 @@ impl Column {
     /// ```
     pub fn with_sort_as(mut self, sort_as: SortAs) -> Self {
         self.sort_as = sort_as;
+        self
+    }
+
+    /// Give this column a dropdown in `DataTable`'s filter row, offering the
+    /// column's distinct values. Selecting one narrows the table to rows whose
+    /// cell equals it exactly.
+    ///
+    /// Filtering is opt-in: a table with no `filterable` column renders no
+    /// filter row. Active filters combine with each other (AND) and with the
+    /// `searchable` free-text box.
+    ///
+    /// Best on low-cardinality columns (status, owner, type) -- a dropdown of a
+    /// thousand distinct ids is not a usable filter.
+    ///
+    /// ```
+    /// use leptos_daisyui_rs::components::Column;
+    ///
+    /// let status = Column::new("status", "Status").filterable();
+    /// ```
+    pub fn filterable(mut self) -> Self {
+        self.filterable = true;
         self
     }
 }
@@ -294,6 +321,8 @@ pub struct DataTableTexts {
     pub search_placeholder: &'static str,
     /// Row-range caption format (use {start}, {end}, and {total} placeholders)
     pub row_range: &'static str,
+    /// Label for the "no filter" option in every filter-row dropdown
+    pub filter_all: &'static str,
 }
 
 impl Default for DataTableTexts {
@@ -306,6 +335,7 @@ impl Default for DataTableTexts {
             page_indicator: "Page {current} of {total}",
             search_placeholder: "Search...",
             row_range: "Showing {start}\u{2013}{end} of {total}",
+            filter_all: "All",
         }
     }
 }

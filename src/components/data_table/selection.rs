@@ -65,12 +65,68 @@ pub fn handle_row_click(
     }
 }
 
+/// Whether a row click should notify the consumer's `on_row_activate`
+/// callback (a plain click, when the consumer opted in) or feed the
+/// internal selection state machine (`handle_row_click`) instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RowClickKind {
+    /// Plain click (no Ctrl/Shift) with an `on_row_activate` callback set --
+    /// the consumer wants to navigate/act on the row, not select it.
+    Activate,
+    /// Modified click (Ctrl and/or Shift), or no `on_row_activate` callback
+    /// registered at all -- feed the existing selection semantics.
+    Select,
+}
+
+/// Decide whether a row click should activate or select.
+///
+/// `has_activate` reports whether the consumer passed an `on_row_activate`
+/// callback to `DataTable`. When it's absent, every click selects, exactly
+/// as before this callback existed -- opt-in, zero behavior change by
+/// default.
+pub fn row_click_kind(ctrl: bool, shift: bool, has_activate: bool) -> RowClickKind {
+    if has_activate && !ctrl && !shift {
+        RowClickKind::Activate
+    } else {
+        RowClickKind::Select
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn sel(items: &[usize]) -> BTreeSet<usize> {
         items.iter().copied().collect()
+    }
+
+    // ── row_click_kind ──
+
+    #[test]
+    fn plain_click_activates_when_callback_set() {
+        assert_eq!(row_click_kind(false, false, true), RowClickKind::Activate);
+    }
+
+    #[test]
+    fn ctrl_click_selects_even_with_callback_set() {
+        assert_eq!(row_click_kind(true, false, true), RowClickKind::Select);
+    }
+
+    #[test]
+    fn shift_click_selects_even_with_callback_set() {
+        assert_eq!(row_click_kind(false, true, true), RowClickKind::Select);
+    }
+
+    #[test]
+    fn ctrl_shift_click_selects_even_with_callback_set() {
+        assert_eq!(row_click_kind(true, true, true), RowClickKind::Select);
+    }
+
+    #[test]
+    fn plain_click_selects_when_no_callback_set() {
+        // No `on_row_activate` registered -- behavior is unchanged from
+        // before this callback existed: every click feeds selection.
+        assert_eq!(row_click_kind(false, false, false), RowClickKind::Select);
     }
 
     // ── plain click ──

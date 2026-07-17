@@ -42,10 +42,12 @@
 //! }
 //! ```
 
+mod auto_page;
 mod body;
 mod clipboard;
 mod component;
 mod controls;
+mod filter;
 mod header;
 mod pagination;
 mod resize;
@@ -57,9 +59,14 @@ pub mod sort;
 /// Types for DataTable component including Column, SortOrder, and configuration structs
 pub mod types;
 
+pub use auto_page::{FALLBACK_HEADER_HEIGHT, FALLBACK_ROW_HEIGHT, rows_per_page_for_height};
 pub use clipboard::{cell_text, row_text, row_with_headers_text};
 pub use component::*;
-pub use selection::handle_row_click;
+pub use filter::{
+    ColumnFilters, DataTableFilterRow, FILTER_ALL, distinct_values, has_filterable_columns,
+    prune_stale_filters, row_matches_filters,
+};
+pub use selection::{RowClickKind, handle_row_click, row_click_kind};
 pub use server_component::*;
 pub use sort::{SortAs, column_sort_as, compare_cells, parse_date, parse_number};
 pub use types::*;

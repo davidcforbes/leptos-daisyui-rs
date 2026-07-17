@@ -162,6 +162,10 @@
 @source inline("tabs tab tab-content tabs-box tabs-border tabs-lift tab-active tab-disabled tabs-top tabs-bottom");
 /* Table */
 @source inline("table table-zebra table-pin-rows table-pin-cols table-xs table-sm table-md table-lg table-xl");
+/* Data Table: column-resize divider, per-column filter row (Column::filterable) */
+@source inline("relative absolute top-0 right-0 z-10 h-full w-1.5 cursor-col-resize select-none");
+@source inline("opacity-0 hover:opacity-100 hover:bg-primary/50 active:opacity-100 active:bg-primary/70");
+@source inline("select select-bordered select-xs w-full font-normal p-1");
 /* Textarea */
 @source inline("textarea textarea-ghost textarea-neutral textarea-primary textarea-secondary textarea-accent textarea-info textarea-success textarea-warning textarea-error textarea-xs textarea-sm textarea-md textarea-lg textarea-xl");
 /* Text Rotate */

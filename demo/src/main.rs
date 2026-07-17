@@ -74,6 +74,10 @@ fn AppInner() -> impl IntoView {
         debug::install_debug_bridge();
     }
 
+    // Above <Router> deliberately: an SwrCache provided inside a route dies with
+    // that route, which is the re-mount the cache exists to survive.
+    leptos_daisyui_rs::utils::provide_swr_cache();
+
     view! {
         <Html attr:data-theme=move || theme_ctx.base_theme() />
         <Title text="Leptos x daisyUI" />
@@ -173,6 +177,7 @@ fn AppInner() -> impl IntoView {
                     <Route path=path!("/toggle") view=ToggleDemo />
                     <Route path=path!("/motion") view=MotionDemo />
                     <Route path=path!("/tokens") view=TokensDemo />
+                    <Route path=path!("/swr") view=SwrDemo />
                     <Route path=path!("/toolbar") view=ToolbarDemo />
                     <Route path=path!("/tooltip") view=TooltipDemo />
                     <Route path=path!("/tree") view=TreeDemo />

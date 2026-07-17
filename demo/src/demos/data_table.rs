@@ -43,6 +43,17 @@ pub fn DataTableDemo() -> impl IntoView {
         Column::new("joined", "Joined Date"),
     ]);
 
+    // Filterable columns: only the low-cardinality ones (role, department,
+    // status) opt in -- a dropdown of 60 distinct names or emails would not be
+    // a usable filter, so `name`/`email` stay plain.
+    let filterable_columns = RwSignal::new(vec![
+        Column::new("name", "Name"),
+        Column::new("email", "Email"),
+        Column::new("role", "Role").filterable(),
+        Column::new("department", "Department").filterable(),
+        Column::new("status", "Status").filterable(),
+    ]);
+
     // Columns with non-sortable
     let mixed_columns = RwSignal::new(vec![
         Column::new("id", "ID"),
@@ -107,6 +118,13 @@ pub fn DataTableDemo() -> impl IntoView {
         Column::new("email", "Email"),
         Column::new("role", "Role"),
     ]);
+
+    // Row-activation state. Its own `selected_rows` so this demo's selection is
+    // independent of the multi-select demo above -- the point here is that a
+    // plain click does NOT land in this set.
+    let activated_row = RwSignal::new(Option::<usize>::None);
+    let activate_count = RwSignal::new(0_usize);
+    let activate_selected = RwSignal::new(BTreeSet::<usize>::new());
 
     // Column resize + typed cells (Badge/Icon) + row background + clipboard export
     let feature_data = RwSignal::new(generate_users(12));
@@ -406,6 +424,50 @@ pub fn DataTableDemo() -> impl IntoView {
                 />
             </Section>
 
+            // Per-column filter row
+            <Section title="Per-Column Filter Row">
+                <p class="text-sm opacity-70 mb-4">
+                    "Columns opt in with " <code>"Column::filterable()"</code> ", which gives them a "
+                    "dropdown of their distinct values beneath the header. Filters combine with each "
+                    "other and with the search box (all must match). Columns that don't opt in get no "
+                    "dropdown, and a table with no filterable column renders no filter row at all."
+                </p>
+                <DataTable
+                    data=Signal::derive(move || generate_users(60))
+                    columns=filterable_columns
+                    page_size=8
+                    searchable=true
+                />
+            </Section>
+
+            // Responsive / auto-growing page size
+            <Section title="Responsive Page Size (auto_page_size)">
+                <p class="text-sm opacity-70 mb-4">
+                    "With " <code>"auto_page_size=true"</code> " the row count is derived from the "
+                    "table's rendered height instead of a fixed " <code>"page_size"</code> ", so a "
+                    "taller window shows more rows. Drag the resizer below (or resize the window) and "
+                    "watch the row count and \"Showing X\u{2013}Y of Z\" caption follow."
+                </p>
+                <div class="alert alert-info mb-4">
+                    <span>
+                        "Needs a definite height: pass " <code>"max_height"</code>
+                        " (used here, and promoted to a real " <code>"height"</code> ") or give the "
+                        "table a parent that fixes its height. Sized from its own rows instead, the "
+                        "table's height would be a function of the row count derived from it."
+                    </span>
+                </div>
+                // `resize-y` + `overflow-auto` makes this box user-resizable, so the
+                // ResizeObserver can be exercised without resizing the browser.
+                <div class="resize-y overflow-auto border border-base-300 rounded-lg p-3 h-96 min-h-32">
+                    <DataTable
+                        data=Signal::derive(move || generate_users(200))
+                        columns=standard_columns
+                        auto_page_size=true
+                        max_height="100%"
+                    />
+                </div>
+            </Section>
+
             // No Pagination
             <Section title="Without Pagination">
                 <p class="text-sm opacity-70 mb-4">
@@ -481,6 +543,7 @@ pub fn DataTableDemo() -> impl IntoView {
                         next: "Siguiente",
                         search_placeholder: "Buscar...",
                         row_range: "Mostrando {start}\u{2013}{end} de {total}",
+                        filter_all: "Todos",
                     }
                 />
             </Section>
@@ -595,6 +658,64 @@ pub fn DataTableDemo() -> impl IntoView {
                     page_size=8
                     selected_rows=selected_rows
                     selection_anchor=selection_anchor
+                />
+            </Section>
+
+            // Row activation (opt-in `on_row_activate`)
+            <Section title="Row Activation (on_row_activate)">
+                <p class="text-sm opacity-70 mb-2">
+                    "Pass " <code>"on_row_activate"</code>
+                    " and a plain click stops selecting and instead calls the callback with the "
+                    "row's absolute index \u{2014} the same index space as "
+                    <code>"selected_rows"</code> ", so it survives pagination and sorting. Use it "
+                    "to open a detail page from a drilldown grid."
+                </p>
+                <p class="text-sm opacity-70 mb-4">
+                    "Modified clicks still select, so both interactions coexist on one table: "
+                    <kbd class="kbd kbd-xs">"Ctrl"</kbd> "+click toggles and "
+                    <kbd class="kbd kbd-xs">"Shift"</kbd>
+                    "+click extends, neither activating. Without the callback, every click selects "
+                    "exactly as before it existed."
+                </p>
+                <div class="flex flex-wrap gap-4 mb-4 text-sm">
+                    <span>
+                        "Last activated: "
+                        <code data-testid="activated-row">
+                            {move || {
+                                activated_row
+                                    .get()
+                                    .map(|i| i.to_string())
+                                    .unwrap_or_else(|| "(none)".to_string())
+                            }}
+                        </code>
+                    </span>
+                    <span>
+                        "Activations: "
+                        <code data-testid="activate-count">{move || activate_count.get()}</code>
+                    </span>
+                    <span>
+                        "Selected (Ctrl/Shift only): "
+                        <code data-testid="activate-selected">
+                            {move || {
+                                let s = activate_selected.get();
+                                if s.is_empty() {
+                                    "(none)".to_string()
+                                } else {
+                                    s.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(", ")
+                                }
+                            }}
+                        </code>
+                    </span>
+                </div>
+                <DataTable
+                    data=selection_data
+                    columns=selection_columns
+                    page_size=8
+                    selected_rows=activate_selected
+                    on_row_activate=Callback::new(move |idx: usize| {
+                        activated_row.set(Some(idx));
+                        activate_count.update(|n| *n += 1);
+                    })
                 />
             </Section>
 
