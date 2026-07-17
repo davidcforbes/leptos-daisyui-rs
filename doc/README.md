@@ -58,6 +58,9 @@ Each component documentation follows a consistent structure:
 - [Input](./components/input.md) - Text inputs with validation and different types
 - [Checkbox](./components/checkbox.md) - Boolean selection with indeterminate support
 
+### Data Components
+- [DataTable](./components/data_table.md) - Sorting, pagination, filtering, search, selection, row activation, and column resizing (plus `ServerDataTable` for server-side paging)
+
 ### Layout Components
 - [Accordion](./components/accordion.md) - Collapsible content sections
 
