@@ -49,9 +49,19 @@ pub fn DataTableBody(
     #[prop(optional, into)]
     empty_row_class: &'static str,
 
-    /// Click callback invoked with the row's absolute index and the raw `MouseEvent`
+    /// Row-interaction callback, invoked with `(absolute_index, ctrl_or_meta,
+    /// shift)`. Modifiers are passed as plain bools rather than an event so the
+    /// same path serves both a mouse click and a keyboard Enter/Space.
     #[prop(optional, into)]
-    on_row_click: Option<Callback<(usize, web_sys::MouseEvent)>>,
+    on_row_click: Option<Callback<(usize, bool, bool)>>,
+
+    /// Whether rows are keyboard-operable: focusable (`tabindex=0`) with
+    /// Enter/Space activating the same behaviour as a click, and carrying
+    /// `aria-selected`. Set by `DataTable` only when the consumer opted into
+    /// interaction (`selected_rows` or `on_row_activate`), so plain display
+    /// tables gain no tab stops.
+    #[prop(optional, into)]
+    interactive: bool,
 
     /// Per-cell renderers. A column with `renderer_index = Some(i)` invokes
     /// `cell_renderers[i]` with `(abs_idx, row)`; otherwise the cell renders
@@ -114,9 +124,6 @@ pub fn DataTableBody(
 
                     rows_vec.iter().map(|(abs_idx, row)| {
                         let abs_idx = *abs_idx;
-                        let click_handler = on_row_click.map(|cb| {
-                            move |ev: web_sys::MouseEvent| cb.run((abs_idx, ev))
-                        });
                         let extra_row_class = row_class_fn
                             .map(|f| f.run((abs_idx, row.clone())))
                             .unwrap_or_default();
@@ -129,12 +136,44 @@ pub fn DataTableBody(
                             }
                         });
 
+                        // `tabindex`/`aria-selected` only on interactive tables,
+                        // so a plain display table adds no tab stops. A `<tr>`
+                        // carries the implicit ARIA role `row`, on which
+                        // `aria-selected` is valid.
+                        let tabindex = interactive.then_some(0);
+                        let aria_selected = move || {
+                            interactive.then(|| {
+                                if selected_rows.with(|s| s.contains(&abs_idx)) {
+                                    "true"
+                                } else {
+                                    "false"
+                                }
+                            })
+                        };
+
                         view! {
                             <tr
                                 class=move || row_class_dyn.get()
-                                on:click=move |ev| {
-                                    if let Some(h) = &click_handler {
-                                        h(ev);
+                                tabindex=tabindex
+                                aria-selected=aria_selected
+                                on:click=move |ev: web_sys::MouseEvent| {
+                                    if let Some(cb) = on_row_click {
+                                        cb.run((abs_idx, ev.ctrl_key() || ev.meta_key(), ev.shift_key()));
+                                    }
+                                }
+                                on:keydown=move |ev: web_sys::KeyboardEvent| {
+                                    if !interactive {
+                                        return;
+                                    }
+                                    // Enter and Space activate/select, matching a
+                                    // click; Space additionally would scroll the
+                                    // page, so suppress its default.
+                                    let key = ev.key();
+                                    if key == "Enter" || key == " " {
+                                        ev.prevent_default();
+                                        if let Some(cb) = on_row_click {
+                                            cb.run((abs_idx, ev.ctrl_key() || ev.meta_key(), ev.shift_key()));
+                                        }
                                     }
                                 }
                             >

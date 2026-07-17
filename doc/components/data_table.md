@@ -33,9 +33,9 @@ Selection is cleared automatically when `data`, the sort column, or the sort ord
 | `pin_rows` | `Signal<bool>` | `false` | Sticky header/footer rows |
 | `pin_cols` | `Signal<bool>` | `false` | Sticky first column |
 | `max_height` | `Option<String>` | `None` | Viewport-constrained scrolling, e.g. `"calc(100vh - 260px)"` |
-| `selected_rows` | `Option<RwSignal<BTreeSet<usize>>>` | `None` | Multi-select state (absolute indices). Owned locally if omitted |
+| `selected_rows` | `Option<RwSignal<BTreeSet<usize>>>` | `None` | Multi-select state (absolute indices). Owned locally if omitted. Supplying it makes rows keyboard-operable |
 | `selection_anchor` | `Option<RwSignal<Option<usize>>>` | `None` | Anchor for Shift-range selection |
-| `on_row_activate` | `Option<Callback<usize>>` | `None` | Plain click activates instead of selecting |
+| `on_row_activate` | `Option<Callback<usize>>` | `None` | Plain click/Enter/Space activates instead of selecting. Supplying it makes rows keyboard-operable |
 | `on_sort_change` | `Option<Callback<(&'static str, SortOrder)>>` | `None` | Fired after a header click changes sort state |
 | `cell_renderers` | `Vec<CellRenderer>` | `[]` | Custom cell views, indexed by `Column::renderer_index` |
 | `typed_cells` | `Vec<TypedCellFn>` | `[]` | Lightweight Badge/Icon cells, indexed by `Column::typed_cell_index` |
@@ -360,8 +360,9 @@ All pure and independently usable:
 - Resize handles are `role="separator"` with `aria-orientation="vertical"` and an `aria-label` naming their column.
 - The search box carries `aria-label="Search table"`; each filter dropdown is labelled `Filter by <column>`.
 - Sort state changes are conveyed through `aria-sort` rather than the `▲`/`▼` glyph alone.
+- **Keyboard operation.** When the table is interactive — `selected_rows` or `on_row_activate` supplied — each row is focusable (`tabindex=0`) and carries `aria-selected`. **Enter** and **Space** do exactly what a plain click does (activate, or select); **Ctrl/Cmd** and **Shift** with Enter/Space toggle and range-extend selection, mirroring the mouse. Space suppresses its default page-scroll. A plain display table (neither prop) adds no tab stops.
 
-**Known gap**: rows respond to click but are not keyboard-focusable, so selection and activation are pointer-only. If you use `on_row_activate` as the sole route to a detail view, provide a keyboard-reachable alternative.
+**Known gap**: rows are keyboard-operable but the table does not yet expose full `role="grid"` semantics (per-cell `role="gridcell"`, arrow-key roaming). Screen readers announce rows and their selected state, but not "row 3 of 20, column 2". For a spreadsheet-grade grid this is a larger, separate change.
 
 ## Best Practices
 

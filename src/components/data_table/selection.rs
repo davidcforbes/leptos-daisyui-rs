@@ -78,6 +78,19 @@ pub enum RowClickKind {
     Select,
 }
 
+/// Whether a table's rows should be keyboard-operable -- focusable
+/// (`tabindex=0`) with Enter/Space mirroring a click, and carrying
+/// `aria-selected`.
+///
+/// True exactly when the consumer opted into row interaction: either a
+/// `selected_rows` signal (`has_selection`) or an `on_row_activate` callback
+/// (`has_activate`) was supplied. A plain display table with neither gains no
+/// tab stops -- a 50-row page would otherwise add 50 tab stops to a table the
+/// user only reads.
+pub fn row_is_interactive(has_selection: bool, has_activate: bool) -> bool {
+    has_selection || has_activate
+}
+
 /// Decide whether a row click should activate or select.
 ///
 /// `has_activate` reports whether the consumer passed an `on_row_activate`
@@ -127,6 +140,29 @@ mod tests {
         // No `on_row_activate` registered -- behavior is unchanged from
         // before this callback existed: every click feeds selection.
         assert_eq!(row_click_kind(false, false, false), RowClickKind::Select);
+    }
+
+    // ── row_is_interactive ──
+
+    #[test]
+    fn interactive_when_selection_surfaced() {
+        assert!(row_is_interactive(true, false));
+    }
+
+    #[test]
+    fn interactive_when_activation_set() {
+        assert!(row_is_interactive(false, true));
+    }
+
+    #[test]
+    fn interactive_when_both() {
+        assert!(row_is_interactive(true, true));
+    }
+
+    #[test]
+    fn not_interactive_for_a_plain_display_table() {
+        // Neither selection nor activation -> no tab stops added.
+        assert!(!row_is_interactive(false, false));
     }
 
     // ── plain click ──

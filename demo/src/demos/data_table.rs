@@ -625,7 +625,11 @@ pub fn DataTableDemo() -> impl IntoView {
                 <p class="text-sm opacity-70 mb-2">
                     "Click a row to select it. " <kbd class="kbd kbd-xs">"Ctrl"</kbd>
                     "+click toggles, " <kbd class="kbd kbd-xs">"Shift"</kbd>
-                    "+click extends the range from the anchor."
+                    "+click extends the range from the anchor. Rows are keyboard-operable too: "
+                    <kbd class="kbd kbd-xs">"Tab"</kbd> " to a row, then "
+                    <kbd class="kbd kbd-xs">"Enter"</kbd> " / " <kbd class="kbd kbd-xs">"Space"</kbd>
+                    " (with " <kbd class="kbd kbd-xs">"Ctrl"</kbd> " / " <kbd class="kbd kbd-xs">"Shift"</kbd>
+                    ") does the same as a click."
                 </p>
                 <p class="text-sm opacity-70 mb-4">
                     "Selected absolute indices: "
@@ -675,7 +679,10 @@ pub fn DataTableDemo() -> impl IntoView {
                     <kbd class="kbd kbd-xs">"Ctrl"</kbd> "+click toggles and "
                     <kbd class="kbd kbd-xs">"Shift"</kbd>
                     "+click extends, neither activating. Without the callback, every click selects "
-                    "exactly as before it existed."
+                    "exactly as before it existed. Keyboard works the same: "
+                    <kbd class="kbd kbd-xs">"Enter"</kbd> " / " <kbd class="kbd kbd-xs">"Space"</kbd>
+                    " activates, " <kbd class="kbd kbd-xs">"Ctrl"</kbd> " / "
+                    <kbd class="kbd kbd-xs">"Shift"</kbd> " + Enter selects."
                 </p>
                 <div class="flex flex-wrap gap-4 mb-4 text-sm">
                     <span>

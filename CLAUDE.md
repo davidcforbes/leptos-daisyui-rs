@@ -160,6 +160,12 @@ The crate has two main modules:
   activation: a plain click activates (navigate/act on the row), a Ctrl/Shift
   click still feeds the selection state machine. With no callback registered,
   every click selects exactly as before.
+- `data_table` keyboard operability + `row_is_interactive()` - when a table is
+  interactive (`selected_rows` or `on_row_activate` supplied), rows are
+  focusable (`tabindex=0`) with `aria-selected`, and Enter/Space (plus
+  Ctrl/Shift) mirror a click. Plain display tables gain no tab stops. The
+  internal `on_row_click` callback carries `(idx, ctrl, shift)` bools rather
+  than a `MouseEvent` so mouse and keyboard share one path.
 
 ### Framework-purity rule (why `utils/` keeps growing)
 

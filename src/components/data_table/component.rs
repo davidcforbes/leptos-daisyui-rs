@@ -8,7 +8,9 @@ use crate::components::data_table::filter::{
     prune_stale_filters, row_matches_filters,
 };
 use crate::components::data_table::header::DataTableHeader;
-use crate::components::data_table::selection::{RowClickKind, handle_row_click, row_click_kind};
+use crate::components::data_table::selection::{
+    RowClickKind, handle_row_click, row_click_kind, row_is_interactive,
+};
 use crate::components::data_table::sort::{column_sort_as, compare_cells};
 use crate::components::data_table::types::{
     CellRenderer, Column, DataTableClasses, DataTableTexts, SortOrder, TableRow, TypedCellFn,
@@ -495,6 +497,12 @@ pub fn DataTable(
         }
     });
 
+    // A row is keyboard-operable only when the consumer opted into interaction,
+    // so plain display tables don't sprout a tab stop per row. Captured before
+    // `selected_rows` is unwrapped into a local signal below, which would erase
+    // whether the consumer supplied one.
+    let row_interactive = row_is_interactive(selected_rows.is_some(), on_row_activate.is_some());
+
     // Selection state — owned locally if the consumer didn't pass their own.
     let selected_rows = selected_rows.unwrap_or_else(|| RwSignal::new(BTreeSet::new()));
     let selection_anchor = selection_anchor.unwrap_or_else(|| RwSignal::new(None));
@@ -511,12 +519,11 @@ pub fn DataTable(
         }
     });
 
-    // Row-click callback: a plain click activates (when the consumer opted
-    // in via `on_row_activate`); a modified click always feeds the existing
-    // Ctrl/Shift multi-select semantics.
-    let on_row_click = Callback::new(move |(abs_idx, ev): (usize, web_sys::MouseEvent)| {
-        let ctrl = ev.ctrl_key() || ev.meta_key();
-        let shift = ev.shift_key();
+    // Row-interaction callback, driven by a mouse click or a keyboard
+    // Enter/Space (modifiers passed as bools, not an event). A plain
+    // interaction activates when the consumer opted in via `on_row_activate`; a
+    // modified one always feeds the existing Ctrl/Shift multi-select semantics.
+    let on_row_click = Callback::new(move |(abs_idx, ctrl, shift): (usize, bool, bool)| {
         match row_click_kind(ctrl, shift, on_row_activate.is_some()) {
             RowClickKind::Activate => {
                 if let Some(cb) = on_row_activate {
@@ -755,6 +762,7 @@ pub fn DataTable(
                         loading_row_class=classes.loading_row
                         empty_row_class=classes.empty_row
                         on_row_click=on_row_click
+                        interactive=row_interactive
                         cell_renderers=cell_renderers
                         column_widths=Signal::derive(move || column_widths.get())
                         typed_cells=typed_cells
