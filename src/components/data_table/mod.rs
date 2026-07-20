@@ -44,6 +44,7 @@
 
 mod auto_page;
 mod body;
+mod chooser;
 mod clipboard;
 mod component;
 mod controls;
@@ -60,6 +61,7 @@ pub mod sort;
 pub mod types;
 
 pub use auto_page::{FALLBACK_HEADER_HEIGHT, FALLBACK_ROW_HEIGHT, rows_per_page_for_height};
+pub use chooser::DataTableColumnChooser;
 pub use clipboard::{cell_text, row_text, row_with_headers_text};
 pub use component::*;
 pub use filter::{

@@ -2,6 +2,9 @@ use crate::components::data_table::auto_page::{
     FALLBACK_HEADER_HEIGHT, FALLBACK_ROW_HEIGHT, rows_per_page_for_height,
 };
 use crate::components::data_table::body::DataTableBody;
+use crate::components::data_table::chooser::{
+    CHOOSER_STORAGE_PREFIX, DataTableColumnChooser, parse_hidden, serialize_hidden, visible_columns,
+};
 use crate::components::data_table::controls::DataTableControls;
 use crate::components::data_table::filter::{
     ColumnFilters, DataTableFilterRow, distinct_values, has_filterable_columns,
@@ -18,8 +21,26 @@ use crate::components::data_table::types::{
 use crate::components::table::{Table, TableSize};
 use crate::merge_classes;
 use leptos::{html::Div, prelude::*};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use web_sys::wasm_bindgen::JsCast;
+
+/// Read a `localStorage` value, returning `None` in any non-browser context
+/// (no `window`, storage disabled) rather than panicking.
+fn local_storage_get(key: &str) -> Option<String> {
+    web_sys::window()?
+        .local_storage()
+        .ok()??
+        .get_item(key)
+        .ok()?
+}
+
+/// Write a `localStorage` value, silently no-op'ing when storage is
+/// unavailable.
+fn local_storage_set(key: &str, value: &str) {
+    if let Some(Ok(Some(storage))) = web_sys::window().map(|w| w.local_storage()) {
+        let _ = storage.set_item(key, value);
+    }
+}
 
 /// # DataTable Component
 ///
@@ -177,6 +198,20 @@ pub fn DataTable(
     /// pagination controls entirely (e.g. a 1–2 row table that needs no pager).
     #[prop(into, default = Signal::derive(|| true))]
     paginate: Signal<bool>,
+
+    /// Opt-in gear-icon column chooser (default `false`). When on, a gear
+    /// dropdown appears in the toolbar letting the user toggle which columns
+    /// are visible; the last visible column can't be hidden. Pair with
+    /// `chooser_key` to persist the choice per table.
+    #[prop(optional, into)]
+    column_chooser: Signal<bool>,
+
+    /// `localStorage` key that persists this table's hidden-column set across
+    /// sessions (only meaningful with `column_chooser`). Ids that no longer
+    /// exist in the column set are dropped on load, so a renamed column can't
+    /// leave a phantom entry. When `None`, the choice is in-memory only.
+    #[prop(optional)]
+    chooser_key: Option<&'static str>,
 
     /// Custom CSS classes
     #[prop(optional)]
@@ -350,13 +385,44 @@ pub fn DataTable(
         }
     };
 
+    // ── Column chooser (opt-in via `column_chooser`) ──
+
+    // Hidden column ids. When `chooser_key` is set, hydrated once from
+    // localStorage at mount and persisted on every change thereafter.
+    let hidden_columns = RwSignal::new(HashSet::<&'static str>::new());
+    if let Some(key) = chooser_key {
+        let storage_key = format!("{CHOOSER_STORAGE_PREFIX}{key}");
+        // One-time synchronous hydrate. Only keep ids that still exist.
+        if let Some(stored) = local_storage_get(&storage_key) {
+            let valid: Vec<&'static str> = columns.get_untracked().iter().map(|c| c.id).collect();
+            hidden_columns.set(parse_hidden(&stored, &valid));
+        }
+        // Persist on change (the first run rewrites the just-hydrated value —
+        // idempotent, so no data loss regardless of effect ordering).
+        Effect::new(move |_| {
+            let serialized = hidden_columns.with(serialize_hidden);
+            local_storage_set(&storage_key, &serialized);
+        });
+    }
+
+    // Columns actually rendered: the full set, minus hidden ones when the
+    // chooser is on. Sorting/filtering logic keeps using the full `columns`
+    // (keyed by id), so hiding a column only drops it from the view.
+    let display_columns = Signal::derive(move || {
+        if column_chooser.get() {
+            visible_columns(&columns.get(), &hidden_columns.get())
+        } else {
+            columns.get()
+        }
+    });
+
     // ── Per-column filter row (opt-in via `Column::filterable`) ──
 
     // Active dropdown selections, shared with `DataTableFilterRow`.
     let column_filters = RwSignal::new(ColumnFilters::new());
-    // Whether to render the filter row at all — no `filterable` column means
-    // no row, so callers that never opt in are untouched.
-    let show_filter_row = Memo::new(move |_| columns.with(|c| has_filterable_columns(c)));
+    // Whether to render the filter row at all — no *visible* `filterable`
+    // column means no row, so callers that never opt in are untouched.
+    let show_filter_row = Memo::new(move |_| display_columns.with(|c| has_filterable_columns(c)));
 
     // Option lists per filterable column, derived from the *unfiltered* data so
     // that choosing one option never removes the others from their dropdowns.
@@ -706,9 +772,11 @@ pub fn DataTable(
     view! {
         <div class=container_class node_ref=node_ref style=container_style>
             {move || {
-                if searchable.get() {
-                    Some(view! {
-                        <div class="mb-3">
+                let show_search = searchable.get();
+                let show_chooser = column_chooser.get();
+                (show_search || show_chooser).then(|| view! {
+                    <div class="mb-3 flex items-center gap-2">
+                        {show_search.then(|| view! {
                             <input
                                 type="text"
                                 class="input input-bordered input-sm w-full max-w-xs"
@@ -717,11 +785,13 @@ pub fn DataTable(
                                 prop:value=move || search_query.get()
                                 on:input=on_search_input
                             />
-                        </div>
-                    })
-                } else {
-                    None
-                }
+                        })}
+                        <div class="flex-1"></div>
+                        {show_chooser.then(|| view! {
+                            <DataTableColumnChooser columns=columns hidden=hidden_columns />
+                        })}
+                    </div>
+                })
             }}
 
             <div style=table_wrapper_style node_ref=table_wrapper_ref>
@@ -732,7 +802,7 @@ pub fn DataTable(
                     pin_cols=pin_cols
                 >
                     <DataTableHeader
-                        columns=columns
+                        columns=display_columns
                         sort_column=Signal::derive(move || sort_column.get())
                         sort_order=Signal::derive(move || sort_order.get())
                         on_sort=on_sort
@@ -742,7 +812,7 @@ pub fn DataTable(
                         {move || {
                             show_filter_row.get().then(|| view! {
                                 <DataTableFilterRow
-                                    columns=columns
+                                    columns=display_columns
                                     options=Signal::derive(move || filter_options.get())
                                     filters=column_filters
                                     all_label=filter_all_label
@@ -751,7 +821,7 @@ pub fn DataTable(
                         }}
                     </DataTableHeader>
                     <DataTableBody
-                        columns=columns
+                        columns=display_columns
                         rows=Signal::derive(move || current_page_rows.get())
                         loading=loading
                         texts=texts_for_body
