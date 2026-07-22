@@ -102,9 +102,12 @@ impl std::error::Error for WebAuthnError {}
 
 /// Whether this browser exposes the JSON-native WebAuthn API.
 ///
+/// Named with the `webauthn_` prefix because `utils` is re-exported flat at
+/// the crate root, where a bare `is_supported` would be meaninglessly generic.
+///
 /// Check before offering a passkey action — an action that cannot succeed
 /// should be disabled, not left to fail on click.
-pub fn is_supported() -> bool {
+pub fn webauthn_is_supported() -> bool {
     js_supported()
 }
 
@@ -140,7 +143,7 @@ fn classify(err: JsValue) -> WebAuthnError {
 ///
 /// Shows the platform prompt — Windows Hello, Touch ID, a security key.
 pub async fn create_credential(options_json: &str) -> Result<String, WebAuthnError> {
-    if !is_supported() {
+    if !webauthn_is_supported() {
         return Err(WebAuthnError::Unsupported);
     }
     match js_create(options_json).await {
@@ -158,7 +161,7 @@ pub async fn create_credential(options_json: &str) -> Result<String, WebAuthnErr
 /// `AuthenticationResponseJSON`, to post back verbatim (Cognito: the
 /// `CREDENTIAL` challenge response).
 pub async fn get_assertion(options_json: &str) -> Result<String, WebAuthnError> {
-    if !is_supported() {
+    if !webauthn_is_supported() {
         return Err(WebAuthnError::Unsupported);
     }
     match js_get(options_json).await {
