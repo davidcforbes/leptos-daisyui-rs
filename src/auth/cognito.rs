@@ -304,6 +304,33 @@ impl CognitoClient {
         tokens_from(result)
     }
 
+    /// Silently exchange a **refresh token** for a fresh ID/access token
+    /// (`REFRESH_TOKEN_AUTH`) — no user interaction, no MFA, no passkey prompt.
+    ///
+    /// ID tokens expire in ~1h. Without this, a tab left open past that is
+    /// bounced back to the sign-in screen mid-session. Cognito does NOT return a
+    /// new refresh token here, so the caller keeps the one it holds until that
+    /// itself expires (the app client's refresh-token validity, 30 days by
+    /// default) — at which point a real sign-in genuinely is required.
+    pub async fn refresh(&self, refresh_token: &str) -> Result<CognitoTokens, CognitoError> {
+        let body = json!({
+            "AuthFlow": "REFRESH_TOKEN_AUTH",
+            "ClientId": self.config.client_id,
+            "AuthParameters": { "REFRESH_TOKEN": refresh_token },
+        });
+        let v = self.call("InitiateAuth", body).await?;
+        let result = v
+            .get("AuthenticationResult")
+            .ok_or_else(|| CognitoError::Unexpected("refresh returned no tokens".into()))?;
+        let mut tokens = tokens_from(result)?;
+        // The response omits it; carry the caller's forward so one refresh does
+        // not silently end the ability to refresh again.
+        if tokens.refresh_token.is_none() {
+            tokens.refresh_token = Some(refresh_token.to_string());
+        }
+        Ok(tokens)
+    }
+
     /// Begin a passkey sign-in: returns `(session, request_options_json)` to
     /// hand to [`crate::utils::webauthn::get_assertion`].
     ///
@@ -491,6 +518,19 @@ mod tests {
         assert!(t.refresh_token.is_none());
 
         assert!(tokens_from(&json!({ "AccessToken": "at" })).is_err());
+    }
+
+    /// A refresh response omits the refresh token; dropping it would mean a
+    /// session could refresh exactly once and then be stranded.
+    #[test]
+    fn refresh_carries_the_existing_refresh_token_forward() {
+        let mut t = tokens_from(&json!({ "IdToken": "id2", "AccessToken": "at2" })).unwrap();
+        assert!(t.refresh_token.is_none());
+        if t.refresh_token.is_none() {
+            t.refresh_token = Some("rt-original".to_string());
+        }
+        assert_eq!(t.refresh_token.as_deref(), Some("rt-original"));
+        assert_eq!(t.id_token, "id2");
     }
 
     /// "No passkey" must read as an ordinary state, not an alarming failure.
