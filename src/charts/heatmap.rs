@@ -117,6 +117,14 @@ pub fn Heatmap(
     /// `None` keeps the legacy stretch-to-fill behavior.
     #[prop(optional)]
     max_cell_h: Option<f64>,
+    /// Optional per-cell click handler, called with `(row, col)` (0-based, in
+    /// the same index space as `row_labels`/`col_labels`). When set, EVERY grid
+    /// position — including empty ones — becomes clickable via a transparent
+    /// overlay rect, so a consumer can drill from a cell whether or not it drew a
+    /// tile there. Purely additive: `None` (the default) is the legacy
+    /// non-interactive heatmap, unchanged for every existing consumer.
+    #[prop(optional)]
+    on_cell_click: Option<Callback<(usize, usize)>>,
 ) -> impl IntoView {
     if row_labels.is_empty() || col_labels.is_empty() {
         return view! {
@@ -224,11 +232,36 @@ pub fn Heatmap(
         })
         .collect_view();
 
+    // Optional interaction overlay (beads-1qhd): one transparent rect per grid
+    // position — including empty ones — so a click lands on any (row, col) even
+    // where no tile was drawn. Only rendered when a handler is supplied, so the
+    // legacy heatmap emits no extra DOM.
+    let click_overlay = on_cell_click.map(|cb| {
+        (0..n_rows)
+            .flat_map(|ri| (0..n_cols).map(move |ci| (ri, ci)))
+            .map(|(ri, ci)| {
+                let (x, y, w, h) = cell_rect(ri, ci, layout);
+                view! {
+                    <rect
+                        x=format!("{x:.2}")
+                        y=format!("{y:.2}")
+                        width=format!("{w:.2}")
+                        height=format!("{h:.2}")
+                        fill="transparent"
+                        style="cursor: pointer"
+                        on:click=move |_| cb.run((ri, ci))
+                    />
+                }
+            })
+            .collect_view()
+    });
+
     view! {
         <svg viewBox=viewbox class="w-full h-auto" xmlns="http://www.w3.org/2000/svg">
             {cell_views}
             {row_label_views}
             {col_label_views}
+            {click_overlay}
         </svg>
     }
     .into_any()
