@@ -280,20 +280,18 @@ pub fn LoginScreen(
                                 />
                             </label>
                             <ul class="text-xs mt-1 space-y-0.5">
-                                <For
-                                    each=move || {
-                                        password_rules(&new_password.get())
-                                            .into_iter()
-                                            .enumerate()
-                                            .collect::<Vec<_>>()
-                                    }
-                                    key=|(i, _)| *i
-                                    let:item
-                                >
-                                    <li class=move || {
-                                        if item.1.1 { "text-success" } else { "opacity-60" }
-                                    }>{if item.1.1 { "\u{2713} " } else { "\u{25CB} " }}{item.1.0}</li>
-                                </For>
+                                {move || {
+                                    // Re-render the whole (5-row) list on each keystroke: a
+                                    // keyed <For> reuses rows and would leave the ✓/○ stale.
+                                    password_rules(&new_password.get())
+                                        .into_iter()
+                                        .map(|(label, ok)| {
+                                            let cls = if ok { "text-success" } else { "opacity-60" };
+                                            let mark = if ok { "\u{2713} " } else { "\u{25CB} " };
+                                            view! { <li class=cls>{mark}{label}</li> }
+                                        })
+                                        .collect_view()
+                                }}
                             </ul>
                         </Show>
 
