@@ -1,5 +1,6 @@
 use super::style::{
-    LoginState, login_password_autocomplete, login_password_label, login_submit_label,
+    LoginState, login_password_autocomplete, login_password_label, login_submit_label, password_ok,
+    password_rules,
 };
 use crate::merge_classes;
 use leptos::{html::Div, prelude::*};
@@ -106,6 +107,29 @@ pub fn LoginScreen(
     #[prop(into, optional)]
     on_passkey: Option<Callback<()>>,
 
+    /// "Create password" pressed on the [`LoginState::SetNewPassword`] step: the
+    /// new password (already policy-checked by the component).
+    #[prop(into, optional)]
+    on_new_password_submit: Option<Callback<String>>,
+
+    /// The base32 TOTP secret for the [`LoginState::SetUpMfa`] step (from
+    /// `AssociateSoftwareToken`). When present, the QR + manual key are shown.
+    #[prop(into, default = Signal::derive(|| None))]
+    mfa_secret: Signal<Option<String>>,
+
+    /// The account label for the `otpauth://` URI (usually the email), so the
+    /// entry in the user's authenticator app is recognisable.
+    #[prop(into, default = "account".to_string())]
+    mfa_account: String,
+
+    /// "Set up" pressed on the [`LoginState::OfferPasskey`] step.
+    #[prop(into, optional)]
+    on_setup_passkey: Option<Callback<()>>,
+
+    /// "Skip" pressed on the [`LoginState::OfferPasskey`] step.
+    #[prop(into, optional)]
+    on_skip_passkey: Option<Callback<()>>,
+
     /// Optional escape hatch, e.g. "use the hosted sign-in page instead".
     /// Omitted entirely when not supplied.
     #[prop(into, optional)]
@@ -125,6 +149,7 @@ pub fn LoginScreen(
 ) -> impl IntoView {
     let (username, set_username) = signal(initial_username.unwrap_or_default());
     let (password, set_password) = signal(String::new());
+    let (new_password, set_new_password) = signal(String::new());
     let (code, set_code) = signal(String::new());
 
     let busy = Signal::derive(move || state.get().is_busy());
@@ -136,7 +161,16 @@ pub fn LoginScreen(
         if s.is_busy() {
             return;
         }
-        if s.shows_mfa() {
+        if s.shows_new_password() {
+            // Only submit a policy-compliant password (the checklist + disabled
+            // button already gate it; guard here too).
+            let p = new_password.get();
+            if let Some(cb) = on_new_password_submit.filter(|_| password_ok(&p)) {
+                cb.run(p);
+            }
+        } else if s.shows_mfa() || s.shows_mfa_setup() {
+            // The returning-user MFA code AND the first-time setup code share one
+            // callback; the host branches on the state it owns.
             let c = code.get().trim().to_string();
             if c.is_empty() {
                 return;
@@ -227,14 +261,102 @@ pub fn LoginScreen(
                             </label>
                         </Show>
 
+                        // Dedicated create-new-password step: single field + a
+                        // live requirements checklist (each rule greens as met).
+                        <Show when=move || state.get().shows_new_password()>
+                            <p class="text-sm opacity-70">
+                                {move || format!("for {}", username.get())}
+                            </p>
+                            <label class="form-control w-full">
+                                <span class="label-text">"New password"</span>
+                                <input
+                                    type="password"
+                                    class="input input-bordered w-full"
+                                    autocomplete="new-password"
+                                    disabled=move || busy.get()
+                                    prop:value=move || new_password.get()
+                                    on:input=move |ev| set_new_password.set(event_target_value(&ev))
+                                />
+                            </label>
+                            <ul class="text-xs mt-1 space-y-0.5">
+                                <For
+                                    each=move || {
+                                        password_rules(&new_password.get())
+                                            .into_iter()
+                                            .enumerate()
+                                            .collect::<Vec<_>>()
+                                    }
+                                    key=|(i, _)| *i
+                                    let:item
+                                >
+                                    <li class=move || {
+                                        if item.1.1 { "text-success" } else { "opacity-60" }
+                                    }>{if item.1.1 { "\u{2713} " } else { "\u{25CB} " }}{item.1.0}</li>
+                                </For>
+                            </ul>
+                        </Show>
+
+                        // First-time TOTP setup: QR + manual key + the code field.
+                        <Show when=move || state.get().shows_mfa_setup()>
+                            {
+                                let account = mfa_account.clone();
+                                move || {
+                                    mfa_secret
+                                        .get()
+                                        .map(|secret| {
+                                            let uri = super::style::otpauth_uri(
+                                                "AWS SSM Monitor",
+                                                &account,
+                                                &secret,
+                                            );
+                                            let svg = super::style::qr_svg(&uri);
+                                            let key = super::style::group_key(&secret);
+                                            view! {
+                                                <div class="flex flex-col items-center gap-2">
+                                                    <div
+                                                        class="bg-white p-2 rounded"
+                                                        inner_html=svg
+                                                    ></div>
+                                                    <p class="text-xs opacity-70">
+                                                        "Can't scan? Enter this key:"
+                                                    </p>
+                                                    <code class="text-xs break-all text-center">
+                                                        {key}
+                                                    </code>
+                                                </div>
+                                            }
+                                        })
+                                }
+                            }
+                            <label class="form-control w-full mt-2">
+                                <span class="label-text">"Authenticator code"</span>
+                                <input
+                                    type="text"
+                                    class="input input-bordered w-full"
+                                    autocomplete="one-time-code"
+                                    inputmode="numeric"
+                                    disabled=move || busy.get()
+                                    prop:value=move || code.get()
+                                    on:input=move |ev| set_code.set(event_target_value(&ev))
+                                />
+                            </label>
+                        </Show>
+
                         <Show when=move || {
                             let s = state.get();
-                            s.shows_credentials() || s.shows_mfa()
+                            s.shows_credentials()
+                                || s.shows_mfa()
+                                || s.shows_new_password()
+                                || s.shows_mfa_setup()
                         }>
                             <button
                                 type="submit"
                                 class="btn btn-primary btn-block mt-2"
-                                disabled=move || busy.get()
+                                disabled=move || {
+                                    busy.get()
+                                        || (state.get().shows_new_password()
+                                            && !password_ok(&new_password.get()))
+                                }
                             >
                                 <Show when=move || busy.get()>
                                     <span class="loading loading-spinner loading-sm"></span>
@@ -243,6 +365,34 @@ pub fn LoginScreen(
                             </button>
                         </Show>
                     </form>
+
+                    // Post-sign-in passkey offer: set up / skip.
+                    <Show when=move || state.get().shows_passkey_offer()>
+                        <button
+                            type="button"
+                            class="btn btn-primary btn-block"
+                            disabled=move || busy.get()
+                            on:click=move |_| {
+                                if let Some(cb) = on_setup_passkey {
+                                    cb.run(());
+                                }
+                            }
+                        >
+                            "Set up a passkey"
+                        </button>
+                        <button
+                            type="button"
+                            class="btn btn-ghost btn-block"
+                            disabled=move || busy.get()
+                            on:click=move |_| {
+                                if let Some(cb) = on_skip_passkey {
+                                    cb.run(());
+                                }
+                            }
+                        >
+                            "Skip"
+                        </button>
+                    </Show>
 
                     {on_passkey
                         .map(|cb| {

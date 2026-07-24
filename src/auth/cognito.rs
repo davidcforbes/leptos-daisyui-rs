@@ -74,14 +74,29 @@ pub struct CognitoTokens {
     pub refresh_token: Option<String>,
 }
 
-/// Where a password sign-in landed.
+/// Where a password sign-in / challenge response landed.
 pub enum SignInOutcome {
     /// Authentication completed outright (the pool required no second factor).
     Tokens(CognitoTokens),
-    /// A one-time code is required. The `session` is **single-use**: pass it to
-    /// [`CognitoClient::respond_mfa`] exactly once.
+    /// A one-time code is required (the user ALREADY has an authenticator). The
+    /// `session` is **single-use**: pass it to [`CognitoClient::respond_mfa`]
+    /// exactly once.
     MfaRequired {
         /// Opaque challenge session to echo back with the code.
+        session: String,
+    },
+    /// Admin-created user's first sign-in — set a new permanent password via
+    /// [`CognitoClient::respond_new_password`].
+    NewPasswordRequired {
+        /// Single-use challenge session to echo back with the new password.
+        session: String,
+    },
+    /// First-time TOTP setup — the user has NO authenticator yet (distinct from
+    /// [`MfaRequired`]). Run [`CognitoClient::begin_totp_setup`] (show the QR) →
+    /// [`verify_totp_setup`](CognitoClient::verify_totp_setup) →
+    /// [`respond_mfa_setup`](CognitoClient::respond_mfa_setup).
+    MfaSetupRequired {
+        /// Single-use challenge session to carry through the setup calls.
         session: String,
     },
 }
@@ -160,6 +175,40 @@ fn tokens_from(result: &Value) -> Result<CognitoTokens, CognitoError> {
             .ok_or_else(|| CognitoError::Unexpected("no AccessToken".into()))?,
         refresh_token: get("RefreshToken"),
     })
+}
+
+/// Map an `InitiateAuth` / `RespondToAuthChallenge` response to a typed outcome.
+/// Shared by password sign-in and the new-password step, so both classify the
+/// same challenge names identically (a new-password response can itself return an
+/// MFA or MFA-setup challenge). First-time users hit `MFA_SETUP`; returning users
+/// with an authenticator hit `SOFTWARE_TOKEN_MFA`.
+fn outcome_from(v: &Value) -> Result<SignInOutcome, CognitoError> {
+    if let Some(result) = v.get("AuthenticationResult") {
+        return Ok(SignInOutcome::Tokens(tokens_from(result)?));
+    }
+    let session = || {
+        v.get("Session")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| CognitoError::Unexpected("challenge without a session".into()))
+    };
+    match v.get("ChallengeName").and_then(Value::as_str) {
+        Some("SOFTWARE_TOKEN_MFA") | Some("SMS_MFA") | Some("EMAIL_OTP") => {
+            Ok(SignInOutcome::MfaRequired {
+                session: session()?,
+            })
+        }
+        Some("NEW_PASSWORD_REQUIRED") => Ok(SignInOutcome::NewPasswordRequired {
+            session: session()?,
+        }),
+        Some("MFA_SETUP") => Ok(SignInOutcome::MfaSetupRequired {
+            session: session()?,
+        }),
+        other => Err(CognitoError::Unexpected(format!(
+            "unsupported challenge: {}",
+            other.unwrap_or("none")
+        ))),
+    }
 }
 
 /// A browser-side Cognito user-pool client.
@@ -257,25 +306,106 @@ impl CognitoClient {
             },
         });
         let v = self.call("InitiateAuth", body).await?;
-        if let Some(result) = v.get("AuthenticationResult") {
-            return Ok(SignInOutcome::Tokens(tokens_from(result)?));
+        outcome_from(&v)
+    }
+
+    /// Complete a `NEW_PASSWORD_REQUIRED` challenge (an admin-created user setting
+    /// their permanent password on first sign-in — the install-enrollment path).
+    /// Returns the next outcome, which for a brand-new user is
+    /// [`SignInOutcome::MfaSetupRequired`].
+    pub async fn respond_new_password(
+        &self,
+        username: &str,
+        session: &str,
+        new_password: &str,
+    ) -> Result<SignInOutcome, CognitoError> {
+        let body = json!({
+            "ChallengeName": "NEW_PASSWORD_REQUIRED",
+            "ClientId": self.config.client_id,
+            "Session": session,
+            "ChallengeResponses": {
+                "USERNAME": username,
+                "NEW_PASSWORD": new_password,
+            },
+        });
+        let v = self.call("RespondToAuthChallenge", body).await?;
+        outcome_from(&v)
+    }
+
+    /// Begin first-time TOTP setup during an `MFA_SETUP` challenge:
+    /// `AssociateSoftwareToken` returns `(secret, session)` — show the secret as a
+    /// QR + manual key. Secret material: display it, never log it.
+    pub async fn begin_totp_setup(&self, session: &str) -> Result<(String, String), CognitoError> {
+        let v = self
+            .call("AssociateSoftwareToken", json!({ "Session": session }))
+            .await?;
+        let secret = v
+            .get("SecretCode")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                CognitoError::Unexpected("AssociateSoftwareToken returned no secret".into())
+            })?
+            .to_string();
+        let new_session = v
+            .get("Session")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                CognitoError::Unexpected("AssociateSoftwareToken returned no session".into())
+            })?
+            .to_string();
+        Ok((secret, new_session))
+    }
+
+    /// Verify the user's first TOTP `code` (`VerifySoftwareToken`). Returns the
+    /// session for [`respond_mfa_setup`](Self::respond_mfa_setup). A wrong code is
+    /// a hard error — the challenge session is single-use.
+    pub async fn verify_totp_setup(
+        &self,
+        session: &str,
+        code: &str,
+    ) -> Result<String, CognitoError> {
+        let v = self
+            .call(
+                "VerifySoftwareToken",
+                json!({ "Session": session, "UserCode": code }),
+            )
+            .await?;
+        match v.get("Status").and_then(Value::as_str) {
+            Some("SUCCESS") => v
+                .get("Session")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    CognitoError::Unexpected("VerifySoftwareToken returned no session".into())
+                })
+                .map(str::to_string),
+            other => Err(CognitoError::Service {
+                code: "EnableSoftwareTokenMFAException".into(),
+                message: format!(
+                    "authenticator code rejected ({})",
+                    other.unwrap_or("no status")
+                ),
+            }),
         }
-        match v.get("ChallengeName").and_then(Value::as_str) {
-            Some("SOFTWARE_TOKEN_MFA") | Some("SMS_MFA") | Some("EMAIL_OTP") => {
-                let session = v
-                    .get("Session")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| {
-                        CognitoError::Unexpected("MFA challenge without a session".into())
-                    })?
-                    .to_string();
-                Ok(SignInOutcome::MfaRequired { session })
-            }
-            other => Err(CognitoError::Unexpected(format!(
-                "unsupported challenge: {}",
-                other.unwrap_or("none")
-            ))),
-        }
+    }
+
+    /// Finish the `MFA_SETUP` challenge after a successful
+    /// [`verify_totp_setup`](Self::verify_totp_setup) → tokens.
+    pub async fn respond_mfa_setup(
+        &self,
+        username: &str,
+        session: &str,
+    ) -> Result<CognitoTokens, CognitoError> {
+        let body = json!({
+            "ChallengeName": "MFA_SETUP",
+            "ClientId": self.config.client_id,
+            "Session": session,
+            "ChallengeResponses": { "USERNAME": username },
+        });
+        let v = self.call("RespondToAuthChallenge", body).await?;
+        let result = v
+            .get("AuthenticationResult")
+            .ok_or_else(|| CognitoError::Unexpected("MFA setup carried no tokens".into()))?;
+        tokens_from(result)
     }
 
     /// Answer a one-time-code challenge.

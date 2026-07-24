@@ -20,6 +20,7 @@ resolver = "3"
 [dependencies]
 leptos = { version = "0.8" }
 leptos_router = "0.8"
+qrcodegen = "1.8"                       # inline-SVG QR for the TOTP-setup step
 table-rs = { path = "../table-rs" }
 ui-tokens = { path = "../Rust-DeskApp/crates/ui-tokens" }
 ai-chat-core = { path = "../Rust-DeskApp/crates/ai-chat-core" }
