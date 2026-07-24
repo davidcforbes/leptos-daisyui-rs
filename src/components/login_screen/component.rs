@@ -118,9 +118,10 @@ pub fn LoginScreen(
     mfa_secret: Signal<Option<String>>,
 
     /// The account label for the `otpauth://` URI (usually the email), so the
-    /// entry in the user's authenticator app is recognisable.
-    #[prop(into, default = "account".to_string())]
-    mfa_account: String,
+    /// entry in the user's authenticator app is recognisable. Reactive because
+    /// the email is only known after the username step.
+    #[prop(into, default = Signal::derive(|| "account".to_string()))]
+    mfa_account: Signal<String>,
 
     /// "Set up" pressed on the [`LoginState::OfferPasskey`] step.
     #[prop(into, optional)]
@@ -299,11 +300,11 @@ pub fn LoginScreen(
                         // First-time TOTP setup: QR + manual key + the code field.
                         <Show when=move || state.get().shows_mfa_setup()>
                             {
-                                let account = mfa_account.clone();
                                 move || {
                                     mfa_secret
                                         .get()
                                         .map(|secret| {
+                                            let account = mfa_account.get();
                                             let uri = super::style::otpauth_uri(
                                                 "AWS SSM Monitor",
                                                 &account,

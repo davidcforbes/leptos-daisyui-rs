@@ -137,6 +137,7 @@ fn AppInner() -> impl IntoView {
                     <Route path=path!("/label") view=LabelDemo />
                     <Route path=path!("/link") view=LinkDemo />
                     <Route path=path!("/list") view=ListDemo />
+                    <Route path=path!("/login_enrollment") view=LoginEnrollmentDemo />
                     <Route path=path!("/loading") view=LoadingDemo />
                     <Route path=path!("/mask") view=MaskDemo />
                     <Route path=path!("/menu") view=MenuDemo />

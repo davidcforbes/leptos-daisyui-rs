@@ -450,6 +450,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     value: "menu",
                 },
                 ComponentItem {
+                    name: "Login / Enrollment",
+                    href: "/components/login_enrollment",
+                    value: "login_enrollment",
+                },
+                ComponentItem {
                     name: "Navbar",
                     href: "/components/navbar",
                     value: "navbar",
