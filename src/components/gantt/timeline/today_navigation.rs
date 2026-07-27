@@ -2,6 +2,7 @@
 ///
 /// Provides navigation to current date with visual highlighting and
 /// keyboard shortcuts for quick temporal orientation.
+use crate::components::icon::IconSize;
 use chrono::{DateTime, Datelike, Utc};
 use leptos::prelude::*;
 
@@ -147,7 +148,7 @@ pub fn TodayButton(
             >
                 <svg
                     xmlns="http://www.w3.org/2000/svg"
-                    class="h-5 w-5"
+                    class=IconSize::Small.as_str()
                     fill="none"
                     viewBox="0 0 24 24"
                     stroke="currentColor"

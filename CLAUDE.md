@@ -291,6 +291,14 @@ Direct2D desktop face. In Tailwind terms that is `1, 2, 3, 4, 6, 8, 12, 16, 24`.
 - **Never hardcode a dimension the tokens already name.** The nav rail's active
   bar is `w-(--border-width-accent)`, not `w-1`, because the desktop draws 3px
   there and a literal silently drifts.
+- **Sizes are a third family, not spacing.** Spacing answers "how far apart?"
+  and must land on the canonical scale. A *size* ramp answers "how big?" and
+  follows its own roughly-geometric progression — `IconSize` is 16/20/24/32/48
+  and `IconTileSize` is 24/32/40/48/64. The 20 and 40 steps are on the 4px grid
+  but deliberately off the 9-step scale: snapping them would collide with their
+  neighbours and collapse a 5-step ramp to 4. The shared token crate takes the
+  same position (`TABLE_ROW_HEIGHT` is 40). Use the enums — don't write
+  `w-5 h-5` for an icon.
 
 `cargo xtask test-layout` asserts all of this against the rendered DOM
 (`tests/layout_audit_smoke.rs`). Overlap is a hard failure; grid and

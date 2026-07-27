@@ -1,3 +1,5 @@
+use crate::components::icon::IconSize;
+use crate::merge_classes;
 use crate::theme::{get_available_themes, use_theme_context};
 use leptos::prelude::*;
 
@@ -99,7 +101,7 @@ pub fn BaseThemeSelector(
                                             view! {
                                                 <svg
                                                     xmlns="http://www.w3.org/2000/svg"
-                                                    class="h-5 w-5 text-primary"
+                                                    class=merge_classes!(IconSize::Small.as_str(), "text-primary")
                                                     viewBox="0 0 20 20"
                                                     fill="currentColor"
                                                 >
@@ -112,7 +114,7 @@ pub fn BaseThemeSelector(
                                             }
                                                 .into_any()
                                         } else {
-                                            view! { <div class="w-5 h-5"></div> }.into_any()
+                                            view! { <div class=IconSize::Small.as_str()></div> }.into_any()
                                         }
                                     }}
 

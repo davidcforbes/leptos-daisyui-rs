@@ -1,3 +1,4 @@
+use crate::components::icon::IconSize;
 use leptos::prelude::*;
 use web_sys::DragEvent;
 
@@ -98,7 +99,7 @@ pub fn KanbanColumnView(
                             viewBox="0 0 24 24"
                             stroke-width="1.5"
                             stroke="currentColor"
-                            class="w-5 h-5"
+                            class=IconSize::Small.as_str()
                         >
                             <Show
                                 when=move || is_collapsed.get()
@@ -210,7 +211,7 @@ pub fn KanbanColumnView(
                                 viewBox="0 0 24 24"
                                 stroke-width="1.5"
                                 stroke="currentColor"
-                                class="w-5 h-5"
+                                class=IconSize::Small.as_str()
                             >
                                 <path
                                     stroke-linecap="round"
