@@ -42,7 +42,7 @@ pub fn UploadFile(
     let (selected_file, set_selected_file) = signal(String::new());
 
     view! {
-        <div node_ref=node_ref class=move || merge_classes!("form-control", class)>
+        <div node_ref=node_ref class=move || merge_classes!("flex flex-col gap-2", class)>
             <div class="card bg-base-200 p-6">
                 <div class="flex flex-col items-center gap-4">
                     <svg

@@ -168,7 +168,7 @@ fn AccessibilityControls() -> impl IntoView {
                             config_ctx.set_reduce_motion(event_target_checked(&ev));
                         }
                     />
-                    <span class="label-text">"Reduce Motion"</span>
+                    <span class="text-sm">"Reduce Motion"</span>
                 </label>
 
                 <label class="label cursor-pointer justify-start gap-4">
@@ -180,7 +180,7 @@ fn AccessibilityControls() -> impl IntoView {
                             config_ctx.set_high_contrast(event_target_checked(&ev));
                         }
                     />
-                    <span class="label-text">"High Contrast"</span>
+                    <span class="text-sm">"High Contrast"</span>
                 </label>
             </div>
         </div>

@@ -36,7 +36,7 @@ use leptos::prelude::*;
 ///
 /// ### Add to `input.css`
 /// ```css
-/// @source inline("form-control label label-text label-text-alt select select-bordered");
+/// @source inline("flex flex-col gap-2 label text-sm text-xs select select-bordered");
 /// ```
 #[component]
 pub fn ComponentCustomizer() -> impl IntoView {
@@ -99,10 +99,10 @@ pub fn ComponentCustomizer() -> impl IntoView {
                 <div class="card-body">
                     <h4 class="card-title text-lg">"Button Customization"</h4>
 
-                    <div class="form-control">
+                    <div class="flex flex-col gap-2">
                         <label class="label">
-                            <span class="label-text font-semibold">"Border Radius"</span>
-                            <span class="label-text-alt">
+                            <span class="text-sm font-semibold">"Border Radius"</span>
+                            <span class="text-xs">
                                 {move || {
                                     current_components()
                                         .button
@@ -151,10 +151,10 @@ pub fn ComponentCustomizer() -> impl IntoView {
                 <div class="card-body">
                     <h4 class="card-title text-lg">"Card Customization"</h4>
 
-                    <div class="form-control">
+                    <div class="flex flex-col gap-2">
                         <label class="label">
-                            <span class="label-text font-semibold">"Border Width"</span>
-                            <span class="label-text-alt">
+                            <span class="text-sm font-semibold">"Border Width"</span>
+                            <span class="text-xs">
                                 {move || {
                                     current_components()
                                         .card
@@ -203,10 +203,10 @@ pub fn ComponentCustomizer() -> impl IntoView {
                 <div class="card-body">
                     <h4 class="card-title text-lg">"Input Customization"</h4>
 
-                    <div class="form-control">
+                    <div class="flex flex-col gap-2">
                         <label class="label">
-                            <span class="label-text font-semibold">"Border Width"</span>
-                            <span class="label-text-alt">
+                            <span class="text-sm font-semibold">"Border Width"</span>
+                            <span class="text-xs">
                                 {move || {
                                     current_components()
                                         .input

@@ -10,7 +10,7 @@ use leptos::{html::Div, prelude::*};
 ///
 /// ### Add to `input.css`
 /// ```css
-/// @source inline("form-control label label-text label-text-alt text-error text-success text-warning");
+/// @source inline("flex flex-col gap-2 label text-sm text-xs text-error text-success text-warning");
 /// ```
 ///
 /// ## Node References
@@ -59,7 +59,7 @@ pub fn Field(
     view! {
         <div
             node_ref=node_ref
-            class=move || merge_classes!("form-control", class)
+            class=move || merge_classes!("flex flex-col gap-2", class)
         >
             {move || {
                 label
@@ -67,7 +67,7 @@ pub fn Field(
                     .map(|label_text| {
                         view! {
                             <label class=move || merge_classes!("label", label_class)>
-                                <span class="label-text">
+                                <span class="text-sm">
                                     {label_text}
                                     {move || {
                                         if required.get() {
@@ -95,7 +95,7 @@ pub fn Field(
                     if let Some(msg) = error_msg {
                         view! {
                             <label class="label">
-                                <span class="label-text-alt text-error">{msg}</span>
+                                <span class="text-xs text-error">{msg}</span>
                             </label>
                         }
                             .into_any()
@@ -106,7 +106,7 @@ pub fn Field(
                     if let Some(msg) = success_msg {
                         view! {
                             <label class="label">
-                                <span class="label-text-alt text-success">{msg}</span>
+                                <span class="text-xs text-success">{msg}</span>
                             </label>
                         }
                             .into_any()
@@ -116,7 +116,7 @@ pub fn Field(
                 } else if matches!(current_state, FieldState::Warning) {
                     view! {
                         <label class="label">
-                            <span class="label-text-alt text-warning">
+                            <span class="text-xs text-warning">
                                 {help.unwrap_or_default()}
                             </span>
                         </label>
@@ -125,7 +125,7 @@ pub fn Field(
                 } else if let Some(msg) = help {
                     view! {
                         <label class="label">
-                            <span class="label-text-alt">{msg}</span>
+                            <span class="text-xs">{msg}</span>
                         </label>
                     }
                         .into_any()

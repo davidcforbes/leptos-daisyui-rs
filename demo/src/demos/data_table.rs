@@ -400,7 +400,7 @@ pub fn DataTableDemo() -> impl IntoView {
             <Section title="Dynamic Page Size">
                 <div class="mb-4 flex items-center gap-4">
                     <label class="label">
-                        <span class="label-text">"Rows per page:"</span>
+                        <span class="text-sm">"Rows per page:"</span>
                     </label>
                     <select
                         class="select select-bordered select-sm"

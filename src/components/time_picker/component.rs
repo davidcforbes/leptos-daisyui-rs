@@ -52,7 +52,7 @@ pub fn TimePicker(
     node_ref: NodeRef<Div>,
 ) -> impl IntoView {
     view! {
-        <div node_ref=node_ref class=move || merge_classes!("form-control", class)>
+        <div node_ref=node_ref class=move || merge_classes!("flex flex-col gap-2", class)>
             <input
                 type="time"
                 class="input input-bordered w-full"

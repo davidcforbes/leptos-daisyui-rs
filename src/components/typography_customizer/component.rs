@@ -36,7 +36,7 @@ use leptos::prelude::*;
 ///
 /// ### Add to `input.css`
 /// ```css
-/// @source inline("form-control label label-text label-text-alt");
+/// @source inline("flex flex-col gap-2 label text-sm text-xs");
 /// @source inline("select select-bordered range");
 /// ```
 #[component]
@@ -110,10 +110,10 @@ pub fn TypographyCustomizer() -> impl IntoView {
             </p>
 
             // Primary Font Family
-            <div class="form-control">
+            <div class="flex flex-col gap-2">
                 <label class="label">
-                    <span class="label-text font-semibold">"Primary Font Family"</span>
-                    <span class="label-text-alt">
+                    <span class="text-sm font-semibold">"Primary Font Family"</span>
+                    <span class="text-xs">
                         {move || {
                             current_typography()
                                 .font_family
@@ -154,10 +154,10 @@ pub fn TypographyCustomizer() -> impl IntoView {
             </div>
 
             // Heading Font Family
-            <div class="form-control">
+            <div class="flex flex-col gap-2">
                 <label class="label">
-                    <span class="label-text font-semibold">"Heading Font Family"</span>
-                    <span class="label-text-alt">"Optional - defaults to primary"</span>
+                    <span class="text-sm font-semibold">"Heading Font Family"</span>
+                    <span class="text-xs">"Optional - defaults to primary"</span>
                 </label>
                 <select
                     class="select select-bordered"
@@ -200,10 +200,10 @@ pub fn TypographyCustomizer() -> impl IntoView {
             </div>
 
             // Monospace Font Family
-            <div class="form-control">
+            <div class="flex flex-col gap-2">
                 <label class="label">
-                    <span class="label-text font-semibold">"Monospace Font Family"</span>
-                    <span class="label-text-alt">"For code blocks"</span>
+                    <span class="text-sm font-semibold">"Monospace Font Family"</span>
+                    <span class="text-xs">"For code blocks"</span>
                 </label>
                 <select
                     class="select select-bordered"
@@ -236,10 +236,10 @@ pub fn TypographyCustomizer() -> impl IntoView {
             </div>
 
             // Base Font Size
-            <div class="form-control">
+            <div class="flex flex-col gap-2">
                 <label class="label">
-                    <span class="label-text font-semibold">"Base Font Size"</span>
-                    <span class="label-text-alt">
+                    <span class="text-sm font-semibold">"Base Font Size"</span>
+                    <span class="text-xs">
                         {move || {
                             format!("{}rem", current_typography().base_font_size.unwrap_or(1.0))
                         }}
@@ -268,10 +268,10 @@ pub fn TypographyCustomizer() -> impl IntoView {
             </div>
 
             // Type Scale Ratio
-            <div class="form-control">
+            <div class="flex flex-col gap-2">
                 <label class="label">
-                    <span class="label-text font-semibold">"Type Scale Ratio"</span>
-                    <span class="label-text-alt">"Controls size relationships"</span>
+                    <span class="text-sm font-semibold">"Type Scale Ratio"</span>
+                    <span class="text-xs">"Controls size relationships"</span>
                 </label>
                 <select
                     class="select select-bordered"

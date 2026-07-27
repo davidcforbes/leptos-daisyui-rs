@@ -126,7 +126,7 @@ pub fn ThemeControllerDemo() -> impl IntoView {
                 <div class="flex flex-wrap gap-4">
                     <ThemeController theme_name="light">
                         <label class="label cursor-pointer gap-2">
-                            <span class="label-text">"Light"</span>
+                            <span class="text-sm">"Light"</span>
                             <input
                                 type="radio"
                                 name="theme-radios"
@@ -140,7 +140,7 @@ pub fn ThemeControllerDemo() -> impl IntoView {
 
                     <ThemeController theme_name="dark">
                         <label class="label cursor-pointer gap-2">
-                            <span class="label-text">"Dark"</span>
+                            <span class="text-sm">"Dark"</span>
                             <input
                                 type="radio"
                                 name="theme-radios"
@@ -154,7 +154,7 @@ pub fn ThemeControllerDemo() -> impl IntoView {
 
                     <ThemeController theme_name="retro">
                         <label class="label cursor-pointer gap-2">
-                            <span class="label-text">"Retro"</span>
+                            <span class="text-sm">"Retro"</span>
                             <input
                                 type="radio"
                                 name="theme-radios"
@@ -168,7 +168,7 @@ pub fn ThemeControllerDemo() -> impl IntoView {
 
                     <ThemeController theme_name="forest">
                         <label class="label cursor-pointer gap-2">
-                            <span class="label-text">"Forest"</span>
+                            <span class="text-sm">"Forest"</span>
                             <input
                                 type="radio"
                                 name="theme-radios"

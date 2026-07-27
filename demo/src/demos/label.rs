@@ -11,7 +11,7 @@ pub fn LabelDemo() -> impl IntoView {
             description="Label is used to add a caption for form elements"
         >
             <Section title="Basic Label">
-                <div class="form-control w-full max-w-xs">
+                <div class="flex flex-col gap-2 w-full max-w-xs">
                     <Label class="label">
                         <LabelText>"What is your name?"</LabelText>
                     </Label>
@@ -20,7 +20,7 @@ pub fn LabelDemo() -> impl IntoView {
             </Section>
 
             <Section title="Label with Helper Text">
-                <div class="form-control w-full max-w-xs">
+                <div class="flex flex-col gap-2 w-full max-w-xs">
                     <Label class="label">
                         <LabelText>"What is your name?"</LabelText>
                         <LabelTextAlt>"Top Right label"</LabelTextAlt>
@@ -34,7 +34,7 @@ pub fn LabelDemo() -> impl IntoView {
             </Section>
 
             <Section title="Required Field">
-                <div class="form-control w-full max-w-xs">
+                <div class="flex flex-col gap-2 w-full max-w-xs">
                     <Label class="label">
                         <LabelText>
                             "Email Address "
@@ -54,43 +54,43 @@ pub fn LabelDemo() -> impl IntoView {
 
             <Section title="Label Colors">
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div class="form-control w-full max-w-xs">
+                    <div class="flex flex-col gap-2 w-full max-w-xs">
                         <Label class="label">
                             <LabelText class="text-primary">"Primary Label"</LabelText>
                         </Label>
                         <Input attr:placeholder="Type here" class="input input-bordered w-full max-w-xs" />
                     </div>
-                    <div class="form-control w-full max-w-xs">
+                    <div class="flex flex-col gap-2 w-full max-w-xs">
                         <Label class="label">
                             <LabelText class="text-secondary">"Secondary Label"</LabelText>
                         </Label>
                         <Input attr:placeholder="Type here" class="input input-bordered w-full max-w-xs" />
                     </div>
-                    <div class="form-control w-full max-w-xs">
+                    <div class="flex flex-col gap-2 w-full max-w-xs">
                         <Label class="label">
                             <LabelText class="text-accent">"Accent Label"</LabelText>
                         </Label>
                         <Input attr:placeholder="Type here" class="input input-bordered w-full max-w-xs" />
                     </div>
-                    <div class="form-control w-full max-w-xs">
+                    <div class="flex flex-col gap-2 w-full max-w-xs">
                         <Label class="label">
                             <LabelText class="text-info">"Info Label"</LabelText>
                         </Label>
                         <Input attr:placeholder="Type here" class="input input-bordered w-full max-w-xs" />
                     </div>
-                    <div class="form-control w-full max-w-xs">
+                    <div class="flex flex-col gap-2 w-full max-w-xs">
                         <Label class="label">
                             <LabelText class="text-success">"Success Label"</LabelText>
                         </Label>
                         <Input attr:placeholder="Type here" class="input input-bordered w-full max-w-xs" />
                     </div>
-                    <div class="form-control w-full max-w-xs">
+                    <div class="flex flex-col gap-2 w-full max-w-xs">
                         <Label class="label">
                             <LabelText class="text-warning">"Warning Label"</LabelText>
                         </Label>
                         <Input attr:placeholder="Type here" class="input input-bordered w-full max-w-xs" />
                     </div>
-                    <div class="form-control w-full max-w-xs">
+                    <div class="flex flex-col gap-2 w-full max-w-xs">
                         <Label class="label">
                             <LabelText class="text-error">"Error Label"</LabelText>
                         </Label>
@@ -101,7 +101,7 @@ pub fn LabelDemo() -> impl IntoView {
 
             <Section title="Label with Icons">
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div class="form-control w-full max-w-xs">
+                    <div class="flex flex-col gap-2 w-full max-w-xs">
                         <Label class="label">
                             <LabelText>
                                 <span class="inline-flex items-center gap-2">
@@ -112,7 +112,7 @@ pub fn LabelDemo() -> impl IntoView {
                         </Label>
                         <Input attr:placeholder="Enter username" class="input input-bordered w-full max-w-xs" />
                     </div>
-                    <div class="form-control w-full max-w-xs">
+                    <div class="flex flex-col gap-2 w-full max-w-xs">
                         <Label class="label">
                             <LabelText>
                                 <span class="inline-flex items-center gap-2">
@@ -132,7 +132,7 @@ pub fn LabelDemo() -> impl IntoView {
 
             <Section title="Different Form Elements">
                 <div class="space-y-4">
-                    <div class="form-control w-full max-w-xs">
+                    <div class="flex flex-col gap-2 w-full max-w-xs">
                         <Label class="label">
                             <LabelText>"Select an option"</LabelText>
                         </Label>
@@ -144,7 +144,7 @@ pub fn LabelDemo() -> impl IntoView {
                         </Select>
                     </div>
 
-                    <div class="form-control w-full max-w-xs">
+                    <div class="flex flex-col gap-2 w-full max-w-xs">
                         <Label class="label">
                             <LabelText>"Your message"</LabelText>
                         </Label>
@@ -157,14 +157,14 @@ pub fn LabelDemo() -> impl IntoView {
                         </Label>
                     </div>
 
-                    <div class="form-control">
+                    <div class="flex flex-col gap-2">
                         <Label class="label cursor-pointer justify-start gap-2 max-w-xs">
                             <Checkbox />
                             <LabelText>"Remember me"</LabelText>
                         </Label>
                     </div>
 
-                    <div class="form-control">
+                    <div class="flex flex-col gap-2">
                         <Label class="label cursor-pointer justify-start gap-2 max-w-xs">
                             <Radio attr:name="radio-demo" />
                             <LabelText>"I agree to the terms and conditions"</LabelText>
@@ -175,7 +175,7 @@ pub fn LabelDemo() -> impl IntoView {
 
             <Section title="Validation States">
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div class="form-control w-full max-w-xs">
+                    <div class="flex flex-col gap-2 w-full max-w-xs">
                         <Label class="label">
                             <LabelText class="text-success">"Valid Input"</LabelText>
                         </Label>
@@ -193,7 +193,7 @@ pub fn LabelDemo() -> impl IntoView {
                         </Label>
                     </div>
 
-                    <div class="form-control w-full max-w-xs">
+                    <div class="flex flex-col gap-2 w-full max-w-xs">
                         <Label class="label">
                             <LabelText class="text-warning">"Warning Input"</LabelText>
                         </Label>
@@ -211,7 +211,7 @@ pub fn LabelDemo() -> impl IntoView {
                         </Label>
                     </div>
 
-                    <div class="form-control w-full max-w-xs">
+                    <div class="flex flex-col gap-2 w-full max-w-xs">
                         <Label class="label">
                             <LabelText class="text-error">"Invalid Input"</LabelText>
                         </Label>
@@ -236,7 +236,7 @@ pub fn LabelDemo() -> impl IntoView {
                     <CardBody>
                         <h2 class="card-title">"Sign Up Form"</h2>
                         <div class="space-y-4">
-                            <div class="form-control w-full">
+                            <div class="flex flex-col gap-2 w-full">
                                 <Label class="label">
                                     <LabelText>
                                         "Full Name "
@@ -249,7 +249,7 @@ pub fn LabelDemo() -> impl IntoView {
                                 />
                             </div>
 
-                            <div class="form-control w-full">
+                            <div class="flex flex-col gap-2 w-full">
                                 <Label class="label">
                                     <LabelText>
                                         "Email Address "
@@ -264,7 +264,7 @@ pub fn LabelDemo() -> impl IntoView {
                                 />
                             </div>
 
-                            <div class="form-control w-full">
+                            <div class="flex flex-col gap-2 w-full">
                                 <Label class="label">
                                     <LabelText>"Password"</LabelText>
                                     <LabelTextAlt>"Must be at least 8 characters"</LabelTextAlt>
@@ -276,7 +276,7 @@ pub fn LabelDemo() -> impl IntoView {
                                 />
                             </div>
 
-                            <div class="form-control">
+                            <div class="flex flex-col gap-2">
                                 <Label class="label cursor-pointer justify-start gap-2">
                                     <Checkbox />
                                     <LabelText class="text-sm">
@@ -288,7 +288,7 @@ pub fn LabelDemo() -> impl IntoView {
                                 </Label>
                             </div>
 
-                            <div class="form-control">
+                            <div class="flex flex-col gap-2">
                                 <Label class="label cursor-pointer justify-start gap-2">
                                     <Checkbox />
                                     <LabelText class="text-sm">

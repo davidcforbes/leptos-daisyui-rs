@@ -22,7 +22,7 @@ pub fn RadioDemo() -> impl IntoView {
                             prop:checked=move || selected_option.get() == "option1"
                             on:change=move |_| set_selected_option.set("option1".to_string())
                         />
-                        <span class="label-text">"Option 1"</span>
+                        <span class="text-sm">"Option 1"</span>
                     </label>
 
                     <label class="label cursor-pointer justify-start gap-2">
@@ -32,7 +32,7 @@ pub fn RadioDemo() -> impl IntoView {
                             prop:checked=move || selected_option.get() == "option2"
                             on:change=move |_| set_selected_option.set("option2".to_string())
                         />
-                        <span class="label-text">"Option 2"</span>
+                        <span class="text-sm">"Option 2"</span>
                     </label>
 
                     <label class="label cursor-pointer justify-start gap-2">
@@ -42,7 +42,7 @@ pub fn RadioDemo() -> impl IntoView {
                             prop:checked=move || selected_option.get() == "option3"
                             on:change=move |_| set_selected_option.set("option3".to_string())
                         />
-                        <span class="label-text">"Option 3"</span>
+                        <span class="text-sm">"Option 3"</span>
                     </label>
                 </div>
 
@@ -188,11 +188,11 @@ pub fn RadioDemo() -> impl IntoView {
             <Section title="Disabled State" row=true>
                 <label class="label cursor-pointer justify-start gap-2">
                     <Radio attr:name="radio-disabled" attr:disabled=true />
-                    <span class="label-text">"Disabled unchecked"</span>
+                    <span class="text-sm">"Disabled unchecked"</span>
                 </label>
                 <label class="label cursor-pointer justify-start gap-2">
                     <Radio attr:name="radio-disabled" attr:disabled=true attr:checked=true />
-                    <span class="label-text">"Disabled checked"</span>
+                    <span class="text-sm">"Disabled checked"</span>
                 </label>
             </Section>
 
@@ -200,22 +200,22 @@ pub fn RadioDemo() -> impl IntoView {
                 <div class="space-x-2">
                     <label class="label cursor-pointer justify-start gap-2">
                         <Radio color=RadioColor::Primary attr:name="framework" />
-                        <span class="label-text">"Leptos (Rust)"</span>
+                        <span class="text-sm">"Leptos (Rust)"</span>
                     </label>
 
                     <label class="label cursor-pointer justify-start gap-2">
                         <Radio color=RadioColor::Primary attr:name="framework" />
-                        <span class="label-text">"React (JavaScript)"</span>
+                        <span class="text-sm">"React (JavaScript)"</span>
                     </label>
 
                     <label class="label cursor-pointer justify-start gap-2">
                         <Radio color=RadioColor::Primary attr:name="framework" />
-                        <span class="label-text">"Vue (JavaScript)"</span>
+                        <span class="text-sm">"Vue (JavaScript)"</span>
                     </label>
 
                     <label class="label cursor-pointer justify-start gap-2">
                         <Radio color=RadioColor::Primary attr:name="framework" />
-                        <span class="label-text">"Svelte (JavaScript)"</span>
+                        <span class="text-sm">"Svelte (JavaScript)"</span>
                     </label>
                 </div>
                 <div class="card-actions justify-end mt-4">

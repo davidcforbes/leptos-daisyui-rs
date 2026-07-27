@@ -22,7 +22,7 @@ pub fn CalendarDemo() -> impl IntoView {
                     <Calendar class="cally">
                         <div>
                             <label class="label">
-                                <span class="label-text">"Start Date"</span>
+                                <span class="text-sm">"Start Date"</span>
                             </label>
                             <input type="date" class="input input-bordered" />
                         </div>
@@ -30,7 +30,7 @@ pub fn CalendarDemo() -> impl IntoView {
                     <Calendar class="cally">
                         <div>
                             <label class="label">
-                                <span class="label-text">"End Date"</span>
+                                <span class="text-sm">"End Date"</span>
                             </label>
                             <input type="date" class="input input-bordered" />
                         </div>
@@ -59,7 +59,7 @@ pub fn CalendarDemo() -> impl IntoView {
                     <Calendar class="cally">
                         <div class="space-y-2">
                             <label class="label">
-                                <span class="label-text">"Select Date and Time"</span>
+                                <span class="text-sm">"Select Date and Time"</span>
                             </label>
                             <input type="datetime-local" class="input input-bordered w-full" />
                         </div>
@@ -72,7 +72,7 @@ pub fn CalendarDemo() -> impl IntoView {
                     <Calendar class="cally">
                         <div class="space-y-2">
                             <label class="label">
-                                <span class="label-text">"Select Month"</span>
+                                <span class="text-sm">"Select Month"</span>
                             </label>
                             <input type="month" class="input input-bordered" />
                         </div>
@@ -85,7 +85,7 @@ pub fn CalendarDemo() -> impl IntoView {
                     <Calendar class="cally">
                         <div class="space-y-2">
                             <label class="label">
-                                <span class="label-text">"Select Week"</span>
+                                <span class="text-sm">"Select Week"</span>
                             </label>
                             <input type="week" class="input input-bordered" />
                         </div>

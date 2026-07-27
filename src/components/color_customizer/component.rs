@@ -31,7 +31,7 @@ use leptos::prelude::*;
 ///
 /// ### Add to `input.css`
 /// ```css
-/// @source inline("form-control label input grid");
+/// @source inline("flex flex-col gap-2 label input grid");
 /// @source inline("btn btn-primary btn-secondary btn-accent");
 /// @source inline("badge badge-info badge-success badge-warning badge-error");
 /// ```
@@ -131,10 +131,10 @@ pub fn ColorCustomizer() -> impl IntoView {
                             let key_for_reset = key_str.clone();
 
                             view! {
-                                <div class="form-control">
+                                <div class="flex flex-col gap-2">
                                     <label class="label">
-                                        <span class="label-text font-medium">{*label}</span>
-                                        <span class="label-text-alt text-xs">{*description}</span>
+                                        <span class="text-sm font-medium">{*label}</span>
+                                        <span class="text-xs">{*description}</span>
                                     </label>
                                     <div class="flex gap-2">
                                         <input
@@ -193,10 +193,10 @@ pub fn ColorCustomizer() -> impl IntoView {
                             let key_for_reset = key_str.clone();
 
                             view! {
-                                <div class="form-control">
+                                <div class="flex flex-col gap-2">
                                     <label class="label">
-                                        <span class="label-text font-medium">{*label}</span>
-                                        <span class="label-text-alt text-xs">{*description}</span>
+                                        <span class="text-sm font-medium">{*label}</span>
+                                        <span class="text-xs">{*description}</span>
                                     </label>
                                     <div class="flex gap-2">
                                         <input
@@ -255,10 +255,10 @@ pub fn ColorCustomizer() -> impl IntoView {
                             let key_for_reset = key_str.clone();
 
                             view! {
-                                <div class="form-control">
+                                <div class="flex flex-col gap-2">
                                     <label class="label">
-                                        <span class="label-text font-medium">{*label}</span>
-                                        <span class="label-text-alt text-xs">{*description}</span>
+                                        <span class="text-sm font-medium">{*label}</span>
+                                        <span class="text-xs">{*description}</span>
                                     </label>
                                     <div class="flex gap-2">
                                         <input

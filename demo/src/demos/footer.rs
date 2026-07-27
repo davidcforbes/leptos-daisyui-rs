@@ -170,9 +170,9 @@ pub fn FooterDemo() -> impl IntoView {
                     </nav>
                     <form>
                         <h6 class="footer-title">"Newsletter"</h6>
-                        <fieldset class="form-control w-80">
+                        <fieldset class="flex flex-col gap-2 w-80">
                             <label class="label">
-                                <span class="label-text">"Enter your email address"</span>
+                                <span class="text-sm">"Enter your email address"</span>
                             </label>
                             <div class="join">
                                 <Input

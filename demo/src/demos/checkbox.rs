@@ -41,7 +41,7 @@ pub fn CheckboxDemo() -> impl IntoView {
 
             <Section title="Interactive Example" col=true>
                 <label class="cursor-pointer label">
-                    <span class="label-text">
+                    <span class="text-sm">
                         {move || { if checked_state.get() { "Checked" } else { "Unchecked" } }}
                     </span>
                     <Checkbox

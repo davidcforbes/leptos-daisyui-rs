@@ -24,9 +24,9 @@ pub fn ChatDemo() -> impl IntoView {
             </Section>
 
             <Section title="Interactive Message" col=true>
-                <div class="form-control">
+                <div class="flex flex-col gap-2">
                     <label class="label cursor-pointer">
-                        <span class="label-text">"Show Timestamp"</span>
+                        <span class="text-sm">"Show Timestamp"</span>
                         <Checkbox
                             prop:checked=move || show_timestamp.get()
                             on:change=move |e| show_timestamp.set(event_target_checked(&e))

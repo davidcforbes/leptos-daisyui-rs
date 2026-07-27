@@ -188,7 +188,7 @@ pub fn ThemeExportImport() -> impl IntoView {
             // Export Section
             <div class="space-y-2">
                 <label class="label">
-                    <span class="label-text font-medium">"Export Theme"</span>
+                    <span class="text-sm font-medium">"Export Theme"</span>
                 </label>
                 <div class="flex gap-2">
                     <button
@@ -214,7 +214,7 @@ pub fn ThemeExportImport() -> impl IntoView {
             // Import Section
             <div class="space-y-2">
                 <label class="label">
-                    <span class="label-text font-medium">"Import Theme"</span>
+                    <span class="text-sm font-medium">"Import Theme"</span>
                 </label>
                 <input
                     type="file"

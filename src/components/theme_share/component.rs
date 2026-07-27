@@ -139,7 +139,7 @@ pub fn ThemeShare() -> impl IntoView {
                         view! {
                             <div class="space-y-2">
                                 <label class="label">
-                                    <span class="label-text font-medium">"Share URL"</span>
+                                    <span class="text-sm font-medium">"Share URL"</span>
                                 </label>
                                 <div class="flex gap-2">
                                     <input

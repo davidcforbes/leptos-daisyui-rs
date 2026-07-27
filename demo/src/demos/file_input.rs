@@ -118,7 +118,7 @@ pub fn FileInputDemo() -> impl IntoView {
                 <div class="space-y-2">
                     <div>
                         <label class="label">
-                            <span class="label-text">"Images only (.jpg, .png, .gif)"</span>
+                            <span class="text-sm">"Images only (.jpg, .png, .gif)"</span>
                         </label>
                         <input
                             type="file"
@@ -128,7 +128,7 @@ pub fn FileInputDemo() -> impl IntoView {
                     </div>
                     <div>
                         <label class="label">
-                            <span class="label-text">"Documents only (.pdf, .doc, .docx)"</span>
+                            <span class="text-sm">"Documents only (.pdf, .doc, .docx)"</span>
                         </label>
                         <input
                             type="file"
@@ -138,7 +138,7 @@ pub fn FileInputDemo() -> impl IntoView {
                     </div>
                     <div>
                         <label class="label">
-                            <span class="label-text">"Videos only (.mp4, .avi, .mov)"</span>
+                            <span class="text-sm">"Videos only (.mp4, .avi, .mov)"</span>
                         </label>
                         <input
                             type="file"
@@ -191,9 +191,9 @@ pub fn FileInputDemo() -> impl IntoView {
                                         })
                                     }}
                                 </div>
-                                <div class="form-control">
+                                <div class="flex flex-col gap-2">
                                     <label class="label">
-                                        <span class="label-text">"Choose new avatar"</span>
+                                        <span class="text-sm">"Choose new avatar"</span>
                                     </label>
                                     <input
                                         type="file"
@@ -202,7 +202,7 @@ pub fn FileInputDemo() -> impl IntoView {
                                         on:change=handle_file_change
                                     />
                                     <label class="label">
-                                        <span class="label-text-alt">
+                                        <span class="text-xs">
                                             "Max size: 5MB. JPG, PNG only."
                                         </span>
                                     </label>
@@ -223,9 +223,9 @@ pub fn FileInputDemo() -> impl IntoView {
                         <CardBody>
                             <h2 class="card-title">"Document Upload"</h2>
                             <div class="space-y-4">
-                                <div class="form-control">
+                                <div class="flex flex-col gap-2">
                                     <label class="label">
-                                        <span class="label-text">"Upload documents"</span>
+                                        <span class="text-sm">"Upload documents"</span>
                                     </label>
                                     <input
                                         type="file"
@@ -234,14 +234,14 @@ pub fn FileInputDemo() -> impl IntoView {
                                         class="file-input file-input-bordered w-full"
                                     />
                                     <label class="label">
-                                        <span class="label-text-alt">
+                                        <span class="text-xs">
                                             "Multiple files allowed. PDF, DOC, DOCX, TXT only."
                                         </span>
                                     </label>
                                 </div>
-                                <div class="form-control">
+                                <div class="flex flex-col gap-2">
                                     <label class="label">
-                                        <span class="label-text">"Description"</span>
+                                        <span class="text-sm">"Description"</span>
                                     </label>
                                     <Textarea
                                         prop:placeholder="Describe these documents..."
@@ -265,15 +265,15 @@ pub fn FileInputDemo() -> impl IntoView {
 
                         <div class="space-y-4">
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div class="form-control">
+                                <div class="flex flex-col gap-2">
                                     <label class="label">
-                                        <span class="label-text">"Project Name"</span>
+                                        <span class="text-sm">"Project Name"</span>
                                     </label>
                                     <Input attr:placeholder="Enter project name" class="w-full" />
                                 </div>
-                                <div class="form-control">
+                                <div class="flex flex-col gap-2">
                                     <label class="label">
-                                        <span class="label-text">"Category"</span>
+                                        <span class="text-sm">"Category"</span>
                                     </label>
                                     <Select class="w-full">
                                         <option disabled selected>
@@ -287,9 +287,9 @@ pub fn FileInputDemo() -> impl IntoView {
                                 </div>
                             </div>
 
-                            <div class="form-control">
+                            <div class="flex flex-col gap-2">
                                 <label class="label">
-                                    <span class="label-text">"Main Project File"</span>
+                                    <span class="text-sm">"Main Project File"</span>
                                 </label>
                                 <input
                                     type="file"
@@ -297,15 +297,15 @@ pub fn FileInputDemo() -> impl IntoView {
                                     class="file-input file-input-bordered file-input-primary w-full"
                                 />
                                 <label class="label">
-                                    <span class="label-text-alt">
+                                    <span class="text-xs">
                                         "Archive files only (ZIP, RAR, TAR.GZ). Max 100MB."
                                     </span>
                                 </label>
                             </div>
 
-                            <div class="form-control">
+                            <div class="flex flex-col gap-2">
                                 <label class="label">
-                                    <span class="label-text">"Additional Files"</span>
+                                    <span class="text-sm">"Additional Files"</span>
                                 </label>
                                 <input
                                     type="file"
@@ -313,15 +313,15 @@ pub fn FileInputDemo() -> impl IntoView {
                                     class="file-input file-input-bordered w-full"
                                 />
                                 <label class="label">
-                                    <span class="label-text-alt">
+                                    <span class="text-xs">
                                         "Optional additional files. Multiple selection allowed."
                                     </span>
                                 </label>
                             </div>
 
-                            <div class="form-control">
+                            <div class="flex flex-col gap-2">
                                 <label class="label">
-                                    <span class="label-text">"Screenshots/Preview Images"</span>
+                                    <span class="text-sm">"Screenshots/Preview Images"</span>
                                 </label>
                                 <input
                                     type="file"
@@ -330,15 +330,15 @@ pub fn FileInputDemo() -> impl IntoView {
                                     class="file-input file-input-bordered file-input-secondary w-full"
                                 />
                                 <label class="label">
-                                    <span class="label-text-alt">
+                                    <span class="text-xs">
                                         "Upload screenshots or preview images. PNG, JPG, GIF allowed."
                                     </span>
                                 </label>
                             </div>
 
-                            <div class="form-control">
+                            <div class="flex flex-col gap-2">
                                 <label class="label">
-                                    <span class="label-text">"Project Description"</span>
+                                    <span class="text-sm">"Project Description"</span>
                                 </label>
                                 <textarea
                                     attr:placeholder="Describe your project, its features, and any special instructions..."
@@ -347,10 +347,10 @@ pub fn FileInputDemo() -> impl IntoView {
                                 ></textarea>
                             </div>
 
-                            <div class="form-control">
+                            <div class="flex flex-col gap-2">
                                 <label class="label cursor-pointer justify-start gap-2">
                                     <Checkbox />
-                                    <span class="label-text">
+                                    <span class="text-sm">
                                         "I agree to the terms and conditions"
                                     </span>
                                 </label>

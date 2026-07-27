@@ -66,7 +66,7 @@ pub fn KanbanFilterBar(
         <div class="kanban-filters flex flex-wrap gap-4 items-center mb-4 p-4 bg-base-200 rounded-lg">
             // Search input
             <Show when=move || enable_search>
-                <div class="form-control flex-1 min-w-64">
+                <div class="flex flex-col gap-2 flex-1 min-w-64">
                     <div class="input-group">
                         <input
                             type="text"
@@ -151,7 +151,7 @@ pub fn KanbanFilterBar(
                                                 });
                                             }
                                         />
-                                        <span class="label-text flex-1">{p.as_str()}</span>
+                                        <span class="text-sm flex-1">{p.as_str()}</span>
                                     </label>
                                 </li>
                             }
@@ -210,7 +210,7 @@ pub fn KanbanFilterBar(
                                                     });
                                                 }
                                             />
-                                            <span class="label-text flex-1">{assignee_name.clone()}</span>
+                                            <span class="text-sm flex-1">{assignee_name.clone()}</span>
                                         </label>
                                     </li>
                                 }

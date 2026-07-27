@@ -141,8 +141,8 @@ pub fn QuickFilterRow(
             {dropdowns.into_iter().map(|d| {
                 let selected = d.selected;
                 view! {
-                    <label class="form-control">
-                        <span class="label-text text-xs text-base-content/60 mb-0.5">{d.label}</span>
+                    <label class="flex flex-col gap-2">
+                        <span class="text-xs text-base-content/60 mb-0.5">{d.label}</span>
                         <select
                             class="select select-bordered select-sm"
                             prop:value=move || selected.get()

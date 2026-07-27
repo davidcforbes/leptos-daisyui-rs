@@ -27,10 +27,10 @@ pub fn BorderCustomizer() -> impl IntoView {
             </div>
 
             // Border Width
-            <div class="form-control">
+            <div class="flex flex-col gap-2">
                 <label class="label">
-                    <span class="label-text font-medium">"Border Width"</span>
-                    <span class="label-text-alt">
+                    <span class="text-sm font-medium">"Border Width"</span>
+                    <span class="text-xs">
                         {move || {
                             current_borders()
                                 .and_then(|b| b.border_width)
@@ -59,10 +59,10 @@ pub fn BorderCustomizer() -> impl IntoView {
             </div>
 
             // Spacing Scale
-            <div class="form-control">
+            <div class="flex flex-col gap-2">
                 <label class="label">
-                    <span class="label-text font-medium">"Spacing Scale"</span>
-                    <span class="label-text-alt">
+                    <span class="text-sm font-medium">"Spacing Scale"</span>
+                    <span class="text-xs">
                         {move || {
                             current_borders()
                                 .and_then(|b| b.spacing_scale)

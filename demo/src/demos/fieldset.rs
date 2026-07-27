@@ -13,19 +13,19 @@ pub fn FieldsetDemo() -> impl IntoView {
                 <FieldSet>
                     <FieldsetLegend>"Personal Information"</FieldsetLegend>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div class="form-control">
+                        <div class="flex flex-col gap-2">
                             <Label class="label">
                                 <LabelText>"First Name"</LabelText>
                             </Label>
                             <Input attr:placeholder="John" class="input input-bordered" />
                         </div>
-                        <div class="form-control">
+                        <div class="flex flex-col gap-2">
                             <Label class="label">
                                 <LabelText>"Last Name"</LabelText>
                             </Label>
                             <Input attr:placeholder="Doe" class="input input-bordered" />
                         </div>
-                        <div class="form-control md:col-span-2">
+                        <div class="flex flex-col gap-2 md:col-span-2">
                             <Label class="label">
                                 <LabelText>"Email"</LabelText>
                             </Label>
@@ -40,19 +40,19 @@ pub fn FieldsetDemo() -> impl IntoView {
                     <FieldSet>
                         <FieldsetLegend>"Account Settings"</FieldsetLegend>
                         <div class="space-y-4">
-                            <div class="form-control">
+                            <div class="flex flex-col gap-2">
                                 <Label class="label">
                                     <LabelText>"Username"</LabelText>
                                 </Label>
                                 <Input attr:placeholder="johndoe" class="input input-bordered" />
                             </div>
-                            <div class="form-control">
+                            <div class="flex flex-col gap-2">
                                 <Label class="label">
                                     <LabelText>"Password"</LabelText>
                                 </Label>
                                 <Input attr:placeholder="••••••••" attr:r#type="password" class="input input-bordered" />
                             </div>
-                            <div class="form-control">
+                            <div class="flex flex-col gap-2">
                                 <Label class="label cursor-pointer justify-start gap-2">
                                     <Checkbox />
                                     <LabelText>"Enable two-factor authentication"</LabelText>
@@ -64,7 +64,7 @@ pub fn FieldsetDemo() -> impl IntoView {
                     <FieldSet>
                         <FieldsetLegend>"Preferences"</FieldsetLegend>
                         <div class="space-y-4">
-                            <div class="form-control">
+                            <div class="flex flex-col gap-2">
                                 <Label class="label">
                                     <LabelText>"Language"</LabelText>
                                 </Label>
@@ -75,7 +75,7 @@ pub fn FieldsetDemo() -> impl IntoView {
                                     <option>"German"</option>
                                 </Select>
                             </div>
-                            <div class="form-control">
+                            <div class="flex flex-col gap-2">
                                 <Label class="label">
                                     <LabelText>"Theme"</LabelText>
                                 </Label>
@@ -94,7 +94,7 @@ pub fn FieldsetDemo() -> impl IntoView {
                                     </Label>
                                 </div>
                             </div>
-                            <div class="form-control">
+                            <div class="flex flex-col gap-2">
                                 <Label class="label cursor-pointer justify-start gap-2">
                                     <Checkbox />
                                     <LabelText>"Enable notifications"</LabelText>
@@ -109,27 +109,27 @@ pub fn FieldsetDemo() -> impl IntoView {
                 <FieldSet attr:disabled=true>
                     <FieldsetLegend>"Billing Information (Coming Soon)"</FieldsetLegend>
                     <div class="space-y-4">
-                        <div class="form-control">
+                        <div class="flex flex-col gap-2">
                             <Label class="label">
                                 <LabelText>"Credit Card Number"</LabelText>
                             </Label>
                             <Input attr:placeholder="**** **** **** ****" class="input input-bordered" attr:disabled=true />
                         </div>
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div class="form-control">
+                            <div class="flex flex-col gap-2">
                                 <Label class="label">
                                     <LabelText>"Expiry Date"</LabelText>
                                 </Label>
                                 <Input attr:placeholder="MM/YY" class="input input-bordered" attr:disabled=true />
                             </div>
-                            <div class="form-control">
+                            <div class="flex flex-col gap-2">
                                 <Label class="label">
                                     <LabelText>"CVV"</LabelText>
                                 </Label>
                                 <Input attr:placeholder="123" class="input input-bordered" attr:disabled=true />
                             </div>
                         </div>
-                        <div class="form-control">
+                        <div class="flex flex-col gap-2">
                             <Label class="label cursor-pointer justify-start gap-2">
                                 <Checkbox attr:disabled=true />
                                 <LabelText>"Save payment method"</LabelText>
@@ -146,19 +146,19 @@ pub fn FieldsetDemo() -> impl IntoView {
                         <FieldSet>
                             <FieldsetLegend>"Primary Address"</FieldsetLegend>
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div class="form-control md:col-span-2">
+                                <div class="flex flex-col gap-2 md:col-span-2">
                                     <Label class="label">
                                         <LabelText>"Street Address"</LabelText>
                                     </Label>
                                     <Input attr:placeholder="123 Main Street" class="input input-bordered" />
                                 </div>
-                                <div class="form-control">
+                                <div class="flex flex-col gap-2">
                                     <Label class="label">
                                         <LabelText>"City"</LabelText>
                                     </Label>
                                     <Input attr:placeholder="New York" class="input input-bordered" />
                                 </div>
-                                <div class="form-control">
+                                <div class="flex flex-col gap-2">
                                     <Label class="label">
                                         <LabelText>"ZIP Code"</LabelText>
                                     </Label>
@@ -170,19 +170,19 @@ pub fn FieldsetDemo() -> impl IntoView {
                         <FieldSet>
                             <FieldsetLegend>"Phone Numbers"</FieldsetLegend>
                             <div class="space-y-4">
-                                <div class="form-control">
+                                <div class="flex flex-col gap-2">
                                     <Label class="label">
                                         <LabelText>"Home"</LabelText>
                                     </Label>
                                     <Input attr:placeholder="(555) 123-4567" attr:r#type="tel" class="input input-bordered" />
                                 </div>
-                                <div class="form-control">
+                                <div class="flex flex-col gap-2">
                                     <Label class="label">
                                         <LabelText>"Mobile"</LabelText>
                                     </Label>
                                     <Input attr:placeholder="(555) 987-6543" attr:r#type="tel" class="input input-bordered" />
                                 </div>
-                                <div class="form-control">
+                                <div class="flex flex-col gap-2">
                                     <Label class="label">
                                         <LabelText>"Work"</LabelText>
                                     </Label>
@@ -202,7 +202,7 @@ pub fn FieldsetDemo() -> impl IntoView {
                             <FieldSet>
                                 <FieldsetLegend>"Basic Information"</FieldsetLegend>
                                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div class="form-control">
+                                    <div class="flex flex-col gap-2">
                                         <Label class="label">
                                             <LabelText>
                                                 "First Name "
@@ -211,7 +211,7 @@ pub fn FieldsetDemo() -> impl IntoView {
                                         </Label>
                                         <Input attr:placeholder="John" class="input input-bordered" attr:required=true />
                                     </div>
-                                    <div class="form-control">
+                                    <div class="flex flex-col gap-2">
                                         <Label class="label">
                                             <LabelText>
                                                 "Last Name "
@@ -220,7 +220,7 @@ pub fn FieldsetDemo() -> impl IntoView {
                                         </Label>
                                         <Input attr:placeholder="Doe" class="input input-bordered" attr:required=true />
                                     </div>
-                                    <div class="form-control md:col-span-2">
+                                    <div class="flex flex-col gap-2 md:col-span-2">
                                         <Label class="label">
                                             <LabelText>
                                                 "Email Address "
@@ -229,7 +229,7 @@ pub fn FieldsetDemo() -> impl IntoView {
                                         </Label>
                                         <Input attr:placeholder="john.doe@example.com" attr:r#type="email" class="input input-bordered" attr:required=true />
                                     </div>
-                                    <div class="form-control md:col-span-2">
+                                    <div class="flex flex-col gap-2 md:col-span-2">
                                         <Label class="label">
                                             <LabelText>"Date of Birth"</LabelText>
                                         </Label>
@@ -241,7 +241,7 @@ pub fn FieldsetDemo() -> impl IntoView {
                             <FieldSet>
                                 <FieldsetLegend>"Security"</FieldsetLegend>
                                 <div class="space-y-4">
-                                    <div class="form-control">
+                                    <div class="flex flex-col gap-2">
                                         <Label class="label">
                                             <LabelText>
                                                 "Password "
@@ -251,7 +251,7 @@ pub fn FieldsetDemo() -> impl IntoView {
                                         </Label>
                                         <Input attr:placeholder="••••••••" attr:r#type="password" class="input input-bordered" attr:required=true />
                                     </div>
-                                    <div class="form-control">
+                                    <div class="flex flex-col gap-2">
                                         <Label class="label">
                                             <LabelText>
                                                 "Confirm Password "
@@ -260,7 +260,7 @@ pub fn FieldsetDemo() -> impl IntoView {
                                         </Label>
                                         <Input attr:placeholder="••••••••" attr:r#type="password" class="input input-bordered" attr:required=true />
                                     </div>
-                                    <div class="form-control">
+                                    <div class="flex flex-col gap-2">
                                         <Label class="label cursor-pointer justify-start gap-2">
                                             <Checkbox />
                                             <LabelText>"Enable two-factor authentication (recommended)"</LabelText>
@@ -272,7 +272,7 @@ pub fn FieldsetDemo() -> impl IntoView {
                             <FieldSet>
                                 <FieldsetLegend>"Preferences"</FieldsetLegend>
                                 <div class="space-y-4">
-                                    <div class="form-control">
+                                    <div class="flex flex-col gap-2">
                                         <Label class="label">
                                             <LabelText>"Newsletter Subscription"</LabelText>
                                         </Label>
@@ -291,7 +291,7 @@ pub fn FieldsetDemo() -> impl IntoView {
                                             </Label>
                                         </div>
                                     </div>
-                                    <div class="form-control">
+                                    <div class="flex flex-col gap-2">
                                         <Label class="label">
                                             <LabelText>"Communication Preference"</LabelText>
                                         </Label>

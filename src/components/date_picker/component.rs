@@ -48,7 +48,7 @@ pub fn DatePicker(
     node_ref: NodeRef<Div>,
 ) -> impl IntoView {
     view! {
-        <div node_ref=node_ref class=move || merge_classes!("form-control", class)>
+        <div node_ref=node_ref class=move || merge_classes!("flex flex-col gap-2", class)>
             <input
                 type="date"
                 class="input input-bordered w-full"

@@ -11,7 +11,7 @@ use leptos::{
 ///
 /// ### Add to `input.css`
 /// ```css
-/// @source inline("label label-text label-text-alt");
+/// @source inline("label text-sm text-xs");
 /// ```
 ///
 /// ## Node References
@@ -55,7 +55,7 @@ pub fn LabelText(
     children: Children,
 ) -> impl IntoView {
     view! {
-        <span node_ref=node_ref class=move || merge_classes!("label-text", class)>
+        <span node_ref=node_ref class=move || merge_classes!("text-sm", class)>
             {children()}
         </span>
     }
@@ -82,7 +82,7 @@ pub fn LabelTextAlt(
     children: Children,
 ) -> impl IntoView {
     view! {
-        <span node_ref=node_ref class=move || merge_classes!("label-text-alt", class)>
+        <span node_ref=node_ref class=move || merge_classes!("text-xs", class)>
             {children()}
         </span>
     }

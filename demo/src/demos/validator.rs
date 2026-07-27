@@ -41,7 +41,7 @@ pub fn ValidatorDemo() -> impl IntoView {
         >
             <Section title="Basic Form Validation">
                 <div class="max-w-2xl space-y-4">
-                    <div class="form-control">
+                    <div class="flex flex-col gap-2">
                         <Label class="label">
                             <LabelText>"Username"</LabelText>
                         </Label>
@@ -66,7 +66,7 @@ pub fn ValidatorDemo() -> impl IntoView {
                         </ValidatorHint>
                     </div>
 
-                    <div class="form-control">
+                    <div class="flex flex-col gap-2">
                         <Label class="label">
                             <LabelText>"Email"</LabelText>
                         </Label>
@@ -92,7 +92,7 @@ pub fn ValidatorDemo() -> impl IntoView {
                         </ValidatorHint>
                     </div>
 
-                    <div class="form-control">
+                    <div class="flex flex-col gap-2">
                         <Label class="label">
                             <LabelText>"Password"</LabelText>
                         </Label>
@@ -138,7 +138,7 @@ pub fn ValidatorDemo() -> impl IntoView {
 
             <Section title="Static Validation States">
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-2xl">
-                    <div class="form-control">
+                    <div class="flex flex-col gap-2">
                         <Label class="label">
                             <LabelText>"Valid Input"</LabelText>
                         </Label>
@@ -148,7 +148,7 @@ pub fn ValidatorDemo() -> impl IntoView {
                         <ValidatorHint>"This is a valid email address"</ValidatorHint>
                     </div>
 
-                    <div class="form-control">
+                    <div class="flex flex-col gap-2">
                         <Label class="label">
                             <LabelText>"Invalid Input"</LabelText>
                         </Label>

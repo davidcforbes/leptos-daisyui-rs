@@ -201,23 +201,23 @@ pub fn StepsDemo() -> impl IntoView {
 
                         <div class="space-y-4">
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div class="form-control">
+                                <div class="flex flex-col gap-2">
                                     <label class="label">
-                                        <span class="label-text">"First Name"</span>
+                                        <span class="text-sm">"First Name"</span>
                                     </label>
                                     <Input attr:placeholder="Enter first name" class="w-full" />
                                 </div>
-                                <div class="form-control">
+                                <div class="flex flex-col gap-2">
                                     <label class="label">
-                                        <span class="label-text">"Last Name"</span>
+                                        <span class="text-sm">"Last Name"</span>
                                     </label>
                                     <Input attr:placeholder="Enter last name" class="w-full" />
                                 </div>
                             </div>
 
-                            <div class="form-control">
+                            <div class="flex flex-col gap-2">
                                 <label class="label">
-                                    <span class="label-text">"Email Address"</span>
+                                    <span class="text-sm">"Email Address"</span>
                                 </label>
                                 <input
                                     type="email"
@@ -226,9 +226,9 @@ pub fn StepsDemo() -> impl IntoView {
                                 />
                             </div>
 
-                            <div class="form-control">
+                            <div class="flex flex-col gap-2">
                                 <label class="label">
-                                    <span class="label-text">"Phone Number"</span>
+                                    <span class="text-sm">"Phone Number"</span>
                                 </label>
                                 <input
                                     type="tel"

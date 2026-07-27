@@ -52,15 +52,15 @@ pub fn HeroDemo() -> impl IntoView {
                         </div>
                         <div class="card shrink-0 w-full max-w-sm shadow-2xl bg-base-100">
                             <form class="card-body">
-                                <div class="form-control">
+                                <div class="flex flex-col gap-2">
                                     <label class="label">
-                                        <span class="label-text">"Email"</span>
+                                        <span class="text-sm">"Email"</span>
                                     </label>
                                     <Input attr:placeholder="email" class="w-full" />
                                 </div>
-                                <div class="form-control">
+                                <div class="flex flex-col gap-2">
                                     <label class="label">
-                                        <span class="label-text">"Password"</span>
+                                        <span class="text-sm">"Password"</span>
                                     </label>
                                     <input
                                         type="password"
@@ -68,12 +68,12 @@ pub fn HeroDemo() -> impl IntoView {
                                         class="input input-bordered w-full"
                                     />
                                     <label class="label">
-                                        <a href="#" class="label-text-alt link link-hover">
+                                        <a href="#" class="text-xs link link-hover">
                                             "Forgot password?"
                                         </a>
                                     </label>
                                 </div>
-                                <div class="form-control mt-6">
+                                <div class="flex flex-col gap-2 mt-6">
                                     <button type="submit" class="btn btn-primary">"Login"</button>
                                 </div>
                             </form>
