@@ -237,3 +237,60 @@ fn test_all_menu_sizes_return_valid_classes() {
         assert_eq!(variant.as_str(), expected);
     }
 }
+
+// ── structural submenu container must not form a box (ldui-1n3) ────────────
+
+/// The non-interactive `is_submenu` container carries `contents`
+/// (`display: contents`).
+///
+/// This is load-bearing, not cosmetic. daisyUI styles a menu item's content
+/// box as `display: grid; grid-auto-flow: column; align-items: center` so an
+/// icon, label and badge share one line. Its selector excludes a direct `ul`
+/// and `.menu-title`, but not our wrapper `<span>` — so without `contents`
+/// the wrapper collects the item grid and lays a `MenuTitle` out *beside* its
+/// `SubMenu`, vertically centred, instead of above it.
+///
+/// Measured in the browser before the fix: title at (36, 252) with the nested
+/// list at (125, 138) — the title to the *right*-of-centre and lower than the
+/// list it labels. With `contents`: title (24, 132), list (40, 169).
+#[test]
+fn structural_submenu_container_declares_display_contents() {
+    let src = include_str!("component.rs");
+    // The branch is identified by the role/tabindex pair it renders; assert
+    // the class travels with it rather than matching on line numbers.
+    let branch = src
+        .rsplit("} else {")
+        .next()
+        .expect("structural submenu branch");
+    assert!(
+        branch.contains("class=\"contents\""),
+        "the structural submenu container must render `contents`, or daisyUI's \
+         item grid puts the MenuTitle beside its SubMenu (ldui-1n3)"
+    );
+}
+
+/// `contents` must reach the generated stylesheet.
+///
+/// It only appears inside a `class="..."` literal, so Tailwind picks it up
+/// from the source scan — but the component's documented `@source inline(...)`
+/// list is what consumers copy into their own `input.css`, and omitting it
+/// there breaks the layout in exactly the way this fix repairs.
+#[test]
+fn contents_is_in_the_documented_source_inline_list() {
+    let src = include_str!("component.rs");
+    let line = src
+        .lines()
+        .find(|l| l.contains("@source inline") && l.contains("cursor-pointer"))
+        .expect("MenuItem @source inline line");
+    assert!(
+        line.contains("contents"),
+        "consumers copying this @source list would lose `contents`: {line}"
+    );
+}
+
+/// The container this applies to is the non-interactive one — the branch that
+/// exists precisely because it has no click semantics of its own.
+#[test]
+fn the_contents_container_is_the_non_interactive_branch() {
+    assert!(!submenu_container_is_interactive(false, false));
+}

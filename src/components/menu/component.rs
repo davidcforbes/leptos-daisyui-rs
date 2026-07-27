@@ -125,7 +125,7 @@ pub fn Menu(
 ///
 /// ### Add to `input.css`
 /// ```css
-/// @source inline("flex items-center gap-2 w-full flex-1 min-w-0 shrink-0 cursor-pointer");
+/// @source inline("flex items-center gap-2 w-full flex-1 min-w-0 shrink-0 cursor-pointer contents");
 /// ```
 ///
 /// ## Node References
@@ -322,12 +322,27 @@ pub fn MenuItem(
                 // spuriously re-activate this container, plus the pointer
                 // cursor would misleadingly suggest the whole container is
                 // clickable (ldui-jcs.21 review).
+                // `contents` (display: contents) is load-bearing, not
+                // cosmetic. daisyUI styles a menu item's content box as
+                // `display: grid; grid-auto-flow: column; align-items: center`
+                // so an icon, label and badge sit on one line. Its selector
+                // excludes a direct `ul` and `.menu-title` — but not this
+                // wrapper, so a structural container picked up the item grid
+                // and laid its `MenuTitle` out *beside* its `SubMenu`,
+                // vertically centred, instead of above it (ldui-1n3).
+                //
+                // Generating no box of its own puts the title and the nested
+                // list back into the `<li>`'s own flow, which is the structure
+                // daisyUI documents (`<li><h2 class="menu-title"><ul>`), while
+                // keeping the id/role/tabindex the roving-focus machinery and
+                // `aria-activedescendant` rely on.
                 view! {
                     <span
                         role="menuitem"
                         tabindex="-1"
                         id=menu_item_dom_id(nav.instance, index)
                         aria-disabled=move || disabled.get().to_string()
+                        class="contents"
                         class:menu-active=is_active
                         class:menu-focus=move || nav.is_highlighted(index)
                         class:menu-disabled=move || disabled.get()
