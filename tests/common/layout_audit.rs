@@ -234,14 +234,37 @@ pub const SWEEP_JS: &str = r#"
       }
     }
 
-    // Vertical stacks only: siblings laid out one above the next. A row of
-    // flex items has no vertical gap to speak of and its horizontal gap is
-    // the flex `gap`, already token-driven.
+    // Siblings ordered top-to-bottom, for the stacking-based checks below.
     const stacked = kids
       .map((k, i) => ({ k, r: rects[i] }))
       .sort((p, q) => p.r.top - q.r.top);
+    const ps0 = cs(parent);
+    const pdisp = ps0.display;
+    const isFlexOrGrid =
+      pdisp === 'flex' || pdisp === 'inline-flex' ||
+      pdisp === 'grid' || pdisp === 'inline-grid';
 
-    // --- 2. grid: vertical gaps land on the canonical scale ---------------
+    // --- 2. grid: gaps land on the canonical scale ------------------------
+    // Flex and grid containers are checked by reading their DECLARED
+    // row/column-gap, not by measuring between rects. Measuring is wrong
+    // there: in a wrapping flex row the distance from a short item to the
+    // next row is the row gap PLUS the leftover height of the tallest item
+    // beside it, which is nobody's spacing decision. That cost 19 phantom
+    // "28px gaps" (a 12px row-gap plus a 16px height difference), and it had
+    // previously read 0 only because 8+16=24 happened to land on the scale —
+    // silently wrong, with arithmetic luck hiding it.
+    if (isFlexOrGrid) {
+      for (const which of ['rowGap', 'columnGap']) {
+        const g = parseFloat(ps0[which]);
+        if (!isNaN(g) && g > EPS && !onScale(g)) {
+          push(out.grid, {
+            selector: path(parent),
+            value: g,
+            detail: 'declared ' + (which === 'rowGap' ? 'row-gap' : 'column-gap')
+          });
+        }
+      }
+    } else {
     for (let i = 1; i < stacked.length; i++) {
       const prev = stacked[i - 1].r, cur = stacked[i].r;
       // Only compare things actually stacked, not side-by-side.
@@ -249,6 +272,7 @@ pub const SWEEP_JS: &str = r#"
       if (horizontallyApart) continue;
       const gap = cur.top - prev.bottom;
       if (gap < -EPS) continue;              // handled by the overlap check
+      if (onLineRamp(cur.top - prev.top)) continue;   // text, not spacing
       if (!onScale(gap)) {
         push(out.grid, {
           selector: path(stacked[i].k),
@@ -256,6 +280,7 @@ pub const SWEEP_JS: &str = r#"
           detail: 'gap below ' + path(stacked[i - 1].k)
         });
       }
+    }
     }
 
     // --- 3a. a child's padding vs the gap between children ----------------
@@ -265,10 +290,17 @@ pub const SWEEP_JS: &str = r#"
     // Only meaningful when the children are visually distinct surfaces —
     // a transparent wrapper has no edge to merge with anything.
     if (stacked.length > 1) {
+      // Same reasoning as check 2: in a flex/grid container the separation
+      // between children is the DECLARED gap, not the measured rect distance.
       let minGap = Infinity;
-      for (let i = 1; i < stacked.length; i++) {
-        const g = stacked[i].r.top - stacked[i - 1].r.bottom;
-        if (g >= -EPS && g < minGap) minGap = g;
+      if (isFlexOrGrid) {
+        const rg = parseFloat(ps0.rowGap);
+        minGap = isNaN(rg) ? Infinity : rg;
+      } else {
+        for (let i = 1; i < stacked.length; i++) {
+          const g = stacked[i].r.top - stacked[i - 1].r.bottom;
+          if (g >= -EPS && g < minGap) minGap = g;
+        }
       }
       if (minGap > EPS && minGap !== Infinity) {
         for (const { k } of stacked) {

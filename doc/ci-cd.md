@@ -197,6 +197,8 @@ elements, out-of-flow elements (an overlay is *supposed* to cover its siblings),
 inline boxes, and anything inside an open dialog/dropdown/modal. Full
 containment is skipped rather than reported — that is nesting, not collision.
 
+`cargo xtask test-layout` runs it, and it is a step of `verify-full`.
+
 `sweep_detects_injected_violations` is a **negative control**: it injects a
 deliberate 20px overlap and a 7px off-grid gap, asserts both are caught, then
 removes them and asserts the counts return to baseline. A detector that reports

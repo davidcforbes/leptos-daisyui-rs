@@ -793,12 +793,7 @@ fn main() -> ExitCode {
             // (needs npm/trunk/tailwind/Chrome installed).
             let mut steps = gate_steps();
             steps.push(reactivity_step());
-            // NOTE: layout_step() is deliberately NOT in verify-full yet.
-            // The sweep logic is verified (see doc/plans/2026-07-26-spacing-
-            // audit.md), but the Rust->CDP call that ships it into the page
-            // does not yet return — wiring it here would hang the gate.
-            // Run it explicitly with `cargo xtask test-layout`. Tracked by
-            // ldui-mai.5.
+            steps.push(layout_step());
             steps.push(cmd(
                 "trunk-build",
                 "trunk",

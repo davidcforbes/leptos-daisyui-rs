@@ -166,7 +166,7 @@ pub async fn oracle(h: &Harness) -> serde_json::Value {
 pub async fn layout_report(h: &Harness) -> layout_audit::AuditReport {
     let raw: String = h
         .page()
-        .evaluate_function(layout_audit::SWEEP_JS)
+        .evaluate(layout_audit::SWEEP_JS.to_string())
         .await
         .expect("layout sweep failed to evaluate")
         .into_value()
