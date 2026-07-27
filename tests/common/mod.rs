@@ -16,6 +16,8 @@
 // helper unused by one binary would warn there.
 #![allow(dead_code)]
 
+pub mod layout_audit;
+
 use pixelproof_web::{Harness, HarnessConfig, ViewportSize};
 use std::path::PathBuf;
 
@@ -153,4 +155,22 @@ pub async fn oracle(h: &Harness) -> serde_json::Value {
         .await
         .expect("app_debug_state call failed")
         .expect("window.__APP_DEBUG__ missing — was the page loaded with ?pp-freeze=1?")
+}
+
+/// Run the [`layout_audit`] sweep against the currently-loaded page and
+/// deserialize the report.
+///
+/// The sweep returns a JSON *string* rather than an object: CDP's value
+/// marshalling flattens nested arrays inconsistently across driver versions,
+/// and a string round-trips identically everywhere.
+pub async fn layout_report(h: &Harness) -> layout_audit::AuditReport {
+    let raw: String = h
+        .page()
+        .evaluate_function(layout_audit::SWEEP_JS)
+        .await
+        .expect("layout sweep failed to evaluate")
+        .into_value()
+        .expect("layout sweep did not return a string");
+    serde_json::from_str(&raw)
+        .unwrap_or_else(|e| panic!("layout sweep returned unparseable JSON ({e}): {raw}"))
 }
