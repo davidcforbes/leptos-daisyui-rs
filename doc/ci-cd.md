@@ -141,6 +141,35 @@ screenshot**, not headed-vs-headless (the same rule Rust-DeskApp uses):
   and stay out of every gate. Ad-hoc visual checks also use the `run` /
   `visual-ui-testing` flow against a live `trunk serve` + Chrome DevTools MCP.
 
+#### Recapturing baselines is a claim, not a refresh
+
+`VISUAL_TEST_MODE=capture` overwrites the committed PNGs with whatever is on
+screen — which asserts that what is on screen is *correct*. Blessing a
+rendering blind also destroys the suite's ability to ever report it, because
+the broken state becomes the reference.
+
+This is not hypothetical. On 2026-07-27 all nine baselines failed (SSIM
+0.69–0.96 against a 0.98 threshold) after three weeks of unrelated work, and
+comparing one render against its baseline is what surfaced `ldui-1n3` — a real
+regression where daisyUI's menu-item grid had unstacked every sidebar group
+title. A straight recapture would have made it permanent and invisible.
+
+The procedure that worked, and the one to repeat:
+
+1. Run in compare mode and read the SSIM per page.
+2. **Fix what the diffs reveal first.** Fixing `ldui-1n3` alone took the
+   failures from 9 to 5 — four pages needed no recapture at all.
+3. Eyeball each remaining render *against its baseline* and classify every
+   difference as intended or regression. An 0.88 on a page that recently
+   gained features is exactly as likely to be a broken table as a better one.
+4. Capture all baselines in **one run**, so the set is mutually consistent —
+   one browser, one build — rather than mixed vintages.
+5. Re-run in compare mode to confirm the new set actually passes.
+
+Because the suite is `#[ignore]`d and out of every gate, drift accumulates
+silently until someone asks. Run it at feature boundaries; a failure then
+means something, where a quarterly run just means "lots changed".
+
 ### `cargo xtask test-reactivity` — the self-spawning subset
 
 The step owns the whole server lifecycle in Rust (logic in the xtask; the

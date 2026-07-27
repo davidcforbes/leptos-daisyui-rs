@@ -315,6 +315,22 @@ goes inert, and the label and its input flow inline instead of stacking. Use
 `fieldset` + `label`, or plain `flex flex-col gap-2`. The `test-daisyui5` gate
 step (`tests/no_dead_daisyui4_classes.rs`) fails if any of the three reappears.
 
+### Wrapper elements inside a daisyUI `menu` pick up the item grid
+
+daisyUI styles a menu item's content box as `display: grid;
+grid-auto-flow: column; align-items: center`, so an icon, label and badge share
+one line. Its selector excludes a direct `ul` and `.menu-title` — **but not a
+wrapper you insert**. `MenuItem`'s structural (non-interactive) `is_submenu`
+branch wraps children in a `<span>` to keep an id/role/tabindex for roving
+focus, and that span collected the item grid: it laid a `MenuTitle` out
+*beside* its `SubMenu` instead of above it, turning the showcase sidebar's
+group headings into labels floating left of their own link columns (`ldui-1n3`).
+
+The wrapper therefore carries `contents` (`display: contents`) so it generates
+no box and its children rejoin the `<li>`'s flow — daisyUI's documented
+`<li><h2 class="menu-title"><ul>` structure. If you add any wrapper inside a
+menu `<li>`, expect the same and do the same.
+
 ## Development Notes
 
 - **Edition**: Uses Rust Edition 2024
