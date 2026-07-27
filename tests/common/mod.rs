@@ -59,19 +59,14 @@ pub fn config() -> HarnessConfig {
     // Profile isolation: without an explicit --user-data-dir, headless Chrome
     // reuses a shared profile, so localStorage (e.g. the persisted
     // `leptos-daisyui-demo-theme`) leaks between tests and runs — the theme
-    // test's "dark" bled into later launches. Give every harness a unique
-    // throwaway profile dir under the OS temp dir.
-    let unique = format!(
-        "ldui-pp-profile-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    );
-    let profile_dir = std::env::temp_dir().join(unique);
-    cfg = cfg.with_launch_arg(format!("--user-data-dir={}", profile_dir.display()));
-    cfg
+    // test's "dark" bled into later launches.
+    //
+    // This used to hand-roll the directory and pass `--user-data-dir`
+    // directly, which isolated the profile but never removed it: ~1.5 GB of
+    // `%TEMP%` in a single working session (ldui-r93). The harness now owns
+    // the directory, deletes it on `close()`, and reaps any left behind by a
+    // killed test process on the next launch.
+    cfg.with_isolated_profile()
 }
 
 /// Launch Chrome, set the smoke viewport, navigate to `path` with the
