@@ -702,6 +702,18 @@ fn tokens_css() -> String {
     css
 }
 
+/// Whether two files differ only in line endings.
+///
+/// The generator writes LF, but this repo is checked out with
+/// `core.autocrlf=true`, so git materialises the committed file as CRLF. A
+/// raw byte comparison therefore reports the file STALE on every fresh
+/// checkout on Windows — which is exactly what happened when the branch was
+/// merged: `--check` failed while `git diff` was empty and regenerating
+/// produced no change. Compare content, not line terminators.
+fn same_ignoring_line_endings(a: &str, b: &str) -> bool {
+    a.lines().eq(b.lines())
+}
+
 /// `cargo xtask gen-tokens [--check]` — write (or verify) the generated
 /// Tailwind theme.
 ///
@@ -713,7 +725,7 @@ fn gen_tokens(check: bool) -> ExitCode {
 
     if check {
         return match have.as_deref() {
-            Some(current) if current == want => {
+            Some(current) if same_ignoring_line_endings(current, &want) => {
                 println!("xtask gen-tokens: {TOKENS_CSS_PATH} is up to date");
                 ExitCode::from(0)
             }
@@ -733,7 +745,10 @@ fn gen_tokens(check: bool) -> ExitCode {
         };
     }
 
-    if have.as_deref() == Some(want.as_str()) {
+    if have
+        .as_deref()
+        .is_some_and(|current| same_ignoring_line_endings(current, &want))
+    {
         println!("xtask gen-tokens: {TOKENS_CSS_PATH} already up to date");
         return ExitCode::from(0);
     }
@@ -1050,6 +1065,29 @@ mod gen_tokens_tests {
         let css = tokens_css();
         assert!(css.contains("  --border-width-hairline: 1px;"), "{css}");
         assert!(css.contains("  --border-width-thin: 2px;"), "{css}");
+    }
+
+    #[test]
+    fn drift_check_ignores_line_endings() {
+        // Regression: the generator writes LF, git checks the file out as
+        // CRLF under core.autocrlf=true, and a raw byte comparison then
+        // reported STALE on every fresh checkout while `git diff` was empty.
+        // Caught only by running the gate on a freshly merged tree.
+        let lf = "a\nb\nc\n";
+        let crlf = "a\r\nb\r\nc\r\n";
+        assert!(same_ignoring_line_endings(lf, crlf));
+        assert!(same_ignoring_line_endings(lf, lf));
+        // ...but a real content change is still a difference.
+        assert!(!same_ignoring_line_endings(lf, "a\r\nb\r\nd\r\n"));
+        assert!(!same_ignoring_line_endings(lf, "a\nb\n"));
+    }
+
+    #[test]
+    fn drift_check_accepts_the_real_generated_css_as_crlf() {
+        // The same property against the actual payload, not a toy string.
+        let want = tokens_css();
+        let crlf = want.replace('\n', "\r\n");
+        assert!(same_ignoring_line_endings(&crlf, &want));
     }
 
     #[test]
