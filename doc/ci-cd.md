@@ -74,16 +74,43 @@ Each step is scoped per-crate; that scoping **is** the xtask's logic.
 
 | Step | Command | Note |
 |---|---|---|
+| `tokens-fresh` | `cargo xtask gen-tokens --check` | Fails if `styles/tokens.css` no longer matches what the `ui-tokens` crate produces — i.e. the desktop and web faces have silently forked. First because it is the cheapest and because a stale theme invalidates every downstream visual result. |
 | `fmt-check` | `cargo fmt -p leptos-daisyui-rs -p leptos-daisyui-showcase -p xtask -- --check` | Per-package, **not `--all`** — `--all` reaches into sibling repos (see above). |
 | `clippy` | `cargo clippy -p leptos-daisyui-rs --all-targets -- -D warnings` **then** `-p leptos-daisyui-showcase` | Two per-crate runs — **not `--workspace`**, which fails on csr feature unification (see above). Host target. |
 | `build` | `cargo build -p leptos-daisyui-rs` | **Library only.** The CSR demo is not natively built here — a native `cargo build` of a wasm/CSR binary can link-fail on `web-sys` host stubs; the demo is *checked* instead (next row) and *really* built by `trunk` (see `verify-full`). |
 | `check-demo` | `cargo check -p leptos-daisyui-showcase` | Fast native check of the demo — catches ~all compile breakage without npm/trunk. |
 | `test` | `cargo test -p leptos-daisyui-rs --lib` + `cargo test -p xtask` | The library's unit-test suite (~1766 tests) plus the xtask's own pure-function tests (SemVer bump, etc.). Non-`#[ignore]`d tests only. |
 
-### `cargo xtask verify-full` — with the reactivity suite and the real wasm build
+### `cargo xtask gen-tokens` — the Tailwind theme is generated, not written
+
+`styles/tokens.css` is **generated** from the `ui-tokens` crate and imported by
+`demo/input.css`. Never hand-edit it; run `cargo xtask gen-tokens` and commit
+the result. The gate's `tokens-fresh` step re-runs the generator with `--check`
+and fails if the committed file differs.
+
+It emits the spacing base unit, the stroke family, radii, and the type ramp
+with its grid-aligned line heights. Two deliberate choices, both load-bearing:
+
+- **rem, not px.** The token crate stores DIPs because Direct2D has no rem. The
+  generator converts to rem so the web keeps scaling with the user's browser
+  font-size preference — emitting the raw DIPs as px would pin every gap and
+  font size against that preference (WCAG 1.4.4). Only border widths stay px: a
+  hairline must not grow with the type.
+- **No named `--spacing-*` keys.** Tailwind resolves `max-w-*`/`w-*` against the
+  `--spacing-*` namespace *before* `--container-*`, so adding a `--spacing-xs`
+  key silently redefines `max-w-xs` from 20rem to 0.5rem. The numeric scale is
+  already token-derived via `--spacing`; semantic aliases would buy nothing and
+  cost a namespace collision. A unit test guards this.
+
+The generated theme is behaviour-preserving by construction: compiling
+`demo/input.css` with and without the import produces zero semantically
+different theme values.
+
+### `cargo xtask verify-full` — with the browser suites and the real wasm build
 
 `verify-full` runs `verify`, then the reactivity/DOM-oracle suite
-(`test-reactivity`, below), then `trunk build --release` in `demo/` — the real
+(`test-reactivity`), then the layout audit (`test-layout`, below), then
+`trunk build --release` in `demo/` — the real
 `wasm32-unknown-unknown` compile plus the Tailwind CSS build. It is a **separate
 task**, not part of the default gate, because it needs `npm` + `trunk` +
 `tailwindcss` + Chrome installed and takes minutes — keeping `verify` fast and
@@ -143,6 +170,44 @@ already-running dev server.
 The suite keeps its `#[ignore]` attributes (the gate passes `--ignored`
 explicitly) so that a bare `cargo test` with no server running still passes.
 `#[ignore]` here means "needs a server", not "is manual".
+
+### `cargo xtask test-layout` — the spacing/overlap audit
+
+Same server lifecycle as `test-reactivity` (both go through
+`run_browser_suite`), running `tests/layout_audit_smoke.rs`. This is the
+article's manual "10-minute spacing audit" made permanent — three checks swept
+over the rendered DOM via `getBoundingClientRect`:
+
+1. **Overlap** — no two visible in-flow siblings may intersect. **Hard failure,
+   no tolerance.** This is the regression test for the whole class of bug where
+   a component grows and its neighbour does not move.
+2. **Grid** — vertical gaps between stacked siblings must land on the canonical
+   scale.
+3. **Internal ≤ external** — a container's padding must not exceed the gap to
+   its siblings, or the containers visually merge.
+
+Checks 2 and 3 are **ratcheted, not zeroed**: each page carries a committed
+ceiling in `PAGES`, and a ceiling may only be lowered. A rendered gap is the sum
+of margins, line boxes, borders and daisyUI's own internal padding, much of
+which this library does not control — zeroing that on day one is not
+achievable, but letting it grow silently is what this stops.
+
+Exempt from comparison, mirroring the desktop contract: invisible or zero-area
+elements, out-of-flow elements (an overlay is *supposed* to cover its siblings),
+inline boxes, and anything inside an open dialog/dropdown/modal. Full
+containment is skipped rather than reported — that is nesting, not collision.
+
+`sweep_detects_injected_violations` is a **negative control**: it injects a
+deliberate 20px overlap and a 7px off-grid gap, asserts both are caught, then
+removes them and asserts the counts return to baseline. A detector that reports
+zero because it is broken is worse than no detector, because it reads as
+evidence.
+
+> Unlike the desktop half, this one measures rather than declares. The desktop
+> suite carries a caveat that a semantic rect is a *declaration*, so a clean
+> sweep there is only a ratchet against new declared-box collisions.
+> `getBoundingClientRect` is a real post-layout measurement, so that caveat does
+> not transfer: an overlap reported here is an overlap that really renders.
 
 ## Versioning — the automated bump
 

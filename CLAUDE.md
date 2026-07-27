@@ -42,10 +42,12 @@ CI/CD is **local-only, two-layer**: logic lives in the `xtask/` crate; cargo-mak
 just delegates. Run the gate before committing:
 
 ```bash
-cargo xtask verify        # advisory gate: fmt/clippy/build/check-demo/test (exit = # failures)
+cargo xtask verify        # advisory gate: tokens/fmt/clippy/build/check-demo/test (exit = # failures)
 cargo make verify         # same, via cargo-make
 cargo xtask verify-full   # + reactivity suite + the real trunk wasm build (needs npm/trunk/Chrome)
 cargo xtask test-reactivity          # reactivity/DOM-oracle suite alone (self-spawns a demo server)
+cargo xtask test-layout              # layout audit: overlap/grid/internal<=external over the real DOM
+cargo xtask gen-tokens [--check]     # regenerate styles/tokens.css from ui-tokens
 cargo xtask bump patch|minor|major   # bump the library version (human-chosen level)
 ```
 
@@ -65,6 +67,21 @@ this and run `cargo clippy -p <crate> --all-targets -- -D warnings` to see the p
 **Running the demo needs `npm install` in `demo/` first** (`node_modules` is not
 committed). Without it, trunk's Tailwind pre-build hook fails and trunk serves a
 **stale** build — the page loads fine but your changes aren't in it.
+
+**`styles/tokens.css` is GENERATED — never hand-edit it.** It is the Tailwind
+`@theme` block, produced from the shared `ui-tokens` crate by `cargo xtask
+gen-tokens` and imported by `demo/input.css`. The gate's first step
+(`tokens-fresh`) re-runs the generator with `--check` and fails if the committed
+file has drifted, which is how the desktop and web faces are kept from silently
+forking. Change a token upstream in `../Rust-DeskApp/crates/ui-tokens`, then
+re-run the generator and commit the result. Two rules the generator encodes:
+
+- **DIP → rem, never px.** Tokens are DIPs because Direct2D has no rem; emitting
+  them as px on the web pins font sizes and gaps against the user's browser
+  font-size preference (WCAG 1.4.4). Only border widths stay px.
+- **No named `--spacing-*` keys.** Tailwind resolves `w-*`/`max-w-*` against
+  `--spacing-*` *before* `--container-*`, so a `--spacing-xs` key silently
+  redefines `max-w-xs` from 20rem to 0.5rem. A unit test forbids them.
 
 ### Using cargo-make (Recommended for CI/Scripts)
 
@@ -145,6 +162,16 @@ The crate has two main modules:
 - `src/motion/` - Animation primitives (`Lerp`, `Transition`, `Keyframe`/`Track`, easing, spring, `use_animated` hook)
 
 ### Recent additions (2026-07)
+- **Spacing & vertical-rhythm system (2026-07-26).** `styles/tokens.css` is
+  generated from `ui-tokens` and imported by `demo/input.css`, so Tailwind's
+  numeric spacing scale and type ramp are derived from the same tokens the
+  desktop face uses rather than merely agreeing with them. `src/tokens/preamble.rs`
+  additionally emits `--ld-space-*`, `--ld-stroke-*`, `--ld-radius-*` and
+  `--ld-text-*`/`--ld-line-*` at runtime, plus a `.ld-text-<step>` class per
+  ramp step pinning both size and line height. `tests/layout_audit_smoke.rs`
+  asserts overlap / grid / internal≤external over the rendered DOM. See the
+  spacing rules under Component Guidelines and
+  [`doc/plans/2026-07-26-spacing-audit.md`](./doc/plans/2026-07-26-spacing-audit.md).
 - `sparkline/`, `empty_state/`, `icon_tile/`, `metric_row/`, `capacity_bar/`, `sla_chip/`, `nav_rail/`, `result_list/`, `day_scheduler/`, `toolbar/`, `tree/`, `week_view/` - new app-shell/data/scheduling components
 - `vertical_steps/` - extended with additional layout options
 - `src/motion/` - new animation module (see above)
@@ -244,6 +271,41 @@ When adding or modifying components:
    pub use component::*;
    pub use style::*;
    ```
+
+### Spacing rules (enforced, not advisory)
+
+Every spacing value must be a member of the canonical scale — **4, 8, 12, 16,
+24, 32, 48, 64, 96 px** — which is `ui_tokens::spacing::SCALE`, shared with the
+Direct2D desktop face. In Tailwind terms that is `1, 2, 3, 4, 6, 8, 12, 16, 24`.
+
+- **Sub-4px values are strokes, not spacing.** A 1px divider and a 1px gap are
+  different decisions that happen to share a number. Borders, dividers, rules,
+  indicator bars and hit-target widths use the stroke family
+  (`--border-width-hairline/thin/accent/emphasis`, from `ui_tokens::stroke`) and
+  are excluded from the spacing checker. `2px` is **not** a sanctioned spacing
+  step — see `ldui-mai.2` for the reasoning.
+- **Internal ≤ external.** A container's padding must not exceed the gap
+  separating it from its neighbours, and a child's padding must not exceed the
+  gap between children — otherwise the two read as one group (Gestalt
+  proximity). This is the bug class behind the Kanban card fix.
+- **Never hardcode a dimension the tokens already name.** The nav rail's active
+  bar is `w-(--border-width-accent)`, not `w-1`, because the desktop draws 3px
+  there and a literal silently drifts.
+
+`cargo xtask test-layout` asserts all of this against the rendered DOM
+(`tests/layout_audit_smoke.rs`). Overlap is a hard failure; grid and
+internal-vs-external are ratcheted per page and may only be lowered. Full
+findings: [`doc/plans/2026-07-26-spacing-audit.md`](./doc/plans/2026-07-26-spacing-audit.md).
+
+### daisyUI 5, not 4
+
+`.form-control`, `.label-text` and `.label-text-alt` were **removed in
+daisyUI 5** and do nothing. They are not harmless leftovers: `.form-control`
+supplied `display:flex; flex-direction:column`, so without it a
+`<label class="form-control w-full">` falls back to `display:inline`, `w-full`
+goes inert, and the label and its input flow inline instead of stacking. Use
+`fieldset` + `label`, or plain `flex flex-col gap-2`. The `test-daisyui5` gate
+step (`tests/no_dead_daisyui4_classes.rs`) fails if any of the three reappears.
 
 ## Development Notes
 

@@ -7,6 +7,14 @@ Welcome to the comprehensive documentation for leptos-daisyui-rs - a type-safe, 
 - **[Quick Start Guide](./QUICK_START.md)** - Get up and running in minutes
 - **[Theming System](./THEMING.md)** - Comprehensive theming and customization guide
 
+## Contributing / internals
+
+- **[CI/CD](./ci-cd.md)** - the local-only two-layer gate (`cargo xtask verify`),
+  the generated Tailwind theme, and the browser-driven suites
+- **[Spacing & vertical-rhythm audit](./plans/2026-07-26-spacing-audit.md)** -
+  the canonical spacing scale, the stroke family, and what the rendered-DOM
+  layout audit does and does not prove
+
 ## Component Documentation
 
 This directory contains comprehensive markdown documentation for all leptos-daisyui-rs components. Each component has its own markdown file with examples, props documentation, and best practices.

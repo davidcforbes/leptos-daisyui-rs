@@ -88,6 +88,7 @@ As a note at build time, since the class names included in daisyUI are included 
 
 ```css input.css
 @import "tailwindcss";
+@import "../styles/tokens.css";   /* see "Design tokens" below */
 @plugin "daisyui";
 @source "../src/**/*.rs";
 
@@ -96,6 +97,21 @@ As a note at build time, since the class names included in daisyUI are included 
 ```
 
 If you want to include everything first [daisyui-components.css](. /stytles/daisyui-components.css).
+
+#### Design tokens
+
+`styles/tokens.css` is a **generated** Tailwind `@theme` block. It comes from
+the `ui-tokens` crate, which this fork shares with the Direct2D desktop face in
+`Rust-DeskApp`, so both render from one spacing scale, stroke family, corner-radius
+set and type ramp instead of two dialects that happen to agree.
+
+Importing it is optional but recommended: without it Tailwind's defaults still
+apply and nothing breaks, but your spacing is then a coincidence rather than a
+contract. It is deliberately behaviour-preserving — compiling `input.css` with
+and without the import produces zero semantically different theme values.
+
+Regenerate with `cargo xtask gen-tokens` after changing a token upstream; never
+edit the file by hand. `cargo xtask verify` fails if it has drifted.
 
 > 🚧 **There is room for optimization** 
 > I still refer to class names by force in this area, so in the future I would like to include only the classes used in the build.
