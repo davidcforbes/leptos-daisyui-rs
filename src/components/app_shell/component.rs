@@ -34,7 +34,7 @@ use leptos::{
 ///                     "Settings"
 ///                 </AppShellIconNavItem>
 ///             </AppShellIconNav>
-///             <AppShellSidePanel class="w-48">
+///             <AppShellSidePanel class="w-70">
 ///                 <Show when=move || section.get() == Some("home".to_string())>
 ///                     "Home navigation"
 ///                 </Show>
@@ -488,9 +488,13 @@ pub fn AppShellIconNavGroup(
 /// # AppShell Side Panel Component
 ///
 /// Secondary navigation panel displayed between the icon nav and the main
-/// content area. Width is controlled via the `width` prop (e.g.,
-/// `width="w-48"` for 192px or `width="w-64"` for 256px) or, as before, via
+/// content area. Width is controlled via the `width` prop or, as before, via
 /// the `class` prop -- both are additive to the base classes.
+///
+/// **Use `width="w-70"` (280px).** That is `ui_tokens::spacing::RIGHT_PANEL_WIDTH`,
+/// the same panel width the Direct2D desktop face draws, so the two faces
+/// agree. The older `w-48` (192px) and `w-64` (256px) examples are on the 4px
+/// grid but not on the canonical scale, and neither matches the desktop.
 ///
 /// Use conditional rendering (`Show`, `match`, etc.) to swap panel content
 /// based on the active section from `AppShellContext`.
@@ -519,7 +523,8 @@ pub fn AppShellSidePanel(
     #[prop(optional, into, default = Signal::derive(|| true))]
     visible: Signal<bool>,
 
-    /// Width class for the panel (e.g. `"w-48"`, `"w-64"`). Leave unset
+    /// Width class for the panel. Prefer `"w-70"` (280px) --- see the
+    /// component docs for why. Leave unset
     /// (default) to size the panel entirely via the `class` prop, as
     /// before.
     #[prop(optional, into)]

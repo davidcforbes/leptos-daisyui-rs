@@ -126,7 +126,13 @@ pub fn KanbanColumnView(
             // Cards container (only show when not collapsed)
             <Show when=move || !is_collapsed.get()>
                 <div
-                    class="kanban-cards p-4 space-y-2"
+                    // Gestalt proximity (ldui-6qb): the gap between cards must
+                    // be at least the card's own internal padding, or each card
+                    // groups more strongly with the column edge than with the
+                    // list it belongs to. Card padding is `p-3` (12px), so the
+                    // gap is 12px too — and stays <= the column's own 16px
+                    // padding, keeping the nesting monotonic.
+                    class="kanban-cards p-4 space-y-3"
                     class:overflow-y-auto=move || column.get().scrollable
                     class:bg-primary=move || {
                         drag_state.get().is_drop_target(&column_id.get())

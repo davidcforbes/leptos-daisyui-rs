@@ -35,7 +35,7 @@ use leptos::{html::Div, prelude::*};
 ///
 /// ### Add to `input.css`
 /// ```css
-/// @source inline("flex flex-col items-baseline justify-between gap-0.5 gap-2");
+/// @source inline("flex flex-col items-baseline justify-between gap-1 gap-2");
 /// @source inline("text-xs text-sm opacity-60 font-semibold text-right pb-1 border-b border-base-200");
 /// @source inline("text-neutral text-primary text-secondary text-accent text-info text-success text-warning text-error");
 /// ```

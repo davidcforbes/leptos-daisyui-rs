@@ -63,7 +63,7 @@ pub fn AppShellDemo() -> impl IntoView {
                             </AppShellIconNavGroup>
                         </AppShellIconNav>
 
-                        <AppShellSidePanel class="w-48 border-r border-base-content/10 p-3">
+                        <AppShellSidePanel class="w-70 border-r border-base-content/10 p-3">
                             <Show when=move || section.get() == Some("home".to_string())>
                                 <h3 class="text-sm font-semibold mb-2">"Dashboard"</h3>
                                 <Menu direction=MenuDirection::Vertical class="w-full">
@@ -126,7 +126,7 @@ pub fn AppShellDemo() -> impl IntoView {
                                     <div class="card bg-base-100 shadow-sm">
                                         <div class="card-body p-4">
                                             <h3 class="card-title text-sm">"Panel Width"</h3>
-                                            <p class="text-2xl font-bold text-secondary">"w-48"</p>
+                                            <p class="text-2xl font-bold text-secondary">"w-70"</p>
                                         </div>
                                     </div>
                                 </div>
@@ -171,7 +171,7 @@ pub fn AppShellDemo() -> impl IntoView {
                             </AppShellIconNavItem>
                         </AppShellIconNav>
                         <AppShellSidePanel
-                            width="w-48"
+                            width="w-70"
                             visible=Signal::derive(move || sidebar_visible.get())
                             class="border-r border-base-content/10 p-3"
                         >
@@ -297,7 +297,7 @@ pub fn AppShellDemo() -> impl IntoView {
                     <pre data-prefix="11"><code>"      <AppShellIconNavItem value=\"settings\">...</AppShellIconNavItem>"</code></pre>
                     <pre data-prefix="12"><code>"    </AppShellIconNavGroup>"</code></pre>
                     <pre data-prefix="13"><code>"  </AppShellIconNav>"</code></pre>
-                    <pre data-prefix="14"><code>"  <AppShellSidePanel width=\"w-48\" visible=sidebar_visible>"</code></pre>
+                    <pre data-prefix="14"><code>"  <AppShellSidePanel width=\"w-70\" visible=sidebar_visible>"</code></pre>
                     <pre data-prefix="15"><code>"    // Conditional content per section"</code></pre>
                     <pre data-prefix="16"><code>"  </AppShellSidePanel>"</code></pre>
                     <pre data-prefix="17"><code>"  <AppShellContent class=\"p-6\">"</code></pre>

@@ -61,7 +61,7 @@ impl MetricRowColor {
 /// d2d-ui's `MetricRow::stacked()` builder flag.
 pub fn container_class(stacked: bool) -> &'static str {
     if stacked {
-        "flex flex-col gap-0.5"
+        "flex flex-col gap-1"
     } else {
         "flex items-baseline justify-between gap-2"
     }

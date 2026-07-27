@@ -86,7 +86,7 @@ fn test_container_class_row() {
 
 #[test]
 fn test_container_class_stacked() {
-    assert_eq!(container_class(true), "flex flex-col gap-0.5");
+    assert_eq!(container_class(true), "flex flex-col gap-1");
 }
 
 // label_class tests

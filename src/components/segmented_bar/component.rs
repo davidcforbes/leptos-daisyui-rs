@@ -45,7 +45,7 @@ use leptos::{html::Div, prelude::*};
 ///
 /// ### Add to `input.css`
 /// ```css
-/// @source inline("flex h-1.5 w-full overflow-hidden rounded bg-base-200");
+/// @source inline("flex h-2 w-full overflow-hidden rounded bg-base-200");
 /// ```
 ///
 /// ## Node References
@@ -74,7 +74,7 @@ pub fn SegmentedBar(
             node_ref=node_ref
             role="img"
             class=move || {
-                merge_classes!("flex h-1.5 w-full overflow-hidden rounded bg-base-200", class)
+                merge_classes!("flex h-2 w-full overflow-hidden rounded bg-base-200", class)
             }
         >
             {move || {

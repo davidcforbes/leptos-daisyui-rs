@@ -53,7 +53,7 @@ fn option_dom_id(instance: u64, i: usize) -> String {
 ///
 /// ### Add to `input.css`
 /// ```css
-/// @source inline("flex flex-col gap-0.5 max-h-80 overflow-y-auto rounded-box border border-base-300 bg-base-100");
+/// @source inline("flex flex-col gap-2 max-h-80 overflow-y-auto rounded-box border border-base-300 bg-base-100");
 /// @source inline("outline-none focus:ring-2 focus:ring-primary/50");
 /// @source inline("px-3 py-2 cursor-pointer");
 /// @source inline("bg-primary/10 text-primary bg-base-200");
@@ -186,7 +186,7 @@ pub fn ResultList(
             }
             class=move || {
                 merge_classes!(
-                    "flex flex-col gap-0.5 max-h-80 overflow-y-auto rounded-box border border-base-300 bg-base-100 outline-none focus:ring-2 focus:ring-primary/50",
+                    "flex flex-col gap-2 max-h-80 overflow-y-auto rounded-box border border-base-300 bg-base-100 outline-none focus:ring-2 focus:ring-primary/50",
                     class
                 )
             }
@@ -218,7 +218,7 @@ pub fn ResultList(
                                     let sel = selected.get() == Some(i);
                                     let hov = hover.get() == Some(i);
                                     merge_classes!(
-                                        "flex flex-col gap-0.5 px-3 py-2 cursor-pointer rounded-box",
+                                        "flex flex-col gap-1 px-3 py-2 cursor-pointer rounded-box",
                                         if sel {
                                             "bg-primary/10 text-primary"
                                         } else if hov {

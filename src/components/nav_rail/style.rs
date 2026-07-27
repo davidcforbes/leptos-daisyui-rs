@@ -41,8 +41,8 @@ pub fn item_class(active: bool) -> &'static str {
 /// rail's left edge, inset from the item's top/bottom (`INDICATOR_INSET`).
 pub fn indicator_class(active: bool) -> &'static str {
     if active {
-        "absolute left-0 top-1/2 h-6 w-1 -translate-y-1/2 rounded-r-full bg-primary"
+        "absolute left-0 top-1/2 h-6 w-(--border-width-accent) -translate-y-1/2 rounded-r-full bg-primary"
     } else {
-        "absolute left-0 top-1/2 h-6 w-1 -translate-y-1/2 rounded-r-full bg-transparent"
+        "absolute left-0 top-1/2 h-6 w-(--border-width-accent) -translate-y-1/2 rounded-r-full bg-transparent"
     }
 }

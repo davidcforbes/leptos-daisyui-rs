@@ -136,7 +136,7 @@ fn local_storage_set(key: &str, value: &str) {
 /// @source inline("table table-zebra table-pin-rows table-pin-cols table-xs table-sm table-md table-lg");
 /// @source inline("btn btn-sm animate-pulse");
 /// // Column-resize divider (header.rs)
-/// @source inline("relative absolute top-0 right-0 z-10 h-full w-1.5 cursor-col-resize select-none");
+/// @source inline("relative absolute top-0 right-0 z-10 h-full w-2 cursor-col-resize select-none");
 /// @source inline("opacity-0 hover:opacity-100 hover:bg-primary/50 active:opacity-100 active:bg-primary/70");
 /// // Typed cells (Column::with_typed_cell -> TypedCell::Badge / TypedCell::Icon)
 /// @source inline("badge badge-neutral badge-primary badge-secondary badge-accent badge-info badge-success badge-warning badge-error");

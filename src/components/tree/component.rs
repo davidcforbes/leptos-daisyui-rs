@@ -277,7 +277,7 @@ fn tree_item(node: FlatNode, ctx: Ctx) -> AnyView {
         let sel = selected.get().as_deref() == Some(key_class.as_str());
         let hov = hover.get().as_deref() == Some(key_class.as_str());
         merge_classes!(
-            "flex items-center gap-1.5 py-1 pr-2 rounded cursor-pointer select-none",
+            "flex items-center gap-2 py-1 pr-2 rounded cursor-pointer select-none",
             if sel {
                 "bg-primary/10 text-primary"
             } else if hov {
@@ -412,7 +412,7 @@ fn tree_item(node: FlatNode, ctx: Ctx) -> AnyView {
 /// ```css
 /// @source inline("w-full max-h-96 overflow-auto rounded-box border border-base-300 bg-base-100 p-1");
 /// @source inline("outline-none focus:ring-2 focus:ring-primary/50 list-none m-0 p-0");
-/// @source inline("flex items-center gap-1.5 py-1 pr-2 rounded cursor-pointer select-none");
+/// @source inline("flex items-center gap-2 py-1 pr-2 rounded cursor-pointer select-none");
 /// @source inline("bg-primary/10 text-primary bg-base-200");
 /// @source inline("shrink-0 w-4 h-4 flex items-center justify-center text-base-content/50 hover:text-base-content");
 /// @source inline("loading loading-spinner loading-xs w-3 h-3 transition-transform rotate-90");

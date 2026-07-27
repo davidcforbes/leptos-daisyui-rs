@@ -52,8 +52,8 @@ use leptos::{html::Div, prelude::*};
 /// ```css
 /// @source inline("flex min-h-screen items-center justify-center bg-base-200 p-4");
 /// @source inline("card w-full max-w-sm bg-base-100 shadow-xl");
-/// @source inline("card-body gap-4");
-/// @source inline("fieldset floating-label form-control w-full");
+/// @source inline("card-body gap-6");
+/// @source inline("fieldset floating-label flex flex-col gap-2 w-full");
 /// @source inline("input input-bordered w-full");
 /// @source inline("btn btn-primary btn-outline btn-ghost btn-block btn-sm");
 /// @source inline("alert alert-error text-sm");
@@ -201,7 +201,11 @@ pub fn LoginScreen(
             )
         >
             <div class="card w-full max-w-sm bg-base-100 shadow-xl">
-                <div class="card-body gap-4">
+                // Gestalt proximity (ldui-6qb): 24px between field groups against
+                // the 8px label-to-input gap inside each one — a 3:1 ratio, so a
+                // label unambiguously belongs to the input below it rather than
+                // sitting between two of them. gap-4 made that ratio only 2:1.
+                <div class="card-body gap-6">
                     <h1 class="text-2xl font-bold text-center">{app_name}</h1>
                     {subtitle
                         .map(|s| view! { <p class="text-center opacity-70 text-sm">{s}</p> })}
@@ -217,8 +221,8 @@ pub fn LoginScreen(
                         submit();
                     }>
                         <Show when=move || state.get().shows_credentials()>
-                            <label class="form-control w-full">
-                                <span class="label-text">"Username"</span>
+                            <label class="flex flex-col gap-2 w-full">
+                                <span class="text-sm">"Username"</span>
                                 <input
                                     type="text"
                                     class="input input-bordered w-full"
@@ -230,8 +234,8 @@ pub fn LoginScreen(
                                     on:input=move |ev| set_username.set(event_target_value(&ev))
                                 />
                             </label>
-                            <label class="form-control w-full">
-                                <span class="label-text">
+                            <label class="flex flex-col gap-2 w-full">
+                                <span class="text-sm">
                                     {move || login_password_label(&state.get())}
                                 </span>
                                 <input
@@ -246,8 +250,8 @@ pub fn LoginScreen(
                         </Show>
 
                         <Show when=move || state.get().shows_mfa()>
-                            <label class="form-control w-full">
-                                <span class="label-text">"Authenticator code"</span>
+                            <label class="flex flex-col gap-2 w-full">
+                                <span class="text-sm">"Authenticator code"</span>
                                 <input
                                     type="text"
                                     class="input input-bordered w-full"
@@ -268,8 +272,8 @@ pub fn LoginScreen(
                             <p class="text-sm opacity-70">
                                 {move || format!("for {}", username.get())}
                             </p>
-                            <label class="form-control w-full">
-                                <span class="label-text">"New password"</span>
+                            <label class="flex flex-col gap-2 w-full">
+                                <span class="text-sm">"New password"</span>
                                 <input
                                     type="password"
                                     class="input input-bordered w-full"
@@ -279,7 +283,7 @@ pub fn LoginScreen(
                                     on:input=move |ev| set_new_password.set(event_target_value(&ev))
                                 />
                             </label>
-                            <ul class="text-xs mt-1 space-y-0.5">
+                            <ul class="text-xs mt-1 space-y-1">
                                 {move || {
                                     // Re-render the whole (5-row) list on each keystroke: a
                                     // keyed <For> reuses rows and would leave the ✓/○ stale.
@@ -327,8 +331,8 @@ pub fn LoginScreen(
                                         })
                                 }
                             }
-                            <label class="form-control w-full mt-2">
-                                <span class="label-text">"Authenticator code"</span>
+                            <label class="flex flex-col gap-2 w-full mt-2">
+                                <span class="text-sm">"Authenticator code"</span>
                                 <input
                                     type="text"
                                     class="input input-bordered w-full"

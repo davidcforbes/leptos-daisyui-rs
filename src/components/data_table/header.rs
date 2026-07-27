@@ -127,7 +127,7 @@ pub fn DataTableHeader(
                                 </span>
                                 {is_resizable.then(|| view! {
                                     <span
-                                        class="absolute top-0 right-0 z-10 h-full w-1.5 cursor-col-resize select-none opacity-0 hover:opacity-100 hover:bg-primary/50 active:opacity-100 active:bg-primary/70"
+                                        class="absolute top-0 right-0 z-10 h-full w-2 cursor-col-resize select-none opacity-0 hover:opacity-100 hover:bg-primary/50 active:opacity-100 active:bg-primary/70"
                                         role="separator"
                                         aria-orientation="vertical"
                                         aria-label=format!("Resize {} column", header_label)

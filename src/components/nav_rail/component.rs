@@ -59,7 +59,7 @@ use leptos::{
 /// @source inline("flex flex-col items-center gap-1 mt-auto");
 /// @source inline("relative flex h-12 w-12 cursor-pointer items-center justify-center rounded-box transition-colors");
 /// @source inline("bg-base-200 bg-base-300 text-primary text-base-content/60 text-base-content hover:bg-base-200 hover:bg-base-300 hover:text-base-content");
-/// @source inline("absolute left-0 top-1/2 h-6 w-1 -translate-y-1/2 rounded-r-full bg-primary bg-transparent");
+/// @source inline("absolute left-0 top-1/2 h-6 w-(--border-width-accent) -translate-y-1/2 rounded-r-full bg-primary bg-transparent");
 /// ```
 ///
 /// ## Bottom-Pinning with NavRailGroup
