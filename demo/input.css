@@ -1,5 +1,10 @@
 @charset "UTF-8";
 @import "tailwindcss";
+/* Spacing scale, stroke family, radii and the grid-aligned type ramp,
+   generated from the shared `ui-tokens` crate by `cargo xtask gen-tokens`.
+   Consuming apps should import this too — it is the one source of truth the
+   desktop face also builds from. */
+@import "../styles/tokens.css";
 @plugin "daisyui" {
   themes: light --default, dark --prefersdark, cupcake, cyberpunk, retro, forest, aqua, dracula;
 }

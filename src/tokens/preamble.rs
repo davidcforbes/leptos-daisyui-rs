@@ -1,6 +1,58 @@
 use leptos::prelude::*;
 use ui_tokens::elevation::{LEVEL_2, LEVEL_4, LEVEL_8, LEVEL_16, LEVEL_64, Shadow};
 use ui_tokens::motion::{DURATION_FAST_MS, DURATION_NORMAL_MS, DURATION_SLOW_MS, Easing};
+use ui_tokens::radius;
+use ui_tokens::spacing::{
+    SPACE_HUGE, SPACE_L, SPACE_M, SPACE_S, SPACE_XL, SPACE_XS, SPACE_XXL, SPACE_XXS, SPACE_XXXL,
+};
+use ui_tokens::stroke;
+use ui_tokens::typography as ty;
+
+/// The spacing scale as `(css-suffix, dips)`, ascending.
+///
+/// Ordering matters: [`crate::tokens::spacing_scale_px`] and the Tailwind
+/// theme generator both iterate this, so the CSS variables and the Tailwind
+/// keys stay in lockstep by construction rather than by hand-copy.
+pub const SPACE_STEPS: [(&str, f32); 9] = [
+    ("xxs", SPACE_XXS),
+    ("xs", SPACE_XS),
+    ("s", SPACE_S),
+    ("m", SPACE_M),
+    ("l", SPACE_L),
+    ("xl", SPACE_XL),
+    ("xxl", SPACE_XXL),
+    ("xxxl", SPACE_XXXL),
+    ("huge", SPACE_HUGE),
+];
+
+/// The type ramp as `(css-suffix, font-size, line-height)`, largest first.
+///
+/// The line height is taken from `ui_tokens`' `LINE_*` ramp, never from a
+/// font metric — that is the whole point of pinning the rhythm.
+pub const TYPE_STEPS: [(&str, f32, f32); 6] = [
+    ("display", ty::SIZE_DISPLAY, ty::LINE_DISPLAY),
+    ("title", ty::SIZE_TITLE, ty::LINE_TITLE),
+    ("subtitle", ty::SIZE_SUBTITLE, ty::LINE_SUBTITLE),
+    ("body", ty::SIZE_BODY, ty::LINE_BODY),
+    ("caption", ty::SIZE_CAPTION, ty::LINE_CAPTION),
+    ("small", ty::SIZE_SMALL, ty::LINE_SMALL),
+];
+
+/// The stroke family as `(css-suffix, dips)`, ascending.
+pub const STROKE_STEPS: [(&str, f32); 4] = [
+    ("hairline", stroke::HAIRLINE),
+    ("thin", stroke::THIN),
+    ("accent", stroke::ACCENT),
+    ("emphasis", stroke::EMPHASIS),
+];
+
+/// The canonical spacing scale in pixels, ascending.
+///
+/// Exposed so a consumer (or a spacing checker) can ask what is on the scale
+/// without re-deriving the list.
+pub fn spacing_scale_px() -> [f32; 9] {
+    SPACE_STEPS.map(|(_, dips)| dips)
+}
 
 /// Build the CSS custom-property block exposing every `ui-tokens` design
 /// token as a `--ld-*` variable on `:root`.
@@ -45,7 +97,49 @@ pub fn ui_tokens_css() -> String {
         ));
     }
 
+    // ---- spacing scale -------------------------------------------------
+    // The first spacing custom properties on the web side. Until these
+    // existed, Tailwind's defaults merely *happened* to agree with the
+    // desktop scale; now there is one source of truth.
+    for (name, dips) in SPACE_STEPS {
+        css.push_str(&format!("  --ld-space-{}: {}px;\n", name, dips));
+    }
+
+    // ---- stroke family -------------------------------------------------
+    // Borders and dividers, deliberately separate from spacing so a 1px
+    // hairline stops being reported as an off-grid gap.
+    for (name, dips) in STROKE_STEPS {
+        css.push_str(&format!("  --ld-stroke-{}: {}px;\n", name, dips));
+    }
+
+    // ---- corner radii --------------------------------------------------
+    for (name, dips) in [
+        ("control", radius::CONTROL),
+        ("card", radius::CARD),
+        ("badge", radius::BADGE),
+    ] {
+        css.push_str(&format!("  --ld-radius-{}: {}px;\n", name, dips));
+    }
+    css.push_str("  --ld-radius-pill: 9999px;\n");
+
+    // ---- type ramp + grid-aligned line heights -------------------------
+    for (name, size, line) in TYPE_STEPS {
+        css.push_str(&format!("  --ld-text-{}: {}px;\n", name, size));
+        css.push_str(&format!("  --ld-line-{}: {}px;\n", name, line));
+    }
+
     css.push_str("}\n");
+
+    // Type-ramp classes. Every step pins BOTH size and line height, so a
+    // stack of N lines occupies exactly N x line-height instead of N x
+    // whatever the font's natural metrics happen to be. Inheriting the
+    // browser or Tailwind default here is what makes the two faces drift.
+    for (name, _, _) in TYPE_STEPS {
+        css.push_str(&format!(
+            "\n.ld-text-{name} {{\n  font-size: var(--ld-text-{name});\n  line-height: var(--ld-line-{name});\n}}\n"
+        ));
+    }
+
     css
 }
 

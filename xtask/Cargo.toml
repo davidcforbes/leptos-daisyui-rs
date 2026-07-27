@@ -4,5 +4,12 @@ version = "0.0.0"
 edition = "2024"
 publish = false
 
-# Zero external dependencies — std only (design constraint, see doc/ci-cd.md).
+# Zero *external* dependencies — std only (design constraint, see doc/ci-cd.md).
+#
+# `ui-tokens` is the one exception, and it does not weaken the constraint: it is
+# a sibling path crate with `#![forbid(unsafe_code)]` and zero dependencies of
+# its own — pure `const` data. `gen-tokens` has to read the real token values to
+# emit the Tailwind theme; hand-copying them into the xtask would recreate
+# exactly the desktop/web drift this whole workstream exists to remove.
 [dependencies]
+ui-tokens = { path = "../../Rust-DeskApp/crates/ui-tokens" }

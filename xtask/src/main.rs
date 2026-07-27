@@ -18,9 +18,9 @@ enum Run {
         args: Vec<String>,
         cwd: Option<&'static str>,
     },
-    /// Spawn the demo dev server on a free port, run the reactivity/DOM-oracle
-    /// suite against it, then tear the server down. See [`run_reactivity_suite`].
-    Reactivity,
+    /// Spawn the demo dev server on a free port, run a browser-driven test
+    /// binary against it, then tear the server down. See [`run_browser_suite`].
+    BrowserSuite(&'static str),
 }
 
 /// A single gate step, named for the summary.
@@ -58,6 +58,15 @@ fn cmd(
 ///   when they are co-built).
 fn gate_steps() -> Vec<Step> {
     vec![
+        // Cheapest step, and the one whose failure invalidates the visual
+        // baselines: if `styles/tokens.css` no longer matches the tokens,
+        // the two faces have silently forked.
+        cmd(
+            "tokens-fresh",
+            "cargo",
+            &["run", "-q", "-p", "xtask", "--", "gen-tokens", "--check"],
+            None,
+        ),
         cmd(
             "fmt-check",
             "cargo",
@@ -121,6 +130,21 @@ fn gate_steps() -> Vec<Step> {
             None,
         ),
         cmd("test-xtask", "cargo", &["test", "-p", "xtask"], None),
+        // Guards against the daisyUI 4 form classes coming back. They are
+        // no-ops in daisyUI 5 and were silently inert in 206 places
+        // (ldui-mai.3) — a pure source scan, so it needs no browser.
+        cmd(
+            "test-daisyui5",
+            "cargo",
+            &[
+                "test",
+                "-p",
+                "leptos-daisyui-rs",
+                "--test",
+                "no_dead_daisyui4_classes",
+            ],
+            None,
+        ),
     ]
 }
 
@@ -146,7 +170,18 @@ fn steps_for(sub: &str) -> Vec<Step> {
 fn reactivity_step() -> Step {
     Step {
         name: "test-reactivity",
-        run: Run::Reactivity,
+        run: Run::BrowserSuite("reactivity_smoke"),
+    }
+}
+
+/// The layout-audit step (ldui-dg2): overlap / grid / internal-vs-external
+/// assertions swept over the rendered DOM. Same tooling requirements as the
+/// reactivity suite, so it lives alongside it in `verify-full` rather than in
+/// the fast `verify` gate.
+fn layout_step() -> Step {
+    Step {
+        name: "test-layout",
+        run: Run::BrowserSuite("layout_audit_smoke"),
     }
 }
 
@@ -167,7 +202,7 @@ fn run_step(step: &Step) -> bool {
                 }
             }
         }
-        Run::Reactivity => run_reactivity_suite(),
+        Run::BrowserSuite(test) => run_browser_suite(test),
     }
 }
 
@@ -314,7 +349,7 @@ impl Drop for DemoServer {
 ///
 /// An externally supplied `VISUAL_TEST_BASE_URL` (a server the caller already
 /// has running) is honoured, and no server is spawned.
-fn run_reactivity_suite() -> bool {
+fn run_browser_suite(test: &str) -> bool {
     let reused = std::env::var("VISUAL_TEST_BASE_URL").ok();
     let _server;
     let base = match &reused {
@@ -341,7 +376,7 @@ fn run_reactivity_suite() -> bool {
             "-p",
             "leptos-daisyui-rs",
             "--test",
-            "reactivity_smoke",
+            test,
             "--",
             "--ignored",
             "--test-threads=1",
@@ -484,6 +519,242 @@ fn bump(level: &str, dry_run: bool) -> ExitCode {
     }
 }
 
+// ---------------------------------------------------------------------------
+// gen-tokens — emit the Tailwind theme from `ui-tokens` (ldui-1mx)
+// ---------------------------------------------------------------------------
+
+/// Where the generated Tailwind theme lands. `demo/input.css` imports it, and
+/// so should any consuming app's own `input.css`.
+const TOKENS_CSS_PATH: &str = "styles/tokens.css";
+
+/// The CSS root font size the DIP -> rem conversion assumes, in px. This is
+/// the browser default and the value Tailwind's own scale is built around.
+const ROOT_FONT_PX: f32 = 16.0;
+
+/// Format a DIP as a CSS px length, without a trailing `.0`.
+///
+/// Used only where a dimension must NOT scale with the user's font size —
+/// border widths. A 1px hairline that grows to 1.5px when someone bumps their
+/// browser font size is a rendering bug, not an accessibility win.
+fn px(v: f32) -> String {
+    if v.fract() == 0.0 {
+        format!("{}px", v as i64)
+    } else {
+        format!("{v}px")
+    }
+}
+
+/// Format a DIP as rem, relative to [`ROOT_FONT_PX`].
+///
+/// Spacing, type sizes and radii are emitted in rem so they keep scaling with
+/// the user's browser font-size preference. The token crate stores DIPs
+/// because Direct2D has no notion of rem; converting here is the whole reason
+/// the two faces can share one scale without the web side breaking
+/// WCAG 1.4.4 (Resize Text).
+///
+/// Every value on the canonical scale divides 16 exactly, so this is lossless
+/// in practice (4 -> 0.25rem, 96 -> 6rem, 11 -> 0.6875rem).
+fn rem(v: f32) -> String {
+    let r = v / ROOT_FONT_PX;
+    if r.fract() == 0.0 {
+        format!("{}rem", r as i64)
+    } else {
+        format!("{r}rem")
+    }
+}
+
+/// Format a line height as the unitless ratio `line / size`.
+///
+/// Unitless is deliberate and matches what Tailwind ships: a ratio inherits
+/// correctly into nested elements, where an absolute length would pin
+/// descendants to the ancestor's leading. Emitted as `calc(20 / 14)` rather
+/// than a rounded decimal so the arithmetic stays exact and the source
+/// numbers stay legible.
+fn line_ratio(line: f32, size: f32) -> String {
+    if (line - size).abs() < f32::EPSILON {
+        return "1".to_string();
+    }
+    format!("calc({} / {})", trim(line), trim(size))
+}
+
+/// Render an `f32` without a trailing `.0`.
+fn trim(v: f32) -> String {
+    if v.fract() == 0.0 {
+        format!("{}", v as i64)
+    } else {
+        format!("{v}")
+    }
+}
+
+/// Build the Tailwind v4 `@theme` block from the shared token crate.
+///
+/// Pure — takes no input and touches no files, so the drift check and the
+/// writer compare the same bytes.
+///
+/// Two things are happening here, and only the second is cosmetic:
+///
+/// 1. `--spacing` is pinned to the token sub-unit, so Tailwind's *numeric*
+///    scale (`p-4`, `gap-2`, …) is derived from `ui-tokens` rather than
+///    merely agreeing with it by coincidence. Every existing `p-4` in the
+///    codebase keeps its current computed value; what changes is where that
+///    value comes from.
+/// 2. Named aliases (`p-m`, `gap-l`, `text-body`) are added for call sites
+///    that want to say which *step* they mean instead of which multiple.
+///
+/// Units are not incidental. Spacing and type are emitted in **rem** and line
+/// heights as **unitless ratios**, exactly as Tailwind ships them, so the
+/// output is byte-for-byte equivalent in behaviour to the defaults it
+/// replaces. Emitting the tokens' raw DIPs as `px` here would have pinned
+/// every font size and gap against the user's browser font-size preference —
+/// a WCAG 1.4.4 regression traded for nothing.
+fn tokens_css() -> String {
+    use ui_tokens::{radius, spacing, stroke, typography as ty};
+
+    let mut css = String::with_capacity(2048);
+    css.push_str(concat!(
+        "/* GENERATED by `cargo xtask gen-tokens` — do not edit by hand.\n",
+        " *\n",
+        " * Source of truth: the `ui-tokens` crate, shared with the Direct2D\n",
+        " * desktop face in Rust-DeskApp. Edit the tokens there and re-run the\n",
+        " * generator; `cargo xtask verify` fails if this file drifts.\n",
+        " *\n",
+        " * The token crate stores DIPs (1 DIP = 1 CSS px at a 16px root).\n",
+        " * Spacing, type and radii are converted to rem here so they keep\n",
+        " * scaling with the user's font-size preference; only border widths\n",
+        " * stay in px, because a hairline must not grow with the type.\n",
+        " */\n\n",
+        "@theme {\n",
+    ));
+
+    css.push_str("  /* Base unit. Tailwind derives its whole numeric spacing\n");
+    css.push_str("     scale from this, so `p-4` is 4 x 0.25rem = 1rem *because\n");
+    css.push_str("     of* the token, not by coincidence. */\n");
+    css.push_str(&format!("  --spacing: {};\n\n", rem(spacing::SPACE_XXS)));
+
+    css.push_str("  /* Named steps are deliberately NOT emitted into the\n");
+    css.push_str("     --spacing-* namespace. Tailwind resolves width and\n");
+    css.push_str("     max-width utilities against --spacing-* before\n");
+    css.push_str("     --container-*, so a `--spacing-xs` key silently\n");
+    css.push_str("     redefines `max-w-xs` from 20rem to 0.5rem. The numeric\n");
+    css.push_str("     scale above is already token-derived and is what every\n");
+    css.push_str("     call site uses; semantic aliases would buy nothing and\n");
+    css.push_str("     cost a namespace collision. See ldui-1mx. */\n");
+
+    css.push_str("\n  /* Strokes. Borders and dividers are NOT spacing — keeping\n");
+    css.push_str("     them in their own family is what stops a 1px hairline\n");
+    css.push_str("     being reported as an off-grid gap. */\n");
+    for (name, dips) in [
+        ("hairline", stroke::HAIRLINE),
+        ("thin", stroke::THIN),
+        ("accent", stroke::ACCENT),
+        ("emphasis", stroke::EMPHASIS),
+    ] {
+        css.push_str(&format!("  --border-width-{}: {};\n", name, px(dips)));
+    }
+
+    css.push_str("\n  /* Corner radii. */\n");
+    for (name, dips) in [
+        ("control", radius::CONTROL),
+        ("card", radius::CARD),
+        ("badge", radius::BADGE),
+    ] {
+        css.push_str(&format!("  --radius-{}: {};\n", name, rem(dips)));
+    }
+
+    css.push_str("\n  /* Type ramp. Every step pins its line height from the\n");
+    css.push_str("     shared LINE_* ramp, so N stacked lines occupy exactly\n");
+    css.push_str("     N x line-height instead of N x a font metric. */\n");
+    for (name, size, line) in [
+        ("display", ty::SIZE_DISPLAY, ty::LINE_DISPLAY),
+        ("title", ty::SIZE_TITLE, ty::LINE_TITLE),
+        ("subtitle", ty::SIZE_SUBTITLE, ty::LINE_SUBTITLE),
+        ("body", ty::SIZE_BODY, ty::LINE_BODY),
+        ("caption", ty::SIZE_CAPTION, ty::LINE_CAPTION),
+        ("small", ty::SIZE_SMALL, ty::LINE_SMALL),
+    ] {
+        css.push_str(&format!("  --text-{}: {};\n", name, rem(size)));
+        css.push_str(&format!(
+            "  --text-{}--line-height: {};\n",
+            name,
+            line_ratio(line, size)
+        ));
+    }
+
+    css.push_str("\n  /* Tailwind's own size keys, re-pointed at the same ramp.\n");
+    css.push_str("     These resolve to exactly what Tailwind ships — that is the\n");
+    css.push_str("     point. The existing `text-xs`/`text-sm` call sites do not\n");
+    css.push_str("     move a pixel; they stop being a coincidence. */\n");
+    for (key, size, line) in [
+        ("xs", ty::SIZE_CAPTION, ty::LINE_CAPTION),
+        ("sm", ty::SIZE_BODY, ty::LINE_BODY),
+        ("base", ty::SIZE_SUBTITLE, ty::LINE_SUBTITLE),
+        ("xl", ty::SIZE_TITLE, ty::LINE_TITLE),
+    ] {
+        css.push_str(&format!("  --text-{}: {};\n", key, rem(size)));
+        css.push_str(&format!(
+            "  --text-{}--line-height: {};\n",
+            key,
+            line_ratio(line, size)
+        ));
+    }
+
+    css.push_str("}\n");
+    css
+}
+
+/// `cargo xtask gen-tokens [--check]` — write (or verify) the generated
+/// Tailwind theme.
+///
+/// `--check` is the gate step: it never writes, and fails if the committed
+/// file does not match what the tokens currently produce.
+fn gen_tokens(check: bool) -> ExitCode {
+    let want = tokens_css();
+    let have = std::fs::read_to_string(TOKENS_CSS_PATH).ok();
+
+    if check {
+        return match have.as_deref() {
+            Some(current) if current == want => {
+                println!("xtask gen-tokens: {TOKENS_CSS_PATH} is up to date");
+                ExitCode::from(0)
+            }
+            Some(_) => {
+                eprintln!(
+                    "xtask gen-tokens: {TOKENS_CSS_PATH} is STALE — the tokens changed.\n\
+                     run `cargo xtask gen-tokens` and commit the result."
+                );
+                ExitCode::from(1)
+            }
+            None => {
+                eprintln!(
+                    "xtask gen-tokens: {TOKENS_CSS_PATH} is missing — run `cargo xtask gen-tokens`"
+                );
+                ExitCode::from(1)
+            }
+        };
+    }
+
+    if have.as_deref() == Some(want.as_str()) {
+        println!("xtask gen-tokens: {TOKENS_CSS_PATH} already up to date");
+        return ExitCode::from(0);
+    }
+    if let Some(parent) = std::path::Path::new(TOKENS_CSS_PATH).parent()
+        && let Err(e) = std::fs::create_dir_all(parent)
+    {
+        eprintln!("xtask gen-tokens: create {}: {e}", parent.display());
+        return ExitCode::from(1);
+    }
+    match std::fs::write(TOKENS_CSS_PATH, &want) {
+        Ok(()) => {
+            println!("xtask gen-tokens: wrote {TOKENS_CSS_PATH}");
+            ExitCode::from(0)
+        }
+        Err(e) => {
+            eprintln!("xtask gen-tokens: write {TOKENS_CSS_PATH}: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
 /// Run a set of steps advisory-first: every step runs, then print the summary
 /// and return the failure count as the exit code.
 fn run_steps(steps: &[Step]) -> ExitCode {
@@ -507,6 +778,12 @@ fn main() -> ExitCode {
             // (needs npm/trunk/tailwind/Chrome installed).
             let mut steps = gate_steps();
             steps.push(reactivity_step());
+            // NOTE: layout_step() is deliberately NOT in verify-full yet.
+            // The sweep logic is verified (see doc/plans/2026-07-26-spacing-
+            // audit.md), but the Rust->CDP call that ships it into the page
+            // does not yet return — wiring it here would hang the gate.
+            // Run it explicitly with `cargo xtask test-layout`. Tracked by
+            // ldui-mai.5.
             steps.push(cmd(
                 "trunk-build",
                 "trunk",
@@ -516,6 +793,11 @@ fn main() -> ExitCode {
             run_steps(&steps)
         }
         "test-reactivity" => run_steps(&[reactivity_step()]),
+        "test-layout" => run_steps(&[layout_step()]),
+        "gen-tokens" => {
+            let check = std::env::args().any(|a| a == "--check");
+            gen_tokens(check)
+        }
         "bump" => {
             let level = std::env::args().nth(2).unwrap_or_default();
             let dry = std::env::args().any(|a| a == "--dry-run");
@@ -524,7 +806,7 @@ fn main() -> ExitCode {
         other => {
             eprintln!("xtask: unknown subcommand {other:?}");
             eprintln!(
-                "usage: cargo xtask <verify|verify-full|fmt-check|clippy|build|check-demo|test|test-reactivity|bump>"
+                "usage: cargo xtask <verify|verify-full|fmt-check|clippy|build|check-demo|test|test-reactivity|test-layout|gen-tokens|bump>"
             );
             ExitCode::from(2)
         }
@@ -562,7 +844,7 @@ mod tests {
     #[test]
     fn test_subcommand_runs_lib_and_xtask() {
         let names: Vec<&str> = steps_for("test").iter().map(|s| s.name).collect();
-        assert_eq!(names, vec!["test-lib", "test-xtask"]);
+        assert_eq!(names, vec!["test-lib", "test-xtask", "test-daisyui5"]);
     }
 
     /// The reactivity suite must never leak into the fast, zero-tooling gate.
@@ -580,7 +862,32 @@ mod tests {
     fn reactivity_step_is_in_process() {
         let s = reactivity_step();
         assert_eq!(s.name, "test-reactivity");
-        assert!(matches!(s.run, Run::Reactivity));
+        assert!(matches!(s.run, Run::BrowserSuite("reactivity_smoke")));
+    }
+
+    #[test]
+    fn layout_step_is_in_process() {
+        let s = layout_step();
+        assert_eq!(s.name, "test-layout");
+        assert!(matches!(s.run, Run::BrowserSuite("layout_audit_smoke")));
+    }
+
+    #[test]
+    fn browser_suites_are_not_in_the_fast_gate() {
+        // Both need npm/trunk/Chrome and a wasm build; `verify` is
+        // deliberately fast and zero-tooling.
+        let names: Vec<&str> = gate_steps().iter().map(|s| s.name).collect();
+        assert!(!names.contains(&"test-reactivity"));
+        assert!(!names.contains(&"test-layout"));
+    }
+
+    #[test]
+    fn test_subcommand_does_not_pick_up_the_browser_suites() {
+        // `steps_for("test")` filters on the `test` prefix, which
+        // `test-reactivity` and `test-layout` also match by name — but they
+        // are not gate steps, so the filter must not surface them.
+        let names: Vec<&str> = steps_for("test").iter().map(|s| s.name).collect();
+        assert_eq!(names, vec!["test-lib", "test-xtask", "test-daisyui5"]);
     }
 
     /// A port the OS hands out must actually be bindable.
@@ -635,5 +942,120 @@ some-dep = { version = \"0.0.4\", path = \"../x\" }
         let input =
             "[package]\nname = \"x\"\nversion = \"1.2.3\"\n\n[dependencies]\nd = \"9.9.9\"\n";
         assert_eq!(current_package_version(input).as_deref(), Some("1.2.3"));
+    }
+}
+
+#[cfg(test)]
+mod gen_tokens_tests {
+    use super::*;
+
+    #[test]
+    fn rem_converts_dips_against_a_16px_root() {
+        assert_eq!(rem(4.0), "0.25rem");
+        assert_eq!(rem(16.0), "1rem");
+        assert_eq!(rem(96.0), "6rem");
+        assert_eq!(rem(11.0), "0.6875rem");
+    }
+
+    #[test]
+    fn px_drops_the_trailing_zero() {
+        assert_eq!(px(1.0), "1px");
+        assert_eq!(px(3.0), "3px");
+    }
+
+    #[test]
+    fn line_ratio_is_exact_and_unitless() {
+        // Unitless so it inherits as a ratio; exact so it matches what
+        // Tailwind ships to the last decimal.
+        assert_eq!(line_ratio(20.0, 14.0), "calc(20 / 14)");
+        assert_eq!(line_ratio(16.0, 12.0), "calc(16 / 12)");
+        // Equal size and leading collapses to a plain 1 rather than
+        // `calc(16 / 16)`.
+        assert_eq!(line_ratio(16.0, 16.0), "1");
+    }
+
+    #[test]
+    fn base_spacing_unit_derives_from_the_token() {
+        let css = tokens_css();
+        let want = format!("  --spacing: {};\n", rem(ui_tokens::spacing::SPACE_XXS));
+        assert!(
+            css.contains(&want),
+            "missing token-derived --spacing:\n{css}"
+        );
+    }
+
+    #[test]
+    fn no_named_spacing_keys_are_emitted() {
+        // Regression guard. Tailwind resolves `max-w-*` against --spacing-*
+        // before --container-*, so emitting `--spacing-xs` silently redefines
+        // `max-w-xs` from 20rem to 0.5rem — a 40x shrink that compiles
+        // cleanly and is invisible until someone looks at the page.
+        // Scan declarations only — the generated file *talks about*
+        // `--spacing-xs` in the comment explaining why it is absent.
+        let css = tokens_css();
+        let offenders: Vec<&str> = css
+            .lines()
+            .map(str::trim)
+            .filter(|l| l.starts_with("--spacing-") && l.contains(':'))
+            .collect();
+        assert!(
+            offenders.is_empty(),
+            "named spacing keys collide with Tailwind's container scale: {offenders:?}"
+        );
+    }
+
+    #[test]
+    fn every_type_ramp_step_emits_size_and_line_height() {
+        let css = tokens_css();
+        for name in ["display", "title", "subtitle", "body", "caption", "small"] {
+            assert!(
+                css.contains(&format!("  --text-{name}: ")),
+                "missing size for {name}"
+            );
+            assert!(
+                css.contains(&format!("  --text-{name}--line-height: ")),
+                "missing line height for {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn tailwind_size_keys_resolve_to_their_shipped_values() {
+        // The re-pointed keys must be behaviour-preserving. These are the
+        // values Tailwind v4 ships; if a token moves, this test is where the
+        // visual change surfaces instead of in the browser.
+        let css = tokens_css();
+        for (key, size, ratio) in [
+            ("xs", "0.75rem", "calc(16 / 12)"),
+            ("sm", "0.875rem", "calc(20 / 14)"),
+            ("base", "1rem", "calc(24 / 16)"),
+            ("xl", "1.25rem", "calc(28 / 20)"),
+        ] {
+            assert!(
+                css.contains(&format!("  --text-{key}: {size}\n").trim_end())
+                    || css.contains(&format!("  --text-{key}: {size};")),
+                "text-{key} is not {size}"
+            );
+            assert!(
+                css.contains(&format!("  --text-{key}--line-height: {ratio};")),
+                "text-{key} line height is not {ratio}"
+            );
+        }
+    }
+
+    #[test]
+    fn stroke_widths_stay_in_px() {
+        // A hairline that scales with the user's font size is a bug, not an
+        // accessibility feature.
+        let css = tokens_css();
+        assert!(css.contains("  --border-width-hairline: 1px;"), "{css}");
+        assert!(css.contains("  --border-width-thin: 2px;"), "{css}");
+    }
+
+    #[test]
+    fn generated_css_is_a_single_theme_block() {
+        let css = tokens_css();
+        assert_eq!(css.matches("@theme {").count(), 1);
+        assert!(css.trim_end().ends_with('}'));
     }
 }

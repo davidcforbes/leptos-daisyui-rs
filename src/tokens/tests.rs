@@ -1,4 +1,148 @@
-use super::{ui_animations_css, ui_tokens_css};
+use super::{
+    SPACE_STEPS, STROKE_STEPS, TYPE_STEPS, spacing_scale_px, ui_animations_css, ui_tokens_css,
+};
+
+// ---------------------------------------------------------------------------
+// Spacing scale (ldui-d14 / ldui-1mx)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn css_emits_every_spacing_step() {
+    let css = ui_tokens_css();
+    for (name, dips) in SPACE_STEPS {
+        let needle = format!("--ld-space-{}: {}px;", name, dips);
+        assert!(css.contains(&needle), "missing {needle}: {css}");
+    }
+}
+
+#[test]
+fn spacing_scale_is_the_canonical_nine_steps() {
+    assert_eq!(
+        spacing_scale_px(),
+        [4.0, 8.0, 12.0, 16.0, 24.0, 32.0, 48.0, 64.0, 96.0]
+    );
+}
+
+#[test]
+fn spacing_scale_lives_on_the_4px_grid() {
+    for step in spacing_scale_px() {
+        assert_eq!(step % 4.0, 0.0, "{step} is not a multiple of 4");
+    }
+}
+
+#[test]
+fn spacing_scale_mirrors_ui_tokens_exactly() {
+    // The web scale must not drift from the shared crate. If this fails,
+    // the two faces have forked.
+    assert_eq!(spacing_scale_px(), ui_tokens::spacing::SCALE);
+}
+
+// ---------------------------------------------------------------------------
+// Stroke family — separate from spacing on purpose
+// ---------------------------------------------------------------------------
+
+#[test]
+fn css_emits_every_stroke_width() {
+    let css = ui_tokens_css();
+    for (name, dips) in STROKE_STEPS {
+        let needle = format!("--ld-stroke-{}: {}px;", name, dips);
+        assert!(css.contains(&needle), "missing {needle}: {css}");
+    }
+}
+
+#[test]
+fn strokes_are_not_spacing_steps() {
+    // A hairline is not a gap. If a stroke width ever lands on the spacing
+    // scale the checker can no longer tell a divider from a bad value.
+    let scale = spacing_scale_px();
+    for (name, dips) in STROKE_STEPS {
+        if name == "emphasis" {
+            continue; // 4px deliberately meets the spacing floor
+        }
+        assert!(
+            !scale.contains(&dips),
+            "stroke {name} ({dips}px) collides with the spacing scale"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Line-height ramp — the rhythm this ticket exists to pin
+// ---------------------------------------------------------------------------
+
+#[test]
+fn css_emits_size_and_line_height_for_every_ramp_step() {
+    let css = ui_tokens_css();
+    for (name, size, line) in TYPE_STEPS {
+        assert!(
+            css.contains(&format!("--ld-text-{}: {}px;", name, size)),
+            "missing size for {name}: {css}"
+        );
+        assert!(
+            css.contains(&format!("--ld-line-{}: {}px;", name, line)),
+            "missing line height for {name}: {css}"
+        );
+    }
+}
+
+#[test]
+fn every_type_ramp_class_pins_an_explicit_line_height() {
+    // The point of the ticket: no ramp step may inherit the browser or
+    // Tailwind default, or a stack of lines drifts off the grid.
+    let css = ui_tokens_css();
+    for (name, _, _) in TYPE_STEPS {
+        let rule = format!(
+            ".ld-text-{name} {{\n  font-size: var(--ld-text-{name});\n  line-height: var(--ld-line-{name});\n}}"
+        );
+        assert!(
+            css.contains(&rule),
+            "missing or partial rule for {name}: {css}"
+        );
+    }
+}
+
+#[test]
+fn line_heights_land_on_the_4px_grid() {
+    for (name, _, line) in TYPE_STEPS {
+        assert_eq!(
+            line % 4.0,
+            0.0,
+            "line height for {name} ({line}px) is off-grid"
+        );
+    }
+}
+
+#[test]
+fn a_stack_of_n_body_lines_is_exactly_n_times_20px() {
+    // The acceptance criterion stated in ldui-d14: a paragraph of body text
+    // occupies N * 20px, not N * (font metric).
+    let line = ui_tokens::typography::LINE_BODY;
+    assert_eq!(line, 20.0);
+    for n in 1..=10u32 {
+        let stack = line * n as f32;
+        assert_eq!(stack, (n * 20) as f32);
+        assert_eq!(stack % 4.0, 0.0, "{n} lines lands off the grid");
+    }
+}
+
+#[test]
+fn line_height_always_clears_its_font_size() {
+    // A line box smaller than the glyph size clips descenders.
+    for (name, size, line) in TYPE_STEPS {
+        assert!(
+            line >= size,
+            "{name}: line height {line}px is smaller than font size {size}px"
+        );
+    }
+}
+
+#[test]
+fn type_ramp_mirrors_ui_tokens_exactly() {
+    let sizes: Vec<f32> = TYPE_STEPS.iter().map(|(_, s, _)| *s).collect();
+    let lines: Vec<f32> = TYPE_STEPS.iter().map(|(_, _, l)| *l).collect();
+    assert_eq!(sizes, ui_tokens::typography::RAMP.to_vec());
+    assert_eq!(lines, ui_tokens::typography::LINE_RAMP.to_vec());
+}
 
 #[test]
 fn css_starts_with_root_selector() {
