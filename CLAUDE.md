@@ -68,6 +68,20 @@ this and run `cargo clippy -p <crate> --all-targets -- -D warnings` to see the p
 committed). Without it, trunk's Tailwind pre-build hook fails and trunk serves a
 **stale** build — the page loads fine but your changes aren't in it.
 
+**Run `cargo xtask` from the repo root.** It resolves `demo/` and `styles/`
+against the *current* directory, not the workspace root, so invoking it from
+`demo/` (easy to do — a shell's cwd persists between commands) fails as
+`xtask: failed to launch npm: The directory name is invalid. (os error 267)`,
+the same for `trunk`, plus a spurious `tokens-fresh` FAIL. npm and trunk are
+fine; the cwd handed to the child is `demo/demo`.
+
+**Budget ~8 minutes for the first browser-suite run.** `test-reactivity`,
+`test-layout` and `verify-full` each build the demo to wasm, which outruns a
+10-minute foreground timeout on a cold target dir — run them in the background.
+Any edit under `demo/src` invalidates that build, so re-run the suites *after*
+the last demo change, not before: `test-layout`'s per-page violation counts are
+ratcheted and a new demo section can move them.
+
 **`styles/tokens.css` is GENERATED — never hand-edit it.** It is the Tailwind
 `@theme` block, produced from the shared `ui-tokens` crate by `cargo xtask
 gen-tokens` and imported by `demo/input.css`. The gate's first step
@@ -173,6 +187,14 @@ The crate has two main modules:
   spacing rules under Component Guidelines and
   [`doc/plans/2026-07-26-spacing-audit.md`](./doc/plans/2026-07-26-spacing-audit.md).
 - `sparkline/`, `empty_state/`, `icon_tile/`, `metric_row/`, `capacity_bar/`, `sla_chip/`, `nav_rail/`, `result_list/`, `day_scheduler/`, `toolbar/`, `tree/`, `week_view/` - new app-shell/data/scheduling components
+- `day_scheduler` / `week_view` `hour_label` - optional
+  `Callback<u32, String>` formatting the hour-gutter labels, overriding
+  `hour_format` when supplied. `hour_format` (`HourFormat::TwentyFour` by
+  default, `Twelve` on request) still covers the common case and mirrors
+  d2d-ui's own two-variant enum; `hour_label` is the escape hatch for a locale
+  neither format expresses. A localised consumer usually wants the *former* —
+  driving `hour_format` off the active locale — so reach for the closure only
+  when 24h and English AM/PM are both wrong.
 - `vertical_steps/` - extended with additional layout options
 - `src/motion/` - new animation module (see above)
 - `src/utils/swr.rs` - stale-while-revalidate keyed resource cache
