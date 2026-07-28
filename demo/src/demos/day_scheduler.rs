@@ -76,6 +76,17 @@ pub fn DaySchedulerDemo() -> impl IntoView {
                 </div>
             </Section>
 
+            <Section title="Custom hour labels (localised gutter)">
+                <div class="w-full max-w-2xl rounded-box border border-base-300 bg-base-100 p-2">
+                    <DayScheduler
+                        start_hour=8
+                        end_hour=18
+                        events=basic_events
+                        hour_label=Callback::new(|hour: u32| format!("{hour} h"))
+                    />
+                </div>
+            </Section>
+
             <Section title="Compact height override">
                 <div class="w-full max-w-2xl rounded-box border border-base-300 bg-base-100 p-2">
                     <DayScheduler

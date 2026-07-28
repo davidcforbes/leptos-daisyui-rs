@@ -18,6 +18,11 @@ use leptos::{html::Div, prelude::*};
 /// pass a ticking `now_min` (e.g. derived from
 /// [`use_sla_now`](crate::components::use_sla_now)) for a live "now" line.
 ///
+/// The gutter's labels follow `hour_format` (24h by default, 12h AM/PM on
+/// request). A localised page that needs neither -- a different clock
+/// convention, or hour names from its own i18n catalogue -- supplies
+/// `hour_label` instead, a `Callback<u32, String>` that formats each hour.
+///
 /// ```rust
 /// use leptos::prelude::*;
 /// use leptos_daisyui_rs::components::{DayScheduler, SchedulerEvent, SchedulerEventColor};
@@ -74,6 +79,14 @@ pub fn DayScheduler(
     /// Hour-label clock format (24h default).
     #[prop(optional, into)]
     hour_format: Signal<HourFormat>,
+
+    /// Optional formatter for the gutter's hour labels, taking the hour
+    /// (`start_hour..=end_hour`) and returning the text to draw. Overrides
+    /// `hour_format` when supplied. This is the escape hatch for locales
+    /// neither built-in format covers -- a Spanish page wanting `8 h`, or a
+    /// label pulled from the consumer's own i18n catalogue.
+    #[prop(optional, into)]
+    hour_label: Option<Callback<u32, String>>,
 
     /// Optional "now" marker, in minutes from midnight. This component
     /// keeps no internal timer -- pair it with a ticking `Signal`, e.g.
@@ -153,7 +166,10 @@ pub fn DayScheduler(
                                     )
                                 }
                             >
-                                {move || hour_format.get().label(hour)}
+                                {move || match hour_label {
+                                    Some(fmt) => fmt.run(hour),
+                                    None => hour_format.get().label(hour),
+                                }}
                             </div>
                         }
                     }

@@ -104,6 +104,14 @@ pub fn WeekView(
     #[prop(optional, into)]
     hour_format: Signal<HourFormat>,
 
+    /// Optional formatter for the gutter's hour labels, taking the hour
+    /// (`start_hour..=end_hour`) and returning the text to draw. Overrides
+    /// `hour_format` when supplied. This is the escape hatch for locales
+    /// neither built-in format covers -- a Spanish page wanting `8 h`, or a
+    /// label pulled from the consumer's own i18n catalogue.
+    #[prop(optional, into)]
+    hour_label: Option<Callback<u32, String>>,
+
     /// Which day column (`0` = Monday .. `6` = Sunday) is "today", if any.
     /// Highlights that column's header/body and gates the now-line.
     #[prop(optional, into)]
@@ -282,7 +290,10 @@ pub fn WeekView(
                                         )
                                     }
                                 >
-                                    {move || hour_format.get().label(hour)}
+                                    {move || match hour_label {
+                                        Some(fmt) => fmt.run(hour),
+                                        None => hour_format.get().label(hour),
+                                    }}
                                 </div>
                             }
                         }

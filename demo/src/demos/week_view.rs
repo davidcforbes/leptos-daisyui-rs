@@ -99,6 +99,18 @@ pub fn WeekViewDemo() -> impl IntoView {
                 </div>
             </Section>
 
+            <Section title="Custom hour labels (localised gutter)">
+                <div class="w-full max-w-5xl">
+                    <WeekView
+                        start_hour=8
+                        end_hour=18
+                        week_start_epoch_day=week_start
+                        events=events
+                        hour_label=Callback::new(|hour: u32| format!("{hour} h"))
+                    />
+                </div>
+            </Section>
+
             <Section title="Compact height override">
                 <div class="w-full max-w-5xl">
                     <WeekView
