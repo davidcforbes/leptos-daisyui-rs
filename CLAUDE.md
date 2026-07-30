@@ -42,12 +42,13 @@ CI/CD is **local-only, two-layer**: logic lives in the `xtask/` crate; cargo-mak
 just delegates. Run the gate before committing:
 
 ```bash
-cargo xtask verify        # advisory gate: tokens/fmt/clippy/build/check-demo/test (exit = # failures)
+cargo xtask verify        # advisory gate: tokens/sibling-tokens/fmt/clippy/build/check-demo/test (exit = # failures)
 cargo make verify         # same, via cargo-make
 cargo xtask verify-full   # + reactivity suite + the real trunk wasm build (needs npm/trunk/Chrome)
 cargo xtask test-reactivity          # reactivity/DOM-oracle suite alone (self-spawns a demo server)
 cargo xtask test-layout              # layout audit: overlap/grid/internal<=external over the real DOM
 cargo xtask gen-tokens [--check]     # regenerate styles/tokens.css from ui-tokens
+cargo xtask check-sibling-tokens     # preamble.rs's ui_tokens refs must exist on the sibling's DEFAULT branch
 cargo xtask bump patch|minor|major   # bump the library version (human-chosen level)
 ```
 
@@ -96,6 +97,16 @@ re-run the generator and commit the result. Two rules the generator encodes:
 - **No named `--spacing-*` keys.** Tailwind resolves `w-*`/`max-w-*` against
   `--spacing-*` *before* `--container-*`, so a `--spacing-xs` key silently
   redefines `max-w-xs` from 20rem to 0.5rem. A unit test forbids them.
+
+**Never reference a `ui_tokens` item that is not on the sibling's DEFAULT
+branch.** `ui-tokens` is a *path* dependency, so cargo resolves it to whatever
+`../Rust-DeskApp` has checked out. A branch-only item compiles here and the
+whole gate goes green, while `main` is unbuildable for everyone whose sibling
+sits on `master` — and the break surfaces in a downstream consumer, where it
+reads as *their* fault. On 2026-07-29 that cost a 4iiz-office session hours.
+The `sibling-tokens` gate step now catches it; it skips (never fails) when the
+sibling is absent. If it fires, land the upstream change before committing the
+reference.
 
 ### Using cargo-make (Recommended for CI/Scripts)
 

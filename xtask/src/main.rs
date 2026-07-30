@@ -5,6 +5,7 @@
 //! PASS/FAIL summary is printed, and the process exit code is the number of
 //! failed steps (0 = all green).
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::process::{Child, Command, ExitCode, Stdio};
@@ -65,6 +66,16 @@ fn gate_steps() -> Vec<Step> {
             "tokens-fresh",
             "cargo",
             &["run", "-q", "-p", "xtask", "--", "gen-tokens", "--check"],
+            None,
+        ),
+        // Cheap, and it catches the one failure mode this repo's own gate is
+        // structurally blind to: a `ui_tokens` item that exists only on an
+        // unmerged sibling branch (ldui-ae5). Everything below compiles
+        // happily against a checked-out branch and tells you nothing.
+        cmd(
+            "sibling-tokens",
+            "cargo",
+            &["run", "-q", "-p", "xtask", "--", "check-sibling-tokens"],
             None,
         ),
         cmd(
@@ -770,6 +781,340 @@ fn gen_tokens(check: bool) -> ExitCode {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Sibling-token guard (ldui-ae5)
+// ---------------------------------------------------------------------------
+//
+// `src/tokens/preamble.rs` imports `ui_tokens` items across a *path*
+// dependency. Cargo resolves that path to whatever the sibling repo currently
+// has checked out, so an item that exists only on an unmerged branch still
+// builds here — and this repo's gate stays green while `main` is, in fact,
+// unbuildable for anyone whose sibling sits on its default branch. That is
+// exactly what happened on 2026-07-29: SPACE_HUGE, SPACE_XXXL, LINE_DISPLAY
+// and the whole stroke module were branch-only, and the break surfaced in a
+// downstream consumer where it read as the consumer's own fault.
+//
+// The guard resolves the sibling's DEFAULT branch and asserts every referenced
+// item exists there, deliberately ignoring the working tree.
+
+/// The repo providing the `ui-tokens` path dependency, relative to this
+/// repo's root. (`cargo xtask` must be run from the root — see `doc/ci-cd.md`.)
+const SIBLING_REPO: &str = "../Rust-DeskApp";
+
+/// The `ui-tokens` source directory, relative to [`SIBLING_REPO`].
+const UI_TOKENS_SRC: &str = "crates/ui-tokens/src";
+
+/// The file whose `ui_tokens` references this guard checks.
+const PREAMBLE_PATH: &str = "src/tokens/preamble.rs";
+
+/// A `ui_tokens` item the preamble depends on — a module (`stroke`), or an
+/// item within one (`spacing::SPACE_HUGE`).
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct TokenRef {
+    module: String,
+    symbol: Option<String>,
+}
+
+impl std::fmt::Display for TokenRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.symbol {
+            Some(s) => write!(f, "ui_tokens::{}::{}", self.module, s),
+            None => write!(f, "ui_tokens::{}", self.module),
+        }
+    }
+}
+
+/// Drop `//` comments so prose naming a token — the doc comment mentioning the
+/// `LINE_*` ramp, for instance — is never mistaken for a real reference.
+///
+/// A `//` inside a string literal would truncate that line early. Nothing in
+/// the preamble does that, and the cost of a false *negative* here is only a
+/// missed check, never a spurious failure.
+fn strip_line_comments(src: &str) -> String {
+    src.lines()
+        .map(|l| match l.find("//") {
+            Some(i) => &l[..i],
+            None => l,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Parse the `use ui_tokens::…;` statements into item references plus the
+/// local module aliases they establish (`typography as ty` yields `ty`).
+fn parse_use_statements(src: &str) -> (Vec<TokenRef>, BTreeMap<String, String>) {
+    const NEEDLE: &str = "use ui_tokens::";
+    let mut refs = Vec::new();
+    let mut aliases = BTreeMap::new();
+    let mut rest = src;
+
+    while let Some(i) = rest.find(NEEDLE) {
+        let after = &rest[i + NEEDLE.len()..];
+        let Some(end) = after.find(';') else { break };
+        let stmt = &after[..end];
+        rest = &after[end..];
+
+        if let Some((module, list)) = stmt.split_once("::{") {
+            // A braced list, possibly spanning several lines.
+            let module = module.trim().to_string();
+            for name in list.trim_end().trim_end_matches('}').split(',') {
+                let name = name.trim();
+                if !name.is_empty() {
+                    refs.push(TokenRef {
+                        module: module.clone(),
+                        symbol: Some(name.to_string()),
+                    });
+                }
+            }
+        } else if let Some((module, symbol)) = stmt.split_once("::") {
+            refs.push(TokenRef {
+                module: module.trim().to_string(),
+                symbol: Some(symbol.trim().to_string()),
+            });
+        } else if let Some((module, alias)) = stmt.split_once(" as ") {
+            let module = module.trim().to_string();
+            aliases.insert(alias.trim().to_string(), module.clone());
+            refs.push(TokenRef {
+                module,
+                symbol: None,
+            });
+        } else {
+            // A bare module import: its own name is the alias.
+            let module = stmt.trim().to_string();
+            aliases.insert(module.clone(), module.clone());
+            refs.push(TokenRef {
+                module,
+                symbol: None,
+            });
+        }
+    }
+    (refs, aliases)
+}
+
+/// Find `alias::SYMBOL` uses in the body, resolving each alias to its real
+/// module.
+///
+/// This is what catches `ty::LINE_DISPLAY`: reached through an alias, so it
+/// never appears in a `use` line and a use-statement scan alone would miss it
+/// — which is half of the original breakage.
+fn parse_qualified_refs(src: &str, aliases: &BTreeMap<String, String>) -> Vec<TokenRef> {
+    let chars: Vec<char> = src.chars().collect();
+    let ident = |c: char| c.is_alphanumeric() || c == '_';
+    let mut out = Vec::new();
+    let mut i = 0;
+
+    while i < chars.len() {
+        if chars[i] == ':' && chars.get(i + 1) == Some(&':') {
+            let mut start = i;
+            while start > 0 && ident(chars[start - 1]) {
+                start -= 1;
+            }
+            let mut end = i + 2;
+            while end < chars.len() && ident(chars[end]) {
+                end += 1;
+            }
+            let alias: String = chars[start..i].iter().collect();
+            let symbol: String = chars[i + 2..end].iter().collect();
+            if !symbol.is_empty()
+                && let Some(module) = aliases.get(&alias)
+            {
+                out.push(TokenRef {
+                    module: module.clone(),
+                    symbol: Some(symbol),
+                });
+            }
+            i = end;
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
+/// Every `ui_tokens` item the preamble source depends on.
+fn token_refs(preamble_src: &str) -> BTreeSet<TokenRef> {
+    let src = strip_line_comments(preamble_src);
+    let (mut refs, aliases) = parse_use_statements(&src);
+    refs.extend(parse_qualified_refs(&src, &aliases));
+    refs.into_iter().collect()
+}
+
+/// Module names declared by `ui-tokens`' `lib.rs`.
+fn modules_declared(lib_src: &str) -> BTreeSet<String> {
+    lib_src
+        .lines()
+        .filter_map(|l| {
+            l.trim()
+                .strip_prefix("pub mod ")
+                .and_then(|r| r.split(';').next())
+                .map(|s| s.trim().to_string())
+        })
+        .collect()
+}
+
+/// Public item names a `ui-tokens` module file defines.
+fn defined_items(module_src: &str) -> BTreeSet<String> {
+    const KINDS: [&str; 6] = ["const ", "struct ", "enum ", "fn ", "type ", "static "];
+    module_src
+        .lines()
+        .filter_map(|l| {
+            let rest = l.trim().strip_prefix("pub ")?;
+            let rest = KINDS.iter().find_map(|k| rest.strip_prefix(k))?;
+            let name: String = rest
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            (!name.is_empty()).then_some(name)
+        })
+        .collect()
+}
+
+/// The references a tree does not satisfy, given each declared module's items.
+/// A module absent from `defined` is itself missing, so every reference into
+/// it fails.
+fn missing_refs(
+    refs: &BTreeSet<TokenRef>,
+    defined: &BTreeMap<String, BTreeSet<String>>,
+) -> Vec<TokenRef> {
+    refs.iter()
+        .filter(|r| match defined.get(&r.module) {
+            None => true,
+            Some(items) => r.symbol.as_ref().is_some_and(|s| !items.contains(s)),
+        })
+        .cloned()
+        .collect()
+}
+
+/// Run a git command in `repo`, returning trimmed stdout on success.
+fn git(repo: &str, args: &[&str]) -> Option<String> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .output()
+        .ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// Which other refs in the sibling repo *do* define an item — the "found on
+/// this branch instead" half of the failure message, and usually the whole
+/// answer (it names the branch that needs merging).
+fn refs_defining(repo: &str, item: &TokenRef) -> Vec<String> {
+    let Some(list) = git(
+        repo,
+        &[
+            "for-each-ref",
+            "--format=%(refname:short)",
+            "refs/heads",
+            "refs/remotes",
+        ],
+    ) else {
+        return Vec::new();
+    };
+    let path = format!("{UI_TOKENS_SRC}/{}.rs", item.module);
+    list.lines()
+        .filter(|r| !r.is_empty() && !r.ends_with("/HEAD"))
+        .filter(|r| match &item.symbol {
+            // A module reference: does the module file exist on that ref?
+            None => git(repo, &["cat-file", "-e", &format!("{r}:{path}")]).is_some(),
+            Some(sym) => git(repo, &["show", &format!("{r}:{path}")])
+                .is_some_and(|src| defined_items(&src).contains(sym)),
+        })
+        .map(|r| r.to_string())
+        .collect()
+}
+
+/// What the guard concluded.
+enum Guard {
+    /// All references resolve on the default branch; carries how many.
+    Ok(usize),
+    /// The sibling is not available to check against — not a failure.
+    Skipped(String),
+    Missing {
+        branch: String,
+        missing: Vec<TokenRef>,
+    },
+}
+
+/// Check the preamble's `ui_tokens` references against the sibling's default
+/// branch. Pure decision-making lives in the helpers above; this is the I/O.
+fn check_sibling_tokens_inner() -> Guard {
+    if !std::path::Path::new(SIBLING_REPO).is_dir() {
+        return Guard::Skipped(format!("{SIBLING_REPO} is not present"));
+    }
+    // `origin/HEAD` is the sibling's default branch. It is a local alias and
+    // can be absent on a shallow or hand-made clone, in which case there is
+    // nothing authoritative to check against.
+    let Some(branch) = git(SIBLING_REPO, &["rev-parse", "--abbrev-ref", "origin/HEAD"]) else {
+        return Guard::Skipped(format!(
+            "{SIBLING_REPO} has no origin/HEAD (run: git remote set-head origin -a)"
+        ));
+    };
+    let preamble = match std::fs::read_to_string(PREAMBLE_PATH) {
+        Ok(s) => s,
+        Err(e) => return Guard::Skipped(format!("cannot read {PREAMBLE_PATH}: {e}")),
+    };
+    let Some(lib) = git(
+        SIBLING_REPO,
+        &["show", &format!("{branch}:{UI_TOKENS_SRC}/lib.rs")],
+    ) else {
+        return Guard::Skipped(format!("cannot read ui-tokens lib.rs at {branch}"));
+    };
+
+    let mut defined: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for m in modules_declared(&lib) {
+        let path = format!("{branch}:{UI_TOKENS_SRC}/{m}.rs");
+        if let Some(src) = git(SIBLING_REPO, &["show", &path]) {
+            defined.insert(m, defined_items(&src));
+        }
+    }
+
+    let refs = token_refs(&preamble);
+    let missing = missing_refs(&refs, &defined);
+    if missing.is_empty() {
+        Guard::Ok(refs.len())
+    } else {
+        Guard::Missing { branch, missing }
+    }
+}
+
+fn check_sibling_tokens() -> ExitCode {
+    match check_sibling_tokens_inner() {
+        Guard::Skipped(why) => {
+            println!("xtask sibling-tokens: skipped — {why}");
+            ExitCode::from(0)
+        }
+        Guard::Ok(n) => {
+            println!(
+                "xtask sibling-tokens: {n} ui_tokens references all resolve on the sibling's default branch"
+            );
+            ExitCode::from(0)
+        }
+        Guard::Missing { branch, missing } => {
+            eprintln!(
+                "xtask sibling-tokens: {PREAMBLE_PATH} references {} ui_tokens item(s) that do NOT exist on {SIBLING_REPO}'s default branch ({branch}):",
+                missing.len()
+            );
+            for item in &missing {
+                let found = refs_defining(SIBLING_REPO, item);
+                if found.is_empty() {
+                    eprintln!("  {item} — found on no branch");
+                } else {
+                    eprintln!("  {item} — found instead on: {}", found.join(", "));
+                }
+            }
+            eprintln!(
+                "\nThis builds locally because the path dependency resolves to whatever the\n\
+                 sibling has checked out, but it is unbuildable for anyone on the default\n\
+                 branch. Land the upstream change before committing the reference."
+            );
+            ExitCode::from(1)
+        }
+    }
+}
+
 /// Run a set of steps advisory-first: every step runs, then print the summary
 /// and return the failure count as the exit code.
 fn run_steps(steps: &[Step]) -> ExitCode {
@@ -808,6 +1153,7 @@ fn main() -> ExitCode {
             let check = std::env::args().any(|a| a == "--check");
             gen_tokens(check)
         }
+        "check-sibling-tokens" => check_sibling_tokens(),
         "bump" => {
             let level = std::env::args().nth(2).unwrap_or_default();
             let dry = std::env::args().any(|a| a == "--dry-run");
@@ -816,7 +1162,7 @@ fn main() -> ExitCode {
         other => {
             eprintln!("xtask: unknown subcommand {other:?}");
             eprintln!(
-                "usage: cargo xtask <verify|verify-full|fmt-check|clippy|build|check-demo|test|test-reactivity|test-layout|gen-tokens|bump>"
+                "usage: cargo xtask <verify|verify-full|fmt-check|clippy|build|check-demo|test|test-reactivity|test-layout|gen-tokens|check-sibling-tokens|bump>"
             );
             ExitCode::from(2)
         }
@@ -855,6 +1201,166 @@ mod tests {
     fn test_subcommand_runs_lib_and_xtask() {
         let names: Vec<&str> = steps_for("test").iter().map(|s| s.name).collect();
         assert_eq!(names, vec!["test-lib", "test-xtask", "test-daisyui5"]);
+    }
+
+    // ---- sibling-token guard (ldui-ae5) --------------------------------
+
+    /// The shape of the real preamble's imports, trimmed to the interesting
+    /// cases: a braced multi-line list, a bare module, an aliased module, and
+    /// a doc comment that names a token in prose.
+    const PREAMBLE_SAMPLE: &str = r#"
+use leptos::prelude::*;
+use ui_tokens::elevation::{LEVEL_2, Shadow};
+use ui_tokens::radius;
+use ui_tokens::spacing::{
+    SPACE_HUGE, SPACE_XS,
+};
+use ui_tokens::stroke;
+use ui_tokens::typography as ty;
+
+/// The line height comes from the `LINE_*` ramp, never a font metric.
+pub const TYPE_STEPS: [(&str, f32); 1] = [("display", ty::LINE_DISPLAY)];
+pub const STROKE_STEPS: [(&str, f32); 1] = [("accent", stroke::ACCENT)];
+pub fn r() -> f32 { radius::CARD }
+"#;
+
+    fn tref(module: &str, symbol: Option<&str>) -> TokenRef {
+        TokenRef {
+            module: module.to_string(),
+            symbol: symbol.map(|s| s.to_string()),
+        }
+    }
+
+    #[test]
+    fn braced_and_bare_and_aliased_imports_all_parse() {
+        let refs = token_refs(PREAMBLE_SAMPLE);
+        assert!(refs.contains(&tref("elevation", Some("LEVEL_2"))));
+        assert!(refs.contains(&tref("elevation", Some("Shadow"))));
+        assert!(refs.contains(&tref("spacing", Some("SPACE_HUGE"))));
+        assert!(refs.contains(&tref("spacing", Some("SPACE_XS"))));
+        assert!(refs.contains(&tref("stroke", None)));
+        assert!(refs.contains(&tref("radius", None)));
+        assert!(refs.contains(&tref("typography", None)));
+    }
+
+    /// The half a use-statement scan misses: reached only through an alias.
+    #[test]
+    fn alias_qualified_references_resolve_to_the_real_module() {
+        let refs = token_refs(PREAMBLE_SAMPLE);
+        assert!(refs.contains(&tref("typography", Some("LINE_DISPLAY"))));
+        assert!(refs.contains(&tref("stroke", Some("ACCENT"))));
+        assert!(refs.contains(&tref("radius", Some("CARD"))));
+        // `ty` is an alias, never a module in its own right.
+        assert!(!refs.iter().any(|r| r.module == "ty"));
+    }
+
+    /// Prose naming a token must not become a reference — otherwise the guard
+    /// fails on documentation.
+    #[test]
+    fn tokens_named_in_comments_are_not_references() {
+        let refs = token_refs("/// See `ty::LINE_NOPE` for detail.\nuse ui_tokens::radius;\n");
+        assert!(
+            !refs
+                .iter()
+                .any(|r| r.symbol.as_deref() == Some("LINE_NOPE"))
+        );
+    }
+
+    /// Unrelated paths must not be mistaken for token references.
+    #[test]
+    fn non_ui_tokens_paths_are_ignored() {
+        let refs = token_refs("use ui_tokens::radius;\nfn f() { crate::tokens::helper(); }\n");
+        assert!(!refs.iter().any(|r| r.module == "crate"));
+        assert_eq!(refs, BTreeSet::from([tref("radius", None)]));
+    }
+
+    #[test]
+    fn declarations_are_read_from_lib_and_module_sources() {
+        let mods = modules_declared("pub mod spacing;\npub mod stroke;\nmod private;\n");
+        assert_eq!(
+            mods,
+            BTreeSet::from(["spacing".to_string(), "stroke".to_string()])
+        );
+
+        let items = defined_items(
+            "pub const SCALE: [f32; 9] = [\npub struct Shadow {\npub enum Easing {\nconst HIDDEN: f32 = 1.0;\n",
+        );
+        assert!(items.contains("SCALE"));
+        assert!(items.contains("Shadow"));
+        assert!(items.contains("Easing"));
+        assert!(
+            !items.contains("HIDDEN"),
+            "private items are not importable"
+        );
+    }
+
+    #[test]
+    fn a_fully_satisfied_tree_reports_nothing_missing() {
+        let refs = BTreeSet::from([
+            tref("spacing", Some("SPACE_XS")),
+            tref("stroke", None),
+            tref("typography", Some("LINE_DISPLAY")),
+        ]);
+        let defined = BTreeMap::from([
+            (
+                "spacing".to_string(),
+                BTreeSet::from(["SPACE_XS".to_string()]),
+            ),
+            ("stroke".to_string(), BTreeSet::new()),
+            (
+                "typography".to_string(),
+                BTreeSet::from(["LINE_DISPLAY".to_string()]),
+            ),
+        ]);
+        assert!(missing_refs(&refs, &defined).is_empty());
+    }
+
+    /// The 2026-07-29 breakage, reproduced: the four items that existed only
+    /// on the unmerged branch must all be reported against a default-branch
+    /// tree that predates them.
+    #[test]
+    fn the_original_branch_only_items_are_all_caught() {
+        let refs = BTreeSet::from([
+            tref("spacing", Some("SPACE_HUGE")),
+            tref("spacing", Some("SPACE_XXXL")),
+            tref("spacing", Some("SPACE_XS")),
+            tref("stroke", None),
+            tref("typography", Some("LINE_DISPLAY")),
+        ]);
+        // ui-tokens as master had it: no stroke module, short spacing scale,
+        // no line ramp.
+        let defined = BTreeMap::from([
+            (
+                "spacing".to_string(),
+                BTreeSet::from(["SPACE_XS".to_string()]),
+            ),
+            (
+                "typography".to_string(),
+                BTreeSet::from(["SIZE_BODY".to_string()]),
+            ),
+        ]);
+
+        let missing = missing_refs(&refs, &defined);
+        assert_eq!(missing.len(), 4, "got {missing:?}");
+        assert!(missing.contains(&tref("spacing", Some("SPACE_HUGE"))));
+        assert!(missing.contains(&tref("spacing", Some("SPACE_XXXL"))));
+        assert!(missing.contains(&tref("typography", Some("LINE_DISPLAY"))));
+        assert!(
+            missing.contains(&tref("stroke", None)),
+            "an absent module is itself missing"
+        );
+        // And the message names the item.
+        assert_eq!(
+            tref("spacing", Some("SPACE_HUGE")).to_string(),
+            "ui_tokens::spacing::SPACE_HUGE"
+        );
+    }
+
+    /// The guard is a gate step, and — unlike the browser suites — a cheap
+    /// enough one to sit in the fast `verify`.
+    #[test]
+    fn sibling_token_guard_is_a_default_gate_step() {
+        assert!(gate_steps().iter().any(|s| s.name == "sibling-tokens"));
     }
 
     /// The reactivity suite must never leak into the fast, zero-tooling gate.

@@ -75,11 +75,34 @@ Each step is scoped per-crate; that scoping **is** the xtask's logic.
 | Step | Command | Note |
 |---|---|---|
 | `tokens-fresh` | `cargo xtask gen-tokens --check` | Fails if `styles/tokens.css` no longer matches what the `ui-tokens` crate produces — i.e. the desktop and web faces have silently forked. First because it is the cheapest and because a stale theme invalidates every downstream visual result. |
+| `sibling-tokens` | `cargo xtask check-sibling-tokens` | Fails if `src/tokens/preamble.rs` references a `ui_tokens` item that does not exist on `../Rust-DeskApp`'s **default** branch. See below — this is the one break no other step can see. |
 | `fmt-check` | `cargo fmt -p leptos-daisyui-rs -p leptos-daisyui-showcase -p xtask -- --check` | Per-package, **not `--all`** — `--all` reaches into sibling repos (see above). |
 | `clippy` | `cargo clippy -p leptos-daisyui-rs --all-targets -- -D warnings` **then** `-p leptos-daisyui-showcase` | Two per-crate runs — **not `--workspace`**, which fails on csr feature unification (see above). Host target. |
 | `build` | `cargo build -p leptos-daisyui-rs` | **Library only.** The CSR demo is not natively built here — a native `cargo build` of a wasm/CSR binary can link-fail on `web-sys` host stubs; the demo is *checked* instead (next row) and *really* built by `trunk` (see `verify-full`). |
 | `check-demo` | `cargo check -p leptos-daisyui-showcase` | Fast native check of the demo — catches ~all compile breakage without npm/trunk. |
 | `test` | `cargo test -p leptos-daisyui-rs --lib` + `cargo test -p xtask` | The library's unit-test suite (~1766 tests) plus the xtask's own pure-function tests (SemVer bump, etc.). Non-`#[ignore]`d tests only. |
+
+### `cargo xtask check-sibling-tokens` — a path dep hides an unmerged branch
+
+`ui-tokens` is a **path** dependency, so cargo resolves it to whatever
+`../Rust-DeskApp` currently has *checked out*. An item that exists only on an
+unmerged branch therefore compiles here perfectly, and every step above stays
+green — while `main` is in fact unbuildable for anyone whose sibling sits on
+its default branch. The failure surfaces only in a downstream consumer, where
+it reads as that consumer's own fault.
+
+That is not hypothetical: on 2026-07-29 `SPACE_HUGE`, `SPACE_XXXL`,
+`LINE_DISPLAY` and the whole `stroke` module were branch-only, and it cost a
+4iiz-office session hours of chasing a break that was never theirs.
+
+The step resolves the sibling's default branch via `origin/HEAD` and asserts
+every `ui_tokens` item the preamble references exists *there*, ignoring the
+working tree. It reports which branch each missing item was found on instead —
+usually naming the branch that still needs merging. Two things it handles that
+a naive grep would not: items reached through a module alias (`ty::LINE_DISPLAY`
+never appears in a `use` line), and tokens merely *named in prose* by a doc
+comment. If the sibling is absent, or has no `origin/HEAD`, the step **skips**
+rather than fails, so clones without it (EUC, CI) still gate cleanly.
 
 ### `cargo xtask gen-tokens` — the Tailwind theme is generated, not written
 
