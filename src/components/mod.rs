@@ -37,6 +37,7 @@ mod field;
 mod fieldset;
 mod file_input;
 mod filter;
+mod filter_sidebar;
 mod footer;
 /// Gantt chart component for project timeline visualization
 pub mod gantt;
@@ -149,6 +150,7 @@ pub use field::*;
 pub use fieldset::*;
 pub use file_input::*;
 pub use filter::*;
+pub use filter_sidebar::*;
 pub use footer::*;
 pub use hero::*;
 pub use hover_3d::*;
