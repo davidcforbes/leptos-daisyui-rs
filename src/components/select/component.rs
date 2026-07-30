@@ -48,9 +48,42 @@ pub fn Select(
     #[prop(optional)]
     node_ref: NodeRef<HtmlSelect>,
 
+    /// The CURRENT selection, driven as the DOM `value` PROPERTY.
+    ///
+    /// ★ WHY THIS EXISTS, because the obvious alternative is a trap that has
+    /// already cost a production bug. Callers were marking the chosen option with
+    /// `attr:selected`, which sets the HTML `selected` ATTRIBUTE — and that is only
+    /// the PARSE-TIME DEFAULT. Once the element exists, changing that attribute does
+    /// not move the browser's current selection, and if the option list is rebuilt
+    /// the browser resets to index 0. The result is a select DISPLAYING the first
+    /// option while the application state says something else: office-perf showed
+    /// one office's figures under an "All Offices" label that way (op-p44s).
+    ///
+    /// Pass this whenever the selection is driven by state the user did not just
+    /// click — restored from storage, changed by another control, or shown beside a
+    /// reactively-rebuilt option list. A select the user is the only author of does
+    /// not need it.
+    ///
+    /// Applied through an effect against `node_ref` rather than a `prop:value` in
+    /// the markup, so that omitting it changes NOTHING for existing callers — a
+    /// `prop:value` defaulting to `""` would force every current select to empty.
+    #[prop(optional, into)]
+    value: Option<Signal<String>>,
+
     /// Child elements (typically SelectOption components)
     children: Children,
 ) -> impl IntoView {
+    // Re-assert the DOM property whenever the bound signal changes. Runs after
+    // render, so it wins over whatever the browser chose when the options were
+    // (re)created.
+    if let Some(v) = value {
+        Effect::new(move |_| {
+            let want = v.get();
+            if let Some(el) = node_ref.get() {
+                el.set_value(&want);
+            }
+        });
+    }
     view! {
         <select
             node_ref=node_ref
