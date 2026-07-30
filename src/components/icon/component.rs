@@ -42,6 +42,61 @@ use leptos::{html, prelude::*};
 /// @source inline("w-4 h-4 w-5 h-5 w-6 h-6 w-8 h-8 w-12 h-12");
 /// @source inline("inline-block");
 /// ```
+#[component]
+pub fn Icon(
+    /// Icon name from Lucide icons (e.g., "heart", "star", "user")
+    #[prop(into)]
+    name: Signal<String>,
+    /// Size of the icon
+    #[prop(optional, into)]
+    size: Signal<IconSize>,
+    /// Color class for the icon (e.g., "text-primary", "text-error")
+    #[prop(optional, into)]
+    color: Signal<String>,
+    /// Additional CSS classes
+    #[prop(optional, into)]
+    class: &'static str,
+    /// Reference to the underlying DOM node
+    #[prop(optional)]
+    node_ref: NodeRef<html::I>,
+) -> impl IntoView {
+    let computed_class = move || {
+        let mut classes = vec!["inline-block", size.get().as_str()];
+        let color_val = color.get();
+        if !color_val.is_empty() {
+            classes.push(&color_val);
+        }
+        if !class.is_empty() {
+            classes.push(class);
+        }
+        classes.join(" ")
+    };
+
+    // The `<i>` element is DELIBERATELY KEPT. Rendering an `<svg>` here instead
+    // would change this component's public `node_ref: NodeRef<html::I>` and every
+    // sizing class already written against `i`. The sprite goes INSIDE it, which
+    // is also what Lucide's own replacement used to do in spirit — except this
+    // needs no script, so the glyph is present on first paint.
+    //
+    // `data-lucide` is retained as an attribute for styling and test selectors
+    // that already key off it. Nothing reads it as an instruction any more.
+    view! {
+        <i
+            node_ref=node_ref
+            data-lucide=move || name.get()
+            class=computed_class
+        >
+            <svg
+                width="100%"
+                height="100%"
+                aria-hidden="true"
+                focusable="false"
+            >
+                <use href=move || format!("#{}", lucide_to_sprite(&name.get())) />
+            </svg>
+        </i>
+    }
+}
 
 /// Translate a Lucide icon name to a 4Ease-sprite symbol id.
 ///
@@ -127,61 +182,5 @@ pub fn lucide_to_sprite(name: &str) -> &'static str {
         "activity" => "performance-stats",
         "settings" => "settings-gear",
         _ => "blank",
-    }
-}
-
-#[component]
-pub fn Icon(
-    /// Icon name from Lucide icons (e.g., "heart", "star", "user")
-    #[prop(into)]
-    name: Signal<String>,
-    /// Size of the icon
-    #[prop(optional, into)]
-    size: Signal<IconSize>,
-    /// Color class for the icon (e.g., "text-primary", "text-error")
-    #[prop(optional, into)]
-    color: Signal<String>,
-    /// Additional CSS classes
-    #[prop(optional, into)]
-    class: &'static str,
-    /// Reference to the underlying DOM node
-    #[prop(optional)]
-    node_ref: NodeRef<html::I>,
-) -> impl IntoView {
-    let computed_class = move || {
-        let mut classes = vec!["inline-block", size.get().as_str()];
-        let color_val = color.get();
-        if !color_val.is_empty() {
-            classes.push(&color_val);
-        }
-        if !class.is_empty() {
-            classes.push(class);
-        }
-        classes.join(" ")
-    };
-
-    // The `<i>` element is DELIBERATELY KEPT. Rendering an `<svg>` here instead
-    // would change this component's public `node_ref: NodeRef<html::I>` and every
-    // sizing class already written against `i`. The sprite goes INSIDE it, which
-    // is also what Lucide's own replacement used to do in spirit — except this
-    // needs no script, so the glyph is present on first paint.
-    //
-    // `data-lucide` is retained as an attribute for styling and test selectors
-    // that already key off it. Nothing reads it as an instruction any more.
-    view! {
-        <i
-            node_ref=node_ref
-            data-lucide=move || name.get()
-            class=computed_class
-        >
-            <svg
-                width="100%"
-                height="100%"
-                aria-hidden="true"
-                focusable="false"
-            >
-                <use href=move || format!("#{}", lucide_to_sprite(&name.get())) />
-            </svg>
-        </i>
     }
 }
