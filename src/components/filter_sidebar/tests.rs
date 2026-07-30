@@ -13,10 +13,7 @@ const SRC: &str = include_str!("component.rs");
 fn the_two_widths_are_the_measured_ones() {
     // Both `width` AND `min-width`: a flex parent will otherwise shrink the panel
     // below its own width and the collapse transition jumps.
-    for cls in [
-        "w-[220px] min-w-[220px]",
-        "w-[44px] min-w-[44px]",
-    ] {
+    for cls in ["w-[220px] min-w-[220px]", "w-[44px] min-w-[44px]"] {
         assert!(
             SRC.contains(cls),
             "measured geometry `{cls}` is gone - rounding it to Tailwind's scale \
