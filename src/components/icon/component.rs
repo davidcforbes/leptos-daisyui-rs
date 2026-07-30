@@ -20,15 +20,21 @@ use leptos::{html, prelude::*};
 /// }
 /// ```
 ///
-/// # Setup Lucide Icons
+/// # Setup: inline an SVG sprite (NOT a Lucide script)
 ///
-/// Include the Lucide icon library in your `index.html`:
+/// This component renders `<use href="#id">` against a sprite the host page
+/// inlines. It needs NO JavaScript and no CDN — see [`lucide_to_sprite`] for the
+/// full reasoning and for the name translation.
+///
 /// ```html
-/// <script src="https://unpkg.com/lucide@latest"></script>
-/// <script>
-///   lucide.createIcons();
-/// </script>
+/// <!-- inlined into index.html, e.g. by Trunk's `rel="inline"` -->
+/// <svg style="display:none"><defs>
+///   <symbol id="clock" viewBox="0 0 24 24"><path d="..."/></symbol>
+/// </defs></svg>
 /// ```
+///
+/// Reference an external file instead and it works in Chromium but renders
+/// NOTHING in Firefox, which has never supported external `<use>`.
 ///
 /// # CSS Classes
 /// Add to your `input.css`:
@@ -36,6 +42,94 @@ use leptos::{html, prelude::*};
 /// @source inline("w-4 h-4 w-5 h-5 w-6 h-6 w-8 h-8 w-12 h-12");
 /// @source inline("inline-block");
 /// ```
+
+/// Translate a Lucide icon name to a 4Ease-sprite symbol id.
+///
+/// # Why this exists
+///
+/// [`Icon`] used to render `<i data-lucide="name">` and rely on Lucide's JS to
+/// replace it with an `<svg>`. That meant a third-party CDN on the critical path,
+/// a `MutationObserver` to catch elements mounted after a fetch resolved, and a
+/// whole class of bug where an icon was silently absent because the scan had not
+/// run yet. It now renders `<use href="#id">` against a sprite the host document
+/// inlines, which resolves before any script runs.
+///
+/// Existing call sites pass LUCIDE names (`SlaChip` asks for `triangle-alert`),
+/// so those names keep working and are translated here. That is the whole reason
+/// this is a function in the library rather than a table in one consumer: the
+/// library's OWN components — `SlaChip`, `AppShell`, `DataTable`, `IconTile`,
+/// `Gantt` — render `Icon` internally, and a mapping held by a consumer could not
+/// reach them.
+///
+/// An unknown name returns `blank`, the sprite's neutral glyph, because an
+/// unresolvable id renders an EMPTY `<svg>` with no error at all — and a visible
+/// placeholder is easier to notice than nothing.
+///
+/// # Requirement on the host document
+///
+/// The page must inline an SVG sprite defining these symbol ids. Referencing an
+/// external file instead works in Chromium but renders NOTHING in Firefox, which
+/// has never supported external `<use>`.
+pub fn lucide_to_sprite(name: &str) -> &'static str {
+    match name {
+        // Same concept, same name.
+        "list" => "list",
+        "calendar" => "calendar",
+        "clock" => "clock",
+        "users" => "users",
+        "search" => "search",
+        "star" => "star",
+        "filter" => "filter",
+        "plus" => "plus",
+        "minus" => "minus",
+        "eye" => "eye",
+        "copy" => "copy",
+        "trash" => "trash",
+        "phone" => "phone",
+        "send" => "send",
+        "refresh" => "refresh",
+        "expand" => "expand",
+        "close" => "close",
+        "pencil" => "pencil",
+        "reply" => "reply",
+        "envelope" => "envelope",
+        "timeline" => "timeline",
+        "ticket" => "ticket",
+        "upload" => "upload",
+        "file" => "file",
+        // Same concept under the sprite's naming.
+        "triangle-alert" => "triangle-exclamation",
+        "circle-alert" => "circle-exclamation-fill",
+        "circle-check" => "circle-check",
+        "info" => "circle-info",
+        "help-circle" => "circle-question",
+        "file-text" => "file-lines",
+        "target" => "bullseye-arrow",
+        "trending-up" => "arrow-trend-up",
+        "circle" => "blank",
+        "x" => "close",
+        "check" => "circle-check",
+        "chevron-left" => "angle-left",
+        "chevron-right" => "angle-right",
+        "chevron-down" => "angle-right",
+        "arrow-left" => "arrow-left",
+        "arrow-right" => "arrow-right",
+        "external-link" => "arrow-up-right-from-square",
+        "message-square" => "message",
+        "mail" => "envelope",
+        "paperclip" => "paper-clip",
+        "more-vertical" => "ellipsis-vertical",
+        "more-horizontal" => "ellipsis",
+        "log-out" => "logout",
+        "user" => "user",
+        // No sprite equivalent exists for these; the closest honest glyph.
+        "layout-dashboard" => "performance-stats",
+        "activity" => "performance-stats",
+        "settings" => "settings-gear",
+        _ => "blank",
+    }
+}
+
 #[component]
 pub fn Icon(
     /// Icon name from Lucide icons (e.g., "heart", "star", "user")
@@ -66,11 +160,28 @@ pub fn Icon(
         classes.join(" ")
     };
 
+    // The `<i>` element is DELIBERATELY KEPT. Rendering an `<svg>` here instead
+    // would change this component's public `node_ref: NodeRef<html::I>` and every
+    // sizing class already written against `i`. The sprite goes INSIDE it, which
+    // is also what Lucide's own replacement used to do in spirit — except this
+    // needs no script, so the glyph is present on first paint.
+    //
+    // `data-lucide` is retained as an attribute for styling and test selectors
+    // that already key off it. Nothing reads it as an instruction any more.
     view! {
         <i
             node_ref=node_ref
             data-lucide=move || name.get()
             class=computed_class
-        ></i>
+        >
+            <svg
+                width="100%"
+                height="100%"
+                aria-hidden="true"
+                focusable="false"
+            >
+                <use href=move || format!("#{}", lucide_to_sprite(&name.get())) />
+            </svg>
+        </i>
     }
 }
