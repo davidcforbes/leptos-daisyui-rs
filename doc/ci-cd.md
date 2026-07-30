@@ -104,6 +104,28 @@ never appears in a `use` line), and tokens merely *named in prose* by a doc
 comment. If the sibling is absent, or has no `origin/HEAD`, the step **skips**
 rather than fails, so clones without it (EUC, CI) still gate cleanly.
 
+#### What this gate still cannot see: the sibling's *formatting*
+
+`ui-tokens` is a path dependency, **not** a workspace member, so
+`cargo fmt -p ui-tokens` fails here with "not a member of the workspace". The
+per-package `fmt-check` above therefore cannot cover it — by construction, not
+by omission. Nothing in this repo's gate will ever tell you that a change you
+landed in the sibling is unformatted.
+
+That bit on 2026-07-29. Two `ui-tokens` commits were cherry-picked onto
+Rust-DeskApp `master` to unblock this repo; `cargo check --workspace` and the
+sibling's tests were run, but not `cargo fmt`, and two unformatted array
+literals in `spacing.rs` rode along. This repo stayed 10/10 green. The break
+surfaced in **editmark**, whose `cargo fmt --all` *does* reach path deps —
+`--all` means "all packages and their local path-based dependencies" — turning
+its release gate red over a repo it never compiles. Fixed in Rust-DeskApp
+`3804fdd`; editmark has since scoped its own `format` task to explicit `-p`
+flags, which is the same workaround this repo uses.
+
+**So: after landing anything in `../Rust-DeskApp/crates/ui-tokens`, run
+`cargo fmt -p ui-tokens` in that repo.** No gate on this side will catch it,
+and the repo that does catch it is one nobody thinks to look at.
+
 ### `cargo xtask gen-tokens` — the Tailwind theme is generated, not written
 
 `styles/tokens.css` is **generated** from the `ui-tokens` crate and imported by

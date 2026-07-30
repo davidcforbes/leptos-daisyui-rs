@@ -108,6 +108,13 @@ The `sibling-tokens` gate step now catches it; it skips (never fails) when the
 sibling is absent. If it fires, land the upstream change before committing the
 reference.
 
+**After landing anything in `../Rust-DeskApp/crates/ui-tokens`, run `cargo fmt
+-p ui-tokens` in *that* repo.** `ui-tokens` is a path dep, not a workspace
+member, so `fmt-check` here structurally cannot see it — and editmark's
+`cargo fmt --all` *does* reach path deps, so unformatted sibling tokens turn
+**editmark's** release gate red over a repo it never compiles. Cost a red gate
+twice on 2026-07-30; see [`doc/ci-cd.md`](./doc/ci-cd.md).
+
 ### Using cargo-make (Recommended for CI/Scripts)
 
 The project includes a comprehensive `Makefile.toml` with automated workflows:
