@@ -145,7 +145,26 @@ pub fn SlaChip(
 pub fn use_sla_now(poll_ms: u64) -> Signal<i64> {
     let now = RwSignal::new(js_sys::Date::now() as i64);
     let handle = leptos::leptos_dom::helpers::set_interval_with_handle(
-        move || now.set(js_sys::Date::now() as i64),
+        // `try_set`, NOT `set`. The interval and the signal are cleaned up by
+        // SEPARATE mechanisms — `on_cleanup` clears the handle, the reactive
+        // owner disposes the signal — and nothing orders them. A tick that
+        // lands in between calls `set` on a disposed signal, which PANICS
+        // ("Tried to access a reactive value that has already been disposed",
+        // reactive_graph traits.rs:361) and reaches the browser as a bare
+        // `RuntimeError: unreachable`.
+        //
+        // Found 2026-07-30: navigating away from office-perf's Consultant Task
+        // Queue panicked on EVERY departure. It is a race, so it is not
+        // reliably visible everywhere — that screen simply has the heaviest
+        // teardown in the app (three tables, six resources, an SSE stream),
+        // which widens the window enough to hit it every time. Lighter screens
+        // using this same helper looked fine, which is exactly why the fix
+        // belongs here rather than in any one screen.
+        //
+        // After disposal the correct behaviour is to do nothing.
+        move || {
+            now.try_set(js_sys::Date::now() as i64);
+        },
         Duration::from_millis(poll_ms),
     );
     if let Ok(handle) = handle {
