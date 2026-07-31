@@ -111,7 +111,14 @@ pub fn SlaChip(
             class=move || {
                 let t = tone();
                 merge_classes!(
-                    "badge badge-soft",
+                    // `whitespace-nowrap`: the label is ONE line by contract.
+                    // A wrapped chip does not grow a second row inside its
+                    // border -- the overflow escapes the pill and prints on
+                    // or below it (ldui-sla1 / office op-jmxb, measured on 12
+                    // of 12 breached rows). `sla_chip_fmt_duration` bounds the
+                    // label so this should never be reached; this is what makes
+                    // "should never" into "cannot".
+                    "badge badge-soft whitespace-nowrap",
                     t.as_str(),
                     if big.get() { "badge-lg" } else { "badge-md" },
                     if stale.get() { "opacity-60" } else { "" },
