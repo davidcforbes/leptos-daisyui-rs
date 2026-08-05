@@ -188,3 +188,48 @@ fn test_over_cap_scenario_positions_are_ordered() {
     assert!((band.0 - cap_pct).abs() < 0.0001);
     assert!((band.0 + band.1 - value_pct).abs() < 0.0001);
 }
+
+// ── Stopped (bead 4iiz-Database 1x6y.7) ──────────────────────────────────────
+
+/// ⚠️ STOPPED MUST NOT RENDER AS A PLAIN FILL. Every other tone answers "how much"; this one
+/// answers "is it still running at all". A solid block asserts a magnitude, and once the series
+/// has ended the magnitude is not the point — a stopped feed drawn as a longer Error bar reads
+/// as the worst case of a LIVE series, which is exactly how a dead mirror hides among slow ones.
+#[test]
+fn stopped_is_a_pattern_not_a_fill() {
+    let s = CapacityBarColor::Stopped.as_str();
+    assert!(
+        s.contains("repeating-linear-gradient"),
+        "Stopped must be hatched so it cannot be mistaken for a full bar: {s}"
+    );
+    for solid in [
+        CapacityBarColor::Error,
+        CapacityBarColor::Warning,
+        CapacityBarColor::Success,
+    ] {
+        assert!(
+            !solid.as_str().contains("repeating-linear-gradient"),
+            "{solid:?} is a magnitude and must stay a plain fill"
+        );
+    }
+}
+
+/// ⚠️ AND ONLY STOPPED ANSWERS `is_stopped`. Callers SORT on it: an ended series belongs at the
+/// top regardless of its value, because "ended" outranks "large". Sorting by magnitude is what
+/// buries it.
+#[test]
+fn only_stopped_reports_itself_as_stopped() {
+    assert!(CapacityBarColor::Stopped.is_stopped());
+    for live in [
+        CapacityBarColor::Neutral,
+        CapacityBarColor::Primary,
+        CapacityBarColor::Secondary,
+        CapacityBarColor::Accent,
+        CapacityBarColor::Info,
+        CapacityBarColor::Success,
+        CapacityBarColor::Warning,
+        CapacityBarColor::Error,
+    ] {
+        assert!(!live.is_stopped(), "{live:?} describes a live series");
+    }
+}

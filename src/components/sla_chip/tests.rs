@@ -172,3 +172,50 @@ fn every_label_fits_the_one_line_pill() {
     }
     assert!(!widest.is_empty());
 }
+
+// ── Stopped (bead 4iiz-Database 1x6y.7) ──────────────────────────────────────
+
+/// ⚠️ `sla_chip_tone` MUST NEVER PRODUCE `Stopped`. Whether a series has ended is a fact about
+/// the DATA — for the mirror that motivated this, `max(modified) == max(created)` — and cannot
+/// be derived from a deadline. If this ever fails, the chip has started guessing.
+#[test]
+fn a_deadline_alone_can_never_imply_stopped() {
+    for deadline in [None, Some(0), Some(1), Some(i64::MAX), Some(-1)] {
+        for now in [0_i64, 1, 10_000, i64::MAX / 2] {
+            let t = sla_chip_tone(deadline, now, 3_600_000);
+            assert_ne!(
+                t,
+                SlaTone::Stopped,
+                "tone({deadline:?}, {now}) inferred Stopped from a deadline"
+            );
+        }
+    }
+}
+
+/// ⚠️ STOPPED IS NOT A DEGREE OF RED. Red says "past the deadline and still counting"; Stopped
+/// says "there is nothing left to count". They must be distinguishable at a glance, or a dead
+/// feed reads as one more overdue row — which is how one stayed dead for a year.
+#[test]
+fn stopped_is_visually_distinct_from_breached() {
+    assert_ne!(
+        SlaTone::Stopped.border_class(),
+        SlaTone::Red.border_class(),
+        "Stopped and Red must not share a border treatment"
+    );
+    assert_ne!(
+        SlaTone::Stopped.icon_name(),
+        SlaTone::Red.icon_name(),
+        "Stopped and Red must not share an icon"
+    );
+    assert!(
+        SlaTone::Stopped.icon_name().is_some(),
+        "Stopped carries an icon — None is reserved for 'no SLA', which is a different claim"
+    );
+}
+
+/// ⚠️ AND IT IS STILL NOT THE DEFAULT. `None` ("no SLA") stays the default tone: a chip
+/// constructed with nothing set must claim ignorance, never that the series has ended.
+#[test]
+fn the_default_tone_is_still_no_sla() {
+    assert_eq!(SlaTone::default(), SlaTone::None);
+}

@@ -21,6 +21,18 @@ pub enum SlaTone {
     /// No SLA defined. Also the default tone.
     #[default]
     None,
+
+    /// The thing being timed has STOPPED — it did not merely breach its deadline.
+    ///
+    /// ⚠️ NOT A DEGREE OF `Red`, A DIFFERENT CLAIM. `Red` says "past the deadline and still
+    /// counting"; this says "there is nothing left to count". A stopped feed shown as breached
+    /// is indistinguishable from a very late one, which is how a mirror that had been dead for
+    /// a year kept reading as an ordinary overdue row.
+    ///
+    /// ⚠️ NOT COMPUTED BY [`sla_chip_tone`], DELIBERATELY. Whether a series has ended is a fact
+    /// about the DATA — for that mirror it was `max(modified) == max(created)` — and the chip
+    /// cannot derive it from a deadline. Callers pass it in.
+    Stopped,
 }
 
 impl SlaTone {
@@ -31,6 +43,7 @@ impl SlaTone {
             SlaTone::Amber => "badge-warning",
             SlaTone::Red => "badge-error",
             SlaTone::None => "badge-neutral",
+            SlaTone::Stopped => "badge-error",
         }
     }
 
@@ -44,6 +57,8 @@ impl SlaTone {
             SlaTone::Amber => "border border-warning/45",
             SlaTone::Red => "border border-error/45",
             SlaTone::None => "border border-neutral/45",
+            // A heavier border than `Red`: the pill must not read as one more overdue row.
+            SlaTone::Stopped => "border-2 border-error/70",
         }
     }
 
@@ -58,6 +73,8 @@ impl SlaTone {
             SlaTone::Amber => Some("triangle-alert"),
             SlaTone::Red => Some("circle-alert"),
             SlaTone::None => None,
+            // "square" reads as a halted transport control, not another alarm.
+            SlaTone::Stopped => Some("square"),
         }
     }
 }

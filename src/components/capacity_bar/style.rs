@@ -35,6 +35,18 @@ pub enum CapacityBarColor {
 
     /// Error color (default overflow-band color)
     Error,
+
+    /// The series ENDED — not "very over capacity".
+    ///
+    /// ⚠️ A DIFFERENT KIND OF FACT FROM THE OTHER VARIANTS, WHICH IS WHY IT IS A VARIANT.
+    /// Every colour above answers "how much"; this answers "is it still running at all". A
+    /// stopped feed drawn as a longer `Error` bar sorts and reads as the worst case of a live
+    /// series, and that is exactly how a dead mirror hides among slow ones — it cost a year of
+    /// silence on one real feed before anyone noticed.
+    ///
+    /// Rendered as a diagonal hatch rather than a fill: a solid block asserts a magnitude, and
+    /// the magnitude is not the point once the series has ended.
+    Stopped,
 }
 
 impl CapacityBarColor {
@@ -49,7 +61,23 @@ impl CapacityBarColor {
             CapacityBarColor::Success => "bg-success",
             CapacityBarColor::Warning => "bg-warning",
             CapacityBarColor::Error => "bg-error",
+            // ⚠️ A PATTERN, NOT A COLOUR. `bg-error` with a repeating-linear-gradient overlay,
+            // so it still reads as severe at a glance while being unmistakably not a plain
+            // fill. The same idiom day_scheduler and week_view already use for a non-bookable
+            // band — promoted here rather than invented.
+            CapacityBarColor::Stopped => {
+                "bg-error/30 bg-[repeating-linear-gradient(45deg,transparent_0_3px,rgba(0,0,0,0.28)_3px_6px)] border border-error/55"
+            }
         }
+    }
+
+    /// Whether this tone describes a series that has ENDED rather than one that is merely
+    /// loaded.
+    ///
+    /// ⚠️ CALLERS SORT ON THIS. A stopped series belongs at the top of a list regardless of its
+    /// value, because "ended" outranks "large" — sorting by magnitude is what buries it.
+    pub fn is_stopped(&self) -> bool {
+        matches!(self, CapacityBarColor::Stopped)
     }
 }
 
