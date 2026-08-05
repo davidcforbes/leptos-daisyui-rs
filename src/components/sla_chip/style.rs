@@ -97,6 +97,40 @@ pub fn sla_chip_tone(deadline_ms: Option<i64>, now_ms: i64, threshold_ms: i64) -
     }
 }
 
+/// The tone the chip actually renders: `stopped` outranks everything the clock
+/// could say, otherwise derive from the deadline as always.
+///
+/// ⚠️ THIS IS THE ONLY WAY A CHIP REACHES [`SlaTone::Stopped`]. Whether a series
+/// has ENDED is a fact about the series, never about the clock —
+/// [`sla_chip_tone`] must not infer it (its own test pins that), so the caller
+/// asserts it through the component's `stopped` prop and this function applies
+/// the precedence. Requested by 4iiz-Database bead wcnb, for the ETL operator
+/// portal: a dead feed filed among the merely late ones is how `desk_contacts`
+/// stayed dead for a year.
+pub fn sla_chip_effective_tone(
+    stopped: bool,
+    deadline_ms: Option<i64>,
+    now_ms: i64,
+    threshold_ms: i64,
+) -> SlaTone {
+    if stopped {
+        SlaTone::Stopped
+    } else {
+        sla_chip_tone(deadline_ms, now_ms, threshold_ms)
+    }
+}
+
+/// The label the chip actually renders. A stopped series says `stopped` — a
+/// deadline-derived `+3d over` under Stopped styling would claim the clock is
+/// still the story, and it is not.
+pub fn sla_chip_effective_label(stopped: bool, deadline_ms: Option<i64>, now_ms: i64) -> String {
+    if stopped {
+        "stopped".to_string()
+    } else {
+        sla_chip_label(deadline_ms, now_ms)
+    }
+}
+
 /// Chip text for `deadline_ms` at `now_ms`: remaining `Xd Yh`/`Xh Ym`/`Ym`
 /// while inside the deadline, `+... over` once breached, or `No SLA` when
 /// none is defined. Ported verbatim from d2d-ui's `SlaChip::label`.

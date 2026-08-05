@@ -192,6 +192,47 @@ fn a_deadline_alone_can_never_imply_stopped() {
     }
 }
 
+/// ⚠️ THE `stopped` ASSERTION OUTRANKS EVERY DEADLINE (4iiz-Database bead wcnb). A feed that
+/// ENDED must not be re-filed by the clock — not as healthy (future deadline), not as merely
+/// late (past deadline), not as unjudged (no deadline). And its label says `stopped`: Stopped
+/// styling around a deadline-derived "+3d over" would claim the clock is still the story.
+#[test]
+fn stopped_outranks_every_deadline() {
+    for deadline in [None, Some(0), Some(-1), Some(i64::MAX)] {
+        for now in [0_i64, 10_000, i64::MAX / 2] {
+            assert_eq!(
+                sla_chip_effective_tone(true, deadline, now, 3_600_000),
+                SlaTone::Stopped,
+                "stopped=true must render Stopped for deadline {deadline:?} at {now}"
+            );
+            assert_eq!(
+                sla_chip_effective_label(true, deadline, now),
+                "stopped",
+                "a stopped chip's label must say so, not narrate the clock"
+            );
+        }
+    }
+}
+
+/// ⚠️ AND UNSET, NOTHING CHANGES. `stopped=false` must reproduce the derived tone and label
+/// EXACTLY — this prop is additive, and every existing caller renders byte-for-byte what it
+/// rendered before the prop existed.
+#[test]
+fn unset_stopped_preserves_the_derivation_exactly() {
+    for deadline in [None, Some(0), Some(-1), Some(7_200_000), Some(i64::MAX)] {
+        for now in [0_i64, 1, 3_600_000, 10_000_000] {
+            assert_eq!(
+                sla_chip_effective_tone(false, deadline, now, 3_600_000),
+                sla_chip_tone(deadline, now, 3_600_000),
+            );
+            assert_eq!(
+                sla_chip_effective_label(false, deadline, now),
+                sla_chip_label(deadline, now),
+            );
+        }
+    }
+}
+
 /// ⚠️ STOPPED IS NOT A DEGREE OF RED. Red says "past the deadline and still counting"; Stopped
 /// says "there is nothing left to count". They must be distinguishable at a glance, or a dead
 /// feed reads as one more overdue row — which is how one stayed dead for a year.

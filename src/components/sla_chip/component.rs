@@ -1,4 +1,6 @@
-use super::style::{SLA_CHIP_DEFAULT_THRESHOLD_MS, sla_chip_label, sla_chip_tone};
+use super::style::{
+    SLA_CHIP_DEFAULT_THRESHOLD_MS, sla_chip_effective_label, sla_chip_effective_tone,
+};
 use crate::components::icon::{Icon, IconSize};
 use crate::merge_classes;
 use leptos::{html::Span, prelude::*};
@@ -88,6 +90,14 @@ pub fn SlaChip(
     #[prop(optional, into)]
     stale: Signal<bool>,
 
+    /// The series ENDED. Outranks everything the clock could say: tone becomes
+    /// [`SlaTone::Stopped`](super::style::SlaTone) and the label reads
+    /// `stopped`, regardless of `deadline_ms`. The caller asserts this from the
+    /// DATA (e.g. newest == oldest timestamp) -- ended-ness is a fact about the
+    /// series, not the clock, which is why no deadline value can produce it.
+    #[prop(optional, into)]
+    stopped: Signal<bool>,
+
     /// Enriched variant: draw a leading severity icon plus a matching border
     /// so the pale/soft pill still reads at a glance on a light page.
     /// beads-p4v4
@@ -102,8 +112,15 @@ pub fn SlaChip(
     #[prop(optional)]
     node_ref: NodeRef<Span>,
 ) -> impl IntoView {
-    let tone = move || sla_chip_tone(deadline_ms.get(), now_ms.get(), threshold_ms.get());
-    let label = move || sla_chip_label(deadline_ms.get(), now_ms.get());
+    let tone = move || {
+        sla_chip_effective_tone(
+            stopped.get(),
+            deadline_ms.get(),
+            now_ms.get(),
+            threshold_ms.get(),
+        )
+    };
+    let label = move || sla_chip_effective_label(stopped.get(), deadline_ms.get(), now_ms.get());
 
     view! {
         <span
