@@ -639,7 +639,7 @@ pub fn AppShellContent(
 ///
 /// ### Add to `input.css`
 /// ```css
-/// @source inline("flex shrink-0 items-center gap-2 border-t border-base-300 bg-base-200 px-4 text-xs text-base-content/70");
+/// @source inline("flex shrink-0 items-center gap-2 border-t border-base-300 bg-base-200 px-4 text-xs text-base-content/80");
 /// @source inline("hidden");
 /// ```
 ///
@@ -668,7 +668,7 @@ pub fn AppShellStatusBar(
             node_ref=node_ref
             class=move || {
                 merge_classes!(
-                    "flex shrink-0 items-center gap-2 border-t border-base-300 bg-base-200 px-4 text-xs text-base-content/70",
+                    "flex shrink-0 items-center gap-2 border-t border-base-300 bg-base-200 px-4 text-xs text-base-content/80",
                     class
                 )
             }
