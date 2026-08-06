@@ -91,9 +91,15 @@ pub fn Textarea(
     /// Reference to the underlying HTML textarea element
     #[prop(optional)]
     node_ref: NodeRef<HtmlTextarea>,
+
+    /// Accessible name (rendered as `aria-label`) for a textarea outside a
+    /// labeled field — the `select`/`capacity_bar` convention.
+    #[prop(optional, into)]
+    label: MaybeProp<String>,
 ) -> impl IntoView {
     view! {
         <textarea
+            aria-label=move || label.get()
             disabled=disabled
             readonly=readonly
             required=required

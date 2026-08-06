@@ -44,6 +44,16 @@ pub fn Select(
     #[prop(optional, into)]
     class: &'static str,
 
+    /// Accessible name for the select (rendered as `aria-label`). The
+    /// first-class labeling path is wrapping in a labeled field (e.g.
+    /// `FilterField`, which renders a real `<label>`); for a select OUTSIDE
+    /// one, pass this — axe's `select-name` rule (serious) fails a select
+    /// with neither. Seven such call sites shipped unlabeled in office-perf
+    /// before its PixelProof suite caught them, because the only path was
+    /// the `attr:aria-label` escape hatch nobody reached for.
+    #[prop(optional, into)]
+    label: MaybeProp<String>,
+
     /// Node reference to the select element
     #[prop(optional)]
     node_ref: NodeRef<HtmlSelect>,
@@ -86,6 +96,7 @@ pub fn Select(
     }
     view! {
         <select
+            aria-label=move || label.get()
             node_ref=node_ref
             class=move || {
                 merge_classes!(
