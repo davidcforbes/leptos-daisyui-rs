@@ -233,7 +233,7 @@ pub fn FilterSection(
 ) -> impl IntoView {
     view! {
         <div class="mb-4">
-            <p class="mb-[5px] text-[14px] font-bold uppercase tracking-[.05em] text-base-content/55">
+            <p class="mb-[5px] text-[14px] font-bold uppercase tracking-[.05em] text-base-content/75">
                 {move || title.get()}
             </p>
             <div class="flex flex-col gap-2.5">{children()}</div>
