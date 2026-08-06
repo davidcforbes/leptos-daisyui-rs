@@ -1,3 +1,4 @@
+use crate::components::data_table::TABLE_SCROLL_WRAPPER_CLASS;
 use crate::components::data_table::auto_page::{
     FALLBACK_HEADER_HEIGHT, FALLBACK_ROW_HEIGHT, rows_per_page_for_height,
 };
@@ -145,7 +146,7 @@ fn local_storage_set(key: &str, value: &str) {
 /// // Pagination: numbered page buttons (join) + row-range caption (controls.rs)
 /// @source inline("flex justify-between items-center mt-4 gap-2");
 /// @source inline("btn btn-sm join join-item btn-active btn-disabled");
-/// @source inline("text-sm text-base-content/60");
+/// @source inline("text-sm text-base-content/75");
 /// // Per-column filter row (Column::filterable -> filter.rs)
 /// @source inline("select select-bordered select-xs w-full font-normal p-1");
 /// ```
@@ -897,7 +898,11 @@ pub fn DataTable(
                 })
             }}
 
-            <div style=table_wrapper_style node_ref=table_wrapper_ref>
+            <div
+                class=TABLE_SCROLL_WRAPPER_CLASS
+                style=table_wrapper_style
+                node_ref=table_wrapper_ref
+            >
                 <Table
                     size=table_size
                     zebra=zebra

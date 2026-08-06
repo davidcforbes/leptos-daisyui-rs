@@ -351,7 +351,7 @@ impl Default for DataTableClasses {
             page_indicator: "text-sm",
             pagination_page_button: "btn btn-sm join-item",
             pagination_active_page_button: "btn btn-sm join-item btn-active",
-            row_range: "text-sm text-base-content/60",
+            row_range: "text-sm text-base-content/75",
         }
     }
 }
@@ -655,7 +655,7 @@ mod tests {
             classes.pagination_active_page_button,
             "btn btn-sm join-item btn-active"
         );
-        assert_eq!(classes.row_range, "text-sm text-base-content/60");
+        assert_eq!(classes.row_range, "text-sm text-base-content/75");
     }
 
     // ── DataTableTexts::default ──

@@ -1,3 +1,4 @@
+use crate::components::data_table::TABLE_SCROLL_WRAPPER_CLASS;
 use crate::components::data_table::body::DataTableBody;
 use crate::components::data_table::filter::{
     ColumnFilters, DataTableFilterRow, distinct_values, has_filterable_columns,
@@ -372,7 +373,7 @@ pub fn ServerDataTable(
                 }
             }}
 
-            <div style=table_wrapper_style>
+            <div class=TABLE_SCROLL_WRAPPER_CLASS style=table_wrapper_style>
                 <Table
                     size=table_size
                     zebra=zebra

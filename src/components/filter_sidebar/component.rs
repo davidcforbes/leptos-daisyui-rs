@@ -131,7 +131,7 @@ pub fn FilterSidebar(
                     aria-label=move || toggle_label.get()
                     aria-expanded=move || (!collapsed.get()).to_string()
                     class="flex size-7 shrink-0 items-center justify-center rounded-md \
-                           border border-black/[.12] bg-base-100 text-base-content/70 \
+                           border border-black/[.12] bg-base-100 text-base-content/75 \
                            hover:bg-black/[.06] hover:text-base-content"
                     on:click=move |_| on_toggle.run(())
                 >
@@ -211,7 +211,7 @@ pub fn FilterSidebar(
                     </span>
                 </Show>
                 <span
-                    class="text-[13px] font-semibold tracking-[.04em] text-base-content/60 \
+                    class="text-[13px] font-semibold tracking-[.04em] text-base-content/75 \
                            [writing-mode:vertical-rl] [text-orientation:mixed] rotate-180"
                 >
                     {move || title.get()}
@@ -255,7 +255,7 @@ pub fn FilterField(
 ) -> impl IntoView {
     view! {
         <label class="flex flex-col gap-1">
-            <span class="text-[12px] font-medium text-base-content/70">{move || label.get()}</span>
+            <span class="text-[12px] font-medium text-base-content/75">{move || label.get()}</span>
             {children()}
         </label>
     }

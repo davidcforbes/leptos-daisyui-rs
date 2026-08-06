@@ -55,6 +55,10 @@ mod resize;
 mod selection;
 mod server_component;
 
+/// Every DataTable variant keeps wide columns reachable instead of clipping
+/// the right-hand side of the table at constrained viewport widths.
+pub(super) const TABLE_SCROLL_WRAPPER_CLASS: &str = "overflow-x-auto";
+
 /// Typed column sorting: `SortAs` plus the cell parsers/comparator behind it
 pub mod sort;
 /// Types for DataTable component including Column, SortOrder, and configuration structs
@@ -72,3 +76,27 @@ pub use selection::{RowClickKind, handle_row_click, row_click_kind, row_is_inter
 pub use server_component::*;
 pub use sort::{SortAs, column_sort_as, compare_cells, parse_date, parse_number};
 pub use types::*;
+
+#[cfg(test)]
+mod responsive_contract {
+    use super::TABLE_SCROLL_WRAPPER_CLASS;
+
+    #[test]
+    fn both_data_table_variants_use_the_horizontal_scroll_wrapper() {
+        assert!(
+            TABLE_SCROLL_WRAPPER_CLASS
+                .split_ascii_whitespace()
+                .any(|class| class == "overflow-x-auto")
+        );
+
+        for source in [
+            include_str!("component.rs"),
+            include_str!("server_component.rs"),
+        ] {
+            assert!(
+                source.contains("class=TABLE_SCROLL_WRAPPER_CLASS"),
+                "a DataTable variant stopped applying the shared horizontal-scroll contract"
+            );
+        }
+    }
+}
