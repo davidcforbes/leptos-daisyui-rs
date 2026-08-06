@@ -202,6 +202,67 @@ pub fn DataTableDemo() -> impl IntoView {
         Column::new("status", "Status").filterable(),
     ]);
 
+    // ServerDataTable + on_query_change: a simulated backend applies the
+    // emitted TableQuery (search/sort/filters/page) to a 57-row fixture and
+    // returns one 10-row page — the round-trip a real server table performs.
+    let server_fixture = StoredValue::new(generate_users(57));
+    let server_rows = RwSignal::new(Vec::<HashMap<&'static str, String>>::new());
+    let server_page = RwSignal::new(1_i64);
+    let server_total = RwSignal::new(0_i64);
+    let last_query = RwSignal::new(String::new());
+    let server_columns = RwSignal::new(vec![
+        Column::new("name", "Name"),
+        Column::new("email", "Email"),
+        Column::new("role", "Role").filterable(),
+        Column::new("status", "Status").filterable(),
+    ]);
+
+    let run_server_query = move |q: TableQuery| {
+        let mut items = server_fixture.get_value();
+        items.retain(|row| {
+            q.filters
+                .iter()
+                .all(|(col, v)| v.is_empty() || row.get(col).is_some_and(|c| c == v))
+        });
+        if !q.search.is_empty() {
+            let s = q.search.to_lowercase();
+            items.retain(|row| row.values().any(|v| v.to_lowercase().contains(&s)));
+        }
+        if let Some((col, order)) = q.sort {
+            items.sort_by(|a, b| {
+                let av = a.get(col).cloned().unwrap_or_default();
+                let bv = b.get(col).cloned().unwrap_or_default();
+                let c = av.cmp(&bv);
+                match order {
+                    SortOrder::Asc => c,
+                    SortOrder::Desc => c.reverse(),
+                }
+            });
+        }
+        server_total.set(items.len() as i64);
+        let start = ((q.page - 1) * q.page_size).max(0) as usize;
+        server_rows.set(
+            items
+                .into_iter()
+                .skip(start)
+                .take(q.page_size.max(0) as usize)
+                .collect(),
+        );
+        server_page.set(q.page);
+        last_query.set(format!(
+            "page={} size={} search={:?} sort={:?} filters={:?}",
+            q.page, q.page_size, q.search, q.sort, q.filters
+        ));
+    };
+    // Initial fetch: page 1, no query shape.
+    run_server_query(TableQuery {
+        page: 1,
+        page_size: 10,
+        search: String::new(),
+        sort: None,
+        filters: ColumnFilters::new(),
+    });
+
     // Column resize + typed cells (Badge/Icon) + row background + clipboard export
     let feature_data = RwSignal::new(generate_users(12));
     let feature_columns = RwSignal::new(vec![
@@ -923,6 +984,42 @@ pub fn DataTableDemo() -> impl IntoView {
                         }
                     })
                     attr:id="custom-filter-table"
+                />
+            </Section>
+
+            // Server-owned table: the typed query round-trip
+            <Section title="Server-Owned Table (ServerDataTable + on_query_change)">
+                <p class="text-sm opacity-70 mb-2">
+                    "The table renders whatever the server returned and never sorts or filters "
+                    "client-side. Every user change \u{2014} page, debounced search, header sort, "
+                    "filter dropdown \u{2014} emits one typed " <code>"TableQuery"</code>
+                    " for the caller to re-fetch with. Here a simulated backend serves a 57-row "
+                    "fixture; " <code>"filter_options"</code>
+                    " supplies population-wide dropdown options so a page window can't lie about "
+                    "the population."
+                </p>
+                <p class="text-xs opacity-60 mb-4">
+                    "Last query: "
+                    <code data-testid="server-last-query">{move || last_query.get()}</code>
+                </p>
+                <ServerDataTable
+                    rows=server_rows
+                    columns=server_columns
+                    current_page=Signal::derive(move || server_page.get())
+                    total_count=Signal::derive(move || server_total.get())
+                    page_size=10_i64
+                    on_page_change=Callback::new(move |_page: i64| {
+                        // The typed query fires too; the work happens there.
+                    })
+                    on_query_change=Callback::new(run_server_query)
+                    filter_options=Signal::derive(move || {
+                        let all = server_fixture.get_value();
+                        HashMap::from([
+                            ("role", distinct_values(&all, "role")),
+                            ("status", distinct_values(&all, "status")),
+                        ])
+                    })
+                    attr:id="server-table"
                 />
             </Section>
 

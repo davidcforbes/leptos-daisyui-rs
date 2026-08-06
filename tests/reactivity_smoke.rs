@@ -217,6 +217,37 @@ async fn extra_filter_composes_with_builtin_toolbar() {
     assert_eq!(count_of(&h, rows).await, 25, "toggle off restores all rows");
 }
 
+/// ServerDataTable typed query API (beads-uy2r / `on_query_change`): a header
+/// click on the demo's server-owned table emits a TableQuery carrying the
+/// sort (previously a no-op), and page navigation emits the new page — the
+/// simulated backend re-fetches from it, so the rendered page follows.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn server_table_round_trips_typed_query() {
+    let h = harness_at("/components/data-table").await;
+
+    assert_eq!(
+        count_of(&h, "#server-table tbody tr").await,
+        10,
+        "initial fetch renders one 10-row page"
+    );
+
+    click(&h, "#server-table thead th:first-child").await;
+    let q = testid_text(&h, "server-last-query").await;
+    assert!(
+        q.contains("sort=Some((\"name\", Asc))") && q.contains("page=1"),
+        "header sort must round-trip through the query: {q}"
+    );
+
+    // The Next button is the last button of the pagination join strip.
+    click(&h, "#server-table .join > button:last-child").await;
+    let q = testid_text(&h, "server-last-query").await;
+    assert!(
+        q.contains("page=2"),
+        "page navigation must round-trip through the query: {q}"
+    );
+}
+
 /// Keyed row identity (beads-py7i / `row_key`): select a row, then replace
 /// the data vec (the demo's Reverse button). The selection must follow the
 /// row's stable id to its new position rather than clearing (the positional

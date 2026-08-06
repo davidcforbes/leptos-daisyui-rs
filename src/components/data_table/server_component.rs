@@ -1,4 +1,7 @@
 use crate::components::data_table::body::DataTableBody;
+use crate::components::data_table::filter::{
+    ColumnFilters, DataTableFilterRow, distinct_values, has_filterable_columns,
+};
 use crate::components::data_table::header::DataTableHeader;
 use crate::components::data_table::types::{
     CellRenderer, Column, DataTableClasses, DataTableTexts, SortOrder, TableRow, TypedCellFn,
@@ -8,6 +11,26 @@ use crate::merge_classes;
 use leptos::{html::Div, prelude::*};
 use std::collections::HashMap;
 use web_sys::wasm_bindgen::JsCast;
+
+/// The full query a server-owned table is currently displaying: everything a
+/// backend needs to produce the matching page. Emitted through
+/// [`ServerDataTable`]'s `on_query_change` on every user change, so the query
+/// round-trips instead of the server seeing only page numbers.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TableQuery {
+    /// 1-based page number, matching `ServerDataTable`'s `current_page`.
+    pub page: i64,
+    /// Rows per page.
+    pub page_size: i64,
+    /// Debounced free-text search ("" when the box is empty or absent).
+    pub search: String,
+    /// Active sort as `(column id, order)`; `None` means the server's
+    /// default order.
+    pub sort: Option<(&'static str, SortOrder)>,
+    /// Active per-column filter selections (column id -> exact value), from
+    /// the filter row's dropdowns ([`Column::filterable`]).
+    pub filters: ColumnFilters,
+}
 
 /// # ServerDataTable Component
 ///
@@ -136,6 +159,29 @@ pub fn ServerDataTable(
     #[prop(optional, into)]
     on_search: Option<Callback<String>>,
 
+    /// Typed query/change API: fired with the full [`TableQuery`] (page, page
+    /// size, search, sort, filters) on **every** user change -- page
+    /// navigation, debounced search, a sort toggle on a sortable header, or a
+    /// filter-row selection. Query-shape changes (search/sort/filters) report
+    /// `page: 1`, since the old page number is meaningless against a new
+    /// result set.
+    ///
+    /// This is the server-owned contract: the table renders whatever `rows`
+    /// holds and never sorts or filters client-side; it only *reports* the
+    /// query for the caller to re-fetch with. Supplying this callback is also
+    /// what arms header sorting (without it a header click has nowhere to
+    /// go, and sortable headers stay inert as before).
+    #[prop(optional, into)]
+    on_query_change: Option<Callback<TableQuery>>,
+
+    /// Option lists for [`Column::filterable`] columns, keyed by column id --
+    /// supply the *population-wide* distinct values from the server. When
+    /// absent, the dropdowns fall back to the distinct values of the current
+    /// page, which silently understates a paged population (the LIMIT-20
+    /// problem) -- fine for a demo, wrong for production.
+    #[prop(optional, into)]
+    filter_options: Option<Signal<HashMap<&'static str, Vec<String>>>>,
+
     /// Node reference to container element
     #[prop(optional)]
     node_ref: NodeRef<Div>,
@@ -170,7 +216,35 @@ pub fn ServerDataTable(
     // (see ldui-1ub) -- keep the two in sync if either changes.
     let (search_query, set_search_query) = signal(String::new());
     let (debounce_handle, set_debounce_handle) = signal(Option::<TimeoutHandle>::None);
-    let has_search = on_search.is_some();
+    // The typed query API is an equally good reason to render the search box.
+    let has_search = on_search.is_some() || on_query_change.is_some();
+
+    // Sort state. The server owns the actual ordering -- these signals only
+    // drive the header indicators and ride along in the emitted query.
+    let (sort_column, set_sort_column) = signal(Option::<&'static str>::None);
+    let (sort_order, set_sort_order) = signal(SortOrder::default());
+
+    // Filter-row selections (only rendered when a column is `filterable`).
+    // Selections are never applied to `rows` client-side: on a server table
+    // the current page is a window, and filtering the window would lie about
+    // the population. They ride along in the emitted query instead.
+    let column_filters = RwSignal::new(ColumnFilters::new());
+
+    // Assemble the current query. Untracked reads: emission points are event
+    // handlers/effects that already know *when* to fire.
+    let emit_query = move |page: i64| {
+        if let Some(cb) = on_query_change {
+            cb.run(TableQuery {
+                page,
+                page_size: page_size.get_untracked(),
+                search: search_query.get_untracked(),
+                sort: sort_column
+                    .get_untracked()
+                    .map(|c| (c, sort_order.get_untracked())),
+                filters: column_filters.get_untracked(),
+            });
+        }
+    };
 
     let on_search_input = move |ev: leptos::ev::Event| {
         // The event always has an `HtmlInputElement` target in practice, but
@@ -193,28 +267,72 @@ pub fn ServerDataTable(
         // Set new 300ms debounce timer. If scheduling fails (no `window`,
         // e.g. outside a browser context), fall back to running the search
         // immediately instead of silently dropping the keystroke.
-        let Some(cb) = on_search else {
-            set_debounce_handle.set(None);
-            return;
+        let fire = move |v: String| {
+            if let Some(cb) = on_search {
+                cb.run(v);
+            }
+            // A changed search invalidates the old page number.
+            emit_query(1);
         };
         let value_for_timeout = value.clone();
         match set_timeout_with_handle(
             move || {
-                cb.run(value_for_timeout);
+                fire(value_for_timeout);
             },
             std::time::Duration::from_millis(300),
         ) {
             Ok(handle) => set_debounce_handle.set(Some(handle)),
             Err(_) => {
-                cb.run(value);
+                fire(value);
                 set_debounce_handle.set(None);
             }
         }
     };
 
-    // No-op sort callback — server tables don't sort client-side
-    let noop_sort = Callback::new(move |_col_id: &'static str| {
-        // Intentionally empty: server-side tables delegate sorting to the server
+    // Header sort: toggle the indicator state and report through the typed
+    // query (the server does the actual ordering). Without `on_query_change`
+    // there is nowhere to report to, and headers stay inert exactly as when
+    // this callback was a no-op.
+    let on_sort = Callback::new(move |col_id: &'static str| {
+        if on_query_change.is_none() {
+            return;
+        }
+        if sort_column.get_untracked() == Some(col_id) {
+            set_sort_order.set(sort_order.get_untracked().toggle());
+        } else {
+            set_sort_column.set(Some(col_id));
+            set_sort_order.set(SortOrder::Asc);
+        }
+        emit_query(1);
+    });
+
+    // Page navigation: keep the plain `on_page_change` contract and mirror it
+    // through the typed query.
+    let page_change = Callback::new(move |page: i64| {
+        on_page_change.run(page);
+        emit_query(page);
+    });
+
+    // Filter row plumbing (rendered only when a column is `filterable`).
+    let show_filter_row = Memo::new(move |_| columns.with(|c| has_filterable_columns(c)));
+    let effective_filter_options = Signal::derive(move || match filter_options {
+        Some(opts) => opts.get(),
+        // Fallback: distinct values of the current page. Understates a paged
+        // population -- see the `filter_options` prop docs.
+        None => rows.with(|r| {
+            columns.with(|cols| {
+                cols.iter()
+                    .filter(|c| c.filterable)
+                    .map(|c| (c.id, distinct_values(r, c.id)))
+                    .collect::<HashMap<&'static str, Vec<String>>>()
+            })
+        }),
+    });
+    Effect::new(move |prev: Option<()>| {
+        let _ = column_filters.get();
+        if prev.is_some() {
+            emit_query(1);
+        }
     });
 
     // Container style for viewport-constrained scrolling
@@ -263,12 +381,25 @@ pub fn ServerDataTable(
                 >
                     <DataTableHeader
                         columns=columns
-                        sort_column=Signal::derive(move || None)
-                        sort_order=Signal::derive(SortOrder::default)
-                        on_sort=noop_sort
+                        sort_column=Signal::derive(move || sort_column.get())
+                        sort_order=Signal::derive(move || sort_order.get())
+                        on_sort=on_sort
                         header_cell_class=classes.header_cell
                         column_widths=column_widths
-                    />
+                    >
+                        {move || {
+                            show_filter_row.get().then(|| view! {
+                                <DataTableFilterRow
+                                    columns=columns
+                                    options=effective_filter_options
+                                    filters=column_filters
+                                    all_label=Signal::derive(move || {
+                                        texts.with(|t| t.filter_all.clone())
+                                    })
+                                />
+                            })
+                        }}
+                    </DataTableHeader>
                     <DataTableBody
                         columns=columns
                         rows=Signal::derive(move || {
@@ -306,7 +437,7 @@ pub fn ServerDataTable(
                                 total_count=total
                                 start=start
                                 end=end
-                                on_page_change=on_page_change
+                                on_page_change=page_change
                                 texts=texts.get()
                                 classes=classes.clone()
                             />
