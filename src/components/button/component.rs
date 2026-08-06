@@ -104,9 +104,11 @@ pub fn Button(
 /// - `node_ref` - References the `<a>` element ([HTMLAnchorElement](https://developer.mozilla.org/en-US/docs/Web/API/HTMLAnchorElement))
 #[component]
 pub fn LinkButton(
-    /// URL to navigate to when clicked
-    #[prop(optional)]
-    href: &'static str,
+    /// URL to navigate to when clicked. Accepts static strings, owned `String`s
+    /// (e.g. a per-row route like `format!("/matter/{case_no}")`), or reactive
+    /// signals.
+    #[prop(optional, into)]
+    href: MaybeProp<String>,
 
     /// Button color variant (same as Button component)
     #[prop(optional, into)]
@@ -142,7 +144,7 @@ pub fn LinkButton(
     let ripple_handle = use_ripple();
     view! {
         <a
-            href=href
+            href=move || href.get()
             node_ref=node_ref
             class=move || {
                 merge_classes!(
