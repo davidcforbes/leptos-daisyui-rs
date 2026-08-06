@@ -217,6 +217,39 @@ async fn extra_filter_composes_with_builtin_toolbar() {
     assert_eq!(count_of(&h, rows).await, 25, "toggle off restores all rows");
 }
 
+/// DayScheduler keyboard contract (ldui-j6s): clicking an event selects and
+/// activates it; ArrowDown on the focused block requests a +15-minute move,
+/// which the demo applies — and because event blocks are keyed by index (not
+/// by their times), the SAME node keeps focus, so a second press moves again.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn day_scheduler_keyboard_moves_event() {
+    let h = harness_at("/components/day-scheduler").await;
+    let block = "#interactive-scheduler [role=\"button\"]";
+
+    click(&h, block).await;
+    assert_eq!(testid_text(&h, "sched-selected").await, "0");
+    assert_eq!(testid_text(&h, "sched-activated").await, "0");
+    assert_eq!(
+        testid_text(&h, "sched-first-times").await,
+        "540-600",
+        "Intake review starts at 09:00"
+    );
+
+    h.press_key_sequence(&[Key::ArrowDown]).await.expect("key");
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    assert_eq!(
+        testid_text(&h, "sched-first-times").await,
+        "555-615",
+        "ArrowDown must move the focused event 15 minutes later"
+    );
+
+    // Focus survived the move (index-keyed node): the next press works too.
+    h.press_key_sequence(&[Key::ArrowDown]).await.expect("key");
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    assert_eq!(testid_text(&h, "sched-first-times").await, "570-630");
+}
+
 /// ServerDataTable typed query API (beads-uy2r / `on_query_change`): a header
 /// click on the demo's server-owned table emits a TableQuery carrying the
 /// sort (previously a no-op), and page navigation emits the new page — the

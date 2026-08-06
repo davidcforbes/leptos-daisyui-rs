@@ -1,6 +1,6 @@
 use super::types::{
-    EventLayout, HourFormat, SchedulerEvent, compute_event_layout, effective_height_px,
-    minute_to_percent,
+    EventKeyIntent, EventLayout, HourFormat, SchedulerEvent, compute_event_layout,
+    effective_height_px, event_aria_label, event_key_intent, minute_to_percent,
 };
 use crate::merge_classes;
 use leptos::{html::Div, prelude::*};
@@ -57,6 +57,8 @@ use leptos::{html::Div, prelude::*};
 /// @source inline("-ml-1 h-2 w-2 rounded-full h-px ml-1 shrink-0 font-medium text-error bg-error");
 /// @source inline("bg-neutral/15 bg-primary/15 bg-secondary/15 bg-accent/15 bg-info/15 bg-success/15 bg-warning/15 bg-error/15");
 /// @source inline("border-neutral border-primary border-secondary border-accent border-info border-success border-warning border-error");
+/// // Interactive event blocks (selection ring)
+/// @source inline("ring-2 ring-primary z-20");
 /// ```
 ///
 /// ## Node References
@@ -109,10 +111,54 @@ pub fn DayScheduler(
     #[prop(optional, into)]
     class: &'static str,
 
+    /// Optional event activation: a click or Enter/Space on an event block
+    /// calls this with the event's index into `events`. Supplying any of the
+    /// interaction props (`on_event_activate`, `selected_event`,
+    /// `on_event_move`, `on_event_resize`) makes event blocks focusable
+    /// (`tabindex=0`, `role="button"`) with an accessible name of
+    /// "title, HH:MM to HH:MM"; a display-only scheduler gains no tab stops.
+    #[prop(optional, into)]
+    on_event_activate: Option<Callback<usize>>,
+
+    /// Optional controlled selection: the index of the selected event, if
+    /// any. Clicking or activating an event selects it; the selected block
+    /// carries `aria-pressed="true"` and a focus-visible-style ring.
+    #[prop(optional)]
+    selected_event: Option<RwSignal<Option<usize>>>,
+
+    /// Optional keyboard move contract: ArrowUp/ArrowDown on a focused event
+    /// requests `(index, signed minute delta)` — negative is earlier. The
+    /// consumer owns `events` and applies (clamps, snaps, or refuses) the
+    /// move; the component never mutates events itself. This is the
+    /// keyboard-equivalent workflow for drag-based rescheduling.
+    #[prop(optional, into)]
+    on_event_move: Option<Callback<(usize, i32)>>,
+
+    /// Optional keyboard resize contract: Shift+ArrowUp/ArrowDown requests
+    /// `(index, signed minute delta)` applied to the event's end time.
+    #[prop(optional, into)]
+    on_event_resize: Option<Callback<(usize, i32)>>,
+
+    /// Minute step for keyboard move/resize (default 15; `0` coerces to 15).
+    #[prop(optional, into, default = Signal::derive(|| 15))]
+    move_step_min: Signal<u32>,
+
+    /// Optional custom event-block content, invoked with
+    /// `(index, event)` — e.g. a title plus an owner chip. When absent the
+    /// block renders its title, exactly as before.
+    #[prop(optional, into)]
+    event_content: Option<Callback<(usize, SchedulerEvent), AnyView>>,
+
     /// Node reference to the wrapping div element
     #[prop(optional)]
     node_ref: NodeRef<Div>,
 ) -> impl IntoView {
+    // Focus/keyboard semantics exist only when the consumer opted into some
+    // interaction — mirrors DataTable's row_is_interactive rule.
+    let interactive = on_event_activate.is_some()
+        || selected_event.is_some()
+        || on_event_move.is_some()
+        || on_event_resize.is_some();
     let hours = Signal::derive(move || {
         let s = start_hour.get();
         let e = end_hour.get().max(s + 1);
@@ -141,6 +187,10 @@ pub fn DayScheduler(
             .enumerate()
             .collect::<Vec<(usize, (SchedulerEvent, EventLayout))>>()
     });
+
+    // Index list for the event <For> — see the keying comment at the loop.
+    let event_indices =
+        Signal::derive(move || (0..paired_events.with(Vec::len)).collect::<Vec<usize>>());
 
     view! {
         <div
@@ -223,37 +273,112 @@ pub fn DayScheduler(
                     }
                 />
 
-                // Event blocks.
+                // Event blocks. Keyed by INDEX, with each block reading its
+                // own (event, layout) reactively: a keyboard move changes the
+                // event's times, and a time-derived key would replace the DOM
+                // node mid-interaction and drop focus — making the second
+                // arrow press land nowhere. Positional identity keeps the
+                // node (and focus) stable while its position animates.
                 <For
-                    each=move || paired_events.get()
-                    key=|(idx, (ev, layout))| {
-                        (
-                            *idx,
-                            ev.start_min,
-                            ev.end_min,
-                            ev.title.clone(),
-                            format!("{:?}", ev.color),
-                            layout.top_pct.to_bits(),
-                            layout.height_pct.to_bits(),
-                            layout.left_pct.to_bits(),
-                            layout.width_pct.to_bits(),
-                        )
-                    }
-                    children=move |(_, (ev, layout))| {
+                    each=move || event_indices.get()
+                    key=|idx| *idx
+                    children=move |idx| {
+                        let pair = Signal::derive(move || {
+                            paired_events.with(|v| v.get(idx).map(|(_, p)| p.clone()))
+                        });
+                        let is_selected = move || {
+                            selected_event.is_some_and(|s| s.get() == Some(idx))
+                        };
+                        let select_and_activate = move || {
+                            if let Some(s) = selected_event {
+                                s.set(Some(idx));
+                            }
+                            if let Some(cb) = on_event_activate {
+                                cb.run(idx);
+                            }
+                        };
                         view! {
                             <div
-                                class=merge_classes!(
-                                    "absolute m-px overflow-hidden rounded-sm border-l-4 p-1 text-xs",
-                                    ev.color.bg_class(),
-                                    ev.color.border_class()
-                                )
-                                style:top=format!("{}%", layout.top_pct)
-                                style:height=format!("{}%", layout.height_pct)
-                                style:left=format!("{}%", layout.left_pct)
-                                style:width=format!("{}%", layout.width_pct)
-                                title=ev.title.clone()
+                                class=move || {
+                                    let (ev, _) = pair.get().unwrap_or_default();
+                                    merge_classes!(
+                                        "absolute m-px overflow-hidden rounded-sm border-l-4 p-1 text-xs",
+                                        ev.color.bg_class(),
+                                        ev.color.border_class()
+                                    ).to_class()
+                                }
+                                class:ring-2=is_selected
+                                class:ring-primary=is_selected
+                                class:z-20=is_selected
+                                class:hidden=move || pair.get().is_none()
+                                style:top=move || {
+                                    format!("{}%", pair.get().unwrap_or_default().1.top_pct)
+                                }
+                                style:height=move || {
+                                    format!("{}%", pair.get().unwrap_or_default().1.height_pct)
+                                }
+                                style:left=move || {
+                                    format!("{}%", pair.get().unwrap_or_default().1.left_pct)
+                                }
+                                style:width=move || {
+                                    format!("{}%", pair.get().unwrap_or_default().1.width_pct)
+                                }
+                                title=move || pair.get().unwrap_or_default().0.title
+                                role=interactive.then_some("button")
+                                tabindex=interactive.then_some(0)
+                                aria-label=move || {
+                                    (interactive && pair.get().is_some()).then(|| {
+                                        event_aria_label(&pair.get().unwrap_or_default().0)
+                                    })
+                                }
+                                aria-pressed=move || {
+                                    (interactive && selected_event.is_some()).then(|| {
+                                        if is_selected() { "true" } else { "false" }
+                                    })
+                                }
+                                on:click=move |_| {
+                                    if interactive {
+                                        select_and_activate();
+                                    }
+                                }
+                                on:keydown=move |ev_k: web_sys::KeyboardEvent| {
+                                    if !interactive {
+                                        return;
+                                    }
+                                    let step = match move_step_min.get_untracked() {
+                                        0 => 15,
+                                        s => s,
+                                    };
+                                    match event_key_intent(&ev_k.key(), ev_k.shift_key(), step) {
+                                        Some(EventKeyIntent::Activate) => {
+                                            ev_k.prevent_default();
+                                            select_and_activate();
+                                        }
+                                        Some(EventKeyIntent::Move(delta)) => {
+                                            ev_k.prevent_default();
+                                            if let Some(cb) = on_event_move {
+                                                cb.run((idx, delta));
+                                            }
+                                        }
+                                        Some(EventKeyIntent::Resize(delta)) => {
+                                            ev_k.prevent_default();
+                                            if let Some(cb) = on_event_resize {
+                                                cb.run((idx, delta));
+                                            }
+                                        }
+                                        None => {}
+                                    }
+                                }
                             >
-                                <span class="truncate font-medium">{ev.title.clone()}</span>
+                                {move || {
+                                    pair.get().map(|(ev, _)| match event_content {
+                                        Some(renderer) => renderer.run((idx, ev)).into_any(),
+                                        None => view! {
+                                            <span class="truncate font-medium">{ev.title}</span>
+                                        }
+                                        .into_any(),
+                                    })
+                                }}
                             </div>
                         }
                     }

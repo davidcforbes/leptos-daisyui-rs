@@ -299,3 +299,74 @@ fn compute_event_layout_three_way_mutual_overlap_needs_three_lanes() {
     approx(layouts[1].left_pct, 100.0 / 3.0);
     approx(layouts[2].left_pct, 200.0 / 3.0);
 }
+
+// ---------------------------------------------------------------------
+// Keyboard contract (event_key_intent) + accessible names
+// ---------------------------------------------------------------------
+
+#[test]
+fn minute_label_formats_hh_mm() {
+    assert_eq!(minute_label(0), "00:00");
+    assert_eq!(minute_label(9 * 60 + 5), "09:05");
+    assert_eq!(minute_label(23 * 60 + 59), "23:59");
+    // 24:00 wraps to a clock hour rather than printing "24".
+    assert_eq!(minute_label(24 * 60), "00:00");
+}
+
+#[test]
+fn event_aria_label_is_title_plus_time_range() {
+    let e = SchedulerEvent::new("Standup", 9 * 60, 9 * 60 + 15, SchedulerEventColor::Primary);
+    assert_eq!(event_aria_label(&e), "Standup, 09:00 to 09:15");
+}
+
+#[test]
+fn enter_and_space_activate() {
+    assert_eq!(
+        event_key_intent("Enter", false, 15),
+        Some(EventKeyIntent::Activate)
+    );
+    assert_eq!(
+        event_key_intent(" ", false, 15),
+        Some(EventKeyIntent::Activate)
+    );
+}
+
+#[test]
+fn arrows_move_by_the_step() {
+    assert_eq!(
+        event_key_intent("ArrowUp", false, 15),
+        Some(EventKeyIntent::Move(-15))
+    );
+    assert_eq!(
+        event_key_intent("ArrowDown", false, 30),
+        Some(EventKeyIntent::Move(30))
+    );
+}
+
+#[test]
+fn shift_arrows_resize_instead_of_moving() {
+    assert_eq!(
+        event_key_intent("ArrowUp", true, 15),
+        Some(EventKeyIntent::Resize(-15))
+    );
+    assert_eq!(
+        event_key_intent("ArrowDown", true, 15),
+        Some(EventKeyIntent::Resize(15))
+    );
+}
+
+#[test]
+fn tab_and_other_keys_are_left_for_focus_navigation() {
+    assert_eq!(event_key_intent("Tab", false, 15), None);
+    assert_eq!(event_key_intent("Escape", false, 15), None);
+    assert_eq!(event_key_intent("a", false, 15), None);
+}
+
+#[test]
+fn zero_step_still_produces_a_nonzero_move() {
+    // A misconfigured step must not turn arrows into no-ops.
+    assert_eq!(
+        event_key_intent("ArrowDown", false, 0),
+        Some(EventKeyIntent::Move(1))
+    );
+}

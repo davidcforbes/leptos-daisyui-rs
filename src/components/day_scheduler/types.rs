@@ -30,8 +30,11 @@ impl HourFormat {
 }
 
 /// One scheduled block. `start_min` / `end_min` are minutes from midnight.
-/// Mirrors d2d-ui's `SchedulerEvent`.
-#[derive(Clone, Debug, PartialEq)]
+/// Mirrors d2d-ui's `SchedulerEvent`. (`Default` is a degenerate zero-length
+/// midnight event — it exists for placeholder reads in reactive closures,
+/// not as a sensible event; construct real events with
+/// [`SchedulerEvent::new`].)
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct SchedulerEvent {
     /// Display title, shown inside the event block.
     pub title: String,
@@ -59,6 +62,55 @@ impl SchedulerEvent {
             end_min: end_min.max(start_min + 1),
             color,
         }
+    }
+}
+
+/// `min` (minutes from midnight) as a `HH:MM` clock label — the vocabulary
+/// of an event block's accessible name.
+pub fn minute_label(min: u32) -> String {
+    format!("{:02}:{:02}", (min / 60) % 24, min % 60)
+}
+
+/// The accessible name of an event block: title plus its time range, so a
+/// screen-reader user hears "Standup, 09:00 to 09:15" rather than a bare
+/// title floating in an unlabeled grid.
+pub fn event_aria_label(ev: &SchedulerEvent) -> String {
+    format!(
+        "{}, {} to {}",
+        ev.title,
+        minute_label(ev.start_min),
+        minute_label(ev.end_min)
+    )
+}
+
+/// What a key press on a focused event block asks for. The mapping is pure
+/// so the keyboard contract is unit-testable without a DOM.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EventKeyIntent {
+    /// Enter / Space — activate the event (open, edit — the consumer's verb).
+    Activate,
+    /// Arrow Up/Down — request the event move earlier/later by the given
+    /// signed minute delta. The consumer owns the events and applies (or
+    /// refuses) the move.
+    Move(i32),
+    /// Shift+Arrow Up/Down — request the event's end shrink/grow by the given
+    /// signed minute delta.
+    Resize(i32),
+}
+
+/// Map a key press on a focused event block to its [`EventKeyIntent`]:
+/// Enter/Space activate, ArrowUp/ArrowDown move by `step_min`, and
+/// Shift+Arrow resizes instead. Everything else (Tab above all) is `None` so
+/// focus navigation keeps working.
+pub fn event_key_intent(key: &str, shift: bool, step_min: u32) -> Option<EventKeyIntent> {
+    let step = step_min.max(1) as i32;
+    match key {
+        "Enter" | " " => Some(EventKeyIntent::Activate),
+        "ArrowUp" if shift => Some(EventKeyIntent::Resize(-step)),
+        "ArrowDown" if shift => Some(EventKeyIntent::Resize(step)),
+        "ArrowUp" => Some(EventKeyIntent::Move(-step)),
+        "ArrowDown" => Some(EventKeyIntent::Move(step)),
+        _ => None,
     }
 }
 
