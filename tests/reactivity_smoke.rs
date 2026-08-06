@@ -128,6 +128,52 @@ async fn data_table_sort_toggles_via_oracle() {
     );
 }
 
+/// Text content of the element with the given `data-testid`.
+async fn testid_text(h: &pixelproof_web::Harness, testid: &str) -> String {
+    let sel = format!("[data-testid=\"{testid}\"]");
+    let expr = format!(
+        "document.querySelector({}).textContent",
+        serde_json::to_string(&sel).unwrap()
+    );
+    h.page()
+        .evaluate(expr.as_str())
+        .await
+        .expect("evaluate")
+        .into_value()
+        .expect("string")
+}
+
+/// Action cells (beads-2knb / `Column::action`): clicking the "Open" button
+/// inside the activation demo's action column runs the button's handler but
+/// must NOT fire `on_row_activate` — no per-renderer `stop_propagation`
+/// involved, the containment lives in the framework. A click on a plain cell
+/// of the same row still activates.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn action_cell_click_does_not_activate_row() {
+    let h = harness_at("/components/data-table").await;
+
+    click(
+        &h,
+        "#activation-table tbody tr:first-child td:last-child button",
+    )
+    .await;
+    assert_eq!(testid_text(&h, "open-count").await, "1", "Open must run");
+    assert_eq!(
+        testid_text(&h, "activate-count").await,
+        "0",
+        "an action-cell click must not activate the row"
+    );
+
+    click(&h, "#activation-table tbody tr:first-child td:first-child").await;
+    assert_eq!(
+        testid_text(&h, "activate-count").await,
+        "1",
+        "a plain-cell click on the same row must still activate"
+    );
+    assert_eq!(testid_text(&h, "open-count").await, "1");
+}
+
 /// DataTable runtime localization (beads-gh7a): the demo's "Runtime
 /// Localization" section derives `columns` and `texts` from a locale signal.
 /// Toggling the locale must re-render the table chrome in place — the header

@@ -106,7 +106,9 @@ pub fn Button(
 pub fn LinkButton(
     /// URL to navigate to when clicked. Accepts static strings, owned `String`s
     /// (e.g. a per-row route like `format!("/matter/{case_no}")`), or reactive
-    /// signals.
+    /// signals. Rendered verbatim as the `<a href>`: do not interpolate
+    /// untrusted input (a `javascript:` scheme would execute), same contract
+    /// as `MenuItem`/`BreadcrumbItem` hrefs.
     #[prop(optional, into)]
     href: MaybeProp<String>,
 

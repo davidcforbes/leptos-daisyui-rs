@@ -152,6 +152,34 @@ pub fn DataTableDemo() -> impl IntoView {
     let activate_count = RwSignal::new(0_usize);
     let activate_selected = RwSignal::new(BTreeSet::<usize>::new());
 
+    // Action column for the activation demo: clicking "Open" must NOT also
+    // activate the row — `Column::action()` scopes the cell's events away
+    // from row interaction (asserted by the reactivity suite's
+    // `action_cell_click_does_not_activate_row`).
+    let open_count = RwSignal::new(0_usize);
+    let activation_columns = RwSignal::new(vec![
+        Column::new("id", "ID"),
+        Column::new("name", "Name"),
+        Column::new("email", "Email"),
+        Column::new_non_sortable("actions", "Actions")
+            .action()
+            .with_renderer(0),
+    ]);
+    let open_renderer: CellRenderer = Callback::new(
+        move |(_idx, _row): (usize, HashMap<&'static str, String>)| {
+            view! {
+                <Button
+                    size=ButtonSize::Xs
+                    color=ButtonColor::Primary
+                    on:click=move |_| open_count.update(|n| *n += 1)
+                >
+                    "Open"
+                </Button>
+            }
+            .into_any()
+        },
+    );
+
     // Column resize + typed cells (Badge/Icon) + row background + clipboard export
     let feature_data = RwSignal::new(generate_users(12));
     let feature_columns = RwSignal::new(vec![
@@ -760,16 +788,22 @@ pub fn DataTableDemo() -> impl IntoView {
                             }}
                         </code>
                     </span>
+                    <span>
+                        "Opens (action cell, never activates): "
+                        <code data-testid="open-count">{move || open_count.get()}</code>
+                    </span>
                 </div>
                 <DataTable
                     data=selection_data
-                    columns=selection_columns
+                    columns=activation_columns
                     page_size=8
                     selected_rows=activate_selected
+                    cell_renderers=vec![open_renderer]
                     on_row_activate=Callback::new(move |idx: usize| {
                         activated_row.set(Some(idx));
                         activate_count.update(|n| *n += 1);
                     })
+                    attr:id="activation-table"
                 />
             </Section>
 

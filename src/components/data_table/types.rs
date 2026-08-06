@@ -96,6 +96,12 @@ pub struct Column {
     /// `false`). Opt in with [`Column::filterable`]. When no column opts in,
     /// no filter row is rendered at all.
     pub filterable: bool,
+    /// Whether this column holds row actions (buttons/links rendered via a
+    /// cell renderer). Opt in with [`Column::action`]. Events inside an
+    /// action cell stay in the cell: a click or Enter/Space there never
+    /// reaches the row's activate/select handling, so cell renderers don't
+    /// need per-app `stop_propagation` wrappers.
+    pub is_action: bool,
 }
 
 impl Column {
@@ -118,6 +124,7 @@ impl Column {
             typed_cell_index: None,
             sort_as: SortAs::Text,
             filterable: false,
+            is_action: false,
         }
     }
 
@@ -136,6 +143,7 @@ impl Column {
             typed_cell_index: None,
             sort_as: SortAs::Text,
             filterable: false,
+            is_action: false,
         }
     }
 
@@ -215,6 +223,25 @@ impl Column {
     /// ```
     pub fn filterable(mut self) -> Self {
         self.filterable = true;
+        self
+    }
+
+    /// Mark this column as holding row actions (buttons/links in its cells).
+    ///
+    /// On an interactive table (`selected_rows` / `on_row_activate`), a click
+    /// on a row normally activates or selects it. Inside an action cell that
+    /// is exactly wrong: pressing "Open" must not also fire the row's
+    /// activation. Marking the column scopes row interaction away from the
+    /// cell once, in the framework, instead of every cell renderer wrapping
+    /// its buttons in `stop_propagation` by hand.
+    ///
+    /// ```
+    /// use leptos_daisyui_rs::components::Column;
+    ///
+    /// let actions = Column::new_non_sortable("actions", "Actions").action().with_renderer(0);
+    /// ```
+    pub fn action(mut self) -> Self {
+        self.is_action = true;
         self
     }
 }
@@ -466,6 +493,26 @@ mod tests {
     fn with_typed_cell_sets_typed_cell_index() {
         let col = Column::new("status", "Status").with_typed_cell(3);
         assert_eq!(col.typed_cell_index, Some(3));
+    }
+
+    #[test]
+    fn columns_are_not_action_by_default() {
+        assert!(!Column::new("x", "X").is_action);
+        assert!(!Column::new_non_sortable("x", "X").is_action);
+    }
+
+    #[test]
+    fn action_sets_is_action() {
+        let col = Column::new_non_sortable("actions", "Actions").action();
+        assert!(col.is_action);
+    }
+
+    #[test]
+    fn column_new_accepts_owned_header() {
+        // Runtime localization hands out owned Strings (t() output).
+        let translated = String::from("Nombre");
+        let col = Column::new("name", translated);
+        assert_eq!(col.header, "Nombre");
     }
 
     #[test]

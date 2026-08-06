@@ -182,6 +182,7 @@ pub fn DataTableBody(
                                     let cell_value = row.get(col.id).cloned().unwrap_or_default();
                                     let cell_class = merge_classes!(body_cell_class, col.class.unwrap_or(""));
                                     let col_id = col.id;
+                                    let is_action = col.is_action;
 
                                     // Build truncation style if enabled. Static per column (doesn't
                                     // depend on `column_widths`), computed once here and cloned into
@@ -238,7 +239,24 @@ pub fn DataTableBody(
                                     };
 
                                     view! {
-                                        <td class=cell_class style=style_attr title=title_attr>
+                                        <td
+                                            class=cell_class
+                                            style=style_attr
+                                            title=title_attr
+                                            // Action cells ([`Column::action`]) keep their events:
+                                            // a click or Enter/Space on a button/link inside must
+                                            // not bubble into the row's activate/select handling.
+                                            on:click=move |ev: web_sys::MouseEvent| {
+                                                if is_action {
+                                                    ev.stop_propagation();
+                                                }
+                                            }
+                                            on:keydown=move |ev: web_sys::KeyboardEvent| {
+                                                if is_action {
+                                                    ev.stop_propagation();
+                                                }
+                                            }
+                                        >
                                             {content}
                                         </td>
                                     }
