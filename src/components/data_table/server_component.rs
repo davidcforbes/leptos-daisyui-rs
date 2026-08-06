@@ -466,6 +466,16 @@ fn ServerPaginationControls(
     // Build page number list with ellipsis
     let page_numbers = build_page_range(current_page, total_pages);
 
+    // Extracted from the view because RSX parses an inline `>=` as a tag
+    // close (same trap `DataTableControls` documents). Worse than a parse
+    // error: `disabled=current_page >` truncated the attribute, demoted the
+    // rest of the tag to text, and turned the Next button's click-guard block
+    // into a *render-time child expression* — every render "clicked Next"
+    // until the last page, silently walking a freshly mounted table to page
+    // N. Unexercised until the typed-query demo made the walk visible.
+    let prev_disabled = current_page <= 1;
+    let next_disabled = current_page >= total_pages;
+
     view! {
         <div class=classes.pagination>
             <span class=classes.page_indicator>
@@ -480,7 +490,7 @@ fn ServerPaginationControls(
                 // Previous button
                 <button
                     class=merge_classes!(classes.pagination_button, "join-item")
-                    disabled=current_page <= 1
+                    disabled=prev_disabled
                     on:click=move |_| {
                         if current_page > 1 {
                             on_page_change.run(current_page - 1);
@@ -524,7 +534,7 @@ fn ServerPaginationControls(
                 // Next button
                 <button
                     class=merge_classes!(classes.pagination_button, "join-item")
-                    disabled=current_page >= total_pages
+                    disabled=next_disabled
                     on:click=move |_| {
                         if current_page < total_pages {
                             on_page_change.run(current_page + 1);
