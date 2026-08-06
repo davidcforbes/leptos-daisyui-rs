@@ -58,7 +58,8 @@ pub fn distinct_values(data: &[TableRow], col_id: &str) -> Vec<String> {
 /// Matching is exact and case-sensitive: the options come from the data itself,
 /// so a selected option always corresponds to a real cell value. This is
 /// deliberately unlike the free-text `searchable` box, which is a
-/// case-insensitive substring match across all columns.
+/// case-insensitive substring match across the declared searchable columns
+/// ([`row_matches_search`]).
 ///
 /// A filter on a column the row has no value for excludes the row -- the row
 /// cannot equal the selected value.
