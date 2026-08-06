@@ -321,6 +321,31 @@ pub fn DataTable(
     /// `classes.selected_row`.
     #[prop(optional)]
     row_class_fn: Option<Callback<(usize, TableRow), String>>,
+
+    /// Optional controlled filter predicate, invoked with `(abs_idx, row)` and
+    /// ANDed with the built-in per-column dropdowns and the `searchable` box.
+    /// This is the home for *derived* domain filters the distinct-value
+    /// dropdowns cannot express -- SLA buckets, new-arrival windows -- without
+    /// rebuilding the table's toolbar.
+    ///
+    /// The predicate is controlled by the caller's own state: read your
+    /// signals inside it and the table re-filters when they change (the
+    /// filtering memo tracks them automatically). Pair with [`toolbar`] to
+    /// put the driving UI inline with the built-in toolbar.
+    ///
+    /// [`toolbar`]: #structfield.toolbar
+    #[prop(optional, into)]
+    extra_filter: Option<Callback<(usize, TableRow), bool>>,
+
+    /// Optional extra toolbar content, rendered in the table's toolbar row
+    /// between the search box and the column chooser -- so caller-supplied
+    /// filter controls (the UI driving [`extra_filter`]) compose with the
+    /// built-in toolbar instead of replacing it. Supplying it forces the
+    /// toolbar row to render even when `searchable`/`column_chooser` are off.
+    ///
+    /// [`extra_filter`]: #structfield.extra_filter
+    #[prop(optional)]
+    toolbar: Option<ViewFn>,
 ) -> impl IntoView {
     // Column-width overrides from dragging a header divider, keyed by
     // column id. Shared between the header (writer) and body (reader) so
@@ -499,6 +524,14 @@ pub fn DataTable(
                 if !filters.is_empty() && !row_matches_filters(row, &filters) {
                     return false;
                 }
+                // Caller-controlled predicate, ANDed with the built-ins.
+                // Signals the predicate reads are tracked by this memo, so
+                // the caller's own filter state re-filters reactively.
+                if let Some(f) = extra_filter
+                    && !f.run((i, row.clone()))
+                {
+                    return false;
+                }
                 if q.is_empty() {
                     return true;
                 }
@@ -506,6 +539,19 @@ pub fn DataTable(
             })
             .collect::<Vec<usize>>()
     });
+
+    // Back to page 1 when the caller's controlled `extra_filter` changes the
+    // visible set, mirroring the built-in dropdowns. Scoped to tables that
+    // supply the predicate so every other table keeps today's exact paging
+    // behaviour.
+    if extra_filter.is_some() {
+        Effect::new(move |prev: Option<()>| {
+            let _ = filtered_indices.get();
+            if prev.is_some() {
+                set_current_page.set(0);
+            }
+        });
+    }
 
     // Sorted indices. Sorting an index permutation (never the data) is what
     // keeps row identity -- and therefore `selected_rows` -- intact.
@@ -828,7 +874,8 @@ pub fn DataTable(
             {move || {
                 let show_search = searchable.get();
                 let show_chooser = column_chooser.get();
-                (show_search || show_chooser).then(|| view! {
+                let extra_toolbar = toolbar.clone();
+                (show_search || show_chooser || extra_toolbar.is_some()).then(|| view! {
                     <div class="mb-3 flex items-center gap-2">
                         {show_search.then(|| view! {
                             <input
@@ -840,6 +887,7 @@ pub fn DataTable(
                                 on:input=on_search_input
                             />
                         })}
+                        {extra_toolbar.map(|t| t.run())}
                         <div class="flex-1"></div>
                         {show_chooser.then(|| view! {
                             <DataTableColumnChooser columns=columns hidden=hidden_columns />

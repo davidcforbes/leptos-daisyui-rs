@@ -191,6 +191,17 @@ pub fn DataTableDemo() -> impl IntoView {
         Column::new("email", "Email"),
     ]);
 
+    // Controlled custom filter (`extra_filter` + `toolbar`): a derived domain
+    // filter (here "Admins only") the distinct-value dropdowns can't express,
+    // composing with the built-in toolbar instead of replacing it.
+    let admins_only = RwSignal::new(false);
+    let custom_filter_data = RwSignal::new(generate_users(25));
+    let custom_filter_columns = RwSignal::new(vec![
+        Column::new("name", "Name"),
+        Column::new("role", "Role"),
+        Column::new("status", "Status").filterable(),
+    ]);
+
     // Column resize + typed cells (Badge/Icon) + row background + clipboard export
     let feature_data = RwSignal::new(generate_users(12));
     let feature_columns = RwSignal::new(vec![
@@ -863,6 +874,55 @@ pub fn DataTableDemo() -> impl IntoView {
                         row.get("id").cloned().unwrap_or_default()
                     })
                     attr:id="keyed-table"
+                />
+            </Section>
+
+            // Controlled custom filter (opt-in `extra_filter` + `toolbar`)
+            <Section title="Custom Filters (extra_filter + toolbar)">
+                <p class="text-sm opacity-70 mb-4">
+                    "A derived domain filter the per-column dropdowns can't express: the "
+                    "\"Admins only\" toggle lives in the " <code>"toolbar"</code>
+                    " slot beside the built-in search box, and its "
+                    <code>"extra_filter"</code>
+                    " predicate ANDs with the Status dropdown and the search — the built-in "
+                    "toolbar stays, nothing is rebuilt."
+                </p>
+                <DataTable
+                    data=custom_filter_data
+                    columns=custom_filter_columns
+                    paginate=false
+                    searchable=true
+                    extra_filter=Callback::new(
+                        move |(_idx, row): (usize, HashMap<&'static str, String>)| {
+                            !admins_only.get() || row.get("role").is_some_and(|r| r == "Admin")
+                        },
+                    )
+                    toolbar=ViewFn::from(move || {
+                        view! {
+                            <Button
+                                size=ButtonSize::Sm
+                                style=ButtonStyle::Outline
+                                color=Signal::derive(move || {
+                                    if admins_only.get() {
+                                        ButtonColor::Primary
+                                    } else {
+                                        ButtonColor::Neutral
+                                    }
+                                })
+                                on:click=move |_| admins_only.update(|b| *b = !*b)
+                                attr:id="admins-only-toggle"
+                            >
+                                {move || {
+                                    if admins_only.get() {
+                                        "Admins only: on"
+                                    } else {
+                                        "Admins only: off"
+                                    }
+                                }}
+                            </Button>
+                        }
+                    })
+                    attr:id="custom-filter-table"
                 />
             </Section>
 

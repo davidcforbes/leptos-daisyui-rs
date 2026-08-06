@@ -174,6 +174,49 @@ async fn action_cell_click_does_not_activate_row() {
     assert_eq!(testid_text(&h, "open-count").await, "1");
 }
 
+/// Number of elements matching `sel`.
+async fn count_of(h: &pixelproof_web::Harness, sel: &str) -> u32 {
+    let expr = format!(
+        "document.querySelectorAll({}).length",
+        serde_json::to_string(sel).unwrap()
+    );
+    h.page()
+        .evaluate(expr.as_str())
+        .await
+        .expect("evaluate")
+        .into_value()
+        .expect("number")
+}
+
+/// Controlled custom filter (beads-je5r / `extra_filter` + `toolbar`): the
+/// demo's "Admins only" toggle lives in the toolbar slot and its predicate
+/// ANDs with the built-in filters. Toggling narrows the 25-row table to its
+/// 5 Admin rows and back, with the built-in toolbar (search box) intact.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn extra_filter_composes_with_builtin_toolbar() {
+    let h = harness_at("/components/data-table").await;
+    let rows = "#custom-filter-table tbody tr";
+
+    assert_eq!(count_of(&h, rows).await, 25, "all rows visible initially");
+    // The built-in search box must be present alongside the custom control.
+    assert_eq!(
+        count_of(
+            &h,
+            "#custom-filter-table input[aria-label=\"Search table\"]"
+        )
+        .await,
+        1,
+        "toolbar slot must compose with, not replace, the built-in toolbar"
+    );
+
+    click(&h, "#admins-only-toggle").await;
+    assert_eq!(count_of(&h, rows).await, 5, "only Admin rows remain");
+
+    click(&h, "#admins-only-toggle").await;
+    assert_eq!(count_of(&h, rows).await, 25, "toggle off restores all rows");
+}
+
 /// Keyed row identity (beads-py7i / `row_key`): select a row, then replace
 /// the data vec (the demo's Reverse button). The selection must follow the
 /// row's stable id to its new position rather than clearing (the positional
