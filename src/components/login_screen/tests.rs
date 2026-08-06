@@ -1,3 +1,4 @@
+use super::provider::LoginProvider;
 use super::style::{
     LoginState, login_password_autocomplete, login_password_label, login_submit_label,
 };
@@ -83,4 +84,46 @@ fn password_autocomplete_distinguishes_a_temporary_password() {
         login_password_autocomplete(&LoginState::EnterTempPassword),
         "one-time-code"
     );
+}
+
+// ---------------------------------------------------------------------
+// LoginProvider (ProviderLoginScreen)
+// ---------------------------------------------------------------------
+
+#[test]
+fn login_provider_defaults_to_primary_button() {
+    let p = LoginProvider::new("zoho", "Sign in with Zoho");
+    assert_eq!(p.id, "zoho");
+    assert_eq!(p.href, None);
+    assert_eq!(p.icon, None);
+    let class = p.button_class(false);
+    assert!(class.contains("btn"));
+    assert!(class.contains("btn-block"));
+    assert!(class.contains("btn-primary"));
+    assert!(!class.contains("btn-disabled"));
+}
+
+#[test]
+fn login_provider_builder_sets_href_icon_and_style() {
+    let p = LoginProvider::new("zoho", "Sign in with Zoho")
+        .with_href("/auth/zoho")
+        .with_icon("log-in")
+        .with_style_class("btn-outline");
+    assert_eq!(p.href.as_deref(), Some("/auth/zoho"));
+    assert_eq!(p.icon.as_deref(), Some("log-in"));
+    assert!(p.button_class(false).contains("btn-outline"));
+    assert!(!p.button_class(false).contains("btn-primary"));
+}
+
+#[test]
+fn login_provider_busy_disables_the_button() {
+    let p = LoginProvider::new("zoho", "Zoho");
+    assert!(p.button_class(true).contains("btn-disabled"));
+}
+
+#[test]
+fn login_provider_label_accepts_owned_localized_text() {
+    let translated = String::from("Iniciar sesión con Zoho");
+    let p = LoginProvider::new("zoho", translated);
+    assert_eq!(p.label, "Iniciar sesión con Zoho");
 }

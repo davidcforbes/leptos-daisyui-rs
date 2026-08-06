@@ -1,7 +1,7 @@
 use crate::core::{ContentLayout, Section};
 use leptos::prelude::*;
 use leptos_daisyui_rs::auth::{CognitoClient, CognitoConfig, SignInOutcome};
-use leptos_daisyui_rs::components::{LoginScreen, LoginState};
+use leptos_daisyui_rs::components::{LoginProvider, LoginScreen, LoginState, ProviderLoginScreen};
 use leptos_daisyui_rs::utils::create_credential;
 use wasm_bindgen_futures::spawn_local;
 
@@ -173,6 +173,62 @@ pub fn LoginEnrollmentDemo() -> impl IntoView {
                     </div>
                 </Show>
             </Section>
+
+            <Section title="Provider login shell (ProviderLoginScreen)" col=true>
+                <p class="text-sm opacity-70 mb-2">
+                    "For hosts whose IdP flow is a server redirect: no credential state, just a "
+                    "branded card with one button per provider. A provider with an "
+                    <code>"href"</code> " renders as a link (navigation starts the OAuth flow); "
+                    "one without reports its id through " <code>"on_provider"</code> "."
+                </p>
+                <ProviderLoginDemo />
+            </Section>
         </ContentLayout>
+    }
+}
+
+#[component]
+fn ProviderLoginDemo() -> impl IntoView {
+    let last_provider = RwSignal::new(String::new());
+    let providers = Signal::derive(|| {
+        vec![
+            LoginProvider::new("zoho", "Sign in with Zoho")
+                .with_href("#zoho-redirect")
+                .with_icon("log-in"),
+            LoginProvider::new("google", "Sign in with Google")
+                .with_icon("chrome")
+                .with_style_class("btn-outline"),
+        ]
+    });
+    view! {
+        <p class="text-sm mb-2">
+            "Last scripted provider: "
+            <code data-testid="provider-clicked">
+                {move || {
+                    let p = last_provider.get();
+                    if p.is_empty() { "(none)".to_string() } else { p }
+                }}
+            </code>
+        </p>
+        <div class="w-full max-w-xl overflow-hidden rounded-box border border-base-300" id="provider-login">
+            <ProviderLoginScreen
+                app_name="Office Performance"
+                subtitle="Use your Zoho account to continue"
+                providers=providers
+                brand=ViewFn::from(|| view! {
+                    <span class="text-4xl" aria-hidden="true">"🏛️"</span>
+                })
+                on_provider=Callback::new(move |id: &'static str| {
+                    last_provider.set(id.to_string());
+                })
+                // The demo page embeds the shell rather than routing to it.
+                full_screen=false
+                class="p-6"
+            >
+                <p class="text-center text-xs opacity-60">
+                    "Trouble signing in? Contact your administrator."
+                </p>
+            </ProviderLoginScreen>
+        </div>
     }
 }
