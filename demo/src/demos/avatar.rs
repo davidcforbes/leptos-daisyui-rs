@@ -1,6 +1,7 @@
 use crate::core::{ContentLayout, Section};
 use leptos::prelude::*;
 use leptos_daisyui_rs::components::*;
+use leptos_daisyui_rs::widgets::{AvatarBadge, AvatarBadgeSize, initials_from_name};
 use leptos_icons::Icon;
 
 #[component]
@@ -90,6 +91,47 @@ pub fn AvatarDemo() -> impl IntoView {
                         </div>
                     </Avatar>
                 </AvatarGroup>
+            </Section>
+
+            <Section title="Deterministic Name Palette (AvatarBadge)">
+                <p class="text-sm opacity-70 mb-2">
+                    "Pass " <code>"name"</code>
+                    " and the badge colour is a stable hash into the daisyUI semantic palette "
+                    "(bg paired with its -content token, so contrast holds in every theme). The "
+                    "same person is the same colour on every screen of every app — no "
+                    "caller-side hash, no drift."
+                </p>
+                <div class="flex flex-wrap items-center gap-3" id="name-palette-row">
+                    {[
+                        "Maria Gonzalez",
+                        "John Smith",
+                        "Aiko Tanaka",
+                        "Omar Haddad",
+                        "Priya Patel",
+                        "Lars Nielsen",
+                    ]
+                        .into_iter()
+                        .map(|name| {
+                            view! {
+                                <div class="flex flex-col items-center gap-1">
+                                    <AvatarBadge
+                                        initials=initials_from_name(name)
+                                        name=name
+                                        size=AvatarBadgeSize::Md
+                                    />
+                                    <span class="text-xs opacity-60">{name}</span>
+                                </div>
+                            }
+                        })
+                        .collect_view()}
+                    <div class="flex flex-col items-center gap-1">
+                        <Persona
+                            name="Maria Gonzalez"
+                            secondary_text="palette=true"
+                            palette=true
+                        />
+                    </div>
+                </div>
             </Section>
 
             <Section title="Reactive Status">

@@ -1,4 +1,5 @@
 use super::style::PersonaSize;
+use crate::widgets::name_color_class;
 use leptos::{html, prelude::*};
 
 /// A persona component for displaying user profiles with avatar and information.
@@ -47,6 +48,13 @@ pub fn Persona(
     /// Size of the persona
     #[prop(optional, into)]
     size: Signal<PersonaSize>,
+    /// Opt-in deterministic avatar colour: the initials circle takes its
+    /// colour from [`name_color_class`] over `name` instead of the neutral
+    /// default, so the same person is the same colour on every screen with
+    /// no caller-side hash. Off by default (no visual change for existing
+    /// callers).
+    #[prop(optional, into)]
+    palette: Signal<bool>,
     /// Additional CSS classes
     #[prop(optional, into)]
     class: &'static str,
@@ -94,8 +102,12 @@ pub fn Persona(
                     when=move || !image_url.get().is_empty()
                     fallback=move || view! {
                         <div class=move || {
-                            format!("{} rounded-full bg-neutral text-neutral-content",
-                                size.get().avatar_class())
+                            let color = if palette.get() {
+                                name_color_class(&name.get())
+                            } else {
+                                "bg-neutral text-neutral-content"
+                            };
+                            format!("{} rounded-full {}", size.get().avatar_class(), color)
                         }>
                             <span class=move || size.get().name_class()>
                                 {computed_initials()}
