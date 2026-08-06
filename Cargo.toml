@@ -82,6 +82,10 @@ web-sys = { version = "0.3", features = [
     "PointerEvent",
     "EventSource",
     "MessageEvent",
+    "AbortController",
+    "AbortSignal",
+    "ReadableStream",
+    "ReadableStreamDefaultReader",
 ] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
