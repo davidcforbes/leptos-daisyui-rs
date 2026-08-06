@@ -355,6 +355,46 @@ pub fn FieldsetDemo() -> impl IntoView {
                     </CardBody>
                 </Card>
             </Section>
+
+            <Section title="Field: programmatic label/help/error association">
+                <p class="text-sm opacity-70 mb-2">
+                    "Wrapping this crate's " <code>"Input"</code> " in a " <code>"Field"</code>
+                    " associates everything automatically: the visible label points at the "
+                    "input via " <code>"for"</code> "/" <code>"id"</code>
+                    ", the help line is referenced by " <code>"aria-describedby"</code>
+                    ", and the error line by " <code>"aria-errormessage"</code> " + "
+                    <code>"aria-invalid"</code> ". Toggle the state to watch the wiring follow."
+                </p>
+                <FieldAssociationDemo />
+            </Section>
         </ContentLayout>
+    }
+}
+
+#[component]
+fn FieldAssociationDemo() -> impl IntoView {
+    let error_on = RwSignal::new(false);
+    view! {
+        <div class="flex flex-col gap-4 max-w-sm" id="field-assoc">
+            <Button
+                size=ButtonSize::Sm
+                style=ButtonStyle::Outline
+                on:click=move |_| error_on.update(|b| *b = !*b)
+                attr:id="field-assoc-toggle"
+            >
+                {move || if error_on.get() { "Clear error" } else { "Set error state" }}
+            </Button>
+            <Field
+                label="Matter number"
+                help_text="Format: YY-NNNNN"
+                error="A matter number is required"
+                state=Signal::derive(move || {
+                    if error_on.get() { FieldState::Error } else { FieldState::Default }
+                })
+                required=true
+            >
+                <Input placeholder="24-01371" />
+            </Field>
+        </div>
     }
 }

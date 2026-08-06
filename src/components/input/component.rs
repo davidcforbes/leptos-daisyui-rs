@@ -138,6 +138,28 @@ pub fn Input(
     #[prop(optional)]
     node_ref: NodeRef<HtmlInput>,
 ) -> impl IntoView {
+    // Wrapped in a `Field`? Pick up its association contract: the id its
+    // visible label points at, plus the ids of the currently rendered
+    // help/error lines for aria-describedby / aria-errormessage.
+    let field = use_context::<crate::components::field::FieldContext>();
+    let field_id = field.as_ref().map(|f| f.input_id.clone());
+    let field_for_desc = field.clone();
+    let described_by = move || {
+        field_for_desc.as_ref().and_then(|f| {
+            // aria-errormessage support is uneven across screen readers, so
+            // the error line is mirrored into aria-describedby too.
+            f.described_by.get().or_else(|| f.error_id.get())
+        })
+    };
+    let field_for_err = field.clone();
+    let error_message = move || field_for_err.as_ref().and_then(|f| f.error_id.get());
+    let field_for_invalid = field.clone();
+    let aria_invalid = move || {
+        field_for_invalid
+            .as_ref()
+            .and_then(|f| f.error_id.get().map(|_| "true"))
+    };
+
     // Internal reveal state for the password show/hide toggle. Harmless to
     // create even when `revealable` is false.
     let reveal = RwSignal::new(false);
@@ -199,6 +221,10 @@ pub fn Input(
                 {leading_icon.map(|icon| icon())}
                 <input
                     type=move || effective_type.get()
+                    id=field_id.clone()
+                    aria-describedby=described_by.clone()
+                    aria-errormessage=error_message.clone()
+                    aria-invalid=aria_invalid.clone()
                     disabled=disabled
                     readonly=readonly
                     required=required
@@ -288,6 +314,10 @@ pub fn Input(
         view! {
             <input
                 type=move || effective_type.get()
+                id=field_id.clone()
+                aria-describedby=described_by.clone()
+                aria-errormessage=error_message.clone()
+                aria-invalid=aria_invalid.clone()
                 disabled=disabled
                 readonly=readonly
                 required=required

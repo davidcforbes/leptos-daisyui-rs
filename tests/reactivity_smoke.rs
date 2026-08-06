@@ -217,6 +217,119 @@ async fn extra_filter_composes_with_builtin_toolbar() {
     assert_eq!(count_of(&h, rows).await, 25, "toggle off restores all rows");
 }
 
+/// Evaluate a JS expression returning a JSON-serializable value.
+async fn eval_json(h: &pixelproof_web::Harness, expr: &str) -> serde_json::Value {
+    h.page()
+        .evaluate(expr)
+        .await
+        .expect("evaluate")
+        .into_value()
+        .expect("json value")
+}
+
+/// Field association (ldui-a8p): wrapping this crate's Input in a Field
+/// yields real programmatic association — label[for] == input[id], the help
+/// line's id is in aria-describedby, and flipping to the error state moves
+/// the reference to aria-errormessage + aria-invalid="true".
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn field_wires_label_help_and_error_to_the_input() {
+    let h = harness_at("/components/fieldset").await;
+
+    let snapshot = eval_json(
+        &h,
+        r#"(() => {
+            const root = document.querySelector('#field-assoc');
+            const input = root.querySelector('input');
+            const label = root.querySelector('label.label');
+            return {
+                id: input.id,
+                for_: label.getAttribute('for'),
+                describedby: input.getAttribute('aria-describedby'),
+                errormessage: input.getAttribute('aria-errormessage'),
+                invalid: input.getAttribute('aria-invalid'),
+                lineText: document.getElementById(input.getAttribute('aria-describedby'))?.textContent ?? null,
+            };
+        })()"#,
+    )
+    .await;
+    assert!(
+        snapshot["id"].as_str().is_some_and(|s| !s.is_empty()),
+        "input must carry the Field-minted id: {snapshot}"
+    );
+    assert_eq!(
+        snapshot["for_"], snapshot["id"],
+        "label[for] must point at the input: {snapshot}"
+    );
+    assert!(
+        snapshot["lineText"]
+            .as_str()
+            .is_some_and(|t| t.contains("YY-NNNNN")),
+        "aria-describedby must resolve to the help line: {snapshot}"
+    );
+    assert!(
+        snapshot["errormessage"].is_null() && snapshot["invalid"].is_null(),
+        "no error attributes while the field is valid: {snapshot}"
+    );
+
+    click(&h, "#field-assoc-toggle").await;
+    let snapshot = eval_json(
+        &h,
+        r#"(() => {
+            const input = document.querySelector('#field-assoc input');
+            return {
+                errormessage: input.getAttribute('aria-errormessage'),
+                invalid: input.getAttribute('aria-invalid'),
+                errText: document.getElementById(input.getAttribute('aria-errormessage'))?.textContent ?? null,
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(snapshot["invalid"], serde_json::json!("true"));
+    assert!(
+        snapshot["errText"]
+            .as_str()
+            .is_some_and(|t| t.contains("required")),
+        "aria-errormessage must resolve to the rendered error line: {snapshot}"
+    );
+}
+
+/// Modal accessible naming (ldui-nui): the demo's basic modal names itself
+/// via aria-labelledby pointing at its visible heading (and describes via
+/// aria-describedby); the hardcoded aria-label="Modal" is gone from it.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn modal_is_named_by_its_visible_heading() {
+    let h = harness_at("/components/modal").await;
+
+    let snapshot = eval_json(
+        &h,
+        r#"(() => {
+            const dialog = document.querySelector('dialog[aria-labelledby="basic-modal-title"]');
+            if (!dialog) return null;
+            return {
+                label: dialog.getAttribute('aria-label'),
+                heading: document.getElementById('basic-modal-title')?.textContent ?? null,
+                desc: document.getElementById(dialog.getAttribute('aria-describedby'))?.textContent ?? null,
+            };
+        })()"#,
+    )
+    .await;
+    assert!(
+        !snapshot.is_null(),
+        "the basic modal must carry aria-labelledby"
+    );
+    assert!(
+        snapshot["label"].is_null(),
+        "aria-label must be suppressed when labelledby names the dialog: {snapshot}"
+    );
+    assert_eq!(snapshot["heading"], serde_json::json!("Hello!"));
+    assert!(
+        snapshot["desc"].as_str().is_some_and(|t| t.contains("ESC")),
+        "aria-describedby must resolve to the summary text: {snapshot}"
+    );
+}
+
 /// DayScheduler keyboard contract (ldui-j6s): clicking an event selects and
 /// activates it; ArrowDown on the focused block requests a +15-minute move,
 /// which the demo applies — and because event blocks are keyed by index (not

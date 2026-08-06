@@ -97,9 +97,31 @@ pub fn Textarea(
     #[prop(optional, into)]
     label: MaybeProp<String>,
 ) -> impl IntoView {
+    // Wrapped in a `Field`? Pick up its association contract (id for the
+    // visible label's `for`, help/error line ids) — same wiring as `Input`.
+    let field = use_context::<crate::components::field::FieldContext>();
+    let field_id = field.as_ref().map(|f| f.input_id.clone());
+    let field_for_desc = field.clone();
+    let described_by = move || {
+        field_for_desc
+            .as_ref()
+            .and_then(|f| f.described_by.get().or_else(|| f.error_id.get()))
+    };
+    let field_for_err = field.clone();
+    let error_message = move || field_for_err.as_ref().and_then(|f| f.error_id.get());
+    let field_for_invalid = field.clone();
+    let aria_invalid = move || {
+        field_for_invalid
+            .as_ref()
+            .and_then(|f| f.error_id.get().map(|_| "true"))
+    };
     view! {
         <textarea
             aria-label=move || label.get()
+            id=field_id
+            aria-describedby=described_by
+            aria-errormessage=error_message
+            aria-invalid=aria_invalid
             disabled=disabled
             readonly=readonly
             required=required
