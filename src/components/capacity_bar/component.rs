@@ -82,6 +82,12 @@ pub fn CapacityBar(
     #[prop(optional, into)]
     class: &'static str,
 
+    /// Accessible name for the progressbar (axe `aria-progressbar-name`:
+    /// a `role="progressbar"` with values but no name is a serious WCAG
+    /// violation). Optional and additive; pass the metric's own label.
+    #[prop(optional, into)]
+    label: MaybeProp<String>,
+
     /// Node reference to the wrapping div element
     #[prop(optional)]
     node_ref: NodeRef<Div>,
@@ -105,6 +111,7 @@ pub fn CapacityBar(
         <div
             node_ref=node_ref
             role="progressbar"
+            aria-label=move || label.get()
             aria-valuenow=move || value.get().to_string()
             aria-valuemin="0"
             aria-valuemax=move || effective_max().to_string()
