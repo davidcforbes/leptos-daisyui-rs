@@ -66,7 +66,7 @@ pub use clipboard::{cell_text, row_text, row_with_headers_text};
 pub use component::*;
 pub use filter::{
     ColumnFilters, DataTableFilterRow, FILTER_ALL, distinct_values, has_filterable_columns,
-    prune_stale_filters, row_matches_filters,
+    prune_stale_filters, row_matches_filters, row_matches_search,
 };
 pub use selection::{RowClickKind, handle_row_click, row_click_kind, row_is_interactive};
 pub use server_component::*;

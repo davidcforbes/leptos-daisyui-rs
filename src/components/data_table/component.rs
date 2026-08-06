@@ -8,7 +8,7 @@ use crate::components::data_table::chooser::{
 use crate::components::data_table::controls::DataTableControls;
 use crate::components::data_table::filter::{
     ColumnFilters, DataTableFilterRow, distinct_values, has_filterable_columns,
-    prune_stale_filters, row_matches_filters,
+    prune_stale_filters, row_matches_filters, row_matches_search,
 };
 use crate::components::data_table::header::DataTableHeader;
 use crate::components::data_table::selection::{
@@ -515,6 +515,10 @@ pub fn DataTable(
         let query = debounced_search.get();
         let filters = column_filters.get();
         let q = query.to_lowercase();
+        // Search is column-scoped (`row_matches_search`): renderer-only
+        // metadata in a TableRow — state codes, route ids, epoch instants —
+        // must never match what a user types.
+        let search_columns = columns.get();
 
         (0..all_data.len())
             .filter(|&i| {
@@ -532,10 +536,7 @@ pub fn DataTable(
                 {
                     return false;
                 }
-                if q.is_empty() {
-                    return true;
-                }
-                row.values().any(|v| v.to_lowercase().contains(&q))
+                row_matches_search(row, &search_columns, &q)
             })
             .collect::<Vec<usize>>()
     });

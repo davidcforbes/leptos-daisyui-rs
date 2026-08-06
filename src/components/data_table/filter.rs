@@ -98,6 +98,25 @@ pub fn has_filterable_columns(columns: &[Column]) -> bool {
     columns.iter().any(|c| c.filterable)
 }
 
+/// Whether `row` matches the free-text search `query_lower` (already
+/// lowercased; `""` matches everything).
+///
+/// The search contract is **column-scoped**: only the values of declared
+/// columns with [`Column::searched`] left at its `true` default participate.
+/// A `TableRow` entry with no declared column -- renderer-only metadata such
+/// as stable state codes, route ids or raw epoch instants -- never matches,
+/// so a user typing (in any language) can't hit hidden English codes or
+/// digits they cannot see.
+pub fn row_matches_search(row: &TableRow, columns: &[Column], query_lower: &str) -> bool {
+    if query_lower.is_empty() {
+        return true;
+    }
+    columns.iter().filter(|c| c.searched).any(|c| {
+        row.get(c.id)
+            .is_some_and(|v| v.to_lowercase().contains(query_lower))
+    })
+}
+
 /// A `<tr>` of per-column filter dropdowns, rendered inside the table's
 /// `<thead>` beneath the sortable header row.
 ///
@@ -348,6 +367,73 @@ mod tests {
         let mut filters = ColumnFilters::new();
         let options = HashMap::from([("status", vec!["Open".to_string()])]);
         assert!(!prune_stale_filters(&mut filters, &options));
+    }
+
+    // ── row_matches_search ──
+
+    #[test]
+    fn search_matches_a_declared_column_value() {
+        let r = row(&[("name", "Maria Gonzalez")]);
+        let cols = vec![Column::new("name", "Name")];
+        assert!(row_matches_search(&r, &cols, "gonza"));
+    }
+
+    #[test]
+    fn search_never_matches_undeclared_metadata() {
+        // The Office queue's rows carry renderer-only metadata: an English
+        // state code and a raw epoch. Neither has a declared column, so a
+        // user's search (in any language) must not hit them.
+        let r = row(&[
+            ("estado", "Abierto"),
+            ("state_code", "OPEN_UNASSIGNED"),
+            ("deadline_epoch", "1791283600"),
+        ]);
+        let cols = vec![Column::new("estado", "Estado")];
+        assert!(
+            !row_matches_search(&r, &cols, "open"),
+            "hidden English state codes must not match"
+        );
+        assert!(
+            !row_matches_search(&r, &cols, "1791"),
+            "raw epoch digits must not match"
+        );
+    }
+
+    #[test]
+    fn search_matches_the_localized_visible_value() {
+        let r = row(&[("estado", "Abierto"), ("state_code", "OPEN_UNASSIGNED")]);
+        let cols = vec![Column::new("estado", "Estado")];
+        assert!(
+            row_matches_search(&r, &cols, "abierto"),
+            "the visible localized value is what a user searches for"
+        );
+    }
+
+    #[test]
+    fn search_skips_a_column_that_opted_out() {
+        // Visible but renderer-formatted: the raw digits should not match.
+        let r = row(&[("deadline_epoch", "1791283600"), ("name", "Maria")]);
+        let cols = vec![
+            Column::new("deadline_epoch", "Deadline").searched(false),
+            Column::new("name", "Name"),
+        ];
+        assert!(!row_matches_search(&r, &cols, "1791"));
+        assert!(row_matches_search(&r, &cols, "maria"));
+    }
+
+    #[test]
+    fn search_empty_query_matches_everything() {
+        let r = row(&[("name", "Maria")]);
+        assert!(row_matches_search(&r, &[], ""));
+        assert!(row_matches_search(&r, &[Column::new("name", "Name")], ""));
+    }
+
+    #[test]
+    fn search_is_case_insensitive_on_the_cell_side() {
+        // Callers pass the query pre-lowercased; cells are lowercased here.
+        let r = row(&[("name", "MARIA")]);
+        let cols = vec![Column::new("name", "Name")];
+        assert!(row_matches_search(&r, &cols, "maria"));
     }
 
     // ── has_filterable_columns ──

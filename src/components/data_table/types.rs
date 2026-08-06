@@ -102,6 +102,12 @@ pub struct Column {
     /// reaches the row's activate/select handling, so cell renderers don't
     /// need per-app `stop_propagation` wrappers.
     pub is_action: bool,
+    /// Whether the free-text `searchable` box matches this column's cell
+    /// values (default: `true`). Opt out with [`Column::searched`]. Note the
+    /// search contract is column-scoped either way: a `TableRow` entry with
+    /// no declared column (renderer-only metadata such as state codes, route
+    /// ids or epoch instants) is never searched at all.
+    pub searched: bool,
 }
 
 impl Column {
@@ -125,6 +131,7 @@ impl Column {
             sort_as: SortAs::Text,
             filterable: false,
             is_action: false,
+            searched: true,
         }
     }
 
@@ -144,6 +151,7 @@ impl Column {
             sort_as: SortAs::Text,
             filterable: false,
             is_action: false,
+            searched: true,
         }
     }
 
@@ -223,6 +231,21 @@ impl Column {
     /// ```
     pub fn filterable(mut self) -> Self {
         self.filterable = true;
+        self
+    }
+
+    /// Declare whether the free-text search box matches this column
+    /// (`true` by default for every declared column).
+    ///
+    /// ```
+    /// use leptos_daisyui_rs::components::Column;
+    ///
+    /// // A raw-epoch column the renderer formats: visible, but its digits
+    /// // should not match what a user types.
+    /// let deadline = Column::new("deadline_epoch", "Deadline").searched(false);
+    /// ```
+    pub fn searched(mut self, searched: bool) -> Self {
+        self.searched = searched;
         self
     }
 
