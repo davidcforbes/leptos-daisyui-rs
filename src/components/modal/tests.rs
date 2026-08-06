@@ -71,3 +71,27 @@ fn modal_status_row_accepts_custom_class() {
         children: ToChildren::to_children(|| view! { "x" }),
     });
 }
+
+// ── modal_aria_label (accessible dialog naming, ldui-nui) ──
+
+#[test]
+fn labelled_by_suppresses_aria_label() {
+    // aria-label would override aria-labelledby's visible heading.
+    assert_eq!(modal_aria_label(Some("Reassign".into()), true), None);
+    assert_eq!(modal_aria_label(None, true), None);
+}
+
+#[test]
+fn explicit_label_is_used_verbatim() {
+    assert_eq!(
+        modal_aria_label(Some("Reasignar expediente".into()), false),
+        Some("Reasignar expediente".to_string())
+    );
+}
+
+#[test]
+fn no_naming_props_falls_back_to_generic_modal() {
+    // An unnamed dialog is an axe violation; the legacy generic name is the
+    // floor, not the goal — callers should pass label or labelled_by.
+    assert_eq!(modal_aria_label(None, false), Some("Modal".to_string()));
+}

@@ -30,14 +30,18 @@ pub fn ModalDemo() -> impl IntoView {
 
                 <Modal
                     open=modal_1_open
+                    labelled_by="basic-modal-title"
+                    described_by="basic-modal-desc"
                     on:close=move |_| {
                         set_modal_1_open.set(false);
                         crate::debug_state::set("modal.open", false);
                     }
                 >
                     <ModalBox>
-                        <h3 class="text-lg font-bold">"Hello!"</h3>
-                        <p class="py-4">"Press ESC key or click the button below to close"</p>
+                        <h3 class="text-lg font-bold" id="basic-modal-title">"Hello!"</h3>
+                        <p class="py-4" id="basic-modal-desc">
+                            "Press ESC key or click the button below to close"
+                        </p>
                         <ModalAction>
                             <form method="dialog">
                                 <Button on:click=move |_| {

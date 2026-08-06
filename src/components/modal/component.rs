@@ -4,10 +4,27 @@ use leptos::{
     prelude::*,
 };
 
+/// The `aria-label` a [`Modal`] should carry: `None` when a visible heading
+/// names the dialog via `labelled_by` (an `aria-label` would override it),
+/// else the caller's `label`, else the legacy `"Modal"` fallback — an
+/// unnamed dialog is an axe violation, so the generic name is still better
+/// than none for callers that haven't adopted the naming props yet.
+pub fn modal_aria_label(label: Option<String>, has_labelled_by: bool) -> Option<String> {
+    if has_labelled_by {
+        None
+    } else {
+        Some(label.unwrap_or_else(|| "Modal".to_string()))
+    }
+}
+
 /// # Modal Component
 ///
 /// A reactive Leptos wrapper for daisyUI's modal component that provides
 /// overlay dialogs using native HTML dialog elements with proper state management.
+///
+/// Name the dialog: pass `labelled_by` (the id of the visible heading inside
+/// [`ModalBox`]) or `label` (a translated accessible name). Without either,
+/// every dialog is announced with the same generic word.
 ///
 /// ### Add to `input.css`
 /// ```css
@@ -25,6 +42,25 @@ pub fn Modal(
     /// Whether to include backdrop for click-to-close
     #[prop(optional, into)]
     backdrop: Signal<bool>,
+
+    /// Accessible name for the dialog (`aria-label`) — pass the dialog's
+    /// (translated) purpose, e.g. `"Reassign matter"`. Prefer `labelled_by`
+    /// when the dialog has a visible heading; without either, the legacy
+    /// generic `"Modal"` is used so the dialog is at least not nameless.
+    #[prop(optional, into)]
+    label: MaybeProp<String>,
+
+    /// Id of the element that names the dialog (`aria-labelledby`) —
+    /// typically the visible `<h3>` inside [`ModalBox`]. Takes precedence
+    /// over `label`, so assistive technology hears exactly what sighted
+    /// users read, in whatever language the page is rendering.
+    #[prop(optional, into)]
+    labelled_by: MaybeProp<String>,
+
+    /// Id of the element that describes the dialog (`aria-describedby`) —
+    /// e.g. the summary paragraph under the heading.
+    #[prop(optional, into)]
+    described_by: MaybeProp<String>,
 
     /// Additional CSS classes
     #[prop(optional, into)]
@@ -49,8 +85,9 @@ pub fn Modal(
 
     view! {
         <dialog
-            aria_modal=move || open.get()
-            aria-label="Modal"
+            aria-label=move || modal_aria_label(label.get(), labelled_by.get().is_some())
+            aria-labelledby=move || labelled_by.get()
+            aria-describedby=move || described_by.get()
             node_ref=node_ref
             class=move || merge_classes!("modal", class)
             class:modal-open=open
