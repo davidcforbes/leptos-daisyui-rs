@@ -31,7 +31,7 @@ pub fn row_text(row: &TableRow, columns: &[Column]) -> String {
 pub fn row_with_headers_text(row: &TableRow, columns: &[Column]) -> String {
     let headers = columns
         .iter()
-        .map(|c| c.header)
+        .map(|c| c.header.as_str())
         .collect::<Vec<_>>()
         .join("\t");
     format!("{headers}\n{}", row_text(row, columns))

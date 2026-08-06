@@ -63,7 +63,7 @@ pub fn DataTableHeader(
                 {move || {
                     columns.get().iter().map(|col| {
                         let col_id = col.id;
-                        let header_label = col.header;
+                        let header_label = col.header.clone();
                         let is_sorted = sort_column.get() == Some(col_id);
                         let is_sortable = col.sortable;
                         let is_resizable = col.resizable;
@@ -112,7 +112,7 @@ pub fn DataTableHeader(
                                 }
                             >
                                 <span class="flex items-center gap-1">
-                                    {col.header}
+                                    {col.header.clone()}
                                     {move || {
                                         if is_sorted {
                                             Some(view! {

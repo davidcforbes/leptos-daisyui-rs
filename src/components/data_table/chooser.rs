@@ -118,7 +118,7 @@ pub fn DataTableColumnChooser(
                                         disabled=disabled
                                         on_toggle=on_toggle
                                     >
-                                        {col.header}
+                                        {col.header.clone()}
                                     </MenuCheckItem>
                                 }
                             })

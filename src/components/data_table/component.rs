@@ -217,9 +217,12 @@ pub fn DataTable(
     #[prop(optional)]
     classes: DataTableClasses,
 
-    /// Custom text strings
-    #[prop(optional)]
-    texts: DataTableTexts,
+    /// Custom text strings. A `Signal` so table chrome can be localized at
+    /// runtime: derive the struct from your translation function inside a
+    /// `Signal::derive` that reads the active locale, and every string
+    /// re-renders on a language switch.
+    #[prop(into, default = Signal::stored(DataTableTexts::default()))]
+    texts: Signal<DataTableTexts>,
 
     /// Additional CSS classes for container
     #[prop(optional, into)]
@@ -732,10 +735,7 @@ pub fn DataTable(
     });
 
     let container_class = merge_classes!(classes.container, class);
-    let texts_for_body = texts.clone();
-    let texts_for_controls = texts.clone();
-    let search_placeholder = texts.search_placeholder;
-    let filter_all_label = texts.filter_all;
+    let filter_all_label = Signal::derive(move || texts.with(|t| t.filter_all.clone()));
 
     // Container style for viewport-constrained scrolling.
     //
@@ -780,7 +780,7 @@ pub fn DataTable(
                             <input
                                 type="text"
                                 class="input input-bordered input-sm w-full max-w-xs"
-                                placeholder=search_placeholder
+                                placeholder=move || texts.with(|t| t.search_placeholder.clone())
                                 aria-label="Search table"
                                 prop:value=move || search_query.get()
                                 on:input=on_search_input
@@ -824,7 +824,7 @@ pub fn DataTable(
                         columns=display_columns
                         rows=Signal::derive(move || current_page_rows.get())
                         loading=loading
-                        texts=texts_for_body
+                        texts=texts
                         body_cell_class=classes.body_cell
                         row_class=classes.row
                         selected_row_class=classes.selected_row
@@ -851,7 +851,7 @@ pub fn DataTable(
                                 total_pages=Signal::derive(move || total_pages.get())
                                 total_items=Signal::derive(move || sorted_indices.get().len())
                                 page_size=page_size
-                                texts=texts_for_controls.clone()
+                                texts=texts
                                 pagination_class=classes.pagination
                                 button_class=classes.pagination_button
                                 page_button_class=classes.pagination_page_button

@@ -23,7 +23,8 @@ pub fn DataTableBody(
     loading: Signal<bool>,
 
     /// Custom text strings
-    texts: DataTableTexts,
+    #[prop(into)]
+    texts: Signal<DataTableTexts>,
 
     /// Custom body cell class
     #[prop(optional, into)]
@@ -101,7 +102,7 @@ pub fn DataTableBody(
                     view! {
                         <tr class=loading_row_class>
                             <td colspan=col_count class="text-center py-8">
-                                {texts.loading}
+                                {texts.with(|t| t.loading.clone())}
                             </td>
                         </tr>
                     }.into_any()
@@ -111,7 +112,7 @@ pub fn DataTableBody(
                     view! {
                         <tr class=empty_row_class>
                             <td colspan=col_count class="text-center py-8">
-                                {texts.empty}
+                                {texts.with(|t| t.empty.clone())}
                             </td>
                         </tr>
                     }.into_any()

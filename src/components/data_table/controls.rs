@@ -32,7 +32,8 @@ pub fn DataTableControls(
     page_size: Signal<usize>,
 
     /// Custom text strings
-    texts: DataTableTexts,
+    #[prop(into)]
+    texts: Signal<DataTableTexts>,
 
     /// Pagination container class
     #[prop(optional, into)]
@@ -82,7 +83,7 @@ pub fn DataTableControls(
                     } else {
                         let (start, end) = row_range(current_page.get(), page_size.get(), total);
                         texts
-                            .row_range
+                            .with(|t| t.row_range.clone())
                             .replace("{start}", &start.to_string())
                             .replace("{end}", &end.to_string())
                             .replace("{total}", &total.to_string())
@@ -96,7 +97,7 @@ pub fn DataTableControls(
                     disabled=prev_disabled
                     on:click=on_previous
                 >
-                    {texts.previous}
+                    {move || texts.with(|t| t.previous.clone())}
                 </button>
 
                 <div class="join">
@@ -145,7 +146,7 @@ pub fn DataTableControls(
                     disabled=next_disabled
                     on:click=on_next
                 >
-                    {texts.next}
+                    {move || texts.with(|t| t.next.clone())}
                 </button>
             </div>
         </div>

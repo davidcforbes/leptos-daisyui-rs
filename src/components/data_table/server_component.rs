@@ -103,9 +103,10 @@ pub fn ServerDataTable(
     #[prop(optional)]
     classes: DataTableClasses,
 
-    /// Custom text strings
-    #[prop(optional)]
-    texts: DataTableTexts,
+    /// Custom text strings. A `Signal` so table chrome can be localized at
+    /// runtime -- see [`DataTableTexts`].
+    #[prop(into, default = Signal::stored(DataTableTexts::default()))]
+    texts: Signal<DataTableTexts>,
 
     /// Additional CSS classes for container
     #[prop(optional, into)]
@@ -163,8 +164,6 @@ pub fn ServerDataTable(
     // resized columns stay aligned.
     let column_widths = RwSignal::new(HashMap::<&'static str, f64>::new());
     let container_class = merge_classes!(classes.container, class);
-    let texts_for_body = texts.clone();
-    let search_placeholder = texts.search_placeholder;
 
     // Search state with debounce (only used when on_search is provided).
     // Mirrors the debounce pattern in `data_table::component::DataTable`
@@ -243,7 +242,7 @@ pub fn ServerDataTable(
                             <input
                                 type="text"
                                 class="input input-bordered input-sm w-full max-w-xs"
-                                placeholder=search_placeholder
+                                placeholder=move || texts.with(|t| t.search_placeholder.clone())
                                 aria-label="Search table"
                                 prop:value=move || search_query.get()
                                 on:input=on_search_input
@@ -276,7 +275,7 @@ pub fn ServerDataTable(
                             rows.get().into_iter().enumerate().collect::<Vec<_>>()
                         })
                         loading=loading
-                        texts=texts_for_body
+                        texts=texts
                         body_cell_class=classes.body_cell
                         row_class=classes.row
                         loading_row_class=classes.loading_row
@@ -308,7 +307,7 @@ pub fn ServerDataTable(
                                 start=start
                                 end=end
                                 on_page_change=on_page_change
-                                texts=texts.clone()
+                                texts=texts.get()
                                 classes=classes.clone()
                             />
                         </div>
@@ -339,7 +338,11 @@ fn ServerPaginationControls(
     view! {
         <div class=classes.pagination>
             <span class=classes.page_indicator>
-                {format!("Showing {}-{} of {}", start, end, total_count)}
+                {texts
+                    .row_range
+                    .replace("{start}", &start.to_string())
+                    .replace("{end}", &end.to_string())
+                    .replace("{total}", &total_count.to_string())}
             </span>
 
             <div class="join">

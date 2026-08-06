@@ -63,8 +63,10 @@ pub type TypedCellFn = Callback<(usize, TableRow), TypedCell>;
 pub struct Column {
     /// Unique identifier for the column (HashMap key)
     pub id: &'static str,
-    /// Display text for column header
-    pub header: &'static str,
+    /// Display text for column header. Owned so it can come from a runtime
+    /// localization lookup (`t()`); rebuild the `columns` vec (typically in a
+    /// `Memo` reading the active locale) and every header re-renders.
+    pub header: String,
     /// Whether this column is sortable
     pub sortable: bool,
     /// Minimum width in pixels
@@ -102,10 +104,10 @@ impl Column {
     /// Sorts as text. If the column holds formatted numbers (money, percentages,
     /// day counts), add [`with_sort_as(SortAs::Number)`](Column::with_sort_as) --
     /// text order puts `"$1,000"` before `"$900"`.
-    pub fn new(id: &'static str, header: &'static str) -> Self {
+    pub fn new(id: &'static str, header: impl Into<String>) -> Self {
         Self {
             id,
-            header,
+            header: header.into(),
             sortable: true,
             min_width: None,
             class: None,
@@ -120,10 +122,10 @@ impl Column {
     }
 
     /// Create a new non-sortable column
-    pub fn new_non_sortable(id: &'static str, header: &'static str) -> Self {
+    pub fn new_non_sortable(id: &'static str, header: impl Into<String>) -> Self {
         Self {
             id,
-            header,
+            header: header.into(),
             sortable: false,
             min_width: None,
             class: None,
@@ -304,38 +306,44 @@ impl Default for DataTableClasses {
     }
 }
 
-/// Customizable text strings for DataTable
+/// Customizable text strings for DataTable.
+///
+/// Fields are owned `String`s and the components take `texts` as a
+/// `Signal<DataTableTexts>`, so table chrome can be localized at runtime:
+/// derive the struct from your translation function inside a
+/// `Signal::derive`/`Memo` that reads the active locale, and every string
+/// re-renders on a language switch.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DataTableTexts {
     /// Loading state text
-    pub loading: &'static str,
+    pub loading: String,
     /// Empty state text
-    pub empty: &'static str,
+    pub empty: String,
     /// Previous button text
-    pub previous: &'static str,
+    pub previous: String,
     /// Next button text
-    pub next: &'static str,
+    pub next: String,
     /// Page indicator format (use {current} and {total} placeholders)
-    pub page_indicator: &'static str,
+    pub page_indicator: String,
     /// Search input placeholder text
-    pub search_placeholder: &'static str,
+    pub search_placeholder: String,
     /// Row-range caption format (use {start}, {end}, and {total} placeholders)
-    pub row_range: &'static str,
+    pub row_range: String,
     /// Label for the "no filter" option in every filter-row dropdown
-    pub filter_all: &'static str,
+    pub filter_all: String,
 }
 
 impl Default for DataTableTexts {
     fn default() -> Self {
         Self {
-            loading: "Loading...",
-            empty: "No data available",
-            previous: "Previous",
-            next: "Next",
-            page_indicator: "Page {current} of {total}",
-            search_placeholder: "Search...",
-            row_range: "Showing {start}\u{2013}{end} of {total}",
-            filter_all: "All",
+            loading: "Loading...".to_string(),
+            empty: "No data available".to_string(),
+            previous: "Previous".to_string(),
+            next: "Next".to_string(),
+            page_indicator: "Page {current} of {total}".to_string(),
+            search_placeholder: "Search...".to_string(),
+            row_range: "Showing {start}\u{2013}{end} of {total}".to_string(),
+            filter_all: "All".to_string(),
         }
     }
 }

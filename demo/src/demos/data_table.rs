@@ -108,6 +108,32 @@ pub fn DataTableDemo() -> impl IntoView {
     let (loading, set_loading) = signal(false);
     let (page_size, set_page_size) = signal(10_usize);
 
+    // Runtime localization: columns and texts derived from a locale signal,
+    // the pattern a `t()`-based app uses. Toggling the locale must re-render
+    // the table chrome (headers, empty state) — asserted by the reactivity
+    // suite's `data_table_headers_relocalize_via_dom`.
+    let locale_es = RwSignal::new(false);
+    let localized_columns = Signal::derive(move || {
+        if locale_es.get() {
+            vec![
+                Column::new("name", "Nombre"),
+                Column::new("email", "Correo"),
+            ]
+        } else {
+            vec![Column::new("name", "Name"), Column::new("email", "Email")]
+        }
+    });
+    let localized_texts = Signal::derive(move || {
+        if locale_es.get() {
+            DataTableTexts {
+                empty: "No hay datos disponibles".to_string(),
+                ..Default::default()
+            }
+        } else {
+            DataTableTexts::default()
+        }
+    });
+
     // Multi-select state for the selection demo
     let selected_rows = RwSignal::new(BTreeSet::<usize>::new());
     let selection_anchor = RwSignal::new(Option::<usize>::None);
@@ -536,15 +562,36 @@ pub fn DataTableDemo() -> impl IntoView {
                     columns=standard_columns
                     page_size=10
                     texts=DataTableTexts {
-                        loading: "Cargando datos...",
-                        empty: "No hay datos disponibles",
-                        page_indicator: "Página {current} de {total}",
-                        previous: "Anterior",
-                        next: "Siguiente",
-                        search_placeholder: "Buscar...",
-                        row_range: "Mostrando {start}\u{2013}{end} de {total}",
-                        filter_all: "Todos",
+                        loading: "Cargando datos...".to_string(),
+                        empty: "No hay datos disponibles".to_string(),
+                        page_indicator: "Página {current} de {total}".to_string(),
+                        previous: "Anterior".to_string(),
+                        next: "Siguiente".to_string(),
+                        search_placeholder: "Buscar...".to_string(),
+                        row_range: "Mostrando {start}\u{2013}{end} de {total}".to_string(),
+                        filter_all: "Todos".to_string(),
                     }
+                />
+            </Section>
+
+            // Runtime localization: language switch re-renders table chrome
+            <Section title="Runtime Localization">
+                <p class="text-sm opacity-70 mb-4">
+                    "Headers and texts derived from a locale signal re-render on a language switch — no remount needed."
+                </p>
+                <Button
+                    color=ButtonColor::Secondary
+                    on:click=move |_| locale_es.update(|es| *es = !*es)
+                    attr:id="locale-toggle"
+                >
+                    {move || if locale_es.get() { "Switch to English" } else { "Cambiar a español" }}
+                </Button>
+                <DataTable
+                    data=Signal::derive(Vec::<HashMap<&'static str, String>>::new)
+                    columns=localized_columns
+                    texts=localized_texts
+                    paginate=false
+                    attr:id="localized-table"
                 />
             </Section>
 

@@ -119,14 +119,14 @@ pub fn DataTableFilterRow(
 
     /// Label for the "no filter" option in every dropdown.
     #[prop(into)]
-    all_label: &'static str,
+    all_label: Signal<String>,
 ) -> impl IntoView {
     view! {
         <tr class="data-table-filter-row">
             {move || {
                 columns.get().iter().map(|col| {
                     let col_id = col.id;
-                    let header_label = col.header;
+                    let header_label = col.header.clone();
                     let is_filterable = col.filterable;
 
                     view! {
@@ -169,7 +169,7 @@ pub fn DataTableFilterRow(
                                             });
                                         }
                                     >
-                                        <option value=FILTER_ALL>{all_label}</option>
+                                        <option value=FILTER_ALL>{move || all_label.get()}</option>
                                         <For
                                             each=col_options
                                             key=|opt: &String| opt.clone()

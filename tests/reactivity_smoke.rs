@@ -128,6 +128,33 @@ async fn data_table_sort_toggles_via_oracle() {
     );
 }
 
+/// DataTable runtime localization (beads-gh7a): the demo's "Runtime
+/// Localization" section derives `columns` and `texts` from a locale signal.
+/// Toggling the locale must re-render the table chrome in place — the header
+/// cells swap to the Spanish strings without a remount.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn data_table_headers_relocalize_via_dom() {
+    let h = harness_at("/components/data-table").await;
+
+    // Precondition: the Spanish headers are nowhere on the page while the
+    // locale is English. ("Nombre"/"Correo" appear only in this section.)
+    let dom = h.dom_html().await.expect("dom");
+    assert!(
+        !dom.contains("Nombre") && !dom.contains("Correo"),
+        "Spanish headers must not render before the locale switch"
+    );
+
+    click(&h, "#locale-toggle").await;
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+    let dom = h.dom_html().await.expect("dom");
+    assert!(
+        dom.contains("Nombre") && dom.contains("Correo"),
+        "headers must re-render to Spanish after the locale switch"
+    );
+}
+
 /// Tabs: clicking the second tab of the Basic Tabs strip selects index 1.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires demo dev server (cargo make test-visual)"]
