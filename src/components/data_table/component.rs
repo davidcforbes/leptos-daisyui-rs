@@ -12,7 +12,8 @@ use crate::components::data_table::filter::{
 };
 use crate::components::data_table::header::DataTableHeader;
 use crate::components::data_table::selection::{
-    RowClickKind, handle_row_click, row_click_kind, row_is_interactive,
+    RowClickKind, handle_row_click, index_of_key, remap_selection, row_click_kind,
+    row_is_interactive, selection_keys,
 };
 use crate::components::data_table::sort::{column_sort_as, compare_cells};
 use crate::components::data_table::types::{
@@ -264,6 +265,22 @@ pub fn DataTable(
     /// locally-owned signal if not provided.
     #[prop(optional)]
     selection_anchor: Option<RwSignal<Option<usize>>>,
+
+    /// Optional stable row identity. Without it, row identity is positional
+    /// (the absolute index into `data`), which is fine for one immutable
+    /// client window but loses selection continuity when the data vec is
+    /// *replaced* -- a server page swap, or a live pool dropping rows (e.g.
+    /// SSE hiding claimed items) -- because the same index now points at a
+    /// different row.
+    ///
+    /// When set, selection state keys off the row's identity instead: the
+    /// keys of the selected rows are captured at click time and remapped onto
+    /// every new data vec, so a selected row stays selected wherever it moves,
+    /// deselects (rather than sliding onto a neighbour) when it disappears,
+    /// and re-selects if it returns. A sort no longer clears the selection
+    /// either -- keyed identity makes the conservative clear unnecessary.
+    #[prop(optional, into)]
+    row_key: Option<Callback<TableRow, String>>,
 
     /// Optional callback fired on a **plain** row click (no Ctrl/Shift),
     /// receiving the row's absolute index (same index space as
@@ -576,15 +593,43 @@ pub fn DataTable(
     let selected_rows = selected_rows.unwrap_or_else(|| RwSignal::new(BTreeSet::new()));
     let selection_anchor = selection_anchor.unwrap_or_else(|| RwSignal::new(None));
 
-    // Clear selection on data refresh or sort change; indices may no
-    // longer point at the same row after either of those events.
+    // Keyed row identity (`row_key`): the source of truth for what is
+    // selected is a set of row *keys*, captured at click time and remapped
+    // onto every new data vec below. `anchor_key` carries the Shift-range
+    // anchor across replacements the same way.
+    let selected_keys = RwSignal::new(BTreeSet::<String>::new());
+    let anchor_key = RwSignal::new(Option::<String>::None);
+
+    // On data replacement: positional identity can only clear (the same index
+    // now points at a different row -- and so might a sort). Keyed identity
+    // instead remaps the stored keys onto the new rows, so selection follows
+    // the row wherever it moves and a sort clears nothing.
     Effect::new(move |prev: Option<()>| {
-        let _ = data.get();
-        let _ = sort_column.get();
-        let _ = sort_order.get();
-        if prev.is_some() {
-            selected_rows.update(|s| s.clear());
-            selection_anchor.set(None);
+        if let Some(key_of) = row_key {
+            let d = data.get();
+            if prev.is_none() {
+                // Adopt a consumer-pre-seeded selection as keys.
+                let seeded = selected_rows.get_untracked();
+                if !seeded.is_empty() {
+                    selected_keys.set(selection_keys(&d, &seeded, |r| key_of.run(r.clone())));
+                }
+                return;
+            }
+            let keys = selected_keys.get_untracked();
+            selected_rows.set(remap_selection(&d, &keys, |r| key_of.run(r.clone())));
+            selection_anchor.set(
+                anchor_key
+                    .get_untracked()
+                    .and_then(|k| index_of_key(&d, &k, |r| key_of.run(r.clone()))),
+            );
+        } else {
+            let _ = data.get();
+            let _ = sort_column.get();
+            let _ = sort_order.get();
+            if prev.is_some() {
+                selected_rows.update(|s| s.clear());
+                selection_anchor.set(None);
+            }
         }
     });
 
@@ -604,6 +649,15 @@ pub fn DataTable(
                 let mut next = selected_rows.get_untracked();
                 let mut anchor = selection_anchor.get_untracked();
                 handle_row_click(abs_idx, ctrl, shift, &mut next, &mut anchor, total);
+                // Keyed identity: capture the keys of what just got selected,
+                // so the selection can be remapped when `data` is replaced.
+                if let Some(key_of) = row_key {
+                    data.with_untracked(|d| {
+                        selected_keys.set(selection_keys(d, &next, |r| key_of.run(r.clone())));
+                        anchor_key
+                            .set(anchor.and_then(|i| d.get(i)).map(|r| key_of.run(r.clone())));
+                    });
+                }
                 selected_rows.set(next);
                 selection_anchor.set(anchor);
             }

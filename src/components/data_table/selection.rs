@@ -5,6 +5,7 @@
 //! a range from the anchor. The function is pure so it's straightforward
 //! to test exhaustively and equally usable from non-DOM contexts.
 
+use crate::components::data_table::types::TableRow;
 use std::collections::BTreeSet;
 
 /// Apply a row click to a selection state.
@@ -76,6 +77,49 @@ pub enum RowClickKind {
     /// Modified click (Ctrl and/or Shift), or no `on_row_activate` callback
     /// registered at all -- feed the existing selection semantics.
     Select,
+}
+
+/// The row keys of the selected indices, via the consumer's `row_key`
+/// function. Indices no longer present in `data` contribute nothing.
+///
+/// Together with [`remap_selection`] this is what makes a keyed selection
+/// survive data replacement: capture keys at click time, remap them onto
+/// whatever rows the next data set holds.
+pub fn selection_keys(
+    data: &[TableRow],
+    selected: &BTreeSet<usize>,
+    key_of: impl Fn(&TableRow) -> String,
+) -> BTreeSet<String> {
+    selected
+        .iter()
+        .filter_map(|&i| data.get(i).map(&key_of))
+        .collect()
+}
+
+/// The indices in `data` whose row key is in `keys` -- a stored key-set
+/// selection re-expressed against a new data vec. Keys with no matching row
+/// (e.g. a claimed row removed from a live pool) simply select nothing, and
+/// re-select if their row returns later.
+pub fn remap_selection(
+    data: &[TableRow],
+    keys: &BTreeSet<String>,
+    key_of: impl Fn(&TableRow) -> String,
+) -> BTreeSet<usize> {
+    data.iter()
+        .enumerate()
+        .filter(|(_, row)| keys.contains(&key_of(row)))
+        .map(|(i, _)| i)
+        .collect()
+}
+
+/// The index in `data` of the row with key `key`, if any -- used to remap the
+/// selection anchor across a data replacement.
+pub fn index_of_key(
+    data: &[TableRow],
+    key: &str,
+    key_of: impl Fn(&TableRow) -> String,
+) -> Option<usize> {
+    data.iter().position(|row| key_of(row) == key)
 }
 
 /// Whether a table's rows should be keyboard-operable -- focusable
@@ -312,5 +356,62 @@ mod tests {
         handle_row_click(8, false, false, &mut s, &mut a, 10);
         assert_eq!(s, sel(&[8]));
         assert_eq!(a, Some(8));
+    }
+
+    // ── keyed identity (selection_keys / remap_selection / index_of_key) ──
+
+    fn rows(ids: &[&str]) -> Vec<TableRow> {
+        ids.iter()
+            .map(|id| TableRow::from([("id", id.to_string())]))
+            .collect()
+    }
+
+    fn key_of(row: &TableRow) -> String {
+        row.get("id").cloned().unwrap_or_default()
+    }
+
+    #[test]
+    fn selection_keys_captures_keys_of_selected_indices() {
+        let data = rows(&["a", "b", "c"]);
+        let keys = selection_keys(&data, &sel(&[0, 2]), key_of);
+        assert_eq!(keys, BTreeSet::from(["a".to_string(), "c".to_string()]));
+    }
+
+    #[test]
+    fn selection_keys_ignores_out_of_range_indices() {
+        let data = rows(&["a"]);
+        let keys = selection_keys(&data, &sel(&[0, 9]), key_of);
+        assert_eq!(keys, BTreeSet::from(["a".to_string()]));
+    }
+
+    #[test]
+    fn remap_selection_survives_reordering() {
+        // The row the user selected moves position; its selection follows it.
+        let keys = BTreeSet::from(["b".to_string()]);
+        let reordered = rows(&["c", "b", "a"]);
+        assert_eq!(remap_selection(&reordered, &keys, key_of), sel(&[1]));
+    }
+
+    #[test]
+    fn remap_selection_drops_keys_of_removed_rows() {
+        // A live pool removed the selected row (e.g. it was claimed): the
+        // selection maps to nothing rather than sliding onto a neighbour.
+        let keys = BTreeSet::from(["b".to_string()]);
+        let without_b = rows(&["a", "c"]);
+        assert!(remap_selection(&without_b, &keys, key_of).is_empty());
+    }
+
+    #[test]
+    fn remap_selection_reselects_a_returning_row() {
+        let keys = BTreeSet::from(["b".to_string()]);
+        let with_b_back = rows(&["a", "b", "c"]);
+        assert_eq!(remap_selection(&with_b_back, &keys, key_of), sel(&[1]));
+    }
+
+    #[test]
+    fn index_of_key_finds_moved_row() {
+        let data = rows(&["x", "y", "z"]);
+        assert_eq!(index_of_key(&data, "z", key_of), Some(2));
+        assert_eq!(index_of_key(&data, "missing", key_of), None);
     }
 }

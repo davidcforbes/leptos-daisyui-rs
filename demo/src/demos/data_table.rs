@@ -180,6 +180,17 @@ pub fn DataTableDemo() -> impl IntoView {
         },
     );
 
+    // Keyed row identity (`row_key`): selection keys off a stable row id, so
+    // replacing the data vec (server page swap, live pool removals) keeps the
+    // same *rows* selected instead of clearing or drifting by position.
+    let keyed_data = RwSignal::new(generate_users(6));
+    let keyed_selected = RwSignal::new(BTreeSet::<usize>::new());
+    let keyed_columns = RwSignal::new(vec![
+        Column::new("id", "ID"),
+        Column::new("name", "Name"),
+        Column::new("email", "Email"),
+    ]);
+
     // Column resize + typed cells (Badge/Icon) + row background + clipboard export
     let feature_data = RwSignal::new(generate_users(12));
     let feature_columns = RwSignal::new(vec![
@@ -804,6 +815,54 @@ pub fn DataTableDemo() -> impl IntoView {
                         activate_count.update(|n| *n += 1);
                     })
                     attr:id="activation-table"
+                />
+            </Section>
+
+            // Keyed row identity (opt-in `row_key`)
+            <Section title="Keyed Row Identity (row_key)">
+                <p class="text-sm opacity-70 mb-2">
+                    "Pass " <code>"row_key"</code>
+                    " and selection keys off each row's stable identity instead of its position. "
+                    "Select a row, then reverse the data \u{2014} the same row stays selected even "
+                    "though every index changed. Without a key, replacing the data clears the "
+                    "selection."
+                </p>
+                <div class="mb-4 flex items-center gap-4 text-sm">
+                    <Button
+                        size=ButtonSize::Sm
+                        color=ButtonColor::Secondary
+                        on:click=move |_| keyed_data.update(|d| d.reverse())
+                        attr:id="keyed-reverse"
+                    >
+                        "Reverse rows"
+                    </Button>
+                    <span>
+                        "Selected ids: "
+                        <code data-testid="keyed-selected-ids">
+                            {move || {
+                                let d = keyed_data.get();
+                                let s = keyed_selected.get();
+                                if s.is_empty() {
+                                    "(none)".to_string()
+                                } else {
+                                    s.iter()
+                                        .filter_map(|&i| d.get(i).and_then(|r| r.get("id")).cloned())
+                                        .collect::<Vec<_>>()
+                                        .join(", ")
+                                }
+                            }}
+                        </code>
+                    </span>
+                </div>
+                <DataTable
+                    data=keyed_data
+                    columns=keyed_columns
+                    paginate=false
+                    selected_rows=keyed_selected
+                    row_key=Callback::new(|row: HashMap<&'static str, String>| {
+                        row.get("id").cloned().unwrap_or_default()
+                    })
+                    attr:id="keyed-table"
                 />
             </Section>
 

@@ -174,6 +174,30 @@ async fn action_cell_click_does_not_activate_row() {
     assert_eq!(testid_text(&h, "open-count").await, "1");
 }
 
+/// Keyed row identity (beads-py7i / `row_key`): select a row, then replace
+/// the data vec (the demo's Reverse button). The selection must follow the
+/// row's stable id to its new position rather than clearing (the positional
+/// behaviour) or sticking to the old index (a different row).
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn keyed_selection_survives_data_replacement() {
+    let h = harness_at("/components/data-table").await;
+
+    click(&h, "#keyed-table tbody tr:first-child td:first-child").await;
+    assert_eq!(
+        testid_text(&h, "keyed-selected-ids").await,
+        "001",
+        "plain click must select the first row (id 001)"
+    );
+
+    click(&h, "#keyed-reverse").await;
+    assert_eq!(
+        testid_text(&h, "keyed-selected-ids").await,
+        "001",
+        "the selected id must survive the data replacement"
+    );
+}
+
 /// DataTable runtime localization (beads-gh7a): the demo's "Runtime
 /// Localization" section derives `columns` and `texts` from a locale signal.
 /// Toggling the locale must re-render the table chrome in place — the header
