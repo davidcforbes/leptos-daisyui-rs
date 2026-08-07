@@ -193,6 +193,40 @@ The crate has two main modules:
   reusable framework hooks (`DebouncedSignal`, `use_swr_resource`)
 - `src/motion/` - Animation primitives (`Lerp`, `Transition`, `Keyframe`/`Track`, easing, spring, `use_animated` hook)
 
+### Recent additions (2026-08-06, from the office-perf audit)
+
+All driven by 4iiz-Office consumer findings (op-99t7/op-cy77.x/op-rrp9); the
+audit files beads into this repo's tracker continuously — check `bd list`.
+
+- **DataTable**: owned `Column.header` + `Signal<DataTableTexts>` (runtime
+  localization); `row_key` (selection keyed by row identity, survives data
+  replacement and sorts); `Column::action()` (action cells never trigger
+  `on_row_activate`); `extra_filter` predicate + `toolbar` ViewFn slot;
+  column-scoped free-text search (`Column::searched(false)` opt-out —
+  renderer-only metadata never matches); `ServerDataTable` typed
+  `TableQuery`/`on_query_change` API (page/size/search/sort/filters) with
+  `filter_options` for population-wide dropdowns. Both variants share
+  `TABLE_SCROLL_WRAPPER_CLASS` (horizontal overflow).
+- **DayScheduler**: opt-in interaction contract — `on_event_activate`,
+  `selected_event`, `on_event_move`/`on_event_resize` (keyboard Arrow /
+  Shift+Arrow minute-delta requests; consumer owns the events),
+  `event_content` renderer. Event blocks are index-keyed so focus survives
+  moves.
+- **Modal**: `label` / `labelled_by` / `described_by` accessible naming
+  (`labelled_by` suppresses `aria-label`).
+- **Field**: mints ids + provides `FieldContext`; `Input`/`Select`/`Textarea`
+  auto-consume it (`label[for]`, `aria-describedby`, `aria-errormessage` +
+  `aria-invalid`).
+- **login_screen**: `ProviderLoginScreen` + `LoginProvider` — branded
+  server-redirect OAuth landing (no credential state).
+- **widgets**: `name_color_class`/`NAME_PALETTE` deterministic avatar
+  palette (`AvatarBadge name=`, `Persona palette=true`); assignments pinned
+  by test — changing the hash is a breaking visual change.
+- **utils**: `use_event_source` (owned-lifecycle SSE, no `Closure::forget`)
+  and `use_event_source_fetch` (authenticated SSE over fetch: headers
+  callback per (re)connect, pure `SseParser`, `retry:`/`Last-Event-ID`).
+- **LinkButton**: `href` is `MaybeProp<String>` (per-row routes).
+
 ### Recent additions (2026-07)
 - **Spacing & vertical-rhythm system (2026-07-26).** `styles/tokens.css` is
   generated from `ui-tokens` and imported by `demo/input.css`, so Tailwind's
