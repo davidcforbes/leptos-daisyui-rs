@@ -73,9 +73,9 @@ pub fn config() -> HarnessConfig {
     cfg.with_isolated_profile()
 }
 
-/// Launch Chrome, set the smoke viewport, navigate to `path` with the
-/// `?pp-freeze=1` determinism/oracle switch appended, and wait for the CSR
-/// app to actually mount.
+/// Launch Chrome, navigate to `path` with the `?pp-freeze=1`
+/// determinism/oracle switch appended, wait for the CSR app to actually
+/// mount, then set the smoke viewport.
 ///
 /// Composes `ldui_audit::ldui_web_config` (the freeze/oracle query suffix,
 /// the freeze style tag as readiness proof, the demo's base URL) with this
@@ -83,6 +83,16 @@ pub fn config() -> HarnessConfig {
 /// `capture_and_compare` still finds the committed baselines. The engine's
 /// `web::harness_at` owns the readiness polling and appends `query_suffix`
 /// itself — no local `?pp-freeze=1` append or extra waits needed here.
+///
+/// The engine harness always launches at `ViewportSize::CANONICAL`
+/// (1440x900, hard-coded in `pixelproof_web::Harness::launch_with_config`)
+/// and has no hook to set a viewport before its own navigate/wait sequence,
+/// so the smoke viewport (1280x800 — what the committed baselines and
+/// ceilings assume) is set *after* it returns, mirroring the order
+/// `pixelproof_web::responsive::capture_at_viewports` uses for its own
+/// per-viewport passes: `set_viewport` (a CDP device-metrics override,
+/// which reflows the already-loaded page) then one settle beat so
+/// fonts/layout are final at the new size before anything reads the DOM.
 pub async fn harness_at(path: &str) -> Harness {
     let mut cfg = ldui_audit::ldui_web_config(DEFAULT_BASE_URL);
     let ssim = config();
@@ -90,8 +100,9 @@ pub async fn harness_at(path: &str) -> Harness {
     cfg.harness.render_root = ssim.render_root;
     cfg.harness.diff_root = ssim.diff_root;
     let base = cfg.harness.base_url.clone();
+    let settle_ms = cfg.harness.settle_ms;
 
-    ldui_audit::web::harness_at(&cfg, path)
+    let h = ldui_audit::web::harness_at(&cfg, path)
         .await
         .unwrap_or_else(|e| {
             panic!(
@@ -100,7 +111,10 @@ pub async fn harness_at(path: &str) -> Harness {
                  Start it with `cargo make test-visual` (orchestrated) or\n\
                  `trunk serve` from demo/ (manual)."
             )
-        })
+        });
+    h.set_viewport(VIEWPORT).await.expect("set viewport");
+    tokio::time::sleep(std::time::Duration::from_millis(settle_ms)).await;
+    h
 }
 
 /// Poll until `document.querySelector(sel)` matches (60 s budget). Panics on
