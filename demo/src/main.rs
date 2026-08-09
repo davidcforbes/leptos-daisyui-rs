@@ -2,13 +2,13 @@ mod core;
 mod debug;
 mod debug_state;
 mod demos;
-mod test_mode;
 
 use core::Layout;
 use demos::*;
 use leptos::mount::mount_to_body;
 use leptos::prelude::*;
 use leptos_daisyui_rs::components::*;
+use leptos_daisyui_rs::test_mode;
 use leptos_daisyui_rs::theme::{ThemeProvider, use_theme_context};
 use leptos_daisyui_rs::tokens::{UiAnimationsPreamble, UiTokensPreamble};
 use leptos_icons::Icon;

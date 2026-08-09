@@ -113,6 +113,17 @@ pub fn install_style_kill_switch() {
     let _ = head.append_child(&style);
 }
 
+/// One-call setup: returns whether test mode is active, installing the
+/// freeze stylesheet when it is. Apps still install their own debug bridge
+/// (app state is app-specific) inside the returned-true branch.
+pub fn install_test_mode() -> bool {
+    let active = is_test_mode();
+    if active {
+        install_style_kill_switch();
+    }
+    active
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

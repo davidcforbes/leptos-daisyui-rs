@@ -4,8 +4,8 @@
 //! port 3010) through headless Chrome via `pixelproof-web`. Every URL gets
 //! `?pp-freeze=1` appended, which (a) kills CSS animations/transitions/caret
 //! blink/smooth scroll before first paint and (b) installs the
-//! `window.__APP_DEBUG__` state oracle — see `demo/src/test_mode.rs` and
-//! `demo/src/debug.rs` (ldui-49w.2/.3).
+//! `window.__APP_DEBUG__` state oracle — see `src/test_mode.rs` (library,
+//! `test-mode` feature) and `demo/src/debug.rs` (ldui-49w.2/.3).
 //!
 //! Baseline convention (ldui-49w.4): committed PNGs live at
 //! `tests/visual/baselines/<page>/<state>.w<width>.png`, viewport-suffixed

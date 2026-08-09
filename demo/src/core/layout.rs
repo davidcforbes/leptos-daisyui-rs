@@ -45,7 +45,7 @@ pub fn Layout() -> impl IntoView {
     // PixelProof determinism (ldui-49w.1): under ?pp-freeze=1 the status bar
     // must not tick — a live clock changes every capture and the
     // performance.memory readout varies per run. Show fixed placeholders.
-    let frozen = crate::test_mode::is_test_mode();
+    let frozen = leptos_daisyui_rs::test_mode::is_test_mode();
     if frozen {
         set_current_time.set("00:00:00".to_string());
         set_memory_usage.set("frozen".to_string());
