@@ -1,8 +1,13 @@
 # Framework-Level Visual Quality Checks — Design
 
 **Date:** 2026-08-08
-**Status:** Approved design, pre-implementation
-**Approach:** Hybrid — reusable audit crate + growing rulebook/skill (approach A)
+**Status:** Approved design, pre-implementation (revised same day: generic
+engine split out to PixelProof so Rust-DeskApp's desktop face can share the
+rule model)
+**Approach:** Hybrid — reusable audit engine in PixelProof + thin ldui layer +
+growing rulebook/skill (approach A, two-crate split)
+**Repos touched:** `C:\dev\PixelProof` (engine), this repo (ldui layer,
+rulebook, test-mode), `C:\dev\4iiz-office` (pilot)
 
 ## Problem
 
@@ -37,9 +42,11 @@ test-support module hard-wired to the demo.
 
 ## Non-goals
 
-- Publishing to crates.io (this repo is path-dep-only; the audit crate follows).
-- Auditing non-Leptos / non-sibling apps (a standalone CLI was considered and
-  rejected — it loses the typed link to `ui-tokens`).
+- Publishing to crates.io (this repo is path-dep-only; the audit crates follow).
+- A standalone CLI auditor (considered and rejected — it loses the typed link
+  to `ui-tokens`). Note the engine living in PixelProof does make non-Leptos
+  web apps auditable via a hand-written profile, but building that consumer
+  story is not part of this work.
 - Replacing app-local static CSS tests. They are the fast no-browser half and
   stay; the audit is the "did it reach the element" half.
 - SSIM baseline management for consumer apps (pixelproof-web already offers
@@ -47,25 +54,52 @@ test-support module hard-wired to the demo.
 
 ## Deliverables
 
-### 1. `ldui-audit` crate (new workspace member, `audit/`)
+The engine/layer split follows one rule: **anything that needs only a DOM,
+computed styles, and a profile-as-data lives in PixelProof; anything that
+knows about daisyUI classes, `ui-tokens`, or Leptos lives here.** This keeps
+PixelProof free of portfolio dependencies (it audited a non-Rust web app as a
+case study and must stay framework-agnostic) while letting Rust-DeskApp's
+desktop face share the rule model — `d2d_ui::layout_audit` already mirrors the
+layout sweep's assertion shape against its semantic tree, and a shared model
+gives both surfaces the same report/ceiling/describe() conventions.
 
-Generalizes `tests/common/` into a public library, consumed as a path
-dependency by C:\dev siblings (same convention as `pixelproof-web` itself).
+### 1a. `pixelproof-style-audit` crate (in `C:\dev\PixelProof`)
 
+The generic, framework-agnostic engine (new crate beside `pixelproof-web`; may
+begin as a module of `pixelproof-web` if a separate crate proves premature —
+implementation planning decides):
+
+- **`StyleProfile` as plain data.** Font family/weight, type ramp, radius set,
+  shadow set, spacing scale. No knowledge of where the values come from.
+- **The in-page sweep JS** for the surface-generic families (typography,
+  shape, depth, spacing/layout) plus the `AuditReport`/`Violation` types,
+  moved and generalized from this repo's `tests/common/layout_audit.rs`. The
+  report keeps the `selector / value / detail` violation shape, `describe()`
+  formatting, `scanned > 0` sanity check, and explicit `truncated` flag.
+- **Ratchet helpers** — per-page committed ceilings with lower-only-freely
+  semantics.
 - **Harness plumbing, made configurable.** `harness_at`, `wait_for_selector`,
-  isolated Chrome profile, settle/mount-poll logic move in from
-  `tests/common/mod.rs`. Base URL, mount selector (currently hard-coded
-  `main`), and env-var names become `AuditConfig` fields with the current
-  values as defaults.
-- **The sweep + report types.** The in-page layout sweep JS and
-  `AuditReport`/`Violation` types (`tests/common/layout_audit.rs`) move in
-  unchanged and are extended with the new families below. The report keeps the
-  `selector / value / detail` violation shape, `describe()` formatting,
-  `scanned > 0` sanity check, and explicit `truncated` flag.
-- **Entry point.** `audit_page(&harness, &profile) -> QualityReport`, grouping
-  violations by rule family. This repo's own `tests/` become the first
-  consumer of the crate, so the demo suites and the public library are the
-  same code — nothing maintained twice.
+  isolated Chrome profile, settle/mount-poll logic generalize from
+  `tests/common/mod.rs`: base URL, mount selector (currently hard-coded
+  `main`), and env-var names become config fields with the current values as
+  defaults.
+- **Surface adapters are out of scope here but enabled**: the rule model is
+  defined so the desktop face can implement a semantic-tree adapter in
+  `d2d_ui` later without changes to the model.
+
+### 1b. `ldui-audit` crate (this repo, new workspace member `audit/`)
+
+A thin ldui-specific layer over the engine, consumed as a path dependency by
+C:\dev siblings:
+
+- **`StyleProfile::from_ui_tokens()`** — profile defaults derived from
+  `ui_tokens` at compile time, so profiles cannot drift from the token crate.
+  The engine never depends on `ui-tokens`; only this layer does.
+- **Component-drift heuristics** (see §2) — daisyUI/ldui class knowledge.
+- **Entry point.** `audit_page(&harness, &profile) -> QualityReport`,
+  composing the engine's families with the drift family. This repo's own
+  `tests/` become the first consumer, so the demo suites and the public
+  library are the same code — nothing maintained twice.
 
 ### 2. Rule families (v1)
 
@@ -88,8 +122,9 @@ wrong-but-valid component; look-and-feel judgment calls) live in the rulebook
 
 ### 3. `StyleProfile`
 
-The reconciliation between "shared design system" and "apps legitimately
-diverge":
+The type lives in the engine (§1a) as plain data; the `from_ui_tokens()`
+constructor lives in `ldui-audit` (§1b). It is the reconciliation between
+"shared design system" and "apps legitimately diverge":
 
 ```rust
 let profile = StyleProfile::from_ui_tokens()   // ramp, spacing, radii, shadows, family
