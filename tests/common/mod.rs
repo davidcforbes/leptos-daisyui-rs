@@ -11,12 +11,16 @@
 //! `tests/visual/baselines/<page>/<state>.w<width>.png`, viewport-suffixed
 //! because captures only match baselines taken at the same viewport. The
 //! single smoke viewport is 1280x800 ([`VIEWPORT`]).
+//!
+//! The browser plumbing itself (readiness polling, the freeze/oracle query
+//! suffix, `click`/`oracle`) now lives in `pixelproof-style-audit::web` +
+//! `ldui-audit` (Task 7, ldui-audit's `audit/src/page.rs`); this module
+//! composes those with the SSIM-specific bits (baseline/render/diff roots)
+//! the visual suite still needs.
 
 // Each integration-test binary compiles this module independently, so any
 // helper unused by one binary would warn there.
 #![allow(dead_code)]
-
-pub mod layout_audit;
 
 use pixelproof_web::{Harness, HarnessConfig, ViewportSize};
 use std::path::PathBuf;
@@ -73,21 +77,21 @@ pub fn config() -> HarnessConfig {
 /// `?pp-freeze=1` determinism/oracle switch appended, and wait for the CSR
 /// app to actually mount.
 ///
-/// The fixed `settle_ms` alone is NOT enough here: the dev-profile wasm is
-/// ~60 MB, so first paint of real content can lag navigation by seconds
-/// (the first capture attempt produced six identical blank PNGs). We poll
-/// for (a) the freeze style tag — `test_mode::install_style_kill_switch`
-/// runs in `main()` before `mount_to_body`, so its presence proves the wasm
-/// booted in test mode — and (b) the Layout's `<main>` element, which proves
-/// the component tree mounted.
+/// Composes `ldui_audit::ldui_web_config` (the freeze/oracle query suffix,
+/// the freeze style tag as readiness proof, the demo's base URL) with this
+/// module's SSIM roots grafted onto its `.harness`, so `visual_smoke.rs`'s
+/// `capture_and_compare` still finds the committed baselines. The engine's
+/// `web::harness_at` owns the readiness polling and appends `query_suffix`
+/// itself — no local `?pp-freeze=1` append or extra waits needed here.
 pub async fn harness_at(path: &str) -> Harness {
-    let cfg = config();
-    let base = cfg.base_url.clone();
-    let h = Harness::launch_with_config(cfg).await.unwrap_or_else(|e| {
-        panic!("failed to launch headless Chrome: {e}. Is Chrome/Chromium installed?")
-    });
-    h.set_viewport(VIEWPORT).await.expect("set viewport");
-    h.navigate(&format!("{path}?pp-freeze=1"))
+    let mut cfg = ldui_audit::ldui_web_config(DEFAULT_BASE_URL);
+    let ssim = config();
+    cfg.harness.baseline_root = ssim.baseline_root;
+    cfg.harness.render_root = ssim.render_root;
+    cfg.harness.diff_root = ssim.diff_root;
+    let base = cfg.harness.base_url.clone();
+
+    ldui_audit::web::harness_at(&cfg, path)
         .await
         .unwrap_or_else(|e| {
             panic!(
@@ -96,76 +100,31 @@ pub async fn harness_at(path: &str) -> Harness {
                  Start it with `cargo make test-visual` (orchestrated) or\n\
                  `trunk serve` from demo/ (manual)."
             )
-        });
-    wait_for_selector(&h, r#"style[data-pixelproof="freeze"]"#).await;
-    wait_for_selector(&h, "main").await;
-    // One settle beat after mount so fonts/layout are final.
-    tokio::time::sleep(std::time::Duration::from_millis(h.config().settle_ms)).await;
-    h
+        })
 }
 
-/// Poll (100 ms interval, 60 s budget) until `document.querySelector(sel)`
-/// matches. Panics on timeout with the selector in the message. The budget is
-/// generous because the dev-profile wasm is ~60 MB and Chrome instances can
-/// contend when tests overlap.
+/// Poll until `document.querySelector(sel)` matches (60 s budget). Panics on
+/// timeout with the selector in the message.
 pub async fn wait_for_selector(h: &Harness, sel: &str) {
-    let expr = format!(
-        "document.querySelector({}) !== null",
-        serde_json::to_string(sel).unwrap()
-    );
-    for _ in 0..600 {
-        let found: bool = h
-            .page()
-            .evaluate(expr.as_str())
-            .await
-            .ok()
-            .and_then(|v| v.into_value().ok())
-            .unwrap_or(false);
-        if found {
-            return;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    }
-    panic!("timed out (30s) waiting for selector {sel:?} — did the wasm app mount?");
+    ldui_audit::web::wait_for_selector(h, sel, 60_000)
+        .await
+        .unwrap_or_else(|e| panic!("{e}"))
 }
 
 /// Click `selector` with a real CDP mouse event and wait the settle delay.
 /// (The harness only exposes click_and_capture; reactivity tests need a
 /// capture-free click.)
 pub async fn click(h: &Harness, selector: &str) {
-    h.page()
-        .find_element(selector)
+    ldui_audit::click(h, selector, h.config().settle_ms)
         .await
-        .unwrap_or_else(|e| panic!("find {selector}: {e}"))
-        .click()
-        .await
-        .unwrap_or_else(|e| panic!("click {selector}: {e}"));
-    tokio::time::sleep(std::time::Duration::from_millis(h.config().settle_ms)).await;
+        .unwrap_or_else(|e| panic!("{e}"))
 }
 
 /// Pull the `window.__APP_DEBUG__.state()` snapshot, panicking if the bridge
 /// is absent (it must exist on any page loaded with `?pp-freeze=1`).
 pub async fn oracle(h: &Harness) -> serde_json::Value {
-    h.app_debug_state()
+    ldui_audit::oracle(h)
         .await
         .expect("app_debug_state call failed")
         .expect("window.__APP_DEBUG__ missing — was the page loaded with ?pp-freeze=1?")
-}
-
-/// Run the [`layout_audit`] sweep against the currently-loaded page and
-/// deserialize the report.
-///
-/// The sweep returns a JSON *string* rather than an object: CDP's value
-/// marshalling flattens nested arrays inconsistently across driver versions,
-/// and a string round-trips identically everywhere.
-pub async fn layout_report(h: &Harness) -> layout_audit::AuditReport {
-    let raw: String = h
-        .page()
-        .evaluate(layout_audit::SWEEP_JS.to_string())
-        .await
-        .expect("layout sweep failed to evaluate")
-        .into_value()
-        .expect("layout sweep did not return a string");
-    serde_json::from_str(&raw)
-        .unwrap_or_else(|e| panic!("layout sweep returned unparseable JSON ({e}): {raw}"))
 }

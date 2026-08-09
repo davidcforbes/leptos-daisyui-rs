@@ -1814,6 +1814,7 @@ dependencies = [
  "editmark-core",
  "editmark-mermaid",
  "js-sys",
+ "ldui-audit",
  "leptos",
  "leptos_router",
  "petgraph",

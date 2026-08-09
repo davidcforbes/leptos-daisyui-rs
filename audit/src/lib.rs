@@ -9,10 +9,12 @@
 //! Design: `docs/superpowers/specs/2026-08-08-visual-quality-checks-design.md`.
 
 pub mod drift;
+pub mod page;
 pub mod profile;
 pub mod web_config;
 
 pub use drift::{DriftReport, drift_js, run_drift};
+pub use page::{audit_page, click, oracle};
 pub use pixelproof_style_audit::web;
 pub use pixelproof_style_audit::{
     AuditReport, Ceiling, FamilyReport, RatchetOutcome, ShadowSpec, StyleProfile, SweepOptions,

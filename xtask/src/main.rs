@@ -218,6 +218,18 @@ fn layout_step() -> Step {
     }
 }
 
+/// The style-audit step (Task 7 of the visual-quality-checks plan): the
+/// engine's typography/shape/depth sweep plus daisyUI component-drift,
+/// ratcheted per page. Same tooling requirements as the other browser
+/// suites, so it lives alongside them in `verify-full` rather than in the
+/// fast `verify` gate.
+fn style_step() -> Step {
+    Step {
+        name: "test-style",
+        run: Run::BrowserSuite("style_audit_smoke"),
+    }
+}
+
 fn run_step(step: &Step) -> bool {
     eprintln!("\n----- {} -----", step.name);
     match &step.run {
@@ -1161,6 +1173,7 @@ fn main() -> ExitCode {
             let mut steps = gate_steps();
             steps.push(reactivity_step());
             steps.push(layout_step());
+            steps.push(style_step());
             steps.push(cmd(
                 "trunk-build",
                 "trunk",
@@ -1171,6 +1184,7 @@ fn main() -> ExitCode {
         }
         "test-reactivity" => run_steps(&[reactivity_step()]),
         "test-layout" => run_steps(&[layout_step()]),
+        "test-style" => run_steps(&[style_step()]),
         "gen-tokens" => {
             let check = std::env::args().any(|a| a == "--check");
             gen_tokens(check)
@@ -1184,7 +1198,7 @@ fn main() -> ExitCode {
         other => {
             eprintln!("xtask: unknown subcommand {other:?}");
             eprintln!(
-                "usage: cargo xtask <verify|verify-full|fmt-check|clippy|build|check-demo|test|test-reactivity|test-layout|gen-tokens|check-sibling-tokens|bump>"
+                "usage: cargo xtask <verify|verify-full|fmt-check|clippy|build|check-demo|test|test-reactivity|test-layout|test-style|gen-tokens|check-sibling-tokens|bump>"
             );
             ExitCode::from(2)
         }
@@ -1414,19 +1428,28 @@ pub fn r() -> f32 { radius::CARD }
     }
 
     #[test]
+    fn style_step_is_in_process() {
+        let s = style_step();
+        assert_eq!(s.name, "test-style");
+        assert!(matches!(s.run, Run::BrowserSuite("style_audit_smoke")));
+    }
+
+    #[test]
     fn browser_suites_are_not_in_the_fast_gate() {
-        // Both need npm/trunk/Chrome and a wasm build; `verify` is
+        // All three need npm/trunk/Chrome and a wasm build; `verify` is
         // deliberately fast and zero-tooling.
         let names: Vec<&str> = gate_steps().iter().map(|s| s.name).collect();
         assert!(!names.contains(&"test-reactivity"));
         assert!(!names.contains(&"test-layout"));
+        assert!(!names.contains(&"test-style"));
     }
 
     #[test]
     fn test_subcommand_does_not_pick_up_the_browser_suites() {
         // `steps_for("test")` filters on the `test` prefix, which
-        // `test-reactivity` and `test-layout` also match by name — but they
-        // are not gate steps, so the filter must not surface them.
+        // `test-reactivity`, `test-layout` and `test-style` also match by
+        // name — but they are not gate steps, so the filter must not surface
+        // them.
         let names: Vec<&str> = steps_for("test").iter().map(|s| s.name).collect();
         assert_eq!(
             names,

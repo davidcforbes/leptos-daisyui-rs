@@ -111,3 +111,7 @@ editmark-core = { path = "../editmark/editmark-core" }
 # C:/dev sibling checkout — same convention as the other path deps above.
 pixelproof-web = { path = "../PixelProof/crates/pixelproof-web" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+# Style/layout audit sweep + daisyUI component-drift heuristics
+# (tests/layout_audit_smoke.rs, tests/style_audit_smoke.rs) — a workspace
+# member, not a C:/dev sibling checkout.
+ldui-audit = { path = "audit" }
