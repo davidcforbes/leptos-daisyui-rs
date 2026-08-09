@@ -96,6 +96,10 @@ fn gate_steps() -> Vec<Step> {
             ],
             None,
         ),
+        // `--features test-mode`: `src/test_mode.rs` is behind that feature,
+        // so a default-feature clippy never lints it and a default-feature
+        // `cargo test` never runs its unit tests — the module the browser
+        // suites depend on was invisible to the gate.
         cmd(
             "clippy-lib",
             "cargo",
@@ -104,6 +108,8 @@ fn gate_steps() -> Vec<Step> {
                 "-p",
                 "leptos-daisyui-rs",
                 "--all-targets",
+                "--features",
+                "test-mode",
                 "--",
                 "-D",
                 "warnings",
@@ -150,10 +156,19 @@ fn gate_steps() -> Vec<Step> {
             &["check", "-p", "leptos-daisyui-showcase"],
             None,
         ),
+        // `--features test-mode`, same reason as `clippy-lib` above: without
+        // it the 7 `test_mode` unit tests silently do not run.
         cmd(
             "test-lib",
             "cargo",
-            &["test", "-p", "leptos-daisyui-rs", "--lib"],
+            &[
+                "test",
+                "-p",
+                "leptos-daisyui-rs",
+                "--lib",
+                "--features",
+                "test-mode",
+            ],
             None,
         ),
         cmd("test-xtask", "cargo", &["test", "-p", "xtask"], None),
@@ -1240,6 +1255,33 @@ mod tests {
             names,
             vec!["test-lib", "test-xtask", "test-audit", "test-daisyui5"]
         );
+    }
+
+    /// Argument-level guard: `src/test_mode.rs` is behind the `test-mode`
+    /// feature, so the two library steps must opt into it. Without the flag
+    /// the module's unit tests do not run and clippy never lints it, while
+    /// the gate still reports green.
+    #[test]
+    fn library_steps_enable_the_test_mode_feature() {
+        for name in ["clippy-lib", "test-lib"] {
+            let steps = gate_steps();
+            let step = steps
+                .iter()
+                .find(|s| s.name == name)
+                .unwrap_or_else(|| panic!("{name} is not a gate step"));
+            let Run::Cmd { args, .. } = &step.run else {
+                panic!("{name} must be a subprocess step");
+            };
+            let i = args
+                .iter()
+                .position(|a| a == "--features")
+                .unwrap_or_else(|| panic!("{name} does not pass --features: {args:?}"));
+            assert_eq!(
+                args.get(i + 1).map(String::as_str),
+                Some("test-mode"),
+                "{name} must enable the test-mode feature: {args:?}"
+            );
+        }
     }
 
     // ---- sibling-token guard (ldui-ae5) --------------------------------
