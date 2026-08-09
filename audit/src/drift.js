@@ -25,8 +25,19 @@ const visible = el => {
   return r.width > 0.5 && r.height > 0.5;
 };
 
+// Hard cap, mirroring the engine's sweep (`pixelproof-style-audit`'s
+// `sweep.rs`): without one a pathological page — a form-heavy consumer screen
+// with thousands of unlabelled inputs — builds a multi-megabyte JSON string
+// and the CDP round-trip appears to hang. All four rules feed the single
+// `component-drift` family, so one list shares the engine's per-family cap.
+// Truncation is reported, never silent.
+const MAX_PER_CATEGORY = 200;
 const violations = [];
-const push = (selector, detail) => violations.push({ selector, value: 1.0, detail });
+let truncated = false;
+const push = (selector, detail) => {
+  if (violations.length < MAX_PER_CATEGORY) violations.push({ selector, value: 1.0, detail });
+  else truncated = true;
+};
 
 const EXEMPT_CLOSEST = '.menu, .tabs, .dropdown, .modal-backdrop, [data-ld-audit-exempt]';
 const NON_FIELD_INPUT_TYPES = ['checkbox', 'radio', 'range', 'hidden'];
@@ -55,8 +66,19 @@ for (const el of els) {
   // that never opted into .badge (or .btn, which shares the same shape).
   if (tag === 'SPAN' || tag === 'DIV') {
     const s = cs(el);
-    const btlr = parseFloat(s.borderTopLeftRadius) || 0;
     const r = el.getBoundingClientRect();
+    // Computed radius is "Npx", "N%", or "X Y" for elliptical. A percentage
+    // resolves against the box, exactly as the engine's shape rule does
+    // (`sweep.rs`) — `parseFloat("50%")` would otherwise read as 50px and
+    // mis-flag a small round chip.
+    const rawRadius = (s.borderTopLeftRadius || '').split(' ')[0];
+    let btlr;
+    if (rawRadius.endsWith('%')) {
+      btlr = (parseFloat(rawRadius) / 100) * Math.min(r.width, r.height);
+    } else {
+      btlr = parseFloat(rawRadius);
+    }
+    if (isNaN(btlr)) btlr = 0;
     const bg = s.backgroundColor;
     const hasOwnText = Array.from(el.childNodes)
       .some(n => n.nodeType === 3 && n.textContent.trim());
@@ -97,4 +119,4 @@ for (const el of els) {
   }
 }
 
-return JSON.stringify({ violations, scanned: els.length });
+return JSON.stringify({ violations, scanned: els.length, truncated });

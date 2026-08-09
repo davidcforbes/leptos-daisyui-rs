@@ -8,7 +8,9 @@
 //! `pixelproof_style_audit::sweep_js` / `sweep.rs`): a self-contained JS IIFE
 //! with the mount selector embedded as a JSON constant, walking the visible
 //! elements under the mount subtree and returning a JSON-stringified
-//! `{ violations, scanned }` object. A later task (Task 7) merges this
+//! `{ violations, scanned, truncated }` object — including the engine's hard
+//! per-family cap, so a pathological page cannot build a multi-megabyte JSON
+//! string and hang the CDP round-trip. [`crate::page::audit_page`] merges this
 //! report's violations into the engine's
 //! [`pixelproof_style_audit::AuditReport`].
 
@@ -21,6 +23,11 @@ pub struct DriftReport {
     pub violations: Vec<pixelproof_style_audit::Violation>,
     /// Elements considered — 0 means the mount selector matched nothing.
     pub scanned: usize,
+    /// Whether the sweep's per-family cap was hit, so `violations` is a floor
+    /// rather than a total. Mirrors `AuditReport::truncated`; `serde(default)`
+    /// so an older sweep body still deserializes.
+    #[serde(default)]
+    pub truncated: bool,
 }
 
 /// Surface-shape options for the drift sweep — currently just where to look.
@@ -90,11 +97,61 @@ mod tests {
     #[test]
     fn drift_report_deserializes_the_sweep_shape() {
         let r: DriftReport = serde_json::from_str(
-            r#"{"violations":[{"selector":"button#save","value":1.0,"detail":"button-without-btn: raw button lacks .btn"}],"scanned":42}"#,
+            r#"{"violations":[{"selector":"button#save","value":1.0,"detail":"button-without-btn: raw button lacks .btn"}],"scanned":42,"truncated":false}"#,
         )
         .unwrap();
         assert_eq!(r.violations.len(), 1);
         assert_eq!(r.scanned, 42);
+        assert!(!r.truncated);
+    }
+
+    #[test]
+    fn drift_report_carries_truncation() {
+        let r: DriftReport =
+            serde_json::from_str(r#"{"violations":[],"scanned":9000,"truncated":true}"#).unwrap();
+        assert!(
+            r.truncated,
+            "a capped sweep must report that its counts are a floor"
+        );
+        // And an older sweep body that predates the flag still parses.
+        let r: DriftReport = serde_json::from_str(r#"{"violations":[],"scanned":9000}"#).unwrap();
+        assert!(!r.truncated);
+    }
+
+    /// The cap is the whole point of mirroring the engine here: without it a
+    /// form-heavy consumer screen builds a multi-megabyte JSON string and the
+    /// CDP round-trip appears to hang.
+    #[test]
+    fn generated_drift_sweep_caps_its_violation_list() {
+        let js = drift_js("main");
+        assert!(
+            js.contains("MAX_PER_CATEGORY = 200"),
+            "drift sweep must carry the engine's per-family cap"
+        );
+        assert!(
+            js.contains("truncated = true"),
+            "hitting the cap must latch the truncation flag"
+        );
+        assert!(
+            js.contains("scanned: els.length, truncated"),
+            "the sweep must return the truncation flag, not just record it"
+        );
+    }
+
+    /// A percentage radius resolves against the box, exactly as the engine's
+    /// shape rule does — `parseFloat("50%")` would read as 50px and mis-flag
+    /// a small round chip as a badge lookalike.
+    #[test]
+    fn badge_lookalike_resolves_percentage_radius_against_the_box() {
+        let js = drift_js("main");
+        assert!(
+            js.contains("rawRadius.endsWith('%')"),
+            "percentage radius must be detected"
+        );
+        assert!(
+            js.contains("(parseFloat(rawRadius) / 100) * Math.min(r.width, r.height)"),
+            "percentage radius must resolve against the shorter box side"
+        );
     }
 
     #[test]
