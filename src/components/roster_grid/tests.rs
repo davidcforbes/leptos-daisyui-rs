@@ -150,7 +150,7 @@ fn shift_state_labels_are_distinct_and_non_empty() {
 /// classes into one shared value.
 #[test]
 fn border_style_encodes_working_state_without_colour() {
-    for state in ShiftState::ALL {
+    for &state in ShiftState::ALL {
         let b = state.as_border_class();
         if state.is_working() {
             assert!(b.contains("border-solid"), "{state:?} -> {b}");
@@ -294,7 +294,7 @@ fn cell_aria_label_uses_the_supplied_state_name_not_the_english_default() {
 
 #[test]
 fn cell_aria_label_carries_every_state_name() {
-    for state in ShiftState::ALL {
+    for &state in ShiftState::ALL {
         let cell = RosterCell::new("x", state);
         assert!(cell_aria_label("W", "C", &cell, state.as_label()).ends_with(state.as_label()));
     }
@@ -311,6 +311,33 @@ fn only_enter_and_space_activate_a_cell() {
     for key in ["Tab", "Escape", "ArrowRight", "a", "Spacebar", ""] {
         assert!(!cell_key_activates(key), "{key} must not activate");
     }
+}
+
+// ---------------------------------------------------------------------
+// grid_is_interactive -- only a callback earns focus semantics
+// ---------------------------------------------------------------------
+
+#[test]
+fn an_activation_callback_makes_the_grid_interactive() {
+    assert!(grid_is_interactive(true, false));
+    assert!(grid_is_interactive(true, true));
+}
+
+/// The fix for review round 1. `selected_cell` is a READ-ONLY `Signal`, so with
+/// no `on_cell_activate` a click or Enter press does nothing. Treating it as
+/// opting in (which DataTable and DayScheduler correctly do, because THEIR
+/// selection props are writable `RwSignal`s) would stamp `role="button"`,
+/// `tabindex=0` and `aria-pressed` onto every tile of a display-only roster --
+/// 140 unresponsive "buttons" on a 20x7 grid, i.e. WCAG 4.1.2. Flipping this
+/// back to `has_activate || has_selection` fails here.
+#[test]
+fn selection_alone_does_not_make_the_grid_interactive() {
+    assert!(!grid_is_interactive(false, true));
+}
+
+#[test]
+fn a_display_only_grid_is_not_interactive() {
+    assert!(!grid_is_interactive(false, false));
 }
 
 #[test]

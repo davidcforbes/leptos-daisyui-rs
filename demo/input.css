@@ -144,7 +144,7 @@
 /* Roster Grid */
 @source inline("w-full overflow-x-auto table table-sm table-md whitespace-nowrap font-medium");
 @source inline("p-1 align-middle text-center flex items-center justify-center overflow-hidden");
-@source inline("rounded-sm border-l-4 border-solid border-dashed px-2 truncate sr-only");
+@source inline("rounded-sm border-l-4 border-solid border-dashed px-2 min-w-0 truncate sr-only");
 @source inline("h-8 text-xs h-10 text-sm cursor-pointer ring-2 ring-primary");
 @source inline("bg-success/15 bg-info/15 bg-base-200/60 bg-accent/15 bg-warning/15");
 @source inline("border-success border-info border-base-300 border-accent border-warning");

@@ -20,6 +20,14 @@
 ///   a `state_label` callback that overrides [`as_label`](Self::as_label)
 ///   wholesale, the same escape hatch `hour_label` gives
 ///   [`WeekView`](crate::components::WeekView).
+///
+/// **This enum is deliberately NOT `#[non_exhaustive]`, unlike
+/// [`RosterDensity`].** It is a value consumers must map exhaustively — a
+/// `state_label` callback returns one string per state — so when a sixth state
+/// lands, a compile error in every consumer is the correct outcome.
+/// `#[non_exhaustive]` would instead route the new state into an existing
+/// `_ =>` arm and announce the wrong name to a screen reader, silently turning
+/// a loud build failure into an accessibility regression. Do not add it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum ShiftState {
     /// A full working shift.
@@ -88,7 +96,12 @@ impl ShiftState {
 
     /// Every variant, in display order — for demos, legends and exhaustive
     /// tests that must fail when a variant is added without a class mapping.
-    pub const ALL: [ShiftState; 5] = [
+    ///
+    /// A slice rather than `[ShiftState; 5]`: baking the count into the public
+    /// type makes adding a sixth state a breaking API change on top of the
+    /// (intended) breaking change to the enum itself, and forces every caller
+    /// that named the array type to be edited for no benefit.
+    pub const ALL: &'static [ShiftState] = &[
         ShiftState::Full,
         ShiftState::Half,
         ShiftState::Off,
@@ -104,7 +117,13 @@ impl ShiftState {
 /// scale because it is `ui_tokens::spacing::TABLE_ROW_HEIGHT` — the row height
 /// the Direct2D desktop face draws. Padding inside a cell still lands on the
 /// canonical scale; only the height comes from here.
+///
+/// `#[non_exhaustive]`: a third step (an ultra-dense wall-display roster, say)
+/// should not be a breaking change. Unlike [`ShiftState`] this is a *knob* the
+/// consumer picks from, not a value it must map, so a `_ =>` fallback in a
+/// consumer's `match` is harmless.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum RosterDensity {
     /// 32px rows with extra-small text — a full department on one screen.
     Compact,

@@ -123,6 +123,32 @@ pub fn cell_key_activates(key: &str) -> bool {
     key == "Enter" || key == " "
 }
 
+/// Whether the grid's tiles carry focus and keyboard semantics: `tabindex=0`,
+/// `role="button"`, `aria-pressed` and Enter/Space activation.
+///
+/// The named counterpart of `DataTable`'s
+/// [`row_is_interactive`](crate::components::row_is_interactive), but with a
+/// deliberately narrower rule, so the difference is visible and testable rather
+/// than buried in a `let` inside the view.
+///
+/// **Only an activation callback counts.** `DataTable` and `DayScheduler` also
+/// treat their selection prop as opting in, because theirs is an `RwSignal`
+/// *they* write — a click on a selection-only grid there really does change
+/// state. `RosterGrid`'s `selected_cell` is a read-only `Signal`, so with no
+/// callback there is nothing for a click or an Enter press to do. Counting it
+/// would put `role="button"` and `tabindex=0` on every tile of a display-only
+/// roster — on a 20x7 grid, 140 focusable elements announced as buttons that
+/// ignore every key. Advertising a role and a state without the behaviour is
+/// exactly WCAG 4.1.2 (Name, Role, Value), and it would also make a
+/// today's-shift highlight unusable to keyboard users.
+///
+/// The selection ring is drawn independently of this, so a display-only roster
+/// keeps its highlight and loses only the dead tab stops.
+pub fn grid_is_interactive(has_activate: bool, has_selection: bool) -> bool {
+    let _ = has_selection;
+    has_activate
+}
+
 /// Whether `(row, col)` is the selected cell.
 ///
 /// Trivial by construction, and that is the point: selection is compared, never

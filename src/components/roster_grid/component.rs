@@ -1,7 +1,7 @@
 use super::style::{RosterDensity, ShiftState};
 use super::types::{
     RosterRow, cell_aria_label, cell_is_selected, cell_key_activates, default_empty_title,
-    default_roster_columns, normalize_cells,
+    default_roster_columns, grid_is_interactive, normalize_cells,
 };
 use crate::components::empty_state::EmptyState;
 use crate::merge_classes;
@@ -68,7 +68,7 @@ use leptos::{html::Div, prelude::*};
 /// ```css
 /// @source inline("w-full overflow-x-auto table table-sm table-md whitespace-nowrap font-medium");
 /// @source inline("p-1 align-middle text-center flex items-center justify-center overflow-hidden");
-/// @source inline("rounded-sm border-l-4 border-solid border-dashed px-2 truncate sr-only");
+/// @source inline("rounded-sm border-l-4 border-solid border-dashed px-2 min-w-0 truncate sr-only");
 /// @source inline("h-8 text-xs h-10 text-sm");
 /// @source inline("bg-success/15 bg-info/15 bg-base-200/60 bg-accent/15 bg-warning/15");
 /// @source inline("border-success border-info border-base-300 border-accent border-warning");
@@ -110,9 +110,9 @@ pub fn RosterGrid(
     state_label: Option<Callback<ShiftState, String>>,
 
     /// Optional cell activation, called with `(row, col)` — the index into
-    /// `rows` and into `columns`. Supplying this (or `selected_cell`) makes
-    /// tiles focusable (`tabindex=0`, `role="button"`) with an accessible name
-    /// of "worker, column, label, state"; a display-only roster gains no tab
+    /// `rows` and into `columns`. Supplying this — and ONLY this — makes tiles
+    /// focusable (`tabindex=0`, `role="button"`) with an accessible name of
+    /// "worker, column, label, state"; a display-only roster gains no tab
     /// stops at all.
     #[prop(optional, into)]
     on_cell_activate: Option<Callback<(usize, usize)>>,
@@ -121,6 +121,11 @@ pub fn RosterGrid(
     /// The consumer owns it — update it from `on_cell_activate`. A coordinate
     /// outside the grid selects nothing rather than panicking, so a stale
     /// selection left over from a larger roster is harmless.
+    ///
+    /// This prop alone does NOT make the grid interactive: it is a read-only
+    /// `Signal`, so passing it without `on_cell_activate` is a legitimate
+    /// display-only highlight (today's shift, a search hit) and the tiles stay
+    /// plain content. The selection ring renders either way.
     #[prop(optional, into)]
     selected_cell: Option<Signal<Option<(usize, usize)>>>,
 
@@ -140,9 +145,10 @@ pub fn RosterGrid(
     #[prop(optional)]
     node_ref: NodeRef<Div>,
 ) -> impl IntoView {
-    // Focus and keyboard semantics exist only where the consumer opted into an
-    // interaction, mirroring DataTable's `row_is_interactive` rule.
-    let interactive = on_cell_activate.is_some() || selected_cell.is_some();
+    // Focus and keyboard semantics exist only where activating a tile actually
+    // does something. See `grid_is_interactive` for why `selected_cell` alone
+    // deliberately does NOT count, unlike in DataTable/DayScheduler.
+    let interactive = grid_is_interactive(on_cell_activate.is_some(), selected_cell.is_some());
 
     // The state's announced name, honouring `state_label` when supplied.
     // `Callback` is `Copy`, so this closure is `Copy` and can be handed to
@@ -271,7 +277,13 @@ pub fn RosterGrid(
                                                                     }
                                                                 }
                                                             >
-                                                                <span class="truncate">{label}</span>
+                                                                // `min-w-0` is load-bearing: a flex item
+                                                                // defaults to `min-width: auto`, which
+                                                                // refuses to shrink below its content, so
+                                                                // `truncate` never ellipsises and the
+                                                                // tile's `overflow-hidden` hard-clips the
+                                                                // text mid-glyph instead.
+                                                                <span class="min-w-0 truncate">{label}</span>
                                                                 // The state reaches assistive tech even
                                                                 // when the tile is not an interactive
                                                                 // widget with an `aria-label`.

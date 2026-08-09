@@ -122,7 +122,7 @@ pub fn RosterGridDemo() -> impl IntoView {
 
             <Section title="Interactive: activate and select a cell" col=true>
                 <p class="text-sm opacity-60">
-                    "Supplying on_cell_activate or selected_cell makes tiles focusable with role=button and an accessible name of \"worker, day, label, state\". A display-only roster gains no tab stops at all."
+                    "Supplying on_cell_activate makes tiles focusable with role=button, aria-pressed and an accessible name of \"worker, day, label, state\". Tab into the grid and press Enter or Space."
                 </p>
                 <RosterGrid
                     rows=rows
@@ -132,6 +132,13 @@ pub fn RosterGridDemo() -> impl IntoView {
                 <p class="text-sm opacity-60 mt-2">
                     "Last activated: " {move || last_activated.get()}
                 </p>
+            </Section>
+
+            <Section title="Display-only highlight: selected_cell with no callback" col=true>
+                <p class="text-sm opacity-60">
+                    "selected_cell alone is a read-only highlight - today's shift, a search hit - so it does NOT make the grid interactive. The ring renders, but there is no tabindex, no role=button and no aria-pressed: tabbing through this section skips the grid entirely. Advertising 140 unresponsive buttons on a 20x7 roster would be WCAG 4.1.2."
+                </p>
+                <RosterGrid rows=rows selected_cell=Signal::derive(|| Some((1, 3))) />
             </Section>
 
             <Section title="Caller-supplied columns and localised state names" col=true>
