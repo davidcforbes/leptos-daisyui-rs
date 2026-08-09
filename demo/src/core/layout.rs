@@ -330,6 +330,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     value: "week-view",
                 },
                 ComponentItem {
+                    name: "Roster Grid (Schedule Matrix)",
+                    href: "/components/roster-grid",
+                    value: "roster-grid",
+                },
+                ComponentItem {
                     name: "Diff",
                     href: "/components/diff",
                     value: "diff",

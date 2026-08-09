@@ -187,6 +187,7 @@ fn AppInner() -> impl IntoView {
                     <Route path=path!("/validator") view=ValidatorDemo />
                     <Route path=path!("/vertical-steps") view=VerticalStepsDemo />
                     <Route path=path!("/week-view") view=WeekViewDemo />
+                    <Route path=path!("/roster-grid") view=RosterGridDemo />
                 </ParentRoute>
             </Routes>
         </Router>

@@ -141,6 +141,13 @@
 @source inline("range range-neutral range-primary range-secondary range-accent range-success range-warning range-info range-error range-xs range-sm range-md range-lg range-xl");
 /* Rating */
 @source inline("rating rating-half rating-hidden rating-xs rating-sm rating-md rating-lg rating-xl");
+/* Roster Grid */
+@source inline("w-full overflow-x-auto table table-sm table-md whitespace-nowrap font-medium");
+@source inline("p-1 align-middle text-center flex items-center justify-center overflow-hidden");
+@source inline("rounded-sm border-l-4 border-solid border-dashed px-2 truncate sr-only");
+@source inline("h-8 text-xs h-10 text-sm cursor-pointer ring-2 ring-primary");
+@source inline("bg-success/15 bg-info/15 bg-base-200/60 bg-accent/15 bg-warning/15");
+@source inline("border-success border-info border-base-300 border-accent border-warning");
 /* Result List */
 @source inline("flex flex-col gap-0.5 max-h-80 overflow-y-auto rounded-box border border-base-300 bg-base-100 outline-none focus:ring-2 focus:ring-primary/50 px-3 py-2 cursor-pointer bg-primary/10 text-primary bg-base-200 font-semibold text-sm truncate text-xs opacity-60 whitespace-normal break-words p-4 text-center");
 /* Tree */
