@@ -65,6 +65,15 @@ gives both surfaces the same report/ceiling/describe() conventions.
 
 ### 1a. `pixelproof-style-audit` crate (in `C:\dev\PixelProof`)
 
+> **As landed** (PixelProof commit `5bba7dc`, bead `PixelProof-5af`): the
+> engine crate holds the **rule model only** — `StyleProfile`, `ShadowSpec`,
+> `Violation`/`FamilyReport`/`AuditReport`, `Ceiling`/`check_ceilings`. The
+> in-page sweep JS and CDP harness plumbing stay in the web layer
+> (`ldui-audit`, §1b), since the desktop face consumes the model through its
+> own semantic-tree adapter and has no use for browser plumbing. The
+> remainder of this section describes the originally-planned wider scope;
+> where they differ, the landed boundary governs.
+
 The generic, framework-agnostic engine (new crate beside `pixelproof-web`; may
 begin as a module of `pixelproof-web` if a separate crate proves premature —
 implementation planning decides):
