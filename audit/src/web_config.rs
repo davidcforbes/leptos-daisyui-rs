@@ -23,6 +23,7 @@ mod tests {
         assert_eq!(cfg.query_suffix, "?pp-freeze=1");
         assert_eq!(cfg.ready_selectors.len(), 1);
         assert_eq!(cfg.ready_selectors[0], r#"style[data-pixelproof="freeze"]"#);
+        assert_eq!(cfg.harness.base_url, "http://localhost:3000");
     }
 
     #[test]
