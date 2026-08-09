@@ -1,5 +1,8 @@
 use crate::core::{ContentLayout, Section};
 use leptos::prelude::*;
+// The SVG chart family lives in `charts`, not `components`. Imported by name
+// rather than glob because `charts` also exports a `Sparkline`.
+use leptos_daisyui_rs::charts::BarChart;
 use leptos_daisyui_rs::components::*;
 
 #[component]
@@ -136,6 +139,66 @@ pub fn SparklineDemo() -> impl IntoView {
                     class="w-72"
                 />
             </Section>
+
+            <Section title="BarChart — per-bar color (ldui-jm6)" col=true>
+                <p class="text-sm opacity-70">
+                    "bar_colors is an optional list positionally parallel to data, so each bar can carry its own judgement — weeks at or above target in success, weeks behind in error — instead of painting the whole chart by the series' majority state. The list need not match data in length: short lists fall back to color, surplus entries are ignored, and the bar count always comes from data."
+                </p>
+                <div class="w-full max-w-xl">
+                    <BarChart
+                        data=closed_by_week()
+                        bar_colors=closed_by_week_colors()
+                        height=180
+                    />
+                </div>
+
+                <p class="text-sm opacity-70">
+                    "Two overrides against a four-bar series — bars 3 and 4 fall back to the chart-wide color rather than panicking or vanishing:"
+                </p>
+                <div class="w-full max-w-xl">
+                    <BarChart
+                        data=vec![
+                            ("Mon".to_string(), 4.0),
+                            ("Tue".to_string(), 7.0),
+                            ("Wed".to_string(), 5.0),
+                            ("Thu".to_string(), 9.0),
+                        ]
+                        bar_colors=vec![
+                            "var(--color-error)".to_string(),
+                            "var(--color-success)".to_string(),
+                        ]
+                        height=180
+                    />
+                </div>
+            </Section>
+
         </ContentLayout>
     }
+}
+
+/// Weekly closed-work counts for the per-bar-color example.
+fn closed_by_week() -> Vec<(String, f64)> {
+    vec![
+        ("W31".to_string(), 18.0),
+        ("W32".to_string(), 24.0),
+        ("W33".to_string(), 11.0),
+        ("W34".to_string(), 27.0),
+        ("W35".to_string(), 9.0),
+    ]
+}
+
+/// Per-bar judgement for [`closed_by_week`]: at or above the target of 20 is
+/// favourable, below it is not. One colour per bar, derived from the same
+/// comparison a consumer would already be making.
+fn closed_by_week_colors() -> Vec<String> {
+    closed_by_week()
+        .iter()
+        .map(|(_, v)| {
+            if *v >= 20.0 {
+                "var(--color-success)".to_string()
+            } else {
+                "var(--color-error)".to_string()
+            }
+        })
+        .collect()
 }

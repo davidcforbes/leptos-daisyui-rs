@@ -1,5 +1,23 @@
 use leptos::prelude::*;
 
+/// Resolves the fill for bar `index`.
+///
+/// `overrides` is the optional per-bar color list, which is deliberately
+/// **not** required to match `data` in length: an index past its end, or an
+/// empty string at that index, falls back to `fallback` (the chart-wide
+/// `color`). Bars are always driven by `data`, never by this list, so a
+/// mismatched list can neither drop a bar nor panic — a chart that panicked on
+/// a length mismatch would take the consumer's whole page down (ldui-jm6).
+///
+/// The empty-string escape hatch lets a caller override only some bars, e.g.
+/// `vec![String::new(), "red".into()]` colors the second bar only.
+fn bar_fill<'a>(index: usize, overrides: &'a [String], fallback: &'a str) -> &'a str {
+    match overrides.get(index) {
+        Some(c) if !c.is_empty() => c,
+        _ => fallback,
+    }
+}
+
 /// SVG-based bar chart component.
 ///
 /// Renders vertical or horizontal bars with category labels.
@@ -16,10 +34,24 @@ pub fn BarChart(
     /// Fill color for the bars.
     #[prop(default = "oklch(0.65 0.2 250)".to_string())]
     color: String,
+    /// Optional per-bar fill overrides, positionally parallel to `data`
+    /// (ldui-jm6). Use it to color each bar by its own judgement — e.g. an
+    /// above/below-target series where some weeks are on track and some are
+    /// behind — instead of painting the whole chart by the series' majority
+    /// state.
+    ///
+    /// The length is NOT required to match `data`. A shorter list colors the
+    /// leading bars and the rest fall back to `color`; a longer list has its
+    /// surplus entries ignored. An empty string at an index also falls back to
+    /// `color`, so only some bars need overriding. The bar count always comes
+    /// from `data`, so no mismatch can drop a bar or panic.
+    #[prop(optional)]
+    bar_colors: Option<Vec<String>>,
     /// If true, render horizontal bars instead of vertical.
     #[prop(default = false)]
     horizontal: bool,
 ) -> impl IntoView {
+    let bar_colors = bar_colors.unwrap_or_default();
     if data.is_empty() {
         return view! {
             <svg
@@ -89,8 +121,9 @@ pub fn BarChart(
 
         let bar_views = bars
             .into_iter()
-            .map(|(bx, by, bw, bh, lx, ly, vx, label, val)| {
-                let c = color.clone();
+            .enumerate()
+            .map(|(i, (bx, by, bw, bh, lx, ly, vx, label, val))| {
+                let c = bar_fill(i, &bar_colors, &color).to_string();
                 let vy = ly.clone();
                 view! {
                     <rect x=bx y=by width=bw height=bh fill=c rx="2" />
@@ -153,8 +186,9 @@ pub fn BarChart(
 
         let bar_views = bars
             .into_iter()
-            .map(|(bx, by, bw, bh, lx, ly, vy, label, val)| {
-                let c = color.clone();
+            .enumerate()
+            .map(|(i, (bx, by, bw, bh, lx, ly, vy, label, val))| {
+                let c = bar_fill(i, &bar_colors, &color).to_string();
                 let vx = lx.clone();
                 view! {
                     <rect x=bx y=by width=bw height=bh fill=c rx="2" />
@@ -185,5 +219,69 @@ pub fn BarChart(
             </svg>
         }
         .into_any()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cols(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn bar_fill_no_overrides_uses_chart_color() {
+        assert_eq!(bar_fill(0, &[], "base"), "base");
+        assert_eq!(bar_fill(7, &[], "base"), "base");
+    }
+
+    #[test]
+    fn bar_fill_uses_override_at_index() {
+        let o = cols(&["red", "green", "blue"]);
+        assert_eq!(bar_fill(0, &o, "base"), "red");
+        assert_eq!(bar_fill(1, &o, "base"), "green");
+        assert_eq!(bar_fill(2, &o, "base"), "blue");
+    }
+
+    #[test]
+    fn bar_fill_shorter_list_falls_back_for_out_of_range() {
+        // 2 overrides against a 4-bar series: bars 2 and 3 keep the chart color
+        // rather than panicking or dropping.
+        let o = cols(&["red", "green"]);
+        assert_eq!(bar_fill(2, &o, "base"), "base");
+        assert_eq!(bar_fill(3, &o, "base"), "base");
+    }
+
+    #[test]
+    fn bar_fill_longer_list_ignores_surplus() {
+        // 5 overrides against a 2-bar series: only the first two are consulted,
+        // and asking for them never reads past `data`.
+        let o = cols(&["a", "b", "c", "d", "e"]);
+        assert_eq!(bar_fill(0, &o, "base"), "a");
+        assert_eq!(bar_fill(1, &o, "base"), "b");
+    }
+
+    #[test]
+    fn bar_fill_empty_entry_falls_back() {
+        // Escape hatch: override only some bars by leaving the others blank.
+        let o = cols(&["", "green", ""]);
+        assert_eq!(bar_fill(0, &o, "base"), "base");
+        assert_eq!(bar_fill(1, &o, "base"), "green");
+        assert_eq!(bar_fill(2, &o, "base"), "base");
+    }
+
+    #[test]
+    fn bar_fill_never_panics_across_a_full_series_sweep() {
+        // The property that matters: for every bar index a chart would draw,
+        // `bar_fill` returns something, whatever the override length.
+        let fallback = "base";
+        for overrides_len in 0..8usize {
+            let o: Vec<String> = (0..overrides_len).map(|i| format!("c{i}")).collect();
+            for i in 0..5usize {
+                let got = bar_fill(i, &o, fallback);
+                assert!(!got.is_empty());
+            }
+        }
     }
 }
