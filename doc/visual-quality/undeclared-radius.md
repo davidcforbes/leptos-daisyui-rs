@@ -39,5 +39,7 @@ radius set`). This is one of the three injected violations in
 injected specifically below the min-side/2 pill threshold so it can't be
 mistaken for a legitimate pill, and the suite asserts the shape count rises.
 `audit/src/profile.rs`'s own unit tests pin the declared radii to
-`[4.0, 8.0, 12.0, 9999.0]` and use `15.0` as the canonical off-scale example.
-Caught by `cargo xtask test-style`.
+`[4.0, 8.0, 12.0, 9999.0]`; the audit engine's own tests
+(`pixelproof-style-audit`'s `profile_matchers_apply_epsilon`) pin `15.0` as
+the canonical undeclared-radius example (`assert!(!p.radius_ok(15.0),
+"undeclared radius fails")`). Caught by `cargo xtask test-style`.
