@@ -9,6 +9,7 @@ mod component;
 mod style;
 #[cfg(test)]
 mod tests;
+pub mod transport;
 mod types;
 
 pub use component::{AiChat, ChatScopeOption};
@@ -16,6 +17,7 @@ pub use style::{
     ComposerAction, composer_key_action, is_markdown, is_thinking, role_classes, role_label,
     should_stick_to_bottom, show_welcome_chips,
 };
+pub use transport::{BridgeCommand, SseBridgeHandle, SseBridgeTransport, parse_sse_data};
 pub use types::{
     format_allowed_tools, format_count, format_usage, parse_allowed_tools,
     settings_from_form_fields,
