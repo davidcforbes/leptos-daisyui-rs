@@ -20,7 +20,7 @@ The orchestrator holds **no logic** — every task just calls `cargo xtask <sub>
 
 ## Workspace shape
 
-The repo is a Cargo **workspace** whose members are exactly the three crates it
+The repo is a Cargo **workspace** whose members are exactly the four crates it
 owns:
 
 ```toml
@@ -30,17 +30,23 @@ name = "leptos-daisyui-rs"   # the library, also the workspace root
 publish = false
 
 [workspace]
-members = [".", "xtask", "demo"]
-resolver = "2"
+members = [".", "xtask", "demo", "audit"]
+resolver = "3"
 ```
 
 - `.` — the `leptos-daisyui-rs` library (the product).
 - `xtask` — the pipeline logic binary.
 - `demo` — the `leptos-daisyui-showcase` CSR app (built for real via `trunk`).
+- `audit` — `ldui-audit`, the visual-quality audit surface: the
+  `pixelproof-style-audit` engine's rule model plus this library's daisyUI
+  component-drift rules and `ui-tokens` profile defaults. A dev-dependency of
+  the library's browser suites, and of consumer apps that audit their own
+  screens.
 
-The six sibling path-deps (`table-rs`, `ui-tokens`, `ai-chat-core`,
-`editmark-mermaid`, `editmark-core`, `pixelproof-web`) are **dependencies, not
-members** — they live outside this repo under `C:\dev`.
+The seven sibling path-deps (`table-rs`, `ui-tokens`, `ai-chat-core`,
+`editmark-mermaid`, `editmark-core`, `pixelproof-web`,
+`pixelproof-style-audit`) are **dependencies, not members** — they live outside
+this repo under `C:\dev`.
 
 Two workspace-wide commands turned out **not** to be safe here (verified
 empirically when the workspace was created), so the gate scopes explicitly:
@@ -48,11 +54,12 @@ empirically when the workspace was created), so the gate scopes explicitly:
 - **`cargo fmt --all` reaches into sibling repos** (e.g. `aws-update/...`, a
   transitive local path-dep) — 300+ diffs in code this repo doesn't own. So
   `fmt` is run **per-package** (`-p leptos-daisyui-rs -p leptos-daisyui-showcase
-  -p xtask`), never `--all`. (Same hazard Rust-DeskApp's doc warns about.)
+  -p xtask -p ldui-audit`), never `--all`. (Same hazard Rust-DeskApp's doc warns
+  about.) Every member is named, so adding one means adding it here too.
 - **`cargo clippy --workspace` fails on feature unification** — co-building the
   demo enables `leptos`'s `csr` feature on the library, surfacing csr-only lints
   in the lib that don't exist when it's built standalone (as `cargo test --lib`
-  builds it). So `clippy` is run **per-crate** (lib and demo separately).
+  builds it). So `clippy` is run **per-crate** (lib, demo and audit separately).
 
 ## Running it
 
@@ -76,11 +83,16 @@ Each step is scoped per-crate; that scoping **is** the xtask's logic.
 |---|---|---|
 | `tokens-fresh` | `cargo xtask gen-tokens --check` | Fails if `styles/tokens.css` no longer matches what the `ui-tokens` crate produces — i.e. the desktop and web faces have silently forked. First because it is the cheapest and because a stale theme invalidates every downstream visual result. |
 | `sibling-tokens` | `cargo xtask check-sibling-tokens` | Fails if `src/tokens/preamble.rs` references a `ui_tokens` item that does not exist on `../Rust-DeskApp`'s **default** branch. See below — this is the one break no other step can see. |
-| `fmt-check` | `cargo fmt -p leptos-daisyui-rs -p leptos-daisyui-showcase -p xtask -- --check` | Per-package, **not `--all`** — `--all` reaches into sibling repos (see above). |
-| `clippy` | `cargo clippy -p leptos-daisyui-rs --all-targets -- -D warnings` **then** `-p leptos-daisyui-showcase` | Two per-crate runs — **not `--workspace`**, which fails on csr feature unification (see above). Host target. |
+| `fmt-check` | `cargo fmt -p leptos-daisyui-rs -p leptos-daisyui-showcase -p xtask -p ldui-audit -- --check` | Per-package, **not `--all`** — `--all` reaches into sibling repos (see above). Every workspace member is named explicitly, so a new member has to be added here or it goes unformatted. |
+| `clippy-lib` | `cargo clippy -p leptos-daisyui-rs --all-targets --features test-mode -- -D warnings` | Per-crate — **not `--workspace`**, which fails on csr feature unification (see above). Host target. `--features test-mode` because `src/test_mode.rs` is behind that feature and a default-feature clippy never lints it. |
+| `clippy-demo` | `cargo clippy -p leptos-daisyui-showcase --all-targets -- -D warnings` | Same per-crate reason. |
+| `clippy-audit` | `cargo clippy -p ldui-audit --all-targets -- -D warnings` | The visual-quality audit crate (`audit/`), which composes the `pixelproof-style-audit` engine with the daisyUI drift rules. |
 | `build` | `cargo build -p leptos-daisyui-rs` | **Library only.** The CSR demo is not natively built here — a native `cargo build` of a wasm/CSR binary can link-fail on `web-sys` host stubs; the demo is *checked* instead (next row) and *really* built by `trunk` (see `verify-full`). |
 | `check-demo` | `cargo check -p leptos-daisyui-showcase` | Fast native check of the demo — catches ~all compile breakage without npm/trunk. |
-| `test` | `cargo test -p leptos-daisyui-rs --lib` + `cargo test -p xtask` | The library's unit-test suite (~1766 tests) plus the xtask's own pure-function tests (SemVer bump, etc.). Non-`#[ignore]`d tests only. |
+| `test-lib` | `cargo test -p leptos-daisyui-rs --lib --features test-mode` | The library's unit-test suite (~2045 tests). Non-`#[ignore]`d tests only. `--features test-mode` for the same reason as `clippy-lib`: without it the 7 `test_mode` tests silently do not run, and that module is what the browser suites' freeze/oracle bridge is built on. |
+| `test-xtask` | `cargo test -p xtask` | The xtask's own pure-function tests (SemVer bump, the sibling-token parser, the gate's own argument vectors). |
+| `test-audit` | `cargo test -p ldui-audit --lib` | The audit crate's browser-free tests: the generated sweep JS (rule ids, the per-family cap, the percentage-radius conversion) and the drift/engine report merge. |
+| `test-daisyui5` | `cargo test -p leptos-daisyui-rs --test no_dead_daisyui4_classes` | Source scan (no browser) guarding against `.form-control` / `.label-text` / `.label-text-alt` coming back — removed in daisyUI 5, so they are silently inert. |
 
 ### `cargo xtask check-sibling-tokens` — a path dep hides an unmerged branch
 
@@ -154,7 +166,8 @@ different theme values.
 ### `cargo xtask verify-full` — with the browser suites and the real wasm build
 
 `verify-full` runs `verify`, then the reactivity/DOM-oracle suite
-(`test-reactivity`), then the layout audit (`test-layout`, below), then
+(`test-reactivity`), then the layout audit (`test-layout`, below), then the
+style audit (`test-style`, below), then
 `trunk build --release` in `demo/` — the real
 `wasm32-unknown-unknown` compile plus the Tailwind CSS build. It is a **separate
 task**, not part of the default gate, because it needs `npm` + `trunk` +
@@ -284,6 +297,57 @@ evidence.
 > sweep there is only a ratchet against new declared-box collisions.
 > `getBoundingClientRect` is a real post-layout measurement, so that caveat does
 > not transfer: an overlap reported here is an overlap that really renders.
+
+### `cargo xtask test-style` — the typography/shape/depth + drift audit
+
+Same server lifecycle again (`run_browser_suite`), running
+`tests/style_audit_smoke.rs`. `test-layout`'s sibling: the *same* engine sweep
+(`ldui_audit::audit_page`) under a fuller profile, reading the families that
+suite ignores.
+
+- **typography** — computed `font-family` off the profile's declared family
+  (i.e. a silent font fallback), and font sizes off `ui_tokens`' type ramp.
+- **shape** — `border-radius` outside the declared radius set.
+- **depth** — `box-shadow` outside `ui_tokens::elevation`, compared per
+  component with epsilons rather than as strings.
+- **component-drift** — the four daisyUI heuristics that are *not* in the
+  engine because the engine knows no framework: a raw `<button>` without
+  `.btn`, a raw `<table>` without `.table`, a pill-shaped text chip without
+  `.badge`, and a text input with no `fieldset`/wrapping `label`/`label[for]`.
+  They come from a second small in-page sweep (`audit/src/drift.js`) merged
+  into the same report.
+
+The profile is `ldui_audit::from_ui_tokens`, whose defaults are derived from
+the shared token crate at compile time, with the font family read from the
+running demo (`common::body_font_family`) rather than named — a family that is
+merely *declared* proves nothing about what is serving.
+
+**Ceilings are ratcheted per page and per family** in the suite's `PAGES`
+table, exactly like `test-layout`: a ceiling may be lowered freely, and raising
+one needs a reason in the commit message. daisyUI's own defaults report
+non-zero typography and depth out of the box — that is the baseline the ratchet
+tracks, not a blocker. Overlap is never ratcheted: gating goes through
+`ldui_audit::verify`, which rejects a ceiling entry for it as a
+misconfiguration.
+
+Two things the suite asserts beyond the ceilings:
+
+- **Truncation is a failure.** The engine caps each family at 200 violations
+  and sets `AuditReport::truncated`, which makes the counts a floor rather than
+  a total. Without an explicit assertion, a family saturated at the cap sits
+  under any ceiling above it forever and every further regression passes while
+  the report reads clean. Both audit suites call
+  `common::assert_not_truncated`.
+- **A negative control** (`sweep_detects_injected_style_and_drift_violations`)
+  injects one deliberate violation per family, asserts each is caught, removes
+  them, and asserts every count returns to baseline — including the drift rules,
+  so a merge that silently dropped them cannot read as a clean page.
+
+`report_style_backlog` is the reporting-only pass the committed ceilings are
+filled from; run it explicitly after a deliberate change.
+
+The rulebook — what each family means, the defect patterns behind them, and how
+to fix rather than ratchet — is `doc/visual-quality/`.
 
 ## Versioning — the automated bump
 

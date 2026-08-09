@@ -47,6 +47,7 @@ cargo make verify         # same, via cargo-make
 cargo xtask verify-full   # + reactivity suite + the real trunk wasm build (needs npm/trunk/Chrome)
 cargo xtask test-reactivity          # reactivity/DOM-oracle suite alone (self-spawns a demo server)
 cargo xtask test-layout              # layout audit: overlap/grid/internal<=external over the real DOM
+cargo xtask test-style               # style audit: typography/shape/depth + daisyUI component-drift, ratcheted per page
 cargo xtask gen-tokens [--check]     # regenerate styles/tokens.css from ui-tokens
 cargo xtask check-sibling-tokens     # preamble.rs's ui_tokens refs must exist on the sibling's DEFAULT branch
 cargo xtask bump patch|minor|major   # bump the library version (human-chosen level)
@@ -54,8 +55,14 @@ cargo xtask bump patch|minor|major   # bump the library version (human-chosen le
 
 **Repo-specific gotchas the gate encodes (do NOT run these directly):**
 `cargo fmt --all` reaches into sibling repos — fmt **per-package**
-(`-p leptos-daisyui-rs -p leptos-daisyui-showcase -p xtask`). `cargo clippy
---workspace` fails on leptos-`csr` feature unification — clippy **per-crate**.
+(`-p leptos-daisyui-rs -p leptos-daisyui-showcase -p xtask -p ldui-audit`).
+`cargo clippy --workspace` fails on leptos-`csr` feature unification — clippy
+**per-crate**. The library's clippy/test steps pass `--features test-mode`;
+without it `src/test_mode.rs` is neither linted nor tested.
+
+**The visual-quality rulebook is [`doc/visual-quality/`](./doc/visual-quality/)** —
+one page per defect pattern the `test-style`/`test-layout` audits detect, with
+the fix rather than the ratchet.
 
 **Doc comments: keep every inline code span on ONE `///` line.** A backtick span
 that wraps across two `///` lines ICEs clippy 1.95 (panic in
@@ -77,11 +84,12 @@ the same for `trunk`, plus a spurious `tokens-fresh` FAIL. npm and trunk are
 fine; the cwd handed to the child is `demo/demo`.
 
 **Budget ~8 minutes for the first browser-suite run.** `test-reactivity`,
-`test-layout` and `verify-full` each build the demo to wasm, which outruns a
-10-minute foreground timeout on a cold target dir — run them in the background.
-Any edit under `demo/src` invalidates that build, so re-run the suites *after*
-the last demo change, not before: `test-layout`'s per-page violation counts are
-ratcheted and a new demo section can move them.
+`test-layout`, `test-style` and `verify-full` each build the demo to wasm, which
+outruns a 10-minute foreground timeout on a cold target dir — run them in the
+background. Any edit under `demo/src` invalidates that build, so re-run the
+suites *after* the last demo change, not before: `test-layout`'s and
+`test-style`'s per-page violation counts are ratcheted and a new demo section
+can move them.
 
 **`styles/tokens.css` is GENERATED — never hand-edit it.** It is the Tailwind
 `@theme` block, produced from the shared `ui-tokens` crate by `cargo xtask
