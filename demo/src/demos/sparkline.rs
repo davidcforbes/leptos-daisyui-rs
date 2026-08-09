@@ -2,7 +2,7 @@ use crate::core::{ContentLayout, Section};
 use leptos::prelude::*;
 // The SVG chart family lives in `charts`, not `components`. Imported by name
 // rather than glob because `charts` also exports a `Sparkline`.
-use leptos_daisyui_rs::charts::BarChart;
+use leptos_daisyui_rs::charts::{BarChart, HeatScale, Heatmap, HeatmapCell};
 use leptos_daisyui_rs::components::*;
 
 #[component]
@@ -172,6 +172,52 @@ pub fn SparklineDemo() -> impl IntoView {
                 </div>
             </Section>
 
+            <Section title="Heatmap — favourable/unfavourable axis (ldui-7zj)" col=true>
+                <p class="text-sm opacity-70">
+                    "scale=HeatScale::Judgement makes intensity signed: the sign picks the hue (success above target, error below) and the magnitude still picks the alpha. The hues default to the daisyUI --color-success and --color-error theme tokens, so no new colour enters the palette. Sense is the caller's sign convention and therefore per-column: 'Handle time' below is a lower-is-better measure, so its deviation is negated before being passed in."
+                </p>
+                <div class="w-full max-w-2xl">
+                    <Heatmap
+                        row_labels=vec![
+                            "North".to_string(),
+                            "South".to_string(),
+                            "East".to_string(),
+                        ]
+                        col_labels=vec![
+                            "Closed".to_string(),
+                            "SLA met".to_string(),
+                            "Handle time".to_string(),
+                        ]
+                        cells=kpi_cells()
+                        scale=HeatScale::Judgement
+                        pad_left=80.0
+                        max_cell_h=48.0
+                        height=200
+                    />
+                </div>
+
+                <p class="text-sm opacity-70">
+                    "The default scale is unchanged — a single hue whose alpha carries magnitude only:"
+                </p>
+                <div class="w-full max-w-2xl">
+                    <Heatmap
+                        row_labels=vec![
+                            "North".to_string(),
+                            "South".to_string(),
+                            "East".to_string(),
+                        ]
+                        col_labels=vec![
+                            "Closed".to_string(),
+                            "SLA met".to_string(),
+                            "Handle time".to_string(),
+                        ]
+                        cells=magnitude_cells()
+                        pad_left=80.0
+                        max_cell_h=48.0
+                        height=200
+                    />
+                </div>
+            </Section>
         </ContentLayout>
     }
 }
@@ -199,6 +245,44 @@ fn closed_by_week_colors() -> Vec<String> {
             } else {
                 "var(--color-error)".to_string()
             }
+        })
+        .collect()
+}
+
+/// KPI-by-office cells on the signed judgement axis. Columns 0 and 1 are
+/// higher-is-better; column 2 (handle time) is lower-is-better, so its
+/// deviation is negated — the sense lives in the sign, per column.
+fn kpi_cells() -> Vec<HeatmapCell> {
+    // (row, col, label, signed intensity)
+    let raw = [
+        (0, 0, "+12%", 0.6),
+        (0, 1, "+4%", 0.2),
+        (0, 2, "-8%", 0.4),
+        (1, 0, "-9%", -0.45),
+        (1, 1, "-2%", -0.1),
+        (1, 2, "+21%", -1.0),
+        (2, 0, "+1%", 0.05),
+        (2, 1, "+18%", 0.9),
+        (2, 2, "0%", 0.0),
+    ];
+    raw.iter()
+        .map(|(row, col, label, intensity)| HeatmapCell {
+            row: *row,
+            col: *col,
+            label: label.to_string(),
+            intensity: *intensity,
+        })
+        .collect()
+}
+
+/// The same grid on the default magnitude scale — absolute deviation only,
+/// single hue, judgement not expressible in colour.
+fn magnitude_cells() -> Vec<HeatmapCell> {
+    kpi_cells()
+        .into_iter()
+        .map(|c| HeatmapCell {
+            intensity: c.intensity.abs(),
+            ..c
         })
         .collect()
 }

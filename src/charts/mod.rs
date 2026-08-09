@@ -15,7 +15,7 @@ mod stacked_bar_chart;
 
 pub use area_chart::AreaChart;
 pub use bar_chart::BarChart;
-pub use heatmap::{Heatmap, HeatmapCell};
+pub use heatmap::{HeatScale, Heatmap, HeatmapCell};
 pub use line_chart::LineChart;
 pub use pie_chart::{PieChart, PieSlice};
 pub use sparkline::Sparkline;

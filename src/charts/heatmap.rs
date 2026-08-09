@@ -9,10 +9,46 @@ pub struct HeatmapCell {
     pub col: usize,
     /// Text rendered centered inside the cell.
     pub label: String,
-    /// Intensity in the `0.0..=1.0` range; mapped to fill alpha (capped at
-    /// 0.55). Callers compute `intensity = value / max` before passing
-    /// cells in — this component only applies the linear alpha mapping.
+    /// Cell intensity. Its meaning depends on the heatmap's [`HeatScale`]:
+    ///
+    /// - [`HeatScale::Magnitude`] (default): `0.0..=1.0`, mapped to fill alpha
+    ///   (capped at 0.55) over the single `rgb` hue. Negative values clamp to 0.
+    /// - [`HeatScale::Judgement`]: `-1.0..=1.0`. The SIGN picks the hue
+    ///   (positive = favorable, negative = unfavorable) and the MAGNITUDE picks
+    ///   the alpha over the same ramp.
+    ///
+    /// Callers normalize before passing cells in — this component only applies
+    /// the linear alpha mapping and the hue choice.
     pub intensity: f64,
+}
+
+/// How a [`HeatmapCell`]'s intensity becomes a fill color.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HeatScale {
+    /// Single hue, magnitude only: every cell tints with the `rgb` prop and
+    /// intensity drives alpha alone. Negative intensity clamps to zero. This
+    /// is the legacy behavior and remains the default, so existing callers are
+    /// unaffected.
+    #[default]
+    Magnitude,
+    /// Signed judgement axis (ldui-7zj): the sign of the intensity picks the
+    /// hue and the magnitude picks the alpha, over the same `0.0..=0.55` ramp.
+    ///
+    /// Positive intensity uses `favorable_color` (daisyUI's `--color-success`
+    /// token by default), negative uses `unfavorable_color` (`--color-error`).
+    /// Zero is fully transparent under either hue, so there is no visual jump
+    /// at the sign flip.
+    ///
+    /// Two consequences are deliberate. First, the color expresses a
+    /// **judgement**, never a category: there is no per-cell color prop to
+    /// reach for, only a signed number, so a caller cannot accidentally tint
+    /// by series. Second, the *sense* of a measure lives in the caller's sign
+    /// convention, which is per-value and therefore per-column by
+    /// construction: a column where higher is better passes
+    /// `(value - target) / scale`, and a column where lower is better (handle
+    /// time, overdue count) passes the negation. No global "higher is good"
+    /// flag is needed or offered.
+    Judgement,
 }
 
 /// Maps a raw intensity value to the cell fill alpha.
@@ -21,6 +57,46 @@ pub struct HeatmapCell {
 /// resulting alpha is always in `0.0..=0.55`.
 fn heat_alpha(intensity: f64) -> f64 {
     intensity.clamp(0.0, 1.0) * 0.55
+}
+
+/// The color inputs a [`Heatmap`] uses to turn an intensity into a fill.
+/// Bundled into a struct so [`cell_fill`] stays a pure two-argument function.
+#[derive(Clone, Copy, Debug)]
+struct HeatPalette<'a> {
+    scale: HeatScale,
+    rgb: &'a str,
+    favorable: &'a str,
+    unfavorable: &'a str,
+}
+
+/// Turns a cell intensity into the CSS color painted into `fill`.
+///
+/// This is the whole color decision for a heatmap cell, kept pure and
+/// unit-tested because it is the only place the judgement axis is expressed.
+///
+/// Under [`HeatScale::Magnitude`] the result is the legacy
+/// `rgb(<triplet> / <alpha>)`, byte-identical to what the component emitted
+/// before the judgement axis existed. Under [`HeatScale::Judgement`] the sign
+/// selects `favorable`/`unfavorable` and the magnitude drives a `color-mix`
+/// against `transparent` — the same construction daisyUI itself uses, so a
+/// theme token like `var(--color-success)` works directly and follows a theme
+/// switch, while a raw color string still works if a caller wants one.
+fn cell_fill(intensity: f64, palette: &HeatPalette<'_>) -> String {
+    match palette.scale {
+        HeatScale::Magnitude => {
+            let alpha = heat_alpha(intensity);
+            format!("rgb({} / {alpha:.4})", palette.rgb)
+        }
+        HeatScale::Judgement => {
+            let base = if intensity < 0.0 {
+                palette.unfavorable
+            } else {
+                palette.favorable
+            };
+            let pct = heat_alpha(intensity.abs()) * 100.0;
+            format!("color-mix(in oklab, {base} {pct:.2}%, transparent)")
+        }
+    }
 }
 
 /// Chooses the per-row cell height. When `max_cell_h` is set and the natural
@@ -75,6 +151,21 @@ fn cell_rect(row: usize, col: usize, layout: GridLayout) -> (f64, f64, f64, f64)
 /// not present in `cells` are left transparent (no rect drawn) — plus a
 /// centered label per cell, row labels to the left of the grid, and column
 /// labels above it.
+///
+/// ## Color scales
+///
+/// By default the grid is a single hue whose alpha carries magnitude. Set
+/// `scale=HeatScale::Judgement` to turn it into a favorable/unfavorable axis:
+/// each cell's intensity becomes signed, the sign picks the hue and the
+/// magnitude still picks the alpha. The two hues default to daisyUI's
+/// `--color-success` and `--color-error` theme tokens, so no new color enters
+/// the palette and both follow a theme switch.
+///
+/// Color on that axis carries the **judgement**, never the category — the API
+/// offers no per-cell color, only a signed number, so there is nothing to tint
+/// a series with. The *sense* of a measure is the caller's sign convention and
+/// is therefore per-value (hence per-column) rather than a global flag: negate
+/// the deviation for a column where lower is better.
 #[component]
 pub fn Heatmap(
     /// Row labels, top-to-bottom.
@@ -92,8 +183,29 @@ pub fn Heatmap(
     height: u32,
     /// Tint base as a CSS `<r> <g> <b>` triplet, e.g. `"220 38 38"`. Cell
     /// fill is `rgb(<rgb> / <alpha>)` where `alpha = intensity * 0.55`.
+    /// Used by [`HeatScale::Magnitude`] only.
     #[prop(default = "220 38 38".to_string())]
     rgb: String,
+    /// Which color scale the cells use (ldui-7zj). Defaults to
+    /// [`HeatScale::Magnitude`] — the legacy single-hue behavior — so existing
+    /// callers render exactly as before. [`HeatScale::Judgement`] switches to
+    /// the signed favorable/unfavorable axis.
+    #[prop(default = HeatScale::Magnitude)]
+    scale: HeatScale,
+    /// Hue for favorable (positive-intensity) cells under
+    /// [`HeatScale::Judgement`]. Defaults to daisyUI's `--color-success` theme
+    /// token so the heatmap introduces no new color and follows theme changes.
+    /// Any CSS color works, so `"var(--color-warning)"` or a literal
+    /// `"rgb(34 197 94)"` are both accepted. Ignored under
+    /// [`HeatScale::Magnitude`].
+    #[prop(default = "var(--color-success)".to_string())]
+    favorable_color: String,
+    /// Hue for unfavorable (negative-intensity) cells under
+    /// [`HeatScale::Judgement`]. Defaults to daisyUI's `--color-error` theme
+    /// token; pass `"var(--color-warning)"` for a softer at-risk read. Ignored
+    /// under [`HeatScale::Magnitude`].
+    #[prop(default = "var(--color-error)".to_string())]
+    unfavorable_color: String,
     /// When `true`, column header labels rotate -45deg around their anchor
     /// (for wide grids, e.g. a 16-column VaR matrix).
     #[prop(default = false)]
@@ -167,12 +279,18 @@ pub fn Heatmap(
         pad_top,
     };
 
+    let palette = HeatPalette {
+        scale,
+        rgb: &rgb,
+        favorable: &favorable_color,
+        unfavorable: &unfavorable_color,
+    };
+
     let cell_views = cells
         .into_iter()
         .map(|c| {
             let (x, y, w, h) = cell_rect(c.row, c.col, layout);
-            let alpha = heat_alpha(c.intensity);
-            let fill = format!("rgb({rgb} / {alpha:.4})");
+            let fill = cell_fill(c.intensity, &palette);
             let cx = format!("{:.2}", x + w / 2.0);
             let cy = format!("{:.2}", y + h / 2.0);
             view! {
@@ -290,6 +408,125 @@ mod tests {
     #[test]
     fn heat_alpha_zero_intensity_is_zero_alpha() {
         assert_eq!(heat_alpha(0.0), 0.0);
+    }
+
+    // --- Judgement axis (ldui-7zj) -------------------------------------
+
+    fn magnitude_palette() -> HeatPalette<'static> {
+        HeatPalette {
+            scale: HeatScale::Magnitude,
+            rgb: "220 38 38",
+            favorable: "var(--color-success)",
+            unfavorable: "var(--color-error)",
+        }
+    }
+
+    fn judgement_palette() -> HeatPalette<'static> {
+        HeatPalette {
+            scale: HeatScale::Judgement,
+            rgb: "220 38 38",
+            favorable: "var(--color-success)",
+            unfavorable: "var(--color-error)",
+        }
+    }
+
+    #[test]
+    fn cell_fill_magnitude_is_the_legacy_single_hue_output() {
+        // Byte-for-byte what the component emitted before the axis existed.
+        let p = magnitude_palette();
+        assert_eq!(cell_fill(1.0, &p), "rgb(220 38 38 / 0.5500)");
+        assert_eq!(cell_fill(0.0, &p), "rgb(220 38 38 / 0.0000)");
+        assert_eq!(cell_fill(0.5, &p), "rgb(220 38 38 / 0.2750)");
+    }
+
+    #[test]
+    fn cell_fill_magnitude_ignores_sign_and_clamps() {
+        let p = magnitude_palette();
+        // Negative clamps to zero alpha; the hue never changes.
+        assert_eq!(cell_fill(-1.0, &p), "rgb(220 38 38 / 0.0000)");
+        assert_eq!(cell_fill(5.0, &p), "rgb(220 38 38 / 0.5500)");
+    }
+
+    #[test]
+    fn cell_fill_judgement_zero_is_fully_transparent() {
+        let p = judgement_palette();
+        assert_eq!(
+            cell_fill(0.0, &p),
+            "color-mix(in oklab, var(--color-success) 0.00%, transparent)"
+        );
+    }
+
+    #[test]
+    fn cell_fill_judgement_plus_one_is_full_favorable() {
+        let p = judgement_palette();
+        assert_eq!(
+            cell_fill(1.0, &p),
+            "color-mix(in oklab, var(--color-success) 55.00%, transparent)"
+        );
+    }
+
+    #[test]
+    fn cell_fill_judgement_minus_one_is_full_unfavorable() {
+        let p = judgement_palette();
+        assert_eq!(
+            cell_fill(-1.0, &p),
+            "color-mix(in oklab, var(--color-error) 55.00%, transparent)"
+        );
+    }
+
+    #[test]
+    fn cell_fill_judgement_clamps_beyond_plus_minus_one() {
+        let p = judgement_palette();
+        assert_eq!(
+            cell_fill(4.2, &p),
+            "color-mix(in oklab, var(--color-success) 55.00%, transparent)"
+        );
+        assert_eq!(
+            cell_fill(-4.2, &p),
+            "color-mix(in oklab, var(--color-error) 55.00%, transparent)"
+        );
+    }
+
+    #[test]
+    fn cell_fill_judgement_flips_hue_at_zero() {
+        let p = judgement_palette();
+        // Zero and above is favorable; anything below zero is unfavorable.
+        assert!(cell_fill(0.0, &p).contains("--color-success"));
+        assert!(cell_fill(f64::MIN_POSITIVE, &p).contains("--color-success"));
+        assert!(cell_fill(-f64::MIN_POSITIVE, &p).contains("--color-error"));
+        assert!(cell_fill(-0.25, &p).contains("--color-error"));
+    }
+
+    #[test]
+    fn cell_fill_judgement_magnitude_is_symmetric_about_zero() {
+        // The alpha ramp must not favor one side: |x| drives it on both.
+        let p = judgement_palette();
+        for x in [0.1_f64, 0.33, 0.5, 0.9, 1.0] {
+            let pos = cell_fill(x, &p);
+            let neg = cell_fill(-x, &p);
+            let pos_pct = pos.split(' ').nth(4).unwrap();
+            let neg_pct = neg.split(' ').nth(4).unwrap();
+            assert_eq!(pos_pct, neg_pct, "asymmetric ramp at {x}");
+        }
+    }
+
+    #[test]
+    fn cell_fill_judgement_honours_overridden_hues() {
+        // A caller wanting an at-risk read swaps in another theme token.
+        let p = HeatPalette {
+            scale: HeatScale::Judgement,
+            rgb: "220 38 38",
+            favorable: "var(--color-info)",
+            unfavorable: "var(--color-warning)",
+        };
+        assert!(cell_fill(0.5, &p).contains("var(--color-info)"));
+        assert!(cell_fill(-0.5, &p).contains("var(--color-warning)"));
+    }
+
+    #[test]
+    fn heat_scale_default_is_magnitude() {
+        // Existing callers must keep the single-hue behavior unchanged.
+        assert_eq!(HeatScale::default(), HeatScale::Magnitude);
     }
 
     #[test]
