@@ -149,20 +149,20 @@ pub fn StackDemo() -> impl IntoView {
                         <h3 class="font-semibold mb-2">"Progress Stack"</h3>
                         <Stack>
                             <Progress
-                                attr:value=100.0
-                                attr:max=100.0
+                                value=100.0
+                                max=100.0
                                 color=ProgressColor::Primary
                                 class="w-56 h-6"
                             />
                             <Progress
-                                attr:value=75.0
-                                attr:max=100.0
+                                value=75.0
+                                max=100.0
                                 color=ProgressColor::Secondary
                                 class="w-52 h-5 mt-1"
                             />
                             <Progress
-                                attr:value=50.0
-                                attr:max=100.0
+                                value=50.0
+                                max=100.0
                                 color=ProgressColor::Accent
                                 class="w-48 h-4 mt-2"
                             />

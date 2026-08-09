@@ -88,17 +88,22 @@ pub fn PipelineKanban(columns: Vec<KanbanColumn>) -> impl IntoView {
                                                 })}
                                             </div>
                                             {match (coverage_pct, defect_count, sub_label) {
-                                                (Some(cov), Some(d), _) => view! {
-                                                    <span class="text-[9px] text-base-content/50 mt-1">
-                                                        {format!("Coverage: {}% | Defects: {}", cov, d)}
-                                                    </span>
-                                                    <Progress
-                                                        color=progress_color_for_card
-                                                        class="h-1.5 mt-1"
-                                                        attr:value=cov
-                                                        attr:max=100
-                                                    />
-                                                }.into_any(),
+                                                (Some(cov), Some(d), _) => {
+                                                    // Keep the label on the original `u32` so its
+                                                    // rendering is untouched; the bar needs an f64.
+                                                    let cov_value = f64::from(cov);
+                                                    view! {
+                                                        <span class="text-[9px] text-base-content/50 mt-1">
+                                                            {format!("Coverage: {}% | Defects: {}", cov, d)}
+                                                        </span>
+                                                        <Progress
+                                                            color=progress_color_for_card
+                                                            class="h-1.5 mt-1"
+                                                            value=cov_value
+                                                            max=100.0
+                                                        />
+                                                    }.into_any()
+                                                }
                                                 (_, _, Some(sub)) => view! {
                                                     <span class="text-[9px] text-base-content/50 mt-1">{sub}</span>
                                                 }.into_any(),

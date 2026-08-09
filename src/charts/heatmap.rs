@@ -1,3 +1,4 @@
+use super::paint::paint_attrs;
 use leptos::prelude::*;
 
 /// A single populated cell within a [`Heatmap`] grid.
@@ -23,7 +24,11 @@ pub struct HeatmapCell {
 }
 
 /// How a [`HeatmapCell`]'s intensity becomes a fill color.
+///
+/// `#[non_exhaustive]`: a third scale (a diverging three-band read, say) should
+/// not be a breaking change for consumers that `match` on this.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum HeatScale {
     /// Single hue, magnitude only: every cell tints with the `rgb` prop and
     /// intensity drives alpha alone. Negative intensity clamps to zero. This
@@ -55,7 +60,18 @@ pub enum HeatScale {
 ///
 /// Negative intensity clamps to 0; intensity above 1.0 clamps to 1.0 — so the
 /// resulting alpha is always in `0.0..=0.55`.
+///
+/// A non-finite intensity folds to 0 rather than propagating. `f64::clamp`
+/// passes NaN straight through, which would format the fill as `NaN` — an
+/// unparseable value, so the `fill` falls back to its initial `black` and the
+/// cell paints as a solid black tile. That is the loudest possible rendering of
+/// a missing datapoint and the exact opposite of what a caller wants, so a
+/// non-finite intensity is treated as no signal: fully transparent. Same
+/// convention as `progress_value` in the Progress component.
 fn heat_alpha(intensity: f64) -> f64 {
+    if !intensity.is_finite() {
+        return 0.0;
+    }
     intensity.clamp(0.0, 1.0) * 0.55
 }
 
@@ -80,7 +96,11 @@ struct HeatPalette<'a> {
 /// selects `favorable`/`unfavorable` and the magnitude drives a `color-mix`
 /// against `transparent` — the same construction daisyUI itself uses, so a
 /// theme token like `var(--color-success)` works directly and follows a theme
-/// switch, while a raw color string still works if a caller wants one.
+/// switch.
+///
+/// A non-finite intensity yields a fully transparent fill (see [`heat_alpha`]);
+/// under the judgement axis it also reads as non-negative, so it takes the
+/// favorable hue — invisible either way, since the alpha is zero.
 fn cell_fill(intensity: f64, palette: &HeatPalette<'_>) -> String {
     match palette.scale {
         HeatScale::Magnitude => {
@@ -195,15 +215,19 @@ pub fn Heatmap(
     /// Hue for favorable (positive-intensity) cells under
     /// [`HeatScale::Judgement`]. Defaults to daisyUI's `--color-success` theme
     /// token so the heatmap introduces no new color and follows theme changes.
-    /// Any CSS color works, so `"var(--color-warning)"` or a literal
-    /// `"rgb(34 197 94)"` are both accepted. Ignored under
-    /// [`HeatScale::Magnitude`].
+    ///
+    /// Pass a daisyUI theme token — `"var(--color-success)"`,
+    /// `"var(--color-warning)"`, `"var(--color-error)"` or
+    /// `"var(--color-info)"`. Staying on the tokens is the point: the palette
+    /// should not grow a hue the rest of the app does not already use, and
+    /// tokens follow a theme switch. Ignored under [`HeatScale::Magnitude`].
     #[prop(default = "var(--color-success)".to_string())]
     favorable_color: String,
     /// Hue for unfavorable (negative-intensity) cells under
     /// [`HeatScale::Judgement`]. Defaults to daisyUI's `--color-error` theme
-    /// token; pass `"var(--color-warning)"` for a softer at-risk read. Ignored
-    /// under [`HeatScale::Magnitude`].
+    /// token; pass `"var(--color-warning)"` for a softer at-risk read. Same
+    /// token guidance as `favorable_color`. Ignored under
+    /// [`HeatScale::Magnitude`].
     #[prop(default = "var(--color-error)".to_string())]
     unfavorable_color: String,
     /// When `true`, column header labels rotate -45deg around their anchor
@@ -290,11 +314,13 @@ pub fn Heatmap(
         .into_iter()
         .map(|c| {
             let (x, y, w, h) = cell_rect(c.row, c.col, layout);
-            let fill = cell_fill(c.intensity, &palette);
+            // Exactly one of these is Some — see `paint_attrs` for why a
+            // token-bearing colour cannot ride on the `fill` attribute.
+            let (fill, style) = paint_attrs(cell_fill(c.intensity, &palette));
             let cx = format!("{:.2}", x + w / 2.0);
             let cy = format!("{:.2}", y + h / 2.0);
             view! {
-                <rect x=format!("{x:.2}") y=format!("{y:.2}") width=format!("{w:.2}") height=format!("{h:.2}") fill=fill />
+                <rect x=format!("{x:.2}") y=format!("{y:.2}") width=format!("{w:.2}") height=format!("{h:.2}") fill=fill style=style />
                 <text x=cx y=cy text-anchor="middle" dominant-baseline="middle"
                     fill="currentColor" font-size="9">
                     {c.label}
@@ -497,6 +523,28 @@ mod tests {
         assert!(cell_fill(-0.25, &p).contains("--color-error"));
     }
 
+    /// Extracts the mix percentage token from a `color-mix(...)` fill.
+    ///
+    /// `"color-mix(in oklab, var(--color-success) 55.00%, transparent)"` splits
+    /// on spaces into `["color-mix(in", "oklab,", "var(--color-success)",
+    /// "55.00%,", "transparent)"]`, so the percentage is index **3**. It was
+    /// index 4 until review caught it, which made the symmetry test below
+    /// compare `"transparent)"` against itself and pass unconditionally. The
+    /// shape assertion is the guard against that recurring: if the format ever
+    /// changes, this fails loudly instead of silently comparing the wrong
+    /// token.
+    fn mix_pct(fill: &str) -> &str {
+        let tok = fill
+            .split(' ')
+            .nth(3)
+            .unwrap_or_else(|| panic!("no token 3 in {fill:?}"));
+        assert!(
+            tok.ends_with("%,"),
+            "token 3 of {fill:?} is {tok:?}, not a percentage — the format moved"
+        );
+        tok
+    }
+
     #[test]
     fn cell_fill_judgement_magnitude_is_symmetric_about_zero() {
         // The alpha ramp must not favor one side: |x| drives it on both.
@@ -504,9 +552,7 @@ mod tests {
         for x in [0.1_f64, 0.33, 0.5, 0.9, 1.0] {
             let pos = cell_fill(x, &p);
             let neg = cell_fill(-x, &p);
-            let pos_pct = pos.split(' ').nth(4).unwrap();
-            let neg_pct = neg.split(' ').nth(4).unwrap();
-            assert_eq!(pos_pct, neg_pct, "asymmetric ramp at {x}");
+            assert_eq!(mix_pct(&pos), mix_pct(&neg), "asymmetric ramp at {x}");
         }
     }
 
@@ -521,6 +567,60 @@ mod tests {
         };
         assert!(cell_fill(0.5, &p).contains("var(--color-info)"));
         assert!(cell_fill(-0.5, &p).contains("var(--color-warning)"));
+    }
+
+    // Non-finite intensity must not reach the DOM. `f64::clamp` propagates NaN,
+    // so before the fold these formatted `NaN` / `inf` into the fill, which
+    // fails to parse and drops the rect back to the initial `fill: black` — a
+    // solid black tile for a missing datapoint.
+    #[test]
+    fn cell_fill_magnitude_folds_non_finite_to_transparent() {
+        let p = magnitude_palette();
+        assert_eq!(cell_fill(f64::NAN, &p), "rgb(220 38 38 / 0.0000)");
+        assert_eq!(cell_fill(f64::INFINITY, &p), "rgb(220 38 38 / 0.0000)");
+        assert_eq!(cell_fill(f64::NEG_INFINITY, &p), "rgb(220 38 38 / 0.0000)");
+    }
+
+    #[test]
+    fn cell_fill_judgement_folds_non_finite_to_transparent() {
+        let p = judgement_palette();
+        for x in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let got = cell_fill(x, &p);
+            assert!(
+                !got.contains("NaN") && !got.contains("inf"),
+                "non-finite leaked into the fill: {got}"
+            );
+            assert_eq!(mix_pct(&got), "0.00%,", "non-finite must be transparent");
+        }
+    }
+
+    #[test]
+    fn heat_alpha_folds_non_finite_to_zero() {
+        assert_eq!(heat_alpha(f64::NAN), 0.0);
+        assert_eq!(heat_alpha(f64::INFINITY), 0.0);
+        assert_eq!(heat_alpha(f64::NEG_INFINITY), 0.0);
+    }
+
+    // How each scale's colour reaches the DOM. The rule itself lives in
+    // `super::paint` and is tested there; these pin the *composition* — that
+    // the default magnitude fill keeps the legacy presentation attribute while
+    // the default judgement fill is routed to `style`.
+    #[test]
+    fn magnitude_fill_keeps_the_legacy_fill_attribute() {
+        let (fill, style) = paint_attrs(cell_fill(1.0, &magnitude_palette()));
+        assert_eq!(fill.as_deref(), Some("rgb(220 38 38 / 0.5500)"));
+        assert_eq!(style, None, "magnitude must keep the legacy DOM");
+    }
+
+    #[test]
+    fn judgement_fill_is_routed_to_the_style_attribute() {
+        // The default hues are theme tokens, so var() substitution — only
+        // specified inside a declaration block — must not land in `fill`.
+        for intensity in [1.0_f64, -1.0, 0.25] {
+            let (fill, style) = paint_attrs(cell_fill(intensity, &judgement_palette()));
+            assert_eq!(fill, None, "var() must not go in the fill attribute");
+            assert!(style.is_some_and(|s| s.starts_with("fill: color-mix(")));
+        }
     }
 
     #[test]

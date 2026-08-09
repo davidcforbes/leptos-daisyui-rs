@@ -8,6 +8,7 @@ mod area_chart;
 mod bar_chart;
 mod heatmap;
 mod line_chart;
+mod paint;
 mod pie_chart;
 mod sparkline;
 mod stacked_area_chart;

@@ -56,6 +56,18 @@ pub(crate) fn progress_value(value: Option<f64>, max: f64) -> Option<f64> {
 /// view! { <Progress value=pct max=100.0 color=ProgressColor::Success class="w-56" /> }
 /// ```
 ///
+/// ## Do not mix the props with `attr:value` / `attr:max`
+///
+/// Before these props existed the only way to drive the bar was to spread the
+/// raw attributes. That is now redundant, and combining the two emits the
+/// attribute **twice** — the component always writes its own `max`, so a stray
+/// `attr:max` produces `<progress max="1" max="100">`. Which one wins is not
+/// something to rely on: on the CSR path spread attributes are applied last and
+/// `set_attribute` overwrites, so the spread value wins, but on the `to_html`
+/// path both are serialized and an HTML parser keeps the **first**, so the
+/// component's own value wins instead. A bar that reads 65/100 in the browser
+/// would render 65/1 — clamped to full — under SSR. Use `value` and `max`.
+///
 /// ### Add to `input.css`
 /// ```css
 /// @source inline("progress progress-primary progress-secondary progress-accent progress-info progress-success progress-warning progress-error");

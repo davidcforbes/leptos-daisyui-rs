@@ -1,3 +1,4 @@
+use super::paint::paint_attrs;
 use leptos::prelude::*;
 
 /// Resolves the fill for bar `index`.
@@ -123,10 +124,12 @@ pub fn BarChart(
             .into_iter()
             .enumerate()
             .map(|(i, (bx, by, bw, bh, lx, ly, vx, label, val))| {
-                let c = bar_fill(i, &bar_colors, &color).to_string();
+                // A theme token must not ride on the `fill` presentation
+                // attribute — see `super::paint::paint_attrs`.
+                let (c, st) = paint_attrs(bar_fill(i, &bar_colors, &color).to_string());
                 let vy = ly.clone();
                 view! {
-                    <rect x=bx y=by width=bw height=bh fill=c rx="2" />
+                    <rect x=bx y=by width=bw height=bh fill=c style=st rx="2" />
                     <text x=lx y=vy text-anchor="end" dominant-baseline="middle"
                         fill="currentColor" font-size="11">
                         {label}
@@ -188,10 +191,12 @@ pub fn BarChart(
             .into_iter()
             .enumerate()
             .map(|(i, (bx, by, bw, bh, lx, ly, vy, label, val))| {
-                let c = bar_fill(i, &bar_colors, &color).to_string();
+                // A theme token must not ride on the `fill` presentation
+                // attribute — see `super::paint::paint_attrs`.
+                let (c, st) = paint_attrs(bar_fill(i, &bar_colors, &color).to_string());
                 let vx = lx.clone();
                 view! {
-                    <rect x=bx y=by width=bw height=bh fill=c rx="2" />
+                    <rect x=bx y=by width=bw height=bh fill=c style=st rx="2" />
                     <text x=lx y=ly text-anchor="middle"
                         fill="currentColor" font-size="11">
                         {label}
@@ -269,6 +274,30 @@ mod tests {
         assert_eq!(bar_fill(0, &o, "base"), "base");
         assert_eq!(bar_fill(1, &o, "base"), "green");
         assert_eq!(bar_fill(2, &o, "base"), "base");
+    }
+
+    #[test]
+    fn bar_fill_composed_with_paint_attrs_routes_tokens_to_style() {
+        // The demo colours bars with daisyUI tokens, so the composition of
+        // `bar_fill` and `paint_attrs` is the path that actually reaches the
+        // DOM. A literal keeps the legacy `fill` attribute; a token does not.
+        let o = cols(&["var(--color-success)", "oklch(0.65 0.2 250)"]);
+        let (fill, style) = paint_attrs(bar_fill(0, &o, "base").to_string());
+        assert_eq!(fill, None);
+        assert_eq!(style.as_deref(), Some("fill: var(--color-success)"));
+
+        let (fill, style) = paint_attrs(bar_fill(1, &o, "base").to_string());
+        assert_eq!(fill.as_deref(), Some("oklch(0.65 0.2 250)"));
+        assert_eq!(style, None);
+    }
+
+    #[test]
+    fn bar_fill_default_chart_color_keeps_the_fill_attribute() {
+        // The default `color` is a literal, so an unstyled chart's DOM is
+        // unchanged from before the judgement work.
+        let (fill, style) = paint_attrs(bar_fill(0, &[], "oklch(0.65 0.2 250)").to_string());
+        assert_eq!(fill.as_deref(), Some("oklch(0.65 0.2 250)"));
+        assert_eq!(style, None);
     }
 
     #[test]
