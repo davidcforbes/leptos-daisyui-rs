@@ -201,6 +201,17 @@ The crate has two main modules:
   reusable framework hooks (`DebouncedSignal`, `use_swr_resource`)
 - `src/motion/` - Animation primitives (`Lerp`, `Transition`, `Keyframe`/`Track`, easing, spring, `use_animated` hook)
 
+**Two DataTable components exist (`ldui-30p`) — pick by capability, not by habit:**
+`components::DataTable` (`src/components/data_table/`) is the full column-model
+table: `cell_renderers`, `typed_cells`, `row_class_fn`, `Column::action()` action
+cells, `row_key`-based selection identity, the column chooser, per-column filter
+dropdowns, `extra_filter` + `toolbar` composition, `auto_page_size`, and a
+server-driven variant. `widgets::DataTable` (`src/widgets/data_table.rs`) is the
+simple `Vec<Vec<String>>` table; it is the only one with `badge_column_keys`,
+`link_column_keys`, and `bulk_select` (checkbox column keyed by the first cell's
+`String` id). They are not converged — each doc comment names the other and
+lists what only it has, so read those before picking.
+
 ### Recent additions (2026-08-06, from the office-perf audit)
 
 All driven by 4iiz-Office consumer findings (op-99t7/op-cy77.x/op-rrp9); the

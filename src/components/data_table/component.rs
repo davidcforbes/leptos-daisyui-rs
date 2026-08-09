@@ -58,6 +58,23 @@ fn local_storage_set(key: &str, value: &str) {
 /// - Fully themed with daisyUI
 /// - Efficient index-based operations for large datasets
 ///
+/// ## Which DataTable -- this one, or `widgets::DataTable`?
+///
+/// This is the full column-model table: reach for it when you need
+/// `cell_renderers`, `typed_cells`, `row_class_fn`, `Column::action()` action
+/// cells, `row_key`-based selection identity that survives a data
+/// replacement, the column chooser, per-column filter dropdowns
+/// (`Column::filterable`), `extra_filter` plus `toolbar` composition, or
+/// `auto_page_size` responsive paging -- plus a server-driven variant for
+/// page/size/search/sort/filter pushed to the backend.
+///
+/// The simpler `widgets::DataTable` takes plain `Vec<Vec<String>>` rows and
+/// has none of that renderer/selection/filter surface, but it is the only
+/// place for three things this component does not have: `badge_column_keys`
+/// and `link_column_keys` (automatic badge/link styling resolved by column
+/// key) and `bulk_select` (a leading checkbox column keyed by the first
+/// cell's `String` id).
+///
 /// ## Sorting
 ///
 /// Sorting reorders an index permutation, never the `data` itself, so row

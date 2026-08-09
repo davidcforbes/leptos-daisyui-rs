@@ -180,6 +180,22 @@ fn badge_class(value: &str) -> String {
 ///
 /// Renders tabular data with column-header sort toggles, pagination controls,
 /// and a row count display. Uses DaisyUI table classes with responsive overflow.
+///
+/// ## Which DataTable -- this one, or `components::DataTable`?
+///
+/// This is the simple table: rows are plain `Vec<Vec<String>>`, and it is the
+/// only place for three things `components::DataTable` does not have --
+/// `badge_column_keys` and `link_column_keys` (automatic badge/link styling
+/// resolved by column key) and `bulk_select` (a leading checkbox column keyed
+/// by the first cell's `String` id, feeding a bulk-action toolbar).
+///
+/// `components::DataTable` is the full column-model table: reach for it
+/// instead when you need `cell_renderers`, `typed_cells`, `row_class_fn`,
+/// `Column::action()` action cells, `row_key`-based selection identity that
+/// survives a data replacement, the column chooser, per-column filter
+/// dropdowns, `extra_filter` plus `toolbar` composition, or `auto_page_size`
+/// responsive paging -- plus a server-driven variant. This table has none of
+/// that renderer/selection/filter surface.
 #[component]
 pub fn DataTable(
     /// Column definitions.
