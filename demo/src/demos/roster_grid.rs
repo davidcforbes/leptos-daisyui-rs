@@ -244,6 +244,22 @@ pub fn RosterGridDemo() -> impl IntoView {
                 />
             </Section>
 
+            <Section title="Naming the table: label, labelled_by, described_by" col=true>
+                <p class="text-sm opacity-60" id="roster-naming-note">
+                    "Spread attributes land on the component's root div, so without these props there is no way to name the table itself and two rosters on one page are announced identically. labelled_by points at the visible heading below and suppresses aria-label, exactly as Modal does, so assistive tech hears what sighted users read."
+                </p>
+                <h3 class="text-base font-medium" id="roster-ward-b-heading">"Ward B, week of 12 May"</h3>
+                <RosterGrid
+                    rows=rows
+                    labelled_by="roster-ward-b-heading"
+                    described_by="roster-naming-note"
+                />
+                <p class="text-sm opacity-60 mt-2">
+                    "Below: the same roster named with label instead, for a table with no visible heading."
+                </p>
+                <RosterGrid rows=rows label="Ward C, week of 12 May" />
+            </Section>
+
             <Section title="Empty roster" col=true>
                 <p class="text-sm opacity-60">
                     "No rows (or no columns) renders an empty state, never a zero-column table or a header with no body."

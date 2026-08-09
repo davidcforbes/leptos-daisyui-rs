@@ -1,9 +1,10 @@
 use super::style::{RosterDensity, ShiftState};
 use super::types::{
-    RosterRow, cell_aria_label, cell_is_selected, cell_key_activates, clamp_focus_cell,
+    RosterRow, cell_aria_label, cell_is_selected, cell_key_activates, cell_title, clamp_focus_cell,
     default_empty_title, default_roster_columns, grid_is_interactive, next_focus_cell,
-    normalize_cells, roster_cell_dom_id, roster_focus_move,
+    normalize_cells, roster_cell_dom_id, roster_focus_move, roster_table_aria_label,
 };
+use crate::components::data_table::TABLE_SCROLL_WRAPPER_CLASS;
 use crate::components::empty_state::EmptyState;
 use crate::components::gantt::utils::focus_element_by_id;
 use crate::merge_classes;
@@ -63,6 +64,11 @@ static ROSTER_GRID_SEQ: AtomicU64 = AtomicU64::new(0);
 /// `Signal`s that shrink: [`clamp_focus_cell`](super::clamp_focus_cell) brings
 /// it back in range on every read, so a filter that empties the roster can
 /// never leave the grid without a tab stop or index out of bounds.
+///
+/// Name the table with `labelled_by` (the id of the visible heading above it)
+/// or `label`. Spread attributes land on the root `<div>`, so those props are
+/// the only way to reach the `<table>` itself — and two rosters on one page are
+/// otherwise indistinguishable to a screen reader.
 ///
 /// Empty `rows` or empty `columns` renders an
 /// [`EmptyState`](crate::components::EmptyState) rather than a zero-column
@@ -160,6 +166,26 @@ pub fn RosterGrid(
     #[prop(optional, into)]
     selected_cell: Option<Signal<Option<(usize, usize)>>>,
 
+    /// Accessible name for the roster `<table>` (`aria-label`) — its
+    /// (translated) subject, e.g. "Ward B, week of 12 May". Spread attributes
+    /// land on the component's root `<div>`, so this is the only way to name
+    /// the table itself; without it two rosters on one page are announced
+    /// identically.
+    #[prop(optional, into)]
+    label: MaybeProp<String>,
+
+    /// Id of the element that names the table (`aria-labelledby`) — typically
+    /// the visible heading above it. Takes precedence over `label`, so
+    /// assistive technology hears exactly what sighted users read, in whatever
+    /// language the page is rendering. Follows [`Modal`](crate::components::Modal).
+    #[prop(optional, into)]
+    labelled_by: MaybeProp<String>,
+
+    /// Id of the element that describes the table (`aria-describedby`) — e.g.
+    /// the paragraph explaining what the shift codes mean.
+    #[prop(optional, into)]
+    described_by: MaybeProp<String>,
+
     /// Title shown when there is nothing to render (no rows, or no columns).
     #[prop(optional, into, default = Signal::derive(default_empty_title))]
     empty_title: Signal<String>,
@@ -226,7 +252,11 @@ pub fn RosterGrid(
     view! {
         <div
             node_ref=node_ref
-            class=move || merge_classes!("w-full overflow-x-auto", class)
+            // The horizontal-overflow contract is shared with both DataTable
+            // variants rather than respelled here: a seven-day roster of long
+            // shift codes overflows exactly as a wide table does, and one
+            // definition means one place to change it.
+            class=move || merge_classes!("w-full", TABLE_SCROLL_WRAPPER_CLASS, class)
         >
             <Show
                 when=has_data
@@ -246,6 +276,11 @@ pub fn RosterGrid(
                 // the header association survives in both.
                 <table
                     role=interactive.then_some("grid")
+                    aria-label=move || {
+                        roster_table_aria_label(label.get(), labelled_by.get().is_some())
+                    }
+                    aria-labelledby=move || labelled_by.get()
+                    aria-describedby=move || described_by.get()
                     class=move || {
                         merge_classes!("table w-full", density.get().as_table_class())
                     }
@@ -257,8 +292,8 @@ pub fn RosterGrid(
                                 columns
                                     .get()
                                     .into_iter()
-                                    .map(|label| {
-                                        view! { <th scope="col" class="text-center">{label}</th> }
+                                    .map(|heading| {
+                                        view! { <th scope="col" class="text-center">{heading}</th> }
                                     })
                                     .collect_view()
                             }}
@@ -299,9 +334,12 @@ pub fn RosterGrid(
                                                         &cell,
                                                         &announced,
                                                     );
-                                                    let aria_attr = aria.clone();
+                                                    // Only the shift value, not
+                                                    // the accessible name: see
+                                                    // `cell_title`.
+                                                    let tooltip = cell_title(&cell);
                                                     let state = cell.state;
-                                                    let label = cell.label.clone();
+                                                    let shift_value = cell.label.clone();
                                                     let is_selected = move || {
                                                         selected_cell
                                                             .is_some_and(|s| {
@@ -346,8 +384,8 @@ pub fn RosterGrid(
                                                                             if focused.get() == Some((ri, ci)) { 0 } else { -1 }
                                                                         })
                                                                 }
-                                                                title=aria
-                                                                aria-label=interactive.then_some(aria_attr)
+                                                                title=tooltip
+                                                                aria-label=interactive.then_some(aria)
                                                                 aria-pressed=move || {
                                                                     (interactive && selected_cell.is_some())
                                                                         .then(|| {
@@ -390,7 +428,7 @@ pub fn RosterGrid(
                                                                 // `truncate` never ellipsises and the
                                                                 // tile's `overflow-hidden` hard-clips the
                                                                 // text mid-glyph instead.
-                                                                <span class="min-w-0 truncate">{label}</span>
+                                                                <span class="min-w-0 truncate">{shift_value}</span>
                                                                 // The state reaches assistive tech even
                                                                 // when the tile is not an interactive
                                                                 // widget with an `aria-label`.

@@ -301,6 +301,98 @@ fn cell_aria_label_carries_every_state_name() {
 }
 
 // ---------------------------------------------------------------------
+// Naming the table -- Modal's label / labelled_by rule
+// ---------------------------------------------------------------------
+
+#[test]
+fn labelled_by_suppresses_aria_label() {
+    // An `aria-label` would override the visible heading `labelled_by` points
+    // at, so a screen reader would hear something different from what sighted
+    // users read. Same rule as `modal_aria_label`.
+    assert_eq!(
+        roster_table_aria_label(Some("Ward B".to_string()), true),
+        None
+    );
+    assert_eq!(roster_table_aria_label(None, true), None);
+}
+
+#[test]
+fn a_label_with_no_labelled_by_becomes_the_aria_label() {
+    assert_eq!(
+        roster_table_aria_label(Some("Ward B, week of 12 May".to_string()), false),
+        Some("Ward B, week of 12 May".to_string())
+    );
+}
+
+/// Unlike `Modal`, there is NO generic fallback. An unnamed `<dialog>` is an
+/// axe violation; an unnamed `<table>` is ordinary, and inventing "Roster"
+/// would announce English into a localised page.
+#[test]
+fn an_unnamed_table_gets_no_invented_name() {
+    assert_eq!(roster_table_aria_label(None, false), None);
+}
+
+// ---------------------------------------------------------------------
+// Tooltips -- the tile's own value, not its accessible name
+// ---------------------------------------------------------------------
+
+#[test]
+fn cell_title_is_the_shift_value_only() {
+    let cell = RosterCell::new("09:00-17:00", ShiftState::Full);
+    let title = cell_title(&cell).expect("a labelled tile has a tooltip");
+    assert_eq!(title, "09:00-17:00");
+    // NOT the accessible name: duplicating it tooltips visible content on the
+    // display-only path and doubles `aria-label` on the interactive one.
+    let aria = cell_aria_label("Ada", "Mon", &cell, ShiftState::Full.as_label());
+    assert_ne!(title, aria);
+    assert!(!title.contains("Ada"));
+    assert!(!title.contains("Full shift"));
+}
+
+#[test]
+fn an_empty_tile_has_no_tooltip_at_all() {
+    // A tooltip exists to reveal a value `truncate` ellipsised; there is no
+    // value here, so an empty `title` attribute would be noise.
+    assert_eq!(cell_title(&RosterCell::off()), None);
+    assert_eq!(cell_title(&RosterCell::new("", ShiftState::Holiday)), None);
+}
+
+// ---------------------------------------------------------------------
+// Shared horizontal-overflow contract
+// ---------------------------------------------------------------------
+
+/// The scroll wrapper is DataTable's `TABLE_SCROLL_WRAPPER_CLASS`, not a
+/// second spelling of `overflow-x-auto`. `pub(super)` on that const means
+/// "visible throughout `crate::components`", and `roster_grid` is inside it —
+/// so reusing it needed no visibility widening.
+#[test]
+fn the_scroll_wrapper_is_the_shared_constant_not_a_copy() {
+    use crate::components::data_table::TABLE_SCROLL_WRAPPER_CLASS;
+
+    let source = include_str!("component.rs");
+    assert!(
+        source.contains("TABLE_SCROLL_WRAPPER_CLASS"),
+        "RosterGrid stopped sharing the horizontal-scroll contract"
+    );
+    // Doc lines are excluded: the `@source inline(...)` block legitimately
+    // lists the emitted classes for Tailwind, which is not a second definition.
+    let code_only = source
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("///"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        !code_only.contains("w-full overflow-x-auto"),
+        "the literal came back -- the contract now lives in two places"
+    );
+    assert!(
+        TABLE_SCROLL_WRAPPER_CLASS
+            .split_ascii_whitespace()
+            .any(|class| class == "overflow-x-auto")
+    );
+}
+
+// ---------------------------------------------------------------------
 // Keyboard + selection
 // ---------------------------------------------------------------------
 

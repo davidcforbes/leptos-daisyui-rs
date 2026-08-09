@@ -151,6 +151,38 @@ pub fn grid_is_interactive(has_activate: bool, has_selection: bool) -> bool {
     has_activate
 }
 
+/// The `aria-label` a [`RosterGrid`](super::RosterGrid)'s `<table>` should
+/// carry: `None` when a visible heading already names it via `labelled_by` (an
+/// `aria-label` would override what sighted users read), else the caller's
+/// `label`.
+///
+/// The same rule as [`modal_aria_label`](crate::components::modal_aria_label),
+/// minus its generic fallback: an unnamed `<dialog>` is an axe violation, but
+/// an unnamed table is ordinary and inventing "Roster" would announce English
+/// into a localised page. Spread attributes land on the component's root
+/// `<div>`, so without these props there is no way to name the table itself —
+/// and two rosters on one page are indistinguishable to a screen reader.
+pub fn roster_table_aria_label(label: Option<String>, has_labelled_by: bool) -> Option<String> {
+    if has_labelled_by { None } else { label }
+}
+
+/// The `title` (hover tooltip) one shift tile should carry: its own label, or
+/// nothing when the tile has none.
+///
+/// Deliberately NOT the accessible name. The full "worker, column, label,
+/// state" string duplicates visible content as a tooltip on the display-only
+/// path and duplicates `aria-label` on the interactive one, which some screen
+/// readers then announce twice. `DayScheduler` carries only the event title for
+/// the same reason. What the tooltip is *for* here is a label the tile's
+/// `truncate` has ellipsised — so an empty label earns no tooltip at all.
+pub fn cell_title(cell: &RosterCell) -> Option<String> {
+    if cell.label.is_empty() {
+        None
+    } else {
+        Some(cell.label.clone())
+    }
+}
+
 /// A focus movement requested by a key press inside an interactive
 /// [`RosterGrid`](super::RosterGrid).
 ///
