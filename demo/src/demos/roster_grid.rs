@@ -54,6 +54,52 @@ fn week_roster() -> Vec<RosterRow> {
     ]
 }
 
+/// A twelve-worker, seven-day roster: 84 tiles, deliberately big enough that
+/// the difference between one tab stop and one-per-tile is impossible to miss.
+/// With `tabindex=0` on every tile this section alone would cost 84 Tab presses
+/// to cross; with the roving tabindex it costs one.
+fn department_roster() -> Vec<RosterRow> {
+    const WORKERS: [&str; 12] = [
+        "Ada Lovelace",
+        "Grace Hopper",
+        "Katherine Johnson",
+        "Margaret Hamilton",
+        "Dorothy Vaughan",
+        "Mary Jackson",
+        "Radia Perlman",
+        "Barbara Liskov",
+        "Frances Allen",
+        "Jean Bartik",
+        "Karen Sparck Jones",
+        "Evelyn Boyd Granville",
+    ];
+
+    WORKERS
+        .iter()
+        .enumerate()
+        .map(|(i, worker)| {
+            let cells = (0..7)
+                .map(|day| match (i + day) % 5 {
+                    0 => RosterCell::new("09:00-17:00", ShiftState::Full),
+                    1 => RosterCell::new("09:00-13:00", ShiftState::Half),
+                    2 => RosterCell::off(),
+                    3 => RosterCell::new("Leave", ShiftState::Leave),
+                    _ => RosterCell::new("22:00-06:00", ShiftState::Full),
+                })
+                .collect();
+            RosterRow::new(*worker, cells)
+        })
+        .collect()
+}
+
+/// Seven-day column headers for [`department_roster`].
+fn full_week_columns() -> Vec<String> {
+    ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        .iter()
+        .map(|s| (*s).to_string())
+        .collect()
+}
+
 /// One row per state, so a reviewer can see all five tints and the
 /// solid-vs-dashed accent bar side by side.
 fn state_legend() -> Vec<RosterRow> {
@@ -90,6 +136,18 @@ pub fn RosterGridDemo() -> impl IntoView {
         set_last_activated.set(format!("{worker} - {day}"));
     });
 
+    let (department_selected, set_department_selected) = signal(None::<(usize, usize)>);
+    let (department_activated, set_department_activated) = signal(String::from("(none yet)"));
+    let on_department_activate = Callback::new(move |(row, col): (usize, usize)| {
+        set_department_selected.set(Some((row, col)));
+        let worker = department_roster()
+            .get(row)
+            .map(|r| r.worker.clone())
+            .unwrap_or_default();
+        let day = full_week_columns().get(col).cloned().unwrap_or_default();
+        set_department_activated.set(format!("{worker} - {day}"));
+    });
+
     view! {
         <ContentLayout
             title="Roster Grid (Schedule Matrix)"
@@ -122,7 +180,7 @@ pub fn RosterGridDemo() -> impl IntoView {
 
             <Section title="Interactive: activate and select a cell" col=true>
                 <p class="text-sm opacity-60">
-                    "Supplying on_cell_activate makes tiles focusable with role=button, aria-pressed and an accessible name of \"worker, day, label, state\". Tab into the grid and press Enter or Space."
+                    "Supplying on_cell_activate makes the table a role=grid widget whose tiles are role=button with aria-pressed and an accessible name of \"worker, day, label, state\". Tab into the grid, move with the arrow keys, and press Enter or Space."
                 </p>
                 <RosterGrid
                     rows=rows
@@ -131,6 +189,22 @@ pub fn RosterGridDemo() -> impl IntoView {
                 />
                 <p class="text-sm opacity-60 mt-2">
                     "Last activated: " {move || last_activated.get()}
+                </p>
+            </Section>
+
+            <Section title="Roving focus: 84 tiles, one tab stop" col=true>
+                <p class="text-sm opacity-60">
+                    "Twelve workers by seven days. With a tabindex on every tile this grid would be 84 sequential Tab presses to cross; the ARIA Data Grid roving tabindex makes the whole thing a single tab stop. Tab in, then: arrow keys move one cell (stopping at the edges rather than wrapping into another worker's week), Home and End jump to the start and end of the row, Ctrl+Home and Ctrl+End to the first and last cell of the grid, and Enter or Space activates. Tab again leaves the grid entirely."
+                </p>
+                <RosterGrid
+                    rows=Signal::derive(department_roster)
+                    columns=Signal::derive(full_week_columns)
+                    density=RosterDensity::Compact
+                    on_cell_activate=on_department_activate
+                    selected_cell=Signal::derive(move || department_selected.get())
+                />
+                <p class="text-sm opacity-60 mt-2">
+                    "Last activated: " {move || department_activated.get()}
                 </p>
             </Section>
 

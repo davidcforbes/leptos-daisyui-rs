@@ -123,8 +123,10 @@ pub fn cell_key_activates(key: &str) -> bool {
     key == "Enter" || key == " "
 }
 
-/// Whether the grid's tiles carry focus and keyboard semantics: `tabindex=0`,
-/// `role="button"`, `aria-pressed` and Enter/Space activation.
+/// Whether the grid's tiles carry focus and keyboard semantics: a roving
+/// `tabindex`, `role="button"`, `aria-pressed`, arrow-key navigation and
+/// Enter/Space activation — and whether the table itself is announced as an
+/// ARIA `grid` widget rather than a plain data table.
 ///
 /// The named counterpart of `DataTable`'s
 /// [`row_is_interactive`](crate::components::row_is_interactive), but with a
@@ -147,6 +149,132 @@ pub fn cell_key_activates(key: &str) -> bool {
 pub fn grid_is_interactive(has_activate: bool, has_selection: bool) -> bool {
     let _ = has_selection;
     has_activate
+}
+
+/// A focus movement requested by a key press inside an interactive
+/// [`RosterGrid`](super::RosterGrid).
+///
+/// The ARIA grid pattern's navigation vocabulary, kept as a value so the
+/// key-to-intent decision and the coordinate arithmetic are two separately
+/// testable steps rather than one `match` buried in an event handler.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum RosterFocusMove {
+    /// One column left.
+    Left,
+    /// One column right.
+    Right,
+    /// One row up.
+    Up,
+    /// One row down.
+    Down,
+    /// First column of the current row.
+    RowStart,
+    /// Last column of the current row.
+    RowEnd,
+    /// The grid's first cell.
+    GridStart,
+    /// The grid's last cell.
+    GridEnd,
+}
+
+/// Map a key press on a focused shift tile to a focus movement, or `None` when
+/// the key is not ours to handle.
+///
+/// Deliberately disjoint from [`cell_key_activates`]: Enter and Space activate,
+/// the arrows and Home/End move, and everything else — Tab above all — is left
+/// to the browser so the grid stays escapable. `Ctrl` promotes Home/End from
+/// the row's extremes to the grid's, which is what the ARIA Data Grid pattern
+/// specifies and what a 30-row roster actually needs.
+pub fn roster_focus_move(key: &str, ctrl: bool) -> Option<RosterFocusMove> {
+    match key {
+        "ArrowLeft" => Some(RosterFocusMove::Left),
+        "ArrowRight" => Some(RosterFocusMove::Right),
+        "ArrowUp" => Some(RosterFocusMove::Up),
+        "ArrowDown" => Some(RosterFocusMove::Down),
+        "Home" if ctrl => Some(RosterFocusMove::GridStart),
+        "End" if ctrl => Some(RosterFocusMove::GridEnd),
+        "Home" => Some(RosterFocusMove::RowStart),
+        "End" => Some(RosterFocusMove::RowEnd),
+        _ => None,
+    }
+}
+
+/// Bring a remembered focus coordinate back inside a grid that is now
+/// `n_rows` x `n_cols`, or report that there is no grid to focus.
+///
+/// **This is the roving-focus equivalent of [`normalize_cells`] and the single
+/// most likely defect in the feature.** `rows` and `columns` are `Signal`s: a
+/// filter, a search, a page change or a fresh fetch can shrink the roster under
+/// a focus position the component is still holding. A stored `(12, 5)` against
+/// a grid that just became 3x3 must land on `(2, 2)` — never index out of
+/// bounds, and never leave *no* cell carrying `tabindex=0`, which would silently
+/// delete the grid's only tab stop and strand keyboard users outside it.
+///
+/// The component calls this on the **read** path (a derived signal), not from an
+/// effect, so a clamped coordinate cannot be stale by an ordering accident. The
+/// clamp is also non-destructive: the raw remembered position is kept, so a
+/// transient shrink (a filter typed and then cleared) restores the user's place
+/// rather than dumping them at the grid's edge. It is rewritten to the clamped
+/// value on the next deliberate move.
+///
+/// Returns `None` for a zero-row or zero-column grid, which is exactly the case
+/// the component renders as an [`EmptyState`](crate::components::EmptyState) —
+/// there is no cell to focus, so there is no coordinate to invent.
+pub fn clamp_focus_cell(
+    focus: (usize, usize),
+    n_rows: usize,
+    n_cols: usize,
+) -> Option<(usize, usize)> {
+    if n_rows == 0 || n_cols == 0 {
+        return None;
+    }
+    Some((focus.0.min(n_rows - 1), focus.1.min(n_cols - 1)))
+}
+
+/// Apply `movement` to `current` within an `n_rows` x `n_cols` grid, returning
+/// the new focus coordinate.
+///
+/// `current` is clamped first, so a movement requested against a roster that
+/// shrank between the last key press and this one still starts from a real
+/// cell. Movement **stops at the edges rather than wrapping**: the ARIA Data
+/// Grid pattern makes wrapping optional, and in a roster a wrap would silently
+/// jump the user from Friday to Monday of a different worker — a plausible-
+/// looking answer to a question they did not ask. `Ctrl+Home`/`Ctrl+End` are
+/// the deliberate way to cross the whole grid.
+///
+/// Returns `None` only when there is no grid at all.
+pub fn next_focus_cell(
+    current: (usize, usize),
+    n_rows: usize,
+    n_cols: usize,
+    movement: RosterFocusMove,
+) -> Option<(usize, usize)> {
+    let (row, col) = clamp_focus_cell(current, n_rows, n_cols)?;
+    let last_row = n_rows - 1;
+    let last_col = n_cols - 1;
+
+    Some(match movement {
+        RosterFocusMove::Left => (row, col.saturating_sub(1)),
+        RosterFocusMove::Right => (row, (col + 1).min(last_col)),
+        RosterFocusMove::Up => (row.saturating_sub(1), col),
+        RosterFocusMove::Down => ((row + 1).min(last_row), col),
+        RosterFocusMove::RowStart => (row, 0),
+        RosterFocusMove::RowEnd => (row, last_col),
+        RosterFocusMove::GridStart => (0, 0),
+        RosterFocusMove::GridEnd => (last_row, last_col),
+    })
+}
+
+/// The DOM id of one shift tile, used to move real focus to it.
+///
+/// Roving focus is not merely a signal changing colour: the browser's
+/// `document.activeElement` has to actually move, or Tab still lands on the
+/// tile the user left and a screen reader announces the wrong cell. `instance`
+/// makes the ids collision-free when a page renders more than one roster —
+/// the same reason [`Menu`](crate::components::Menu) mints per-instance item
+/// ids for its `aria-activedescendant` wiring.
+pub fn roster_cell_dom_id(instance: u64, row: usize, col: usize) -> String {
+    format!("ld-roster-{instance}-cell-{row}-{col}")
 }
 
 /// Whether `(row, col)` is the selected cell.

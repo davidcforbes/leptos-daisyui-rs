@@ -1,11 +1,19 @@
 use super::style::{RosterDensity, ShiftState};
 use super::types::{
-    RosterRow, cell_aria_label, cell_is_selected, cell_key_activates, default_empty_title,
-    default_roster_columns, grid_is_interactive, normalize_cells,
+    RosterRow, cell_aria_label, cell_is_selected, cell_key_activates, clamp_focus_cell,
+    default_empty_title, default_roster_columns, grid_is_interactive, next_focus_cell,
+    normalize_cells, roster_cell_dom_id, roster_focus_move,
 };
 use crate::components::empty_state::EmptyState;
+use crate::components::gantt::utils::focus_element_by_id;
 use crate::merge_classes;
 use leptos::{html::Div, prelude::*};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Per-instance sequence so each `RosterGrid` on a page mints collision-free
+/// cell DOM ids for the roving-focus machinery, the same device
+/// [`Menu`](crate::components::Menu) uses for `aria-activedescendant`.
+static ROSTER_GRID_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// # Roster Grid Component
 ///
@@ -34,6 +42,27 @@ use leptos::{html::Div, prelude::*};
 /// 4. **It is locale-free.** Column labels come from the caller (defaulting to
 ///    Mon-Fri), and `state_label` overrides the English state names, the same
 ///    escape hatch `hour_label` gives the scheduler components.
+/// 5. **An interactive roster is ONE tab stop, not one per cell.** A grid is
+///    two-dimensional, so a tile-per-tab-stop scheme costs `rows x columns`
+///    presses to cross — 210 on a 30-worker week. The component implements the
+///    ARIA Data Grid roving tabindex instead: the focused tile carries
+///    `tabindex=0`, every other tile `tabindex=-1`, and the arrows move real
+///    DOM focus between them. See the keyboard table below.
+///
+/// ### Keyboard (interactive rosters only)
+///
+/// | Key | Effect |
+/// |---|---|
+/// | `Tab` | Enter the grid at the focused cell, or leave it entirely |
+/// | Arrow keys | Move one cell, stopping at the edges rather than wrapping |
+/// | `Home` / `End` | First / last column of the current row |
+/// | `Ctrl+Home` / `Ctrl+End` | First / last cell of the whole grid |
+/// | `Enter` / `Space` | Activate the focused cell |
+///
+/// The focused coordinate is internal state, and `rows`/`columns` are
+/// `Signal`s that shrink: [`clamp_focus_cell`](super::clamp_focus_cell) brings
+/// it back in range on every read, so a filter that empties the roster can
+/// never leave the grid without a tab stop or index out of bounds.
 ///
 /// Empty `rows` or empty `columns` renders an
 /// [`EmptyState`](crate::components::EmptyState) rather than a zero-column
@@ -110,10 +139,12 @@ pub fn RosterGrid(
     state_label: Option<Callback<ShiftState, String>>,
 
     /// Optional cell activation, called with `(row, col)` — the index into
-    /// `rows` and into `columns`. Supplying this — and ONLY this — makes tiles
-    /// focusable (`tabindex=0`, `role="button"`) with an accessible name of
-    /// "worker, column, label, state"; a display-only roster gains no tab
-    /// stops at all.
+    /// `rows` and into `columns`. Supplying this — and ONLY this — turns the
+    /// grid into a keyboard widget: `role="grid"` on the table, `role="button"`
+    /// tiles with an accessible name of "worker, column, label, state", and a
+    /// roving tabindex giving the whole roster a single tab stop with arrow-key
+    /// navigation inside it. A display-only roster gains no tab stops at all
+    /// and stays a plain semantic table.
     #[prop(optional, into)]
     on_cell_activate: Option<Callback<(usize, usize)>>,
 
@@ -150,6 +181,35 @@ pub fn RosterGrid(
     // deliberately does NOT count, unlike in DataTable/DayScheduler.
     let interactive = grid_is_interactive(on_cell_activate.is_some(), selected_cell.is_some());
 
+    // ---- Roving tabindex (ARIA Data Grid) -------------------------------
+    //
+    // A roster is two-dimensional, so `tabindex=0` per tile costs `rows x
+    // columns` Tab presses to cross -- 210 on a 30x7 grid. The whole grid is
+    // therefore ONE tab stop: the focused cell carries `tabindex=0` and every
+    // other cell `tabindex=-1`, with the arrows moving focus inside.
+    let instance = ROSTER_GRID_SEQ.fetch_add(1, Ordering::Relaxed);
+
+    // The remembered position, which may be out of range after the data
+    // shrinks; `focused` clamps it on the READ path so a stale coordinate can
+    // never leave the grid with no `tabindex=0` at all. See `clamp_focus_cell`.
+    let focus_raw = RwSignal::new((0usize, 0usize));
+    let focused = Signal::derive(move || {
+        clamp_focus_cell(focus_raw.get(), rows.with(Vec::len), columns.with(Vec::len))
+    });
+
+    // Moving focus is not just a signal write: `document.activeElement` has to
+    // move too, or Tab leaves from the old tile and the screen reader reads the
+    // wrong cell. Only ever called from a key press, so the component never
+    // steals focus on mount or when the data changes.
+    let move_focus = move |movement| {
+        let n_rows = rows.with_untracked(Vec::len);
+        let n_cols = columns.with_untracked(Vec::len);
+        if let Some(next) = next_focus_cell(focus_raw.get_untracked(), n_rows, n_cols, movement) {
+            focus_raw.set(next);
+            focus_element_by_id(&roster_cell_dom_id(instance, next.0, next.1));
+        }
+    };
+
     // The state's announced name, honouring `state_label` when supplied.
     // `Callback` is `Copy`, so this closure is `Copy` and can be handed to
     // every per-cell closure independently.
@@ -174,9 +234,22 @@ pub fn RosterGrid(
                     view! { <EmptyState title=empty_title subtitle=empty_subtitle /> }
                 }
             >
-                <table class=move || {
-                    merge_classes!("table w-full", density.get().as_table_class())
-                }>
+                // `role="grid"` ONLY when interactive. A grid is a *widget*
+                // role: it promises one tab stop and arrow navigation, and a
+                // screen reader switches out of browse mode for it -- which the
+                // roving focus actually needs, because in browse mode the AT
+                // eats the arrow keys and this handler never sees them. On a
+                // display-only roster that promise would be a lie (the same
+                // WCAG 4.1.2 argument as `grid_is_interactive`), so that path
+                // keeps native table semantics. Either way the `<table>`,
+                // `<th scope=col>` and `<th scope=row>` markup is unchanged, so
+                // the header association survives in both.
+                <table
+                    role=interactive.then_some("grid")
+                    class=move || {
+                        merge_classes!("table w-full", density.get().as_table_class())
+                    }
+                >
                     <thead>
                         <tr>
                             <th scope="col">{move || worker_header.get()}</th>
@@ -241,8 +314,16 @@ pub fn RosterGrid(
                                                         }
                                                     };
                                                     view! {
-                                                        <td class="p-1 align-middle">
+                                                        <td
+                                                            role=interactive
+                                                                .then_some("gridcell")
+                                                            class="p-1 align-middle"
+                                                        >
                                                             <div
+                                                                id=interactive
+                                                                    .then(|| {
+                                                                        roster_cell_dom_id(instance, ri, ci)
+                                                                    })
                                                                 class=move || {
                                                                     merge_classes!(
                                                                         "flex items-center justify-center overflow-hidden rounded-sm border-l-4 px-2 text-center",
@@ -256,7 +337,15 @@ pub fn RosterGrid(
                                                                 class:ring-2=is_selected
                                                                 class:ring-primary=is_selected
                                                                 role=interactive.then_some("button")
-                                                                tabindex=interactive.then_some(0)
+                                                                // The roving part: exactly one tile
+                                                                // is reachable by Tab; the rest are
+                                                                // programmatically focusable only.
+                                                                tabindex=move || {
+                                                                    interactive
+                                                                        .then(|| {
+                                                                            if focused.get() == Some((ri, ci)) { 0 } else { -1 }
+                                                                        })
+                                                                }
                                                                 title=aria
                                                                 aria-label=interactive.then_some(aria_attr)
                                                                 aria-pressed=move || {
@@ -267,13 +356,31 @@ pub fn RosterGrid(
                                                                 }
                                                                 on:click=move |_| {
                                                                     if interactive {
+                                                                        // A click is also a focus
+                                                                        // move: the tab stop must
+                                                                        // follow the user's actual
+                                                                        // position.
+                                                                        focus_raw.set((ri, ci));
                                                                         activate();
                                                                     }
                                                                 }
                                                                 on:keydown=move |ev: web_sys::KeyboardEvent| {
-                                                                    if interactive && cell_key_activates(&ev.key()) {
+                                                                    if !interactive {
+                                                                        return;
+                                                                    }
+                                                                    let key = ev.key();
+                                                                    if cell_key_activates(&key) {
                                                                         ev.prevent_default();
                                                                         activate();
+                                                                    } else if let Some(movement) = roster_focus_move(
+                                                                        &key,
+                                                                        ev.ctrl_key(),
+                                                                    ) {
+                                                                        // Arrows would otherwise
+                                                                        // scroll the page out from
+                                                                        // under the grid.
+                                                                        ev.prevent_default();
+                                                                        move_focus(movement);
                                                                     }
                                                                 }
                                                             >

@@ -314,6 +314,257 @@ fn only_enter_and_space_activate_a_cell() {
 }
 
 // ---------------------------------------------------------------------
+// Roving focus -- key mapping
+// ---------------------------------------------------------------------
+
+#[test]
+fn arrows_and_home_end_map_to_movements() {
+    use RosterFocusMove::*;
+    assert_eq!(roster_focus_move("ArrowLeft", false), Some(Left));
+    assert_eq!(roster_focus_move("ArrowRight", false), Some(Right));
+    assert_eq!(roster_focus_move("ArrowUp", false), Some(Up));
+    assert_eq!(roster_focus_move("ArrowDown", false), Some(Down));
+    assert_eq!(roster_focus_move("Home", false), Some(RowStart));
+    assert_eq!(roster_focus_move("End", false), Some(RowEnd));
+    assert_eq!(roster_focus_move("Home", true), Some(GridStart));
+    assert_eq!(roster_focus_move("End", true), Some(GridEnd));
+}
+
+/// Tab must reach the browser untouched or the grid becomes a keyboard trap,
+/// and the activation keys must NOT also move focus -- the two vocabularies are
+/// disjoint by construction, which is what makes `cell_key_activates` free to
+/// stay Enter/Space-only.
+#[test]
+fn movement_and_activation_keys_are_disjoint_and_tab_is_untouched() {
+    for key in ["Tab", "Escape", "a", "PageDown", "Spacebar", ""] {
+        assert!(roster_focus_move(key, false).is_none(), "{key} moved focus");
+        assert!(roster_focus_move(key, true).is_none(), "ctrl+{key} moved");
+    }
+    for key in ["Enter", " "] {
+        assert!(cell_key_activates(key));
+        assert!(roster_focus_move(key, false).is_none());
+    }
+    for key in [
+        "ArrowLeft",
+        "ArrowRight",
+        "ArrowUp",
+        "ArrowDown",
+        "Home",
+        "End",
+    ] {
+        assert!(roster_focus_move(key, false).is_some());
+        assert!(!cell_key_activates(key), "{key} must not activate");
+    }
+}
+
+// ---------------------------------------------------------------------
+// clamp_focus_cell -- the data-shrinks-under-the-focus rule
+//
+// The roving-focus counterpart of `normalize_cells`, and the most likely
+// defect in the feature: `rows`/`columns` are Signals, so a filter or a fetch
+// can shrink the grid under a remembered coordinate. Out of range must clamp,
+// never panic and never index.
+// ---------------------------------------------------------------------
+
+#[test]
+fn clamp_focus_cell_leaves_an_in_range_coordinate_alone() {
+    assert_eq!(clamp_focus_cell((0, 0), 3, 3), Some((0, 0)));
+    assert_eq!(clamp_focus_cell((1, 2), 3, 3), Some((1, 2)));
+    assert_eq!(clamp_focus_cell((2, 2), 3, 3), Some((2, 2)));
+}
+
+#[test]
+fn clamp_focus_cell_when_rows_shrink() {
+    // 20x7 roster filtered down to 3 workers: the column is still valid.
+    assert_eq!(clamp_focus_cell((12, 5), 3, 7), Some((2, 5)));
+}
+
+#[test]
+fn clamp_focus_cell_when_columns_shrink() {
+    // A full week narrowed to a working week.
+    assert_eq!(clamp_focus_cell((12, 6), 20, 5), Some((12, 4)));
+}
+
+#[test]
+fn clamp_focus_cell_when_both_shrink() {
+    // The case in the bead: (12, 5) against a roster that just became 3x3.
+    assert_eq!(clamp_focus_cell((12, 5), 3, 3), Some((2, 2)));
+}
+
+#[test]
+fn clamp_focus_cell_of_an_empty_grid_is_none_not_a_coordinate() {
+    // Zero rows or zero columns is the EmptyState path: there is no cell to
+    // focus, so inventing (0, 0) would put `tabindex=0` on nothing and
+    // `n - 1` would underflow. `None` is the only honest answer.
+    assert_eq!(clamp_focus_cell((0, 0), 0, 5), None);
+    assert_eq!(clamp_focus_cell((0, 0), 5, 0), None);
+    assert_eq!(clamp_focus_cell((0, 0), 0, 0), None);
+    assert_eq!(clamp_focus_cell((12, 5), 0, 0), None);
+}
+
+#[test]
+fn clamp_is_non_destructive_so_a_transient_shrink_restores_the_users_place() {
+    // The component stores the RAW coordinate and clamps on read, so a filter
+    // typed and then cleared puts focus back where the user left it rather
+    // than stranding them at the grid's edge.
+    let remembered = (12, 5);
+    assert_eq!(clamp_focus_cell(remembered, 3, 3), Some((2, 2)));
+    assert_eq!(clamp_focus_cell(remembered, 0, 0), None);
+    assert_eq!(clamp_focus_cell(remembered, 20, 7), Some((12, 5)));
+}
+
+#[test]
+fn clamp_focus_cell_never_returns_an_out_of_bounds_index() {
+    for n_rows in 0..6usize {
+        for n_cols in 0..6usize {
+            for focus in [(0, 0), (3, 3), (99, 0), (0, 99), (99, 99)] {
+                match clamp_focus_cell(focus, n_rows, n_cols) {
+                    Some((r, c)) => {
+                        assert!(r < n_rows && c < n_cols, "{focus:?} -> ({r}, {c})");
+                    }
+                    None => assert!(n_rows == 0 || n_cols == 0),
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------
+// next_focus_cell -- movement stops at the edges, never wraps
+// ---------------------------------------------------------------------
+
+#[test]
+fn next_focus_cell_moves_one_cell_per_arrow() {
+    use RosterFocusMove::*;
+    assert_eq!(next_focus_cell((1, 1), 3, 3, Left), Some((1, 0)));
+    assert_eq!(next_focus_cell((1, 1), 3, 3, Right), Some((1, 2)));
+    assert_eq!(next_focus_cell((1, 1), 3, 3, Up), Some((0, 1)));
+    assert_eq!(next_focus_cell((1, 1), 3, 3, Down), Some((2, 1)));
+}
+
+/// Wrapping is optional in the ARIA Data Grid pattern and wrong here: a wrap
+/// from Friday would land the user on Monday of a *different worker*, which is
+/// a plausible-looking answer to a question they did not ask.
+#[test]
+fn next_focus_cell_stops_at_the_edges_instead_of_wrapping() {
+    use RosterFocusMove::*;
+    assert_eq!(next_focus_cell((0, 0), 3, 3, Left), Some((0, 0)));
+    assert_eq!(next_focus_cell((0, 0), 3, 3, Up), Some((0, 0)));
+    assert_eq!(next_focus_cell((2, 2), 3, 3, Right), Some((2, 2)));
+    assert_eq!(next_focus_cell((2, 2), 3, 3, Down), Some((2, 2)));
+}
+
+#[test]
+fn home_and_end_are_the_rows_extremes_and_ctrl_is_the_grids() {
+    use RosterFocusMove::*;
+    assert_eq!(next_focus_cell((1, 3), 4, 7, RowStart), Some((1, 0)));
+    assert_eq!(next_focus_cell((1, 3), 4, 7, RowEnd), Some((1, 6)));
+    assert_eq!(next_focus_cell((1, 3), 4, 7, GridStart), Some((0, 0)));
+    assert_eq!(next_focus_cell((1, 3), 4, 7, GridEnd), Some((3, 6)));
+}
+
+#[test]
+fn next_focus_cell_clamps_a_stale_start_before_moving() {
+    use RosterFocusMove::*;
+    // Focus remembered at (12, 5); the roster shrank to 3x3 before the key
+    // press. The move starts from the clamped (2, 2), not from nowhere.
+    assert_eq!(next_focus_cell((12, 5), 3, 3, Left), Some((2, 1)));
+    assert_eq!(next_focus_cell((12, 5), 3, 3, Up), Some((1, 2)));
+    assert_eq!(next_focus_cell((12, 5), 3, 3, RowStart), Some((2, 0)));
+}
+
+#[test]
+fn next_focus_cell_of_an_empty_grid_is_none() {
+    for movement in [
+        RosterFocusMove::Left,
+        RosterFocusMove::Right,
+        RosterFocusMove::Up,
+        RosterFocusMove::Down,
+        RosterFocusMove::RowStart,
+        RosterFocusMove::RowEnd,
+        RosterFocusMove::GridStart,
+        RosterFocusMove::GridEnd,
+    ] {
+        assert_eq!(next_focus_cell((0, 0), 0, 0, movement), None);
+        assert_eq!(next_focus_cell((3, 3), 0, 5, movement), None);
+        assert_eq!(next_focus_cell((3, 3), 5, 0, movement), None);
+    }
+}
+
+#[test]
+fn a_one_by_one_grid_never_moves_off_its_only_cell() {
+    for movement in [
+        RosterFocusMove::Left,
+        RosterFocusMove::Right,
+        RosterFocusMove::Up,
+        RosterFocusMove::Down,
+        RosterFocusMove::RowStart,
+        RosterFocusMove::RowEnd,
+        RosterFocusMove::GridStart,
+        RosterFocusMove::GridEnd,
+    ] {
+        assert_eq!(next_focus_cell((0, 0), 1, 1, movement), Some((0, 0)));
+    }
+}
+
+#[test]
+fn every_reachable_movement_result_is_in_bounds() {
+    let movements = [
+        RosterFocusMove::Left,
+        RosterFocusMove::Right,
+        RosterFocusMove::Up,
+        RosterFocusMove::Down,
+        RosterFocusMove::RowStart,
+        RosterFocusMove::RowEnd,
+        RosterFocusMove::GridStart,
+        RosterFocusMove::GridEnd,
+    ];
+    for n_rows in 1..5usize {
+        for n_cols in 1..5usize {
+            for r in 0..n_rows {
+                for c in 0..n_cols {
+                    for m in movements {
+                        let (nr, nc) = next_focus_cell((r, c), n_rows, n_cols, m).unwrap();
+                        assert!(nr < n_rows && nc < n_cols, "{m:?} from ({r}, {c})");
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------
+// Cell DOM ids -- how focus actually moves
+// ---------------------------------------------------------------------
+
+#[test]
+fn cell_dom_ids_are_unique_per_instance_and_coordinate() {
+    assert_ne!(
+        roster_cell_dom_id(0, 1, 2),
+        roster_cell_dom_id(1, 1, 2),
+        "two rosters on one page would fight over the same ids"
+    );
+    assert_ne!(roster_cell_dom_id(0, 1, 2), roster_cell_dom_id(0, 2, 1));
+
+    let mut ids: Vec<String> = (0..3)
+        .flat_map(|r| (0..3).map(move |c| roster_cell_dom_id(7, r, c)))
+        .collect();
+    let total = ids.len();
+    ids.sort();
+    ids.dedup();
+    assert_eq!(ids.len(), total);
+}
+
+#[test]
+fn cell_dom_ids_are_valid_html_ids() {
+    // Must start with a letter and contain nothing that needs escaping in a
+    // `getElementById` lookup.
+    let id = roster_cell_dom_id(3, 12, 5);
+    assert!(id.starts_with("ld-roster-"));
+    assert!(id.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '-'));
+}
+
+// ---------------------------------------------------------------------
 // grid_is_interactive -- only a callback earns focus semantics
 // ---------------------------------------------------------------------
 
