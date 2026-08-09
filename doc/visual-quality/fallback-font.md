@@ -1,7 +1,8 @@
 # Silent font fallback
 
-**Status:** partially automated (typography, since 2026-08-08) — catches a
-declared font that fails to load, does NOT catch a missing `@font-face`
+**Status:** automated (typography, since 2026-08-09) — both a failed load and a
+missing `@font-face` are caught, **but only if the profile pins a real family
+name; a CSS generic covers nothing.** See the caveat under Automation.
 **Seen in:** office-perf-web (op-edag.1)
 
 ## What it looks like
@@ -43,29 +44,57 @@ that declares a web font is itself the defect.
 ## Automation
 
 `ldui_audit::audit_page` (via the engine's generic sweep,
-`pixelproof-style-audit`) runs that `document.fonts.check` against
-`StyleProfile.font_family` once per page and pushes a `family::TYPOGRAPHY`
-violation with detail `declared family "<name>" is not loaded — text is
-silently falling back` when it fails. `font_family` comes from
-`ldui_audit::from_ui_tokens`, so the declared name is never hand-typed at the
-call site. Caught by `cargo xtask test-style` (`tests/style_audit_smoke.rs`).
+`pixelproof-style-audit`) checks `StyleProfile.font_family` once per page and
+pushes a `family::TYPOGRAPHY` violation when the family is not painting.
+`font_family` comes from `ldui_audit::from_ui_tokens`, so the declared name is
+never hand-typed at the call site. Caught by `cargo xtask test-style`
+(`tests/style_audit_smoke.rs`).
 
-**What this actually covers — established by break-and-revert, not assumed**
-(2026-08-09, against office-perf-web; see `ldui-9rf.12`):
+**Both failure modes are now covered, and they report differently** — since
+`PixelProof-zbr` (engine commit `9b5020a`, 2026-08-09). The sweep no longer
+asks `document.fonts.check`; it **measures** whether the declared family
+actually paints, comparing canvas text metrics against two generics:
 
-| broken how | detected? |
-|---|---|
-| `@font-face` present, font file 404s | **yes** — all four audited routes failed |
-| `@font-face` block deleted entirely | **no** — suite stayed green |
+| broken how | detected? | detail it reports |
+|---|---|---|
+| `@font-face` present, font file 404s | **yes** | `has an @font-face rule but never loaded (src failed?)` |
+| `@font-face` block deleted entirely | **yes** | `does not resolve — no @font-face rule and no system font by that name` |
 
-The second row is the vacuous-`check` blind spot described above, and it is
-the exact shape op-edag.1 took. Nothing observable in the rendered DOM
-distinguishes that page from a healthy one — computed styles are identical —
-so no in-page sweep can close it. It needs a **static** check that the
-`@font-face` `src`, the font file, and the build's asset-copy directive all
-agree; office-perf-web's `font_pipeline.rs` is that check, and an app without
-one is uncovered for this row no matter how green its style audit is.
+Two failure modes, two fixes, so two distinct details. Both are pinned by
+browser negative controls in the engine's own suite
+(`typography_catches_a_declared_family_with_no_font_face_rule`), and a real
+system font that resolves without any `@font-face` stays green
+(`typography_accepts_a_resolving_system_font`).
 
-Filed against the engine as **`PixelProof-zbr`** (P1): the sweep should assert
-the `@font-face` EXISTS before asking whether it loaded, so the two failure
-modes report as two distinct violations with two distinct fixes.
+> **The row above was `no` until 2026-08-09.** It was established as a genuine
+> blind spot by break-and-revert against office-perf-web (`ldui-9rf.12`) —
+> deleting the `@font-face` block left the suite green, because
+> `document.fonts.check` answers "are all *matching* faces loaded?" and returns
+> `true` vacuously when none match. That finding is what produced the engine
+> fix. Kept here because the reasoning is what makes the current coverage
+> trustworthy, not because the gap remains.
+
+### ⚠ The caveat that decides whether any of this applies to you
+
+**A CSS generic family is exempt from the resolution probe, so pinning one
+covers nothing.** `ui-sans-serif`, `system-ui`, `sans-serif` and the other
+generic keywords always resolve by definition, and the probe cannot say
+anything useful about them (`PixelProof-1mf`).
+
+This matters more than it sounds: **Tailwind's default font stack begins with
+`ui-sans-serif`**, and the documented way to pin a profile —
+`body_font_family()`, taking the first family from the computed body stack —
+therefore yields a generic for any app that has not set its own font. Such an
+app gets no font-fallback coverage at all, and the audit will not tell it so.
+This repo's own demo is exactly that case.
+
+**If your app ships a web font, pin that family by name rather than whatever
+`body_font_family()` returns.** Otherwise this entry's automation is inert for
+you and you are relying entirely on the static check below.
+
+A **static** check that the `@font-face` `src`, the font file, and the build's
+asset-copy directive all agree is still worth having — it fails at build time
+rather than needing a browser, and it catches the copy-step disagreement that
+produced op-edag.1 before anything renders. office-perf-web's
+`font_pipeline.rs` is that check. Keep it; the in-page sweep is now a second
+line of defence rather than the only one.

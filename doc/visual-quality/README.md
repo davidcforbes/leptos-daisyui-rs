@@ -59,7 +59,7 @@ Every file in this directory follows the same shape:
 
 | Entry | Status | Family | What it looks like |
 |---|---|---|---|
-| [`fallback-font.md`](./fallback-font.md) | partially automated | typography | Text renders in the platform default font instead of the declared one — looks "slightly off", nobody files it. A 404'd font file is caught; a missing `@font-face` is **not** |
+| [`fallback-font.md`](./fallback-font.md) | automated | typography | Text renders in the platform default font instead of the declared one — looks "slightly off", nobody files it. Both failure modes caught since 2026-08-09 — but only if the profile pins a **real family name**, never a CSS generic |
 | [`off-ramp-font-size.md`](./off-ramp-font-size.md) | automated | typography | An ad-hoc pixel size (e.g. `text-[13px]`) sits off the six-step type ramp |
 | [`ad-hoc-shadow.md`](./ad-hoc-shadow.md) | automated | depth | A stock Tailwind `shadow-md` instead of a declared elevation level — cards stop reading as one product |
 | [`undeclared-radius.md`](./undeclared-radius.md) | automated | shape | 8px vs 15px card corners — a small number mismatch that makes two apps look unrelated |
