@@ -89,6 +89,8 @@ fn gate_steps() -> Vec<Step> {
                 "leptos-daisyui-showcase",
                 "-p",
                 "xtask",
+                "-p",
+                "ldui-audit",
                 "--",
                 "--check",
             ],
@@ -123,6 +125,20 @@ fn gate_steps() -> Vec<Step> {
             None,
         ),
         cmd(
+            "clippy-audit",
+            "cargo",
+            &[
+                "clippy",
+                "-p",
+                "ldui-audit",
+                "--all-targets",
+                "--",
+                "-D",
+                "warnings",
+            ],
+            None,
+        ),
+        cmd(
             "build",
             "cargo",
             &["build", "-p", "leptos-daisyui-rs"],
@@ -141,6 +157,12 @@ fn gate_steps() -> Vec<Step> {
             None,
         ),
         cmd("test-xtask", "cargo", &["test", "-p", "xtask"], None),
+        cmd(
+            "test-audit",
+            "cargo",
+            &["test", "-p", "ldui-audit", "--lib"],
+            None,
+        ),
         // Guards against the daisyUI 4 form classes coming back. They are
         // no-ops in daisyUI 5 and were silently inert in 206 places
         // (ldui-mai.3) — a pure source scan, so it needs no browser.
@@ -1194,13 +1216,16 @@ mod tests {
     #[test]
     fn clippy_subcommand_runs_both_crate_steps() {
         let names: Vec<&str> = steps_for("clippy").iter().map(|s| s.name).collect();
-        assert_eq!(names, vec!["clippy-lib", "clippy-demo"]);
+        assert_eq!(names, vec!["clippy-lib", "clippy-demo", "clippy-audit"]);
     }
 
     #[test]
     fn test_subcommand_runs_lib_and_xtask() {
         let names: Vec<&str> = steps_for("test").iter().map(|s| s.name).collect();
-        assert_eq!(names, vec!["test-lib", "test-xtask", "test-daisyui5"]);
+        assert_eq!(
+            names,
+            vec!["test-lib", "test-xtask", "test-audit", "test-daisyui5"]
+        );
     }
 
     // ---- sibling-token guard (ldui-ae5) --------------------------------
@@ -1403,7 +1428,10 @@ pub fn r() -> f32 { radius::CARD }
         // `test-reactivity` and `test-layout` also match by name — but they
         // are not gate steps, so the filter must not surface them.
         let names: Vec<&str> = steps_for("test").iter().map(|s| s.name).collect();
-        assert_eq!(names, vec!["test-lib", "test-xtask", "test-daisyui5"]);
+        assert_eq!(
+            names,
+            vec!["test-lib", "test-xtask", "test-audit", "test-daisyui5"]
+        );
     }
 
     /// A port the OS hands out must actually be bindable.
