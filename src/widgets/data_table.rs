@@ -237,10 +237,18 @@ pub fn DataTable(
     /// right-aligned in a single nowrap line.
     ///
     /// `row_index` is the row's index in the `rows` prop — stable across sorting
-    /// and paging, so it identifies the row even after the operator re-sorts.
-    /// `row_cells` is that row's cells, aligned to `columns` by index, so the
-    /// callback can read any field it needs (the first cell is the row id by the
-    /// same convention `selected_row_key` and `bulk_select` use).
+    /// and paging, so it still points at the same entry of `rows` after the
+    /// operator re-sorts. `row_cells` is that row's cells, aligned to `columns`
+    /// by index, so the callback can read any field it needs.
+    ///
+    /// **For anything that identifies a record — navigating to it, deleting it,
+    /// completing it — key off the row id, not the index.** The first cell is
+    /// the row id by the same convention `selected_row_key` and `bulk_select`
+    /// already use, and it is an identity rather than a position: if the caller
+    /// built `rows` by filtering or reordering some backing store, `row_index`
+    /// indexes the snapshot handed to this component and `store[row_index]` is
+    /// a different record. Reach for `row_index` when the caller's own state is
+    /// genuinely parallel to `rows` (a `Vec<bool>` of expanded flags, say).
     ///
     /// The action column never participates in sorting: its header is inert and
     /// it is rendered outside the column/cell loops, so `badge_columns`,
@@ -252,23 +260,48 @@ pub fn DataTable(
     /// they may differ per row — wrap a disabled control in a daisyUI
     /// `tooltip` to explain why it is unavailable.
     ///
+    /// # Read signals inside the returned view, not in the callback body
+    ///
+    /// This callback runs inside the reactive effect that renders the whole
+    /// `<tbody>` — it has to, because that is the effect sort and pagination
+    /// re-run. So a signal read in the **callback body** is tracked by that
+    /// effect, and every change to it destroys and rebuilds every row's
+    /// controls. That is not an error, it is a silent degradation: focus jumps
+    /// from the clicked button to `<body>` so the next Tab restarts at the top
+    /// of the document, an open tooltip vanishes mid-hover, and the horizontal
+    /// scroll offset of the table's overflow wrapper resets.
+    ///
+    /// Read the signal **inside the view you return** instead, where it is
+    /// tracked by the individual attribute and updates that one node:
+    ///
     /// ```ignore
-    /// <DataTable
-    ///     columns=columns
-    ///     rows=rows
-    ///     action_header="Actions"
-    ///     row_actions=Callback::new(|(idx, row): (usize, Vec<String>)| {
-    ///         view! { <button class="btn btn-xs" on:click=move |_| open(idx)>"Open"</button> }
-    ///             .into_any()
-    ///     })
-    /// />
+    /// // WRONG — tracked by the tbody effect; rebuilds every row on change.
+    /// row_actions=move |(_idx, row): (usize, Vec<String>)| {
+    ///     let id = row[0].clone();
+    ///     let busy = pending.with(|p| p.contains(&id));
+    ///     view! { <button class="btn btn-xs" disabled=busy>"Complete"</button> }.into_any()
+    /// }
+    ///
+    /// // RIGHT — tracked by the `disabled` attribute; updates one button.
+    /// row_actions=move |(_idx, row): (usize, Vec<String>)| {
+    ///     let id = row[0].clone();
+    ///     view! {
+    ///         <button
+    ///             class="btn btn-xs"
+    ///             disabled=move || pending.with(|p| p.contains(&id))
+    ///         >"Complete"</button>
+    ///     }.into_any()
+    /// }
     /// ```
-    #[prop(optional)]
+    #[prop(optional, into)]
     row_actions: Option<Callback<(usize, Vec<String>), AnyView>>,
-    /// Header label for the action column. Ignored when `row_actions` is unset.
-    /// Defaults to an empty header, which is a common choice for an action
-    /// column; pass a label such as `"Actions"` when the column benefits from
-    /// one.
+    /// Visible header label for the action column. Ignored when `row_actions`
+    /// is unset.
+    ///
+    /// Defaults to a visually-hidden "Actions", so the column always carries an
+    /// accessible name — without one a screen reader announces the row's cells
+    /// and then a blank header followed by unexplained buttons. Pass a label to
+    /// show it, which is worth doing when the column is wide enough to carry it.
     #[prop(optional, into)]
     action_header: String,
 ) -> impl IntoView {
@@ -443,9 +476,22 @@ pub fn DataTable(
                             }).collect::<Vec<_>>()}
                             // Trailing action header. Emitted outside the column
                             // loop above, so it takes no data index and carries
-                            // no sort handler.
-                            {row_actions.map(|_| view! {
-                                <th class="text-right">{action_header.get_value()}</th>
+                            // no sort handler. An unset label still names the
+                            // column for assistive tech rather than announcing
+                            // a blank header before a run of buttons.
+                            {row_actions.map(|_| {
+                                let label = action_header.get_value();
+                                view! {
+                                    <th class="text-right">
+                                        {if label.is_empty() {
+                                            Either::Left(view! {
+                                                <span class="sr-only">"Actions"</span>
+                                            })
+                                        } else {
+                                            Either::Right(label)
+                                        }}
+                                    </th>
+                                }
                             })}
                         </tr>
                     </thead>
@@ -478,7 +524,7 @@ pub fn DataTable(
                                     let action_cell = row_actions.map(|render| {
                                         let cells = row.clone();
                                         view! {
-                                            <td class="text-right whitespace-nowrap">
+                                            <td class="text-sm text-right whitespace-nowrap">
                                                 <div class="flex items-center justify-end gap-1">
                                                     {render.run((row_index, cells))}
                                                 </div>
