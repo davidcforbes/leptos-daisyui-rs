@@ -1,13 +1,14 @@
 use super::style::{
-    ComposerAction, clamp_composer_height, composer_hint, composer_key_action, is_markdown,
-    is_thinking, role_avatar_bg, role_avatar_initial, role_classes, role_label,
-    should_stick_to_bottom, show_welcome_chips,
+    ComposerAction, clamp_composer_height, composer_hint, composer_key_action,
+    default_composer_placeholder, is_markdown, is_thinking, role_avatar_bg,
+    role_avatar_initial_with, role_classes, role_label_with, should_stick_to_bottom,
+    show_welcome_chips,
 };
 use super::types::{format_allowed_tools, format_usage, settings_from_form_fields};
 use crate::components::{Dropdown, DropdownAlignment, DropdownContent, Input, Textarea, Toggle};
 use crate::markdown::MarkdownView;
 use crate::merge_classes;
-use ai_chat_core::{ChatMessage, ChatRequest, ChatSession, ChatSettings};
+use ai_chat_core::{Capabilities, ChatMessage, ChatRequest, ChatSession, ChatSettings};
 use leptos::html::{Div, Textarea as HtmlTextarea};
 use leptos::prelude::*;
 use std::time::Duration;
@@ -83,6 +84,7 @@ impl ChatScopeOption {
 /// @source inline("flex flex-col flex-1 flex-wrap items-center justify-between justify-start gap-1 gap-2 h-full min-h-0 w-full w-72 w-52 w-6 h-6 overflow-y-auto p-1 p-2 p-3 p-4 space-y-3 space-y-2");
 /// @source inline("border-t border-b border-base-300 text-xs text-sm opacity-50 opacity-60 text-right whitespace-pre-wrap resize-none max-h-[320px] text-[10px]");
 /// @source inline("btn btn-primary btn-error btn-ghost btn-sm btn-xs textarea textarea-bordered loading loading-dots loading-sm rounded-full");
+/// @source inline("select select-sm select-bordered");
 /// @source inline("dropdown-content bg-base-100 rounded-box z-10 shadow border");
 /// @source inline("bg-primary bg-neutral bg-info bg-base-300 text-primary-content text-neutral-content text-info-content text-base-content");
 /// ```
@@ -135,6 +137,22 @@ pub fn AiChat(
     /// Fired after the session is restarted via the New-session header button.
     #[prop(optional, into)]
     on_restart: Option<Callback<()>>,
+    /// Assistant attribution: the configured backend's human label (e.g.
+    /// `ai_chat_core::Capabilities::label`). Drives the assistant bubbles'
+    /// header + avatar initial, the "Thinking…" row, and the default composer
+    /// placeholder — a Codex session reads as Codex end to end, matching the
+    /// desktop (em-c7w1). Empty (default) keeps the historical "Claude".
+    #[prop(optional, into)]
+    assistant_label: Signal<String>,
+    /// Backend capability list for a Backend picker in the settings popover
+    /// (`ai_chat_core::Capabilities`, e.g. fetched from ai-chat-engine's
+    /// HTTP/SSE service). Empty (default) hides the picker.
+    #[prop(optional, into)]
+    backends: Signal<Vec<Capabilities>>,
+    /// Fired with the selected backend `id` when the user picks one; the host
+    /// swaps the transport / reconfigures the session.
+    #[prop(optional, into)]
+    on_backend_change: Option<Callback<String>>,
 ) -> impl IntoView {
     // Bumped whenever a poll() (or a send) changes the transcript, so the
     // message-list closure re-runs. `messages()` borrows the session, so we
@@ -261,12 +279,23 @@ pub fn AiChat(
         }
     };
 
+    // Effective assistant attribution (empty prop = historical "Claude").
+    let assistant = Signal::derive(move || {
+        let l = assistant_label.get();
+        if l.is_empty() {
+            "Claude".to_string()
+        } else {
+            l
+        }
+    });
+
     let messages = move || {
         version.track();
+        let label = assistant.get();
         let snapshot = session.with_value(|s| s.messages().to_vec());
         snapshot
             .into_iter()
-            .map(|m| view! { <MessageBubble msg=m /> })
+            .map(|m| view! { <MessageBubble msg=m assistant_label=label.clone() /> })
             .collect_view()
     };
 
@@ -344,6 +373,17 @@ pub fn AiChat(
             .unwrap_or_else(|| "Scope".to_string())
     };
 
+    // Backend picker selection, seeded from the first capability like scopes.
+    let active_backend = RwSignal::new(String::new());
+    Effect::new(move |_| {
+        let list = backends.get();
+        if active_backend.with_untracked(|a| a.is_empty())
+            && let Some(first) = list.first()
+        {
+            active_backend.set(first.id.clone());
+        }
+    });
+
     view! {
         <div class=move || merge_classes!("lds-aichat flex flex-col h-full min-h-0", class)>
             <div class="lds-aichat-header border-b border-base-300 p-2 flex items-center justify-between gap-2">
@@ -395,6 +435,35 @@ pub fn AiChat(
                                 "\u{2699}"
                             </button>
                             <DropdownContent class="dropdown-content bg-base-100 rounded-box z-10 w-72 p-3 shadow border border-base-300 space-y-2">
+                                <Show when=move || !backends.get().is_empty()>
+                                    <label class="flex flex-col gap-1 text-xs">
+                                        <span class="opacity-60">"Backend"</span>
+                                        <select
+                                            class="select select-sm select-bordered w-full"
+                                            on:change=move |e| {
+                                                let id = event_target_value(&e);
+                                                active_backend.set(id.clone());
+                                                if let Some(cb) = on_backend_change {
+                                                    cb.run(id);
+                                                }
+                                            }
+                                        >
+                                            <For each=move || backends.get() key=|b| b.id.clone() let:b>
+                                                {
+                                                    let id = b.id.clone();
+                                                    let label = b.label.clone();
+                                                    let sel = {
+                                                        let id = id.clone();
+                                                        move || active_backend.get() == id
+                                                    };
+                                                    view! {
+                                                        <option value=id selected=sel>{label}</option>
+                                                    }
+                                                }
+                                            </For>
+                                        </select>
+                                    </label>
+                                </Show>
                                 <label class="flex flex-col gap-1 text-xs">
                                     <span class="opacity-60">"Model"</span>
                                     <Input
@@ -479,7 +548,9 @@ pub fn AiChat(
                 {messages}
                 <Show when=thinking>
                     <div class="chat chat-start">
-                        <div class="chat-header text-xs opacity-60">"Claude"</div>
+                        <div class="chat-header text-xs opacity-60">
+                            {move || assistant.get()}
+                        </div>
                         <div class="chat-bubble chat-bubble-ghost">
                             <span class="loading loading-dots loading-sm"></span>
                         </div>
@@ -517,7 +588,7 @@ pub fn AiChat(
                         rows="2"
                         placeholder=move || {
                             let p = placeholder.get();
-                            if p.is_empty() { "Ask Claude about this document\u{2026}".to_string() } else { p }
+                            if p.is_empty() { default_composer_placeholder(&assistant.get()) } else { p }
                         }
                         prop:value=move || input.get()
                         on:input=move |e| {
@@ -578,11 +649,16 @@ pub fn AiChat(
 
 /// One transcript message as a daisyUI chat bubble, with a copy button.
 #[component]
-fn MessageBubble(msg: ChatMessage) -> impl IntoView {
+fn MessageBubble(
+    msg: ChatMessage,
+    /// Assistant attribution label (empty = historical "Claude").
+    #[prop(optional, into)]
+    assistant_label: String,
+) -> impl IntoView {
     let (side, bubble) = role_classes(&msg.role);
-    let label = role_label(&msg.role);
+    let label = role_label_with(&msg.role, &assistant_label);
     let avatar_bg = role_avatar_bg(&msg.role);
-    let avatar_initial = role_avatar_initial(&msg.role);
+    let avatar_initial = role_avatar_initial_with(&msg.role, &assistant_label);
     let md = is_markdown(&msg.role);
     let streaming = msg.streaming;
     let content = msg.content.clone();

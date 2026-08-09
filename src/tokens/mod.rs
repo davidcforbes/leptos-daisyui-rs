@@ -19,9 +19,11 @@
 //! ```
 
 mod animations;
+mod dark_palette;
 mod preamble;
 
 pub use animations::*;
+pub use dark_palette::*;
 pub use preamble::*;
 
 #[cfg(test)]

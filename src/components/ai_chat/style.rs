@@ -28,6 +28,41 @@ pub fn role_label(role: &ChatRole) -> &'static str {
     }
 }
 
+/// [`role_label`] with the assistant attributed to the CONFIGURED backend's
+/// label — parity with ai-chat-engine (em-c7w1): a Codex session must read as
+/// Codex, never a hardcoded "Claude". An empty label keeps the historical
+/// default so label-less callers are unchanged.
+pub fn role_label_with(role: &ChatRole, assistant_label: &str) -> String {
+    match role {
+        ChatRole::Assistant if !assistant_label.is_empty() => assistant_label.to_string(),
+        r => role_label(r).to_string(),
+    }
+}
+
+/// [`role_avatar_initial`] with the assistant's initial taken from the
+/// configured label (uppercased first char; empty label falls back).
+pub fn role_avatar_initial_with(role: &ChatRole, assistant_label: &str) -> String {
+    match role {
+        ChatRole::Assistant => assistant_label
+            .chars()
+            .next()
+            .map(|c| c.to_uppercase().to_string())
+            .unwrap_or_else(|| role_avatar_initial(role).to_string()),
+        r => role_avatar_initial(r).to_string(),
+    }
+}
+
+/// Composer placeholder when the host didn't set one, addressed to the
+/// configured assistant (empty label keeps the historical "Claude").
+pub fn default_composer_placeholder(assistant_label: &str) -> String {
+    let who = if assistant_label.is_empty() {
+        "Claude"
+    } else {
+        assistant_label
+    };
+    format!("Ask {who} about this document\u{2026}")
+}
+
 /// True when a role's `content` is markdown (rendered via `MarkdownView`); the
 /// agent's reasoning/tool messages are plain text.
 pub fn is_markdown(role: &ChatRole) -> bool {

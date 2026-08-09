@@ -1,7 +1,8 @@
 use super::style::{
-    ComposerAction, clamp_composer_height, composer_hint, composer_key_action, is_markdown,
-    is_thinking, role_avatar_bg, role_avatar_initial, role_classes, role_label,
-    should_stick_to_bottom, show_welcome_chips,
+    ComposerAction, clamp_composer_height, composer_hint, composer_key_action,
+    default_composer_placeholder, is_markdown, is_thinking, role_avatar_bg, role_avatar_initial,
+    role_avatar_initial_with, role_classes, role_label, role_label_with, should_stick_to_bottom,
+    show_welcome_chips,
 };
 use super::types::{
     format_allowed_tools, format_usage, parse_allowed_tools, settings_from_form_fields,
@@ -38,6 +39,35 @@ fn user_bubble_is_primary() {
 fn labels_match_roles() {
     assert_eq!(role_label(&ChatRole::User), "You");
     assert_eq!(role_label(&ChatRole::Assistant), "Claude");
+}
+
+/// beads-xqmi (parity with ai-chat-engine em-c7w1): assistant bubbles
+/// attribute to the CONFIGURED backend's label — a Codex session reads as
+/// Codex — while an empty label keeps every historical default.
+#[test]
+fn assistant_attribution_follows_the_configured_backend() {
+    assert_eq!(
+        role_label_with(&ChatRole::Assistant, "Codex CLI (OpenAI)"),
+        "Codex CLI (OpenAI)"
+    );
+    assert_eq!(role_label_with(&ChatRole::Assistant, ""), "Claude");
+    assert_eq!(role_label_with(&ChatRole::User, "Codex"), "You");
+
+    assert_eq!(role_avatar_initial_with(&ChatRole::Assistant, "codex"), "C");
+    assert_eq!(role_avatar_initial_with(&ChatRole::Assistant, ""), "C");
+    assert_eq!(
+        role_avatar_initial_with(&ChatRole::Tool, "Codex"),
+        "\u{2699}"
+    );
+
+    assert_eq!(
+        default_composer_placeholder("Codex"),
+        "Ask Codex about this document\u{2026}"
+    );
+    assert_eq!(
+        default_composer_placeholder(""),
+        "Ask Claude about this document\u{2026}"
+    );
 }
 
 #[test]
