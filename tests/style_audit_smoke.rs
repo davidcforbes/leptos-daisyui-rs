@@ -29,14 +29,84 @@
 //! family cannot slip through ungoverned). Those two numbers are kept in sync
 //! with `layout_audit_smoke.rs`'s ceilings for the same page.
 //!
-//! Ceilings below are filled from the first run's actual counts — daisyUI's
-//! own defaults report non-zero typography/shape/depth out of the box, which
-//! is the ratchet baseline, not a blocker. Lower a ceiling whenever a fix
-//! drops the count; raising one needs a reason in the commit message.
+//! Ceilings below are the actual measured counts — no slack. Lower one
+//! whenever a fix drops the count; raising one needs a reason in the commit
+//! message, and "the count went up" is not one.
+//!
+//! **A ceiling is the last resort, not the first.** When a page reports a
+//! value the app deliberately ships, DECLARE it in [`demo_profile`] with the
+//! CSS it comes from; only genuinely-undecided debt is left to the ratchet.
+//! The distinction matters because the sweep pushes at most one violation per
+//! element: a wide ceiling full of known-benign findings is headroom a real
+//! regression on those same elements hides in. That is exactly what happened
+//! here (ldui-gne) — every `.btn` reported its resting shadow, so a *wrong*
+//! shadow on a button could not have been seen.
 
 mod common;
 use common::{assert_not_truncated, body_font_family, harness_at};
-use ldui_audit::{Ceiling, family};
+use ldui_audit::{Ceiling, ShadowSpec, StyleProfile, family};
+
+/// The demo's audit profile: `ui-tokens` defaults plus this app's **declared
+/// deviations**, each one a value the demo deliberately ships that the shared
+/// token crate does not name (ldui-gne).
+///
+/// Deviations are *additive* — read back from `from_ui_tokens`' output and
+/// extended, never retyped — so the token crate stays the source of truth and
+/// a token change still flows through. Every entry below must cite the CSS it
+/// comes from: an undocumented entry here is indistinguishable from raising a
+/// ceiling, and blinds the family it widens.
+///
+/// **Why declare rather than ratchet.** The engine's sweep pushes at most one
+/// violation per element and then moves on, so while every `.btn` on a page
+/// reports its resting shadow, a genuinely *wrong* shadow on those same
+/// buttons is invisible — the ceiling protects nothing. Naming the expected
+/// value restores the check: any other shadow on a button now fails.
+fn demo_profile(font_family: String) -> StyleProfile {
+    let base = ldui_audit::from_ui_tokens(font_family);
+
+    // --- depth ------------------------------------------------------------
+    // The demo's "Enhanced Button Push Effect" (`demo/input.css`, the
+    // `@layer components { .btn { … } }` block) overrides *every* button's
+    // shadow with `!important`:
+    //
+    //   box-shadow: 0 6px 12px -2px rgba(0, 0, 0, 0.15),
+    //               0 3px 6px  -2px rgba(0, 0, 0, 0.1) !important;
+    //
+    // Two layers, both black, neither inset, both with a -2px spread. It is a
+    // deliberate press-affordance vocabulary (paired with a `translateY`),
+    // authored in one place, and not expressible as a `ui_tokens::elevation`
+    // level — those are single-layer, spread-less. Declaring it is what lets
+    // the depth family still say something about buttons.
+    //
+    // The pressed variant (`0 1px 3px rgba(0, 0, 0, 0.12)`, same block) is
+    // deliberately NOT declared: it only paints under `:active`, which a
+    // static sweep never captures, and declaring it would additionally accept
+    // Tailwind's `shadow-sm` first layer (`0 1px 3px rgba(0,0,0,0.1)`) —
+    // inside the opacity epsilon — weakening a real check for no gain today.
+    //
+    // daisyUI's own control shadows (`.select`, `.input`, `.checkbox`,
+    // `.alert`) are NOT declared here: they are authored in `oklch()`/
+    // `oklab()`, which the engine's shadow parser does not understand, so any
+    // spec written for them would encode a mis-parse (it reads the geometry
+    // out of the colour's coordinates — negative blur and all). They stay
+    // ratcheted until the engine can parse them: PixelProof-0il.
+    let mut shadows = base.shadows.clone();
+    shadows.extend([
+        ShadowSpec::new(0.0, 6.0, 12.0, 0.15).with_spread(-2.0),
+        ShadowSpec::new(0.0, 3.0, 6.0, 0.10).with_spread(-2.0),
+    ]);
+
+    // --- typography -------------------------------------------------------
+    // 18px is daisyUI's / Tailwind's "large" text step, and the demo exists to
+    // show daisyUI at its declared sizes: `.table-lg` cells, `.card-title`,
+    // `.btn-lg` and `h3.text-lg` all compute to it. The `ui-tokens` ramp
+    // (28/20/16/14/12/11) has no 18 because the desktop face has no such step,
+    // so this is a web-only, framework-supplied size — declared, not hidden.
+    let mut ramp = base.type_ramp.clone();
+    ramp.push(18.0);
+
+    base.shadows(shadows).type_ramp(ramp)
+}
 
 /// Pages swept, with their current per-family violation ceilings.
 ///
@@ -44,38 +114,57 @@ use ldui_audit::{Ceiling, family};
 /// listed here (a ceiling entry for it is itself a misconfiguration per
 /// `ldui_audit::verify`'s contract, mirrored here for `check_ceilings`).
 ///
-/// Filled from the first run's actual counts (`report_style_backlog` /
-/// the `check_ceilings` failure output, which names the exact count per
-/// family). SHAPE is 0 on every page today — daisyUI's border-radius
-/// utilities already land on the declared radius set — so it stays listed
-/// at 0 as a regression tripwire rather than an ungoverned family. DEPTH is
-/// non-zero everywhere: daisyUI's `shadow-*` utilities don't match the
-/// declared `ui_tokens::elevation` set, which is real debt this ratchet now
-/// tracks rather than hides. GRID/INTERNAL mirror `layout_audit_smoke.rs`'s
-/// committed ceilings for the same page (see the module doc above).
+/// Filled from the actual counts (`report_style_backlog` / the
+/// `check_ceilings` failure output, which names the exact count per family),
+/// measured *after* [`demo_profile`]'s declared deviations. SHAPE is 0 on
+/// every page — daisyUI's border-radius utilities already land on the
+/// declared radius set — so it stays listed at 0 as a regression tripwire
+/// rather than an ungoverned family. GRID/INTERNAL mirror
+/// `layout_audit_smoke.rs`'s committed ceilings for the same page (see the
+/// module doc above).
+///
+/// What is left under the non-zero ceilings, and why each is still there:
+///
+/// - **TYPOGRAPHY.** Inline `<code>` resolving `ui-monospace` against a
+///   profile pinned to the demo's `ui-sans-serif` body face (70 of
+///   data-table's 83). A `<code>` element *should* be monospace; the engine's
+///   per-element family rule has no exemption for `code`/`pre`/`kbd`/`samp`,
+///   which is an engine gap filed as **PixelProof-0oc**, not a page defect.
+///   The remainder is daisyUI's `-xs` size step (10px on `.kbd-xs`,
+///   `.badge-xs`), its `-xl` step (22px on `.btn-xl`), and Tailwind
+///   `text-2xl` (24px) in the kanban demo's own headings — genuinely
+///   undecided, so ratcheted rather than declared.
+/// - **DEPTH.** Two distinct things. daisyUI's `oklch()`/`oklab()` control
+///   shadows (`.select`, `.input`, `.checkbox`, `.alert`) cannot be declared
+///   at all until the engine's shadow parser understands those colour
+///   functions (**PixelProof-0il**) — 18 of data-table's 18, 2 of kanban's 7.
+///   The rest is real ad-hoc-shadow debt: Tailwind `shadow-xl` on the card
+///   demo's cards (11) and `shadow-sm` on kanban cards (5), neither from
+///   `ui_tokens::elevation`. See `doc/visual-quality/ad-hoc-shadow.md`.
+/// - **COMPONENT-DRIFT / GRID / INTERNAL.** Unchanged by this pass.
 const PAGES: &[(&str, &[(&str, usize)])] = &[
     (
         "/components/button",
         &[
-            (family::TYPOGRAPHY, 3),
+            (family::TYPOGRAPHY, 1),
             (family::SHAPE, 0),
-            (family::DEPTH, 36),
+            (family::DEPTH, 0),
         ],
     ),
     (
         "/components/card",
         &[
-            (family::TYPOGRAPHY, 10),
+            (family::TYPOGRAPHY, 1),
             (family::SHAPE, 0),
-            (family::DEPTH, 15),
+            (family::DEPTH, 11),
         ],
     ),
     (
         "/components/data-table",
         &[
-            (family::TYPOGRAPHY, 89),
+            (family::TYPOGRAPHY, 83),
             (family::SHAPE, 0),
-            (family::DEPTH, 109),
+            (family::DEPTH, 18),
             (family::GRID, 2),
             (family::COMPONENT_DRIFT, 10),
         ],
@@ -83,9 +172,9 @@ const PAGES: &[(&str, &[(&str, usize)])] = &[
     (
         "/components/kanban",
         &[
-            (family::TYPOGRAPHY, 11),
+            (family::TYPOGRAPHY, 7),
             (family::SHAPE, 0),
-            (family::DEPTH, 12),
+            (family::DEPTH, 7),
             (family::GRID, 34),
             (family::INTERNAL, 2),
             (family::COMPONENT_DRIFT, 1),
@@ -96,7 +185,7 @@ const PAGES: &[(&str, &[(&str, usize)])] = &[
 async fn audit_page(path: &str, ceilings: &[(&str, usize)]) {
     let h = harness_at(path).await;
     let font = body_font_family(&h).await;
-    let profile = ldui_audit::from_ui_tokens(font);
+    let profile = demo_profile(font);
     let report = ldui_audit::audit_page(&h, &profile, &Default::default())
         .await
         .expect("audit_page");
@@ -145,7 +234,7 @@ style_audit_test!(kanban_style_is_within_ceiling, 3);
 async fn sweep_detects_injected_style_and_drift_violations() {
     let h = harness_at("/components/button").await;
     let font = body_font_family(&h).await;
-    let profile = ldui_audit::from_ui_tokens(font);
+    let profile = demo_profile(font);
 
     let before = ldui_audit::audit_page(&h, &profile, &Default::default())
         .await
@@ -255,7 +344,7 @@ async fn report_style_backlog() {
     for (path, _) in PAGES {
         let h = harness_at(path).await;
         let font = body_font_family(&h).await;
-        let profile = ldui_audit::from_ui_tokens(font);
+        let profile = demo_profile(font);
         let report = ldui_audit::audit_page(&h, &profile, &Default::default())
             .await
             .expect("audit_page");
