@@ -40,8 +40,22 @@
 //! (that suite runs the same engine sweep with a fuller profile).
 
 mod common;
-use common::harness_at;
+use common::{assert_not_truncated, body_font_family, harness_at};
 use ldui_audit::family;
+
+/// The profile this suite sweeps with: token defaults pinned to the demo's
+/// *real* computed body font.
+///
+/// This used to pass a `"__any__"` sentinel on the grounds that typography is
+/// not asserted here — but the engine compares every text-bearing element's
+/// computed `font-family` against the profile regardless of which families
+/// the caller reads. A sentinel therefore made every element on a text-heavy
+/// page a typography violation, overran the engine's 200-per-family cap, and
+/// latched `truncated` on every run forever. (An empty `type_ramp` would not
+/// have helped: the family comparison is independent of the ramp.)
+async fn profile(h: &ldui_audit::Harness) -> ldui_audit::StyleProfile {
+    ldui_audit::from_ui_tokens(body_font_family(h).await)
+}
 
 /// Pages swept, with their current violation ceilings.
 ///
@@ -61,12 +75,18 @@ const PAGES: &[(&str, usize, usize)] = &[
 
 async fn audit_page(path: &str, max_grid: usize, max_internal: usize) {
     let h = harness_at(path).await;
-    let profile = ldui_audit::from_ui_tokens("__any__"); // family/typography not asserted here
+    let profile = profile(&h).await;
     let report = ldui_audit::audit_page(&h, &profile, &Default::default())
         .await
         .expect("audit_page");
 
     report.sanity().unwrap();
+    // This suite governs only overlap/grid/internal, so it cannot use
+    // `ldui_audit::verify` (whose ratchet demands a ceiling for *every*
+    // reporting family — typography/shape/depth are `style_audit_smoke`'s
+    // business). Truncation still has to be surfaced, and `verify` only notes
+    // it anyway, so both suites share the same explicit assertion.
+    assert_not_truncated(&report, path);
 
     assert_eq!(
         report.count(family::OVERLAP),
@@ -119,7 +139,7 @@ audit_test!(kanban_layout_is_clean, 5);
 #[ignore = "needs the demo dev server (trunk serve in demo/)"]
 async fn sweep_detects_injected_violations() {
     let h = harness_at("/components/button").await;
-    let profile = ldui_audit::from_ui_tokens("__any__");
+    let profile = profile(&h).await;
 
     let before = ldui_audit::audit_page(&h, &profile, &Default::default())
         .await
@@ -205,9 +225,9 @@ async fn sweep_detects_injected_violations() {
 #[ignore = "reporting only; run explicitly to enumerate the spacing backlog"]
 async fn report_layout_backlog() {
     let mut total = 0;
-    let profile = ldui_audit::from_ui_tokens("__any__");
     for (path, _, _) in PAGES {
         let h = harness_at(path).await;
+        let profile = profile(&h).await;
         let report = ldui_audit::audit_page(&h, &profile, &Default::default())
             .await
             .expect("audit_page");

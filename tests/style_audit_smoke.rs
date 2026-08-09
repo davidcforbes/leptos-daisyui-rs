@@ -14,9 +14,11 @@
 //! cargo test --test style_audit_smoke -- --ignored
 //! ```
 //!
-//! **Overlap is still a hard failure here too** (asserted separately, before
-//! the ratchet, exactly like `layout_audit_smoke`) — `ldui_audit::verify`
-//! itself refuses a ceiling for it.
+//! **Overlap is still a hard failure here too.** Gating goes through
+//! `ldui_audit::verify`, which does sanity + hard-fail overlap + the ratchet
+//! in one call and refuses a ceiling for overlap as a misconfiguration.
+//! Truncation is asserted separately (`common::assert_not_truncated`) because
+//! `verify` only notes it.
 //!
 //! **Every other family is ratcheted, not zeroed**, including grid/internal:
 //! the engine sweep reports every family under one profile in one pass, so
@@ -33,29 +35,8 @@
 //! drops the count; raising one needs a reason in the commit message.
 
 mod common;
-use common::harness_at;
-use ldui_audit::{Ceiling, check_ceilings, family};
-
-/// Determine the demo's real computed `<body>` font family (first family in
-/// the stack, quotes stripped) and pin it into the profile: a silent font
-/// fallback (declared family never loads) is itself a regression the sweep
-/// should catch, so the profile must assert the family that is *actually*
-/// serving today rather than a guess.
-async fn body_font_family(h: &ldui_audit::Harness) -> String {
-    let raw: String = h
-        .page()
-        .evaluate("getComputedStyle(document.body).fontFamily")
-        .await
-        .expect("evaluate body font-family")
-        .into_value()
-        .expect("font-family computed style is a string");
-    raw.split(',')
-        .next()
-        .unwrap_or(&raw)
-        .trim()
-        .trim_matches(|c| c == '"' || c == '\'')
-        .to_string()
-}
+use common::{assert_not_truncated, body_font_family, harness_at};
+use ldui_audit::{Ceiling, family};
 
 /// Pages swept, with their current per-family violation ceilings.
 ///
@@ -120,22 +101,17 @@ async fn audit_page(path: &str, ceilings: &[(&str, usize)]) {
         .await
         .expect("audit_page");
 
-    report.sanity().unwrap();
-    assert_eq!(
-        report.count(family::OVERLAP),
-        0,
-        "{}",
-        report.describe(path)
-    );
-
+    // `verify` is sanity + hard-fail overlap + the ratchet in one call, and it
+    // additionally refuses a ceiling for OVERLAP as a misconfiguration. It
+    // only *notes* truncation in its Ok path, though, so that gets its own
+    // assertion — see `common::assert_not_truncated` for why a truncated
+    // sweep must never read as a pass.
     let ceiling_list: Vec<Ceiling> = ceilings.iter().map(|(f, m)| Ceiling::new(f, *m)).collect();
-    let out = check_ceilings(&report, &ceiling_list);
-    assert!(
-        out.is_pass(),
-        "{}\n{}",
-        out.over.join("\n"),
-        report.describe(path)
-    );
+    let notes = ldui_audit::verify(path, &report, &ceiling_list).unwrap_or_else(|e| panic!("{e}"));
+    for n in &notes {
+        println!("{n}");
+    }
+    assert_not_truncated(&report, path);
 }
 
 macro_rules! style_audit_test {

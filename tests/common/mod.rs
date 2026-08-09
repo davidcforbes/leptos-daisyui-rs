@@ -117,6 +117,55 @@ pub async fn harness_at(path: &str) -> Harness {
     h
 }
 
+/// The demo's real computed `<body>` font family (first family in the stack,
+/// quotes stripped).
+///
+/// Both audit suites pin this into their `StyleProfile` rather than naming a
+/// family: a silent font fallback (the declared family never loads) is itself
+/// a regression the sweep should catch, and a *wrong* declared family is
+/// worse than useless — the engine compares every text-bearing element's
+/// computed family against it, so a sentinel like `"__any__"` makes every
+/// element on a text-heavy page a typography violation, overruns the engine's
+/// 200-per-family cap and latches `truncated` on every run forever (see
+/// `assert_not_truncated`).
+pub async fn body_font_family(h: &Harness) -> String {
+    let raw: String = h
+        .page()
+        .evaluate("getComputedStyle(document.body).fontFamily")
+        .await
+        .expect("evaluate body font-family")
+        .into_value()
+        .expect("font-family computed style is a string");
+    raw.split(',')
+        .next()
+        .unwrap_or(&raw)
+        .trim()
+        .trim_matches(|c| c == '"' || c == '\'')
+        .to_string()
+}
+
+/// Fail when a sweep hit the engine's per-family cap.
+///
+/// The engine caps each family at 200 violations and sets
+/// `AuditReport::truncated`, documenting the counts as "a floor, not a total".
+/// A ratcheted ceiling above the cap is then permanently uncheckable: the
+/// count saturates at 200, stays `<= ceiling` forever, and every further
+/// regression passes while the report reads clean.
+///
+/// Both audit suites call this — `ldui_audit::verify` only *notes* truncation
+/// in its `Ok` path, so surfacing it needs an explicit assertion either way,
+/// and the layout suite cannot adopt `verify` at all (it governs only
+/// overlap/grid/internal, while `verify`'s ratchet demands a ceiling for
+/// every reporting family).
+pub fn assert_not_truncated(report: &ldui_audit::AuditReport, surface: &str) {
+    assert!(
+        !report.truncated,
+        "sweep of {surface} hit the engine's per-family cap — counts are a floor, \
+         not a total, so any ceiling at or above the cap can never fail again.\n{}",
+        report.describe(surface)
+    );
+}
+
 /// Poll until `document.querySelector(sel)` matches (60 s budget). Panics on
 /// timeout with the selector in the message.
 pub async fn wait_for_selector(h: &Harness, sel: &str) {
