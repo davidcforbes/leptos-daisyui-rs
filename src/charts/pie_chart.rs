@@ -1,3 +1,4 @@
+use super::paint::paint_attrs;
 use leptos::prelude::*;
 
 /// A single slice in a pie chart.
@@ -117,8 +118,11 @@ pub fn PieChart(
     let arc_views = arcs
         .into_iter()
         .map(|arc| {
+            // A theme token must not ride on the `fill` presentation attribute
+            // — see `super::paint::paint_attrs`.
+            let (c, st) = paint_attrs(arc.color);
             view! {
-                <path d=arc.path fill=arc.color stroke="white" stroke-width="1" />
+                <path d=arc.path fill=c style=st stroke="white" stroke-width="1" />
             }
         })
         .collect_view();
@@ -131,13 +135,13 @@ pub fn PieChart(
                 let ly = legend_start_y + i as f64 * 20.0;
                 let lx = format!("{legend_x:.2}");
                 let ly_str = format!("{ly:.2}");
-                let col = s.color.clone();
+                let (col, col_style) = paint_attrs(s.color.clone());
                 let pct = (s.value / total * 100.0).round();
                 let text = format!("{} ({}%)", s.label, pct);
                 let text_x = format!("{:.2}", legend_x + 14.0);
                 let text_y = ly_str.clone();
                 view! {
-                    <rect x=lx y=ly_str width="10" height="10" fill=col rx="2" />
+                    <rect x=lx y=ly_str width="10" height="10" fill=col style=col_style rx="2" />
                     <text x=text_x y=text_y dominant-baseline="hanging"
                         fill="currentColor" font-size="11">
                         {text}

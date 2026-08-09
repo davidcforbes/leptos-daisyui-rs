@@ -1,5 +1,6 @@
 use leptos::prelude::*;
 
+use super::paint::paint_attrs;
 use super::stacked_bar_chart::ChartSeries;
 
 /// Estimated on-screen width (SVG user units) of a `font-size="10"` text
@@ -206,8 +207,10 @@ pub fn StackedAreaChart(
             }
 
             let poly_points = points.join(" ");
-            let color = series[si].color.clone();
-            view! { <polygon points=poly_points fill=color opacity="0.85" /> }
+            // A theme token must not ride on the `fill` presentation attribute
+            // — see `super::paint::paint_attrs`.
+            let (color, style) = paint_attrs(series[si].color.clone());
+            view! { <polygon points=poly_points fill=color style=style opacity="0.85" /> }
         })
         .collect_view();
 
@@ -243,12 +246,12 @@ pub fn StackedAreaChart(
                 let lx = pad_left + offset;
                 let lx_str = format!("{lx:.2}");
                 let ly_str = format!("{legend_y:.2}");
-                let col = s.color.clone();
+                let (col, col_style) = paint_attrs(s.color.clone());
                 let name = s.name.clone();
                 let text_x = format!("{:.2}", lx + 14.0);
                 let text_y = ly_str.clone();
                 view! {
-                    <rect x=lx_str y=ly_str width="10" height="10" fill=col rx="2" />
+                    <rect x=lx_str y=ly_str width="10" height="10" fill=col style=col_style rx="2" />
                     <text x=text_x y=text_y dominant-baseline="hanging"
                         fill="currentColor" font-size="10">
                         {name}

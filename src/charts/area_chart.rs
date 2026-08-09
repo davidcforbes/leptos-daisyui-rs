@@ -1,3 +1,4 @@
+use super::paint::{paint_attrs, stroke_attrs};
 use leptos::prelude::*;
 
 /// SVG-based area chart component.
@@ -120,6 +121,12 @@ pub fn AreaChart(
         })
         .collect_view();
 
+    // Neither colour may ride on its presentation attribute when it carries a
+    // theme token — see `super::paint` (ldui-1g5). They land on two different
+    // elements, so the two `style` attributes never collide.
+    let (area_fill, area_style) = paint_attrs(fill_color);
+    let (line_stroke, line_style) = stroke_attrs(stroke_color);
+
     let fill_opacity_str = format!("{fill_opacity}");
     let axis_y_end = format!("{baseline_y:.2}");
     let pad_left_str = format!("{pad_left:.2}");
@@ -150,13 +157,15 @@ pub fn AreaChart(
             {x_tick_views}
             <polygon
                 points=polygon_points
-                fill=fill_color
+                fill=area_fill
+                style=area_style
                 opacity=fill_opacity_str
             />
             <polyline
                 points=line_points
                 fill="none"
-                stroke=stroke_color
+                stroke=line_stroke
+                style=line_style
                 stroke-width="2"
                 stroke-linejoin="round"
                 stroke-linecap="round"
