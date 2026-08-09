@@ -8,8 +8,14 @@
 //!
 //! Design: `docs/superpowers/specs/2026-08-08-visual-quality-checks-design.md`.
 
+pub mod profile;
+pub mod web_config;
+
+pub use pixelproof_style_audit::web;
 pub use pixelproof_style_audit::{
-    AuditReport, Ceiling, FamilyReport, RatchetOutcome, ShadowSpec, StyleProfile, Violation,
-    check_ceilings, family,
+    AuditReport, Ceiling, FamilyReport, RatchetOutcome, ShadowSpec, StyleProfile, SweepOptions,
+    Violation, check_ceilings, family, sweep_js, verify,
 };
 pub use pixelproof_web::{Harness, HarnessConfig, ViewportSize};
+pub use profile::from_ui_tokens;
+pub use web_config::ldui_web_config;
