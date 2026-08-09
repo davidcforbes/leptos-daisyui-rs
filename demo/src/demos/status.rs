@@ -250,8 +250,8 @@ pub fn StatusDemo() -> impl IntoView {
                                     "New company website with modern design"
                                 </p>
                                 <Progress
-                                    attr:value=100.0
-                                    attr:max=100.0
+                                    value=100.0
+                                    max=100.0
                                     color=ProgressColor::Success
                                     class="w-full"
                                 />
@@ -269,8 +269,8 @@ pub fn StatusDemo() -> impl IntoView {
                                     "iOS and Android companion app"
                                 </p>
                                 <Progress
-                                    attr:value=65.0
-                                    attr:max=100.0
+                                    value=65.0
+                                    max=100.0
                                     color=ProgressColor::Warning
                                     class="w-full"
                                 />
@@ -290,8 +290,8 @@ pub fn StatusDemo() -> impl IntoView {
                                     "Comprehensive API documentation"
                                 </p>
                                 <Progress
-                                    attr:value=25.0
-                                    attr:max=100.0
+                                    value=25.0
+                                    max=100.0
                                     color=ProgressColor::Info
                                     class="w-full"
                                 />
@@ -311,8 +311,8 @@ pub fn StatusDemo() -> impl IntoView {
                                     "Migrate legacy systems to new platform"
                                 </p>
                                 <Progress
-                                    attr:value=10.0
-                                    attr:max=100.0
+                                    value=10.0
+                                    max=100.0
                                     color=ProgressColor::Error
                                     class="w-full"
                                 />

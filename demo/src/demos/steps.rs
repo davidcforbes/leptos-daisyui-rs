@@ -328,8 +328,8 @@ pub fn StepsDemo() -> impl IntoView {
                                 "Progress: 3/8 completed"
                             </div>
                             <Progress
-                                attr:value=37.5
-                                attr:max=100.0
+                                value=37.5
+                                max=100.0
                                 color=ProgressColor::Primary
                                 class="w-full mt-2"
                             />
