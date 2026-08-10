@@ -96,6 +96,14 @@ pub fn FilterSidebar(
     /// every existing call site is unchanged.
     #[prop(optional, into)]
     side: Signal<SidebarSide>,
+    /// Expanded width classes. Defaults to the measured `220px`, which every
+    /// existing call site keeps. Override for a panel hosting content wider
+    /// than a filter column (e.g. an assistant card) — pass the full class
+    /// pair (`"w-[360px] min-w-[360px]"`), and remember the consumer's CSS
+    /// must `@source inline(...)` any arbitrary-value classes it passes,
+    /// exactly as the type docs require for this crate's own.
+    #[prop(default = String::from("w-[220px] min-w-[220px]"), into)]
+    expanded_width: String,
     /// Reference to the panel element
     /// ([HTMLElement](https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement)).
     #[prop(optional)]
@@ -107,9 +115,9 @@ pub fn FilterSidebar(
 ) -> impl IntoView {
     let width_class = move || {
         if collapsed.get() {
-            "w-[44px] min-w-[44px]"
+            "w-[44px] min-w-[44px]".to_string()
         } else {
-            "w-[220px] min-w-[220px]"
+            expanded_width.clone()
         }
     };
     // `opacity-0 pointer-events-none` rather than unmounting — see the type docs.
