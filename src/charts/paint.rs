@@ -24,6 +24,12 @@
 //! their primary mark unprotected while looking protected. Hence
 //! [`stroke_attrs`] alongside [`paint_attrs`], both built on the same
 //! value-keyed split (ldui-1g5).
+//!
+//! The hazard is a property of *SVG presentation attributes*, not of charts, so
+//! this module is the crate's routing for any SVG paint — the Gantt timeline
+//! draws through it too (ldui-xxc). Elements outside `charts` tend to carry
+//! their own static `style`, which is why [`merge_style`] and the
+//! [`paint_attrs_with`] / [`stroke_attrs_with`] pair exist.
 
 /// Splits a CSS color into `(attr_value, style_attr)` for `property` on an SVG
 /// shape. Exactly one is `Some`.
@@ -61,6 +67,59 @@ pub(crate) fn paint_attrs(color: String) -> (Option<String>, Option<String>) {
 /// `stroke` needs the same treatment as `fill`.
 pub(crate) fn stroke_attrs(color: String) -> (Option<String>, Option<String>) {
     attrs_for("stroke", color)
+}
+
+/// Joins CSS declarations into one `style` attribute value, or `None` if they
+/// contribute nothing.
+///
+/// [`attrs_for`] returns the *whole* `style` value, so on its own it only fits
+/// an element whose `style` carries nothing else. Chart shapes happen to be
+/// that shape; most other SVG is not. The Gantt dependency preview already
+/// declares `opacity` and `pointer-events`, and a timeline marker declares
+/// `cursor` — a second writer of the attribute would silently drop the first,
+/// and losing `pointer-events: none` there would make an overlay swallow
+/// clicks.
+///
+/// The composable unit is therefore the *declaration*, not the attribute. This
+/// takes declarations in source order, so a static base is simply the first
+/// item and a routed colour is another; an element routing both a fill and a
+/// stroke passes three. `None` items are skipped, which is exactly what the
+/// routers hand back when the colour stayed on its presentation attribute, so
+/// no call site has to branch on which half it got.
+pub(crate) fn merge_style<I: IntoIterator<Item = Option<String>>>(
+    declarations: I,
+) -> Option<String> {
+    let mut out = String::new();
+    for decl in declarations.into_iter().flatten() {
+        let decl = decl.trim().trim_end_matches(';').trim();
+        if decl.is_empty() {
+            continue;
+        }
+        if !out.is_empty() {
+            out.push_str("; ");
+        }
+        out.push_str(decl);
+    }
+    (!out.is_empty()).then_some(out)
+}
+
+/// Splits a colour for `property` on an element whose `style` attribute already
+/// carries the `base` declarations. See [`merge_style`].
+fn attrs_for_with(property: &str, base: &str, color: String) -> (Option<String>, Option<String>) {
+    let (attr, routed) = attrs_for(property, color);
+    (attr, merge_style([Some(base.to_string()), routed]))
+}
+
+/// [`paint_attrs`] for an element whose `style` already carries `base`: the
+/// routed declaration is appended to it instead of replacing it.
+pub(crate) fn paint_attrs_with(base: &str, color: String) -> (Option<String>, Option<String>) {
+    attrs_for_with("fill", base, color)
+}
+
+/// [`stroke_attrs`] for an element whose `style` already carries `base`: the
+/// routed declaration is appended to it instead of replacing it.
+pub(crate) fn stroke_attrs_with(base: &str, color: String) -> (Option<String>, Option<String>) {
+    attrs_for_with("stroke", base, color)
 }
 
 #[cfg(test)]
@@ -138,6 +197,67 @@ mod tests {
         assert_eq!(
             stroke_style.as_deref(),
             Some("stroke: var(--color-primary)")
+        );
+    }
+
+    #[test]
+    fn merge_style_keeps_the_base_declarations_when_a_token_is_routed() {
+        // The dependency preview's case: losing `pointer-events: none` would
+        // let the overlay swallow clicks, so the base must survive.
+        let (stroke, style) = stroke_attrs_with(
+            "opacity: 0.7; pointer-events: none",
+            "var(--color-success)".into(),
+        );
+        assert_eq!(stroke, None);
+        assert_eq!(
+            style.as_deref(),
+            Some("opacity: 0.7; pointer-events: none; stroke: var(--color-success)")
+        );
+    }
+
+    #[test]
+    fn merge_style_keeps_the_base_declarations_when_a_literal_stays_on_the_attribute() {
+        let (stroke, style) = stroke_attrs_with("cursor: pointer; opacity: 0.7", "#6b7280".into());
+        assert_eq!(stroke.as_deref(), Some("#6b7280"));
+        assert_eq!(style.as_deref(), Some("cursor: pointer; opacity: 0.7"));
+    }
+
+    #[test]
+    fn merge_style_normalises_a_trailing_semicolon_rather_than_doubling_it() {
+        // Base strings are copied off elements that wrote `...; ` by hand.
+        let merged = merge_style([
+            Some("opacity: 0.7;".to_string()),
+            Some("fill: var(--color-base-100)".to_string()),
+        ]);
+        assert_eq!(
+            merged.as_deref(),
+            Some("opacity: 0.7; fill: var(--color-base-100)")
+        );
+    }
+
+    #[test]
+    fn merge_style_is_none_when_nothing_is_contributed() {
+        // An empty base plus a literal colour must not emit `style=""`.
+        assert_eq!(merge_style([None, None]), None);
+        assert_eq!(
+            merge_style([Some(String::new()), Some("  ; ".into())]),
+            None
+        );
+        let (fill, style) = paint_attrs_with("", "currentColor".into());
+        assert_eq!(fill.as_deref(), Some("currentColor"));
+        assert_eq!(style, None);
+    }
+
+    #[test]
+    fn merge_style_composes_a_routed_fill_and_a_routed_stroke_on_one_element() {
+        // The reason declarations rather than whole attribute values are the
+        // unit: two routers can write the same element without clobbering.
+        let (_, fill_decl) = paint_attrs("var(--color-base-100)".to_string());
+        let (_, stroke_decl) = stroke_attrs("var(--color-primary)".to_string());
+        let merged = merge_style([Some("opacity: 0.7".to_string()), fill_decl, stroke_decl]);
+        assert_eq!(
+            merged.as_deref(),
+            Some("opacity: 0.7; fill: var(--color-base-100); stroke: var(--color-primary)")
         );
     }
 

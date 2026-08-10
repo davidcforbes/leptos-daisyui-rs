@@ -193,20 +193,22 @@ fn gate_steps() -> Vec<Step> {
             ],
             None,
         ),
-        // Guards every chart colour against riding on a `fill=`/`stroke=`
-        // presentation attribute, where `var()` substitution is unspecified
-        // (ldui-1g5). Also a pure source scan, so also browser-free — and it
+        // Guards every SVG colour in `src/` against riding on a
+        // `fill=`/`stroke=` presentation attribute, where `var()` substitution
+        // is unspecified (ldui-1g5, widened past `src/charts` in ldui-xxc after
+        // a dead daisyUI-4 token shipped in the Gantt timeline while this step
+        // read green). Also a pure source scan, so also browser-free — and it
         // has to be its own step: `test-lib` runs the library's unit tests
         // only, so an integration test not named here never runs in the gate.
         cmd(
-            "test-charts-paint",
+            "test-svg-paint",
             "cargo",
             &[
                 "test",
                 "-p",
                 "leptos-daisyui-rs",
                 "--test",
-                "charts_paint_routing",
+                "svg_paint_routing",
             ],
             None,
         ),
@@ -1275,7 +1277,7 @@ mod tests {
                 "test-xtask",
                 "test-audit",
                 "test-daisyui5",
-                "test-charts-paint"
+                "test-svg-paint"
             ]
         );
     }
@@ -1467,12 +1469,12 @@ pub fn r() -> f32 { radius::CARD }
         assert!(gate_steps().iter().any(|s| s.name == "sibling-tokens"));
     }
 
-    /// The chart paint guard is a source scan, so it belongs in the fast gate
+    /// The SVG paint guard is a source scan, so it belongs in the fast gate
     /// next to the daisyUI-4 class scan — and it must be its OWN step, because
     /// `test-lib` never runs an integration test (ldui-1g5).
     #[test]
-    fn chart_paint_guard_is_a_default_gate_step() {
-        assert!(gate_steps().iter().any(|s| s.name == "test-charts-paint"));
+    fn svg_paint_guard_is_a_default_gate_step() {
+        assert!(gate_steps().iter().any(|s| s.name == "test-svg-paint"));
     }
 
     /// The reactivity suite must never leak into the fast, zero-tooling gate.
@@ -1531,7 +1533,7 @@ pub fn r() -> f32 { radius::CARD }
                 "test-xtask",
                 "test-audit",
                 "test-daisyui5",
-                "test-charts-paint"
+                "test-svg-paint"
             ]
         );
     }
