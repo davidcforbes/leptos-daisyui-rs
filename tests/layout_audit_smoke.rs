@@ -64,6 +64,15 @@ async fn profile(h: &ldui_audit::Harness) -> ldui_audit::StyleProfile {
 /// The set mirrors the visual smoke suite's complexity tiers: simple,
 /// stateful, and the layout-heavy fork additions where spacing bugs actually
 /// live.
+///
+/// `/components/charts` (ldui-40g) is the SVG tier, and its ceilings behave
+/// differently from the rest: all 14 GRID findings are distances between
+/// `<text>` nodes laid out in a chart's own viewBox coordinate space and then
+/// scaled by `w-full h-auto`, so they are not spacing debt anyone can work off
+/// on the 4px grid — the page's own DOM markup reports nothing. OVERLAP is the
+/// number that earns the page its place here: sweeping it for the first time
+/// caught `AreaChart` drawing its bottom y-scale label over its first x-axis
+/// tick, which was fixed in `AreaChart` rather than absorbed.
 const PAGES: &[(&str, usize, usize)] = &[
     ("/components/button", 0, 0),
     ("/components/alert", 0, 0),
@@ -71,6 +80,7 @@ const PAGES: &[(&str, usize, usize)] = &[
     ("/components/tab", 0, 0),
     ("/components/data-table", 2, 0),
     ("/components/kanban", 34, 2),
+    ("/components/charts", 14, 0),
 ];
 
 async fn audit_page(path: &str, max_grid: usize, max_internal: usize) {
@@ -127,6 +137,7 @@ audit_test!(card_layout_is_clean, 2);
 audit_test!(tab_layout_is_clean, 3);
 audit_test!(data_table_layout_is_clean, 4);
 audit_test!(kanban_layout_is_clean, 5);
+audit_test!(charts_layout_is_clean, 6);
 
 /// Negative control: prove the sweep actually detects things.
 ///

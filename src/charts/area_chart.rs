@@ -1,3 +1,4 @@
+use super::line_chart::tick_anchor;
 use super::paint::{paint_attrs, stroke_attrs};
 use leptos::prelude::*;
 
@@ -104,6 +105,12 @@ pub fn AreaChart(
         })
         .collect_view();
 
+    // The endpoint ticks anchor inward (`super::line_chart::tick_anchor`). A
+    // centered first tick sits half over the y-axis gutter, where it collides
+    // with the bottom y-scale label — a real overlap the layout audit fails on,
+    // and the same reason `LineChart` and `StackedAreaChart` already anchor
+    // their edge labels (ldui-40g). It also keeps a wide last label inside the
+    // viewBox instead of clipping it.
     let x_tick_views = (0..=4)
         .map(|i| {
             let frac = i as f64 / 4.0;
@@ -112,8 +119,9 @@ pub fn AreaChart(
             let x = format!("{sx:.2}");
             let y = format!("{:.2}", baseline_y + 15.0);
             let label = format!("{val:.1}");
+            let anchor = tick_anchor(i, 5);
             view! {
-                <text x=x y=y text-anchor="middle"
+                <text x=x y=y text-anchor=anchor
                     fill="currentColor" font-size="10" opacity="0.6">
                     {label}
                 </text>

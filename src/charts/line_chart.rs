@@ -34,7 +34,13 @@ fn tick_label_index(frac: f64, labels_len: usize) -> usize {
 /// other side (`"end"`), so a wide label (e.g. a full `"YYYY-MM-DD"` date)
 /// never overflows the SVG viewBox's left/right edge and gets clipped in a
 /// screenshot; interior ticks stay centered (`"middle"`).
-fn tick_anchor(i: usize, tick_count: usize) -> &'static str {
+///
+/// Shared with [`super::area_chart`] rather than copied: a centered first tick
+/// also overlaps the y-axis scale label sitting at the plot's bottom-left
+/// corner, which is how `AreaChart` failed the layout audit's hard overlap
+/// check (ldui-40g). `StackedAreaChart` reaches the same rule from its own
+/// category-label geometry (`x_label_anchor`).
+pub(super) fn tick_anchor(i: usize, tick_count: usize) -> &'static str {
     if tick_count > 1 && i == 0 {
         "start"
     } else if tick_count > 1 && i == tick_count - 1 {

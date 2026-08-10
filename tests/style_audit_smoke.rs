@@ -142,6 +142,22 @@ fn demo_profile(font_family: String) -> StyleProfile {
 ///   demo's cards (11) and `shadow-sm` on kanban cards (5), neither from
 ///   `ui_tokens::elevation`. See `doc/visual-quality/ad-hoc-shadow.md`.
 /// - **COMPONENT-DRIFT / GRID / INTERNAL.** Unchanged by this pass.
+/// - **CHARTS (ldui-40g).** This page's numbers are a first measurement, not a
+///   ratchet raise, and every one of them comes from inside the chart
+///   components' SVG — the page's own markup contributes zero violations in
+///   every family (verified in the browser: no non-SVG text on the page is off
+///   the ramp, and no GRID finding names a non-`svg` selector). TYPOGRAPHY 78
+///   is 60 axis/legend labels hardcoded at `font-size="10"` plus 18 heatmap
+///   cell labels at `font-size="9"`, both below the `ui-tokens` ramp's smallest
+///   step (11) — real, pre-existing library drift that had no page to report
+///   on until now, and the reason this bead asked for the page. GRID 14 is
+///   vertical distance between `<text>` nodes positioned in the SVG's own
+///   viewBox coordinate space, then scaled by `w-full h-auto`; the 4px grid
+///   cannot mean anything there, so unlike the other pages this number is not
+///   spacing debt to work off. Both are worth an engine/library follow-up
+///   rather than a ceiling raise. OVERLAP is 0 and stays 0 — the first run of
+///   this page found a real one (`AreaChart`'s bottom y-tick over its first
+///   x-tick) and it was fixed at the source, not absorbed.
 const PAGES: &[(&str, &[(&str, usize)])] = &[
     (
         "/components/button",
@@ -178,6 +194,16 @@ const PAGES: &[(&str, &[(&str, usize)])] = &[
             (family::GRID, 34),
             (family::INTERNAL, 2),
             (family::COMPONENT_DRIFT, 1),
+        ],
+    ),
+    (
+        "/components/charts",
+        &[
+            (family::TYPOGRAPHY, 78),
+            (family::SHAPE, 0),
+            (family::DEPTH, 0),
+            (family::GRID, 14),
+            (family::INTERNAL, 0),
         ],
     ),
 ];
@@ -218,6 +244,7 @@ style_audit_test!(button_style_is_within_ceiling, 0);
 style_audit_test!(card_style_is_within_ceiling, 1);
 style_audit_test!(data_table_style_is_within_ceiling, 2);
 style_audit_test!(kanban_style_is_within_ceiling, 3);
+style_audit_test!(charts_style_is_within_ceiling, 4);
 
 /// Negative control: prove the sweep + merge actually detects things, across
 /// both the engine's style families and the daisyUI drift heuristics.
