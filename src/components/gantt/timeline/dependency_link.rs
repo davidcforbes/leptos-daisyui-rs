@@ -189,7 +189,14 @@ pub fn DependencyLink(
                 }
                 style="cursor: pointer; opacity: 0.7;"
                 style:opacity=move || if is_selected.get() { "1.0" } else { "0.7" }
-                style:stroke=move || if is_selected.get() { "var(--fallback-p,oklch(var(--p)/1))" } else { "currentColor" }
+                // `--p`/`--fallback-p` are daisyUI 4 names with no daisyUI 5
+                // counterpart, so this substitution failed, the declaration was
+                // invalid at computed-value time, and `stroke` — which
+                // inherits — fell back to the inherited value: a selected link
+                // never took the primary colour (ldui-xxc). This rides on the
+                // `style:` channel, which IS specified to run `var()`, so only
+                // the token name was wrong; no routing change is needed.
+                style:stroke=move || if is_selected.get() { "var(--color-primary)" } else { "currentColor" }
             />
         </g>
     }

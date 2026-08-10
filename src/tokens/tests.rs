@@ -375,9 +375,19 @@ fn animations_css_defines_focus_ring() {
         css.contains("@keyframes ld-focus-ring-in"),
         "missing ld-focus-ring-in keyframes: {css}"
     );
+    // `--p` is the daisyUI **4** primary token. It does not exist in daisyUI 5
+    // (`rg -- '--p:' demo/node_modules/daisyui/daisyui.css` finds nothing), so
+    // the old form of this assertion was pinning a dead token in place: the
+    // ring silently resolved to its `currentColor` fallback on all eight
+    // controls that carry `.ld-focus-ring`. If this test ever fails, fix the
+    // CSS forward — do NOT reintroduce `--p` to make it pass.
     assert!(
-        css.contains("var(--p"),
-        "ld-focus-ring must reference daisyUI --p primary token: {css}"
+        css.contains("var(--color-primary"),
+        "ld-focus-ring must reference the daisyUI 5 --color-primary token: {css}"
+    );
+    assert!(
+        !css.contains("var(--p,") && !css.contains("var(--p)"),
+        "ld-focus-ring must not reference the dead daisyUI 4 --p token: {css}"
     );
 }
 

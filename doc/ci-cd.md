@@ -93,6 +93,7 @@ Each step is scoped per-crate; that scoping **is** the xtask's logic.
 | `test-xtask` | `cargo test -p xtask` | The xtask's own pure-function tests (SemVer bump, the sibling-token parser, the gate's own argument vectors). |
 | `test-audit` | `cargo test -p ldui-audit --lib` | The audit crate's browser-free tests: the generated sweep JS (rule ids, the per-family cap, the percentage-radius conversion) and the drift/engine report merge. |
 | `test-daisyui5` | `cargo test -p leptos-daisyui-rs --test no_dead_daisyui4_classes` | Source scan (no browser) guarding against `.form-control` / `.label-text` / `.label-text-alt` coming back — removed in daisyUI 5, so they are silently inert. |
+| `test-svg-paint` | `cargo test -p leptos-daisyui-rs --test svg_paint_routing` | Source scan (no browser) over **all of `src/`**: no `fill=`/`stroke=`/`stop-color=`/`flood-color=`/`lighting-color=` may carry a custom property, and any non-literal value must be a `charts::paint` binding. `var()` substitution is not specified to run in a presentation attribute, so a token there degrades to `fill: black` or `stroke: none` **silently, with no console error**. It has to be its own step because `test-lib` runs unit tests only — an integration test not named here never runs in the gate at all. Scoped to `src/charts` originally, which is exactly how it read green over four live defects in `src/components/gantt/` (ldui-1g5, widened in ldui-xxc). |
 
 ### `cargo xtask check-sibling-tokens` — a path dep hides an unmerged branch
 

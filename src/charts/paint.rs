@@ -46,8 +46,16 @@
 /// which prop it arrived through.
 ///
 /// The tradeoff is that an inline `style` outranks author stylesheet rules,
-/// where a presentation attribute loses to them. Chart shapes carry no per-shape
-/// class or id to select, so that override path does not exist in practice.
+/// where a presentation attribute loses to them. For chart shapes that is free:
+/// they carry no per-shape class or id, so the override path does not exist.
+/// Outside `charts` it is a real, if small, behaviour change — the Gantt
+/// elements routed in ldui-xxc do carry classes (`gantt-today-line`,
+/// `gantt-today-background`, `marker-line`, `marker-label`,
+/// `dependency-preview-line`), so their colour moves from losing to an author
+/// rule to beating it. No stylesheet in this repo or its demo targets those
+/// selectors, so nothing changes today; a consumer who wants to restyle them
+/// needs `!important` or a `style:` binding, which is the documented cost of
+/// routing a token off a presentation attribute at all.
 fn attrs_for(property: &str, color: String) -> (Option<String>, Option<String>) {
     if color.contains("var(") {
         (None, Some(format!("{property}: {color}")))
