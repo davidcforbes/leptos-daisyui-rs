@@ -590,6 +590,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     value: "filter",
                 },
                 ComponentItem {
+                    name: "Filter Sidebar (Collapsible Panel)",
+                    href: "/components/filter-sidebar",
+                    value: "filter-sidebar",
+                },
+                ComponentItem {
                     name: "Input",
                     href: "/components/input",
                     value: "input",

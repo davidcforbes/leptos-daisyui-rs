@@ -1,12 +1,16 @@
+use super::style::{SidebarSide, join_side_class};
 use crate::components::icon::{Icon, IconSize};
 use leptos::{html::Aside, prelude::*};
 
 /// # FilterSidebar
 ///
-/// A left-hand collapsible filter panel: header with a toggle, a filter-search
-/// field, stacked labelled field blocks, an optional saved-filter list, and — when
+/// A collapsible side panel: header with a toggle, a filter-search field,
+/// stacked labelled field blocks, an optional saved-filter list, and — when
 /// collapsed — a narrow rail carrying the ACTIVE FILTER COUNT and a vertical
 /// label.
+///
+/// Docks against either edge via [`side`](SidebarSide); left by default, which
+/// is what it always was.
 ///
 /// Every dimension here is measured from a running reference implementation
 /// (4Ease's `pilot-filter-sidebar`), not chosen: 220px expanded, 44px collapsed,
@@ -42,7 +46,22 @@ use leptos::{html::Aside, prelude::*};
 /// @source inline("w-[220px] min-w-[220px] w-[44px] min-w-[44px] h-[52px]");
 /// @source inline("transition-[width,min-width] duration-[250ms] ease-out");
 /// @source inline("opacity-0 opacity-100 pointer-events-none");
+/// @source inline("border-r border-l flex-row-reverse rotate-180");
+/// @source inline("[writing-mode:vertical-rl] [text-orientation:mixed]");
 /// ```
+///
+/// The last two lines are the [`SidebarSide::Right`] half of every mirrored
+/// pair. A project that scans this crate's sources already picks them up —
+/// each is a bare string literal in `style.rs` — so listing them is belt and
+/// braces, and the braces are there because the RIGHT halves are the ones that
+/// go missing and they go missing *silently*.
+///
+/// Measured while this was written: the demo's built CSS carried
+/// `.lg\:flex-row-reverse` and no bare `.flex-row-reverse` rule at all,
+/// because Tailwind generates the variant it saw and never the base. The day
+/// one of these stops being a bare literal — concatenated, hidden behind a
+/// `const`, prefixed at its only call site — the right-hand panel quietly
+/// loses its reversed header and renders merely odd rather than broken.
 #[component]
 pub fn FilterSidebar(
     /// Whether the panel is collapsed. CONTROLLED: the consumer owns this, so it
@@ -71,6 +90,12 @@ pub fn FilterSidebar(
     /// icon-only, so this is the only thing a screen reader announces.
     #[prop(into)]
     toggle_label: Signal<String>,
+    /// Which page edge the panel docks against. See [`SidebarSide`] for the
+    /// four things that mirror and the two that deliberately do not. Defaults
+    /// to [`SidebarSide::Left`], the only behaviour that existed before, so
+    /// every existing call site is unchanged.
+    #[prop(optional, into)]
+    side: Signal<SidebarSide>,
     /// Reference to the panel element
     /// ([HTMLElement](https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement)).
     #[prop(optional)]
@@ -104,9 +129,10 @@ pub fn FilterSidebar(
             // visibly reflows text on every frame.
             class=move || {
                 format!(
-                    "relative flex h-full flex-col overflow-hidden border-r \
+                    "relative flex h-full flex-col overflow-hidden {} \
                      border-black/[.08] bg-base-100 \
                      transition-[width,min-width] duration-[250ms] ease-out {}",
+                    side.get().as_border_class(),
                     width_class(),
                 )
             }
@@ -114,7 +140,18 @@ pub fn FilterSidebar(
             // ── header: 52px, and the toggle NEVER hides ────────────────────
             // The title fades out; the button stays, because it is the only way
             // back and a control that disappears when used is a trap.
-            <div class="flex h-[52px] shrink-0 items-center justify-between px-3 pb-2.5 pt-3.5">
+            //
+            // `flex-row-reverse` on a right-hand panel: the toggle belongs at
+            // the panel's INNER edge, beside the content it reveals, not
+            // pinned to the window frame. `justify-between` then pushes the
+            // title to the outer edge, which is the mirror of what a left
+            // panel does.
+            <div class=move || {
+                join_side_class(
+                    "flex h-[52px] shrink-0 items-center justify-between px-3 pb-2.5 pt-3.5",
+                    side.get().as_header_class(),
+                )
+            }>
                 <h3
                     class=move || {
                         format!(
@@ -135,11 +172,12 @@ pub fn FilterSidebar(
                            hover:bg-black/[.06] hover:text-base-content"
                     on:click=move |_| on_toggle.run(())
                 >
-                    // `angle-left`/`angle-right`: the sprite has no `chevron-*`.
+                    // The arrow points where the panel would GO, so it depends
+                    // on the side AND the collapsed state - see
+                    // `SidebarSide::chevron_name`.
                     <Icon
                         name=Signal::derive(move || {
-                            if collapsed.get() { "chevron-right".to_string() }
-                            else { "chevron-left".to_string() }
+                            side.get().chevron_name(collapsed.get()).to_string()
                         })
                         size=IconSize::XSmall
                     />
@@ -159,6 +197,12 @@ pub fn FilterSidebar(
                 {search
                     .map(|s| {
                         view! {
+                            // NOT mirrored, on purpose: the magnifier's
+                            // `left-2.5` and the input's `pl-[30px]` are
+                            // READING direction, not panel orientation. A
+                            // search box looks the same whichever edge of the
+                            // screen it sits near, and flipping it would put
+                            // the icon where the caret goes.
                             <div class="relative mb-3">
                                 <span class="pointer-events-none absolute left-2.5 top-1/2 \
                                              -translate-y-1/2 text-[13px] text-base-content/45">
@@ -210,12 +254,15 @@ pub fn FilterSidebar(
                         {move || active_count.get()}
                     </span>
                 </Show>
-                <span
-                    class="text-[13px] font-semibold tracking-[.04em] text-base-content/75 \
-                           [writing-mode:vertical-rl] [text-orientation:mixed] rotate-180"
-                >
-                    {move || title.get()}
-                </span>
+                // Bottom-to-top on a left edge, top-to-bottom on a right one:
+                // the convention every IDE tool-window already follows. See
+                // `SidebarSide::as_rail_title_class`.
+                <span class=move || {
+                    format!(
+                        "text-[13px] font-semibold tracking-[.04em] text-base-content/75 {}",
+                        side.get().as_rail_title_class(),
+                    )
+                }>{move || title.get()}</span>
             </div>
         </aside>
     }

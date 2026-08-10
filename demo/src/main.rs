@@ -123,6 +123,7 @@ fn AppInner() -> impl IntoView {
                     <Route path=path!("/fieldset") view=FieldsetDemo />
                     <Route path=path!("/file_input") view=FileInputDemo />
                     <Route path=path!("/filter") view=FilterDemo />
+                    <Route path=path!("/filter-sidebar") view=FilterSidebarDemo />
                     <Route path=path!("/footer") view=FooterDemo />
                     <Route path=path!("/hero") view=HeroDemo />
                     <Route path=path!("/hover_3d") view=Hover3dDemo />
