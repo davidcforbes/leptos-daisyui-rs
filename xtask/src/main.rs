@@ -144,6 +144,26 @@ fn gate_steps() -> Vec<Step> {
             ],
             None,
         ),
+        // The gate must lint the crate that IS the gate. Omitting this let a
+        // `needless_borrows_for_generic_args` sit in `xtask` from 2026-07-26
+        // until 2026-08-10 while `verify` reported a clean 13/13 (ldui-mpm).
+        // `test-xtask` was already running its tests, so only the lint was
+        // missing. Per-crate, never `--workspace`: that fails on leptos `csr`
+        // feature unification.
+        cmd(
+            "clippy-xtask",
+            "cargo",
+            &[
+                "clippy",
+                "-p",
+                "xtask",
+                "--all-targets",
+                "--",
+                "-D",
+                "warnings",
+            ],
+            None,
+        ),
         cmd(
             "build",
             "cargo",
@@ -1296,9 +1316,13 @@ mod tests {
     }
 
     #[test]
-    fn clippy_subcommand_runs_both_crate_steps() {
+    fn clippy_subcommand_runs_every_crate_step() {
         let names: Vec<&str> = steps_for("clippy").iter().map(|s| s.name).collect();
-        assert_eq!(names, vec!["clippy-lib", "clippy-demo", "clippy-audit"]);
+        assert_eq!(
+            names,
+            vec!["clippy-lib", "clippy-demo", "clippy-audit", "clippy-xtask"],
+            "every workspace crate must be lint-gated, including xtask itself"
+        );
     }
 
     #[test]
@@ -1714,7 +1738,7 @@ mod gen_tokens_tests {
             ("xl", "1.25rem", "calc(28 / 20)"),
         ] {
             assert!(
-                css.contains(&format!("  --text-{key}: {size}\n").trim_end())
+                css.contains(format!("  --text-{key}: {size}\n").trim_end())
                     || css.contains(&format!("  --text-{key}: {size};")),
                 "text-{key} is not {size}"
             );
