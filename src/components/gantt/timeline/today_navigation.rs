@@ -2,9 +2,29 @@
 ///
 /// Provides navigation to current date with visual highlighting and
 /// keyboard shortcuts for quick temporal orientation.
+use crate::charts::paint::{paint_attrs_with, stroke_attrs_with};
 use crate::components::icon::IconSize;
 use chrono::{DateTime, Datelike, Utc};
 use leptos::prelude::*;
+
+/// The today line's non-colour declarations; they share the element's single
+/// `style` attribute with the routed colour (`charts::paint::merge_style`).
+const TODAY_LINE_STYLE: &str = "opacity: 0.6";
+
+/// The today column's non-colour declarations. See [`TODAY_LINE_STYLE`].
+const TODAY_COLUMN_STYLE: &str = "opacity: 0.3; pointer-events: none";
+
+/// Half-strength primary for the today line. The alpha rides in a `color-mix`
+/// because daisyUI 5's `--color-*` tokens are whole colours, not the bare
+/// components daisyUI 4's `--p` was.
+fn today_line_color() -> String {
+    "color-mix(in oklab, var(--color-primary) 50%, transparent)".to_string()
+}
+
+/// A wash of primary behind today's column. See [`today_line_color`].
+fn today_column_color() -> String {
+    "color-mix(in oklab, var(--color-primary) 10%, transparent)".to_string()
+}
 
 /// Configuration for today navigation behavior
 #[derive(Clone, Debug, PartialEq)]
@@ -185,6 +205,15 @@ pub fn TodayMarker(
     #[prop(optional, into, default=Signal::derive(|| TodayNavigationConfig::default()))]
     config: Signal<TodayNavigationConfig>,
 ) -> impl IntoView {
+    // Same defect as the dependency preview (ldui-xxc): these carried
+    // `oklch(var(--p)/…)`, whose daisyUI 4 name has no daisyUI 5 counterpart,
+    // so the line drew as `stroke: none` and the column as `fill: black`. The
+    // alpha the old value folded in becomes a `color-mix` against transparent.
+    let today_line_stroke = move || stroke_attrs_with(TODAY_LINE_STYLE, today_line_color()).0;
+    let today_line_style = move || stroke_attrs_with(TODAY_LINE_STYLE, today_line_color()).1;
+    let today_column_fill = move || paint_attrs_with(TODAY_COLUMN_STYLE, today_column_color()).0;
+    let today_column_style = move || paint_attrs_with(TODAY_COLUMN_STYLE, today_column_color()).1;
+
     view! {
         <Show when=move || config.get().highlight_today_column>
             <g class="gantt-today-marker">
@@ -196,10 +225,10 @@ pub fn TodayMarker(
                     y2=move || timeline_height.get()
                     class="gantt-today-line"
                     class:gantt-today-pulse=move || is_pulsing.get()
-                    stroke="var(--fallback-p,oklch(var(--p)/0.5))"
+                    stroke=today_line_stroke
                     stroke-width="2"
                     stroke-dasharray="5,5"
-                    style="opacity: 0.6;"
+                    style=today_line_style
                 />
 
                 // Optional: Background highlight column
@@ -210,8 +239,8 @@ pub fn TodayMarker(
                     height=move || timeline_height.get()
                     class="gantt-today-background"
                     class:gantt-today-pulse=move || is_pulsing.get()
-                    fill="var(--fallback-p,oklch(var(--p)/0.1))"
-                    style="opacity: 0.3; pointer-events: none;"
+                    fill=today_column_fill
+                    style=today_column_style
                 />
             </g>
         </Show>

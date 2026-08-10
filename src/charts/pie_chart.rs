@@ -1,4 +1,13 @@
+use super::paint::{merge_style, paint_attrs, stroke_attrs};
 use leptos::prelude::*;
+
+/// The hairline between adjacent slices. It exists to separate the arcs, not to
+/// outline them, so it has to be the colour of whatever surface the chart sits
+/// on. The literal `white` it used to be was invisible only under the light
+/// themes: under `dark`, `dracula` or `forest` it read as a bright seam across
+/// the card (ldui-cy5). Being token-bearing, it now routes like every other
+/// non-literal colour — see `super::paint`.
+const SLICE_SEPARATOR: &str = "var(--color-base-100)";
 
 /// A single slice in a pie chart.
 #[derive(Clone, Debug, PartialEq)]
@@ -117,8 +126,13 @@ pub fn PieChart(
     let arc_views = arcs
         .into_iter()
         .map(|arc| {
+            // Neither colour may ride on its presentation attribute — see
+            // `super::paint`. Both declarations share the one `style`.
+            let (c, fill_decl) = paint_attrs(arc.color);
+            let (sep, sep_decl) = stroke_attrs(SLICE_SEPARATOR.to_string());
+            let st = merge_style([fill_decl, sep_decl]);
             view! {
-                <path d=arc.path fill=arc.color stroke="white" stroke-width="1" />
+                <path d=arc.path fill=c style=st stroke=sep stroke-width="1" />
             }
         })
         .collect_view();
@@ -131,13 +145,13 @@ pub fn PieChart(
                 let ly = legend_start_y + i as f64 * 20.0;
                 let lx = format!("{legend_x:.2}");
                 let ly_str = format!("{ly:.2}");
-                let col = s.color.clone();
+                let (col, col_style) = paint_attrs(s.color.clone());
                 let pct = (s.value / total * 100.0).round();
                 let text = format!("{} ({}%)", s.label, pct);
                 let text_x = format!("{:.2}", legend_x + 14.0);
                 let text_y = ly_str.clone();
                 view! {
-                    <rect x=lx y=ly_str width="10" height="10" fill=col rx="2" />
+                    <rect x=lx y=ly_str width="10" height="10" fill=col style=col_style rx="2" />
                     <text x=text_x y=text_y dominant-baseline="hanging"
                         fill="currentColor" font-size="11">
                         {text}
@@ -157,4 +171,52 @@ pub fn PieChart(
         </svg>
     }
     .into_any()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_slice_separator_tracks_the_surface_rather_than_being_white() {
+        // `white` was only invisible under the light themes; under `dark` it
+        // was a bright seam across the card (ldui-cy5).
+        assert!(SLICE_SEPARATOR.contains("--color-base-100"));
+        assert!(!SLICE_SEPARATOR.contains("white"));
+    }
+
+    #[test]
+    fn the_slice_separator_is_routed_off_the_stroke_attribute() {
+        // Being token-bearing, it must not ride on the presentation attribute
+        // — a `stroke` that stopped parsing falls back to the initial `none`.
+        let (stroke, decl) = stroke_attrs(SLICE_SEPARATOR.to_string());
+        assert_eq!(stroke, None);
+        assert_eq!(decl.as_deref(), Some("stroke: var(--color-base-100)"));
+    }
+
+    #[test]
+    fn a_slice_carries_its_fill_and_its_separator_in_one_style() {
+        // The composition `merge_style` exists for: two routed colours on one
+        // element, neither clobbering the other.
+        let (fill, fill_decl) = paint_attrs("var(--color-primary)".to_string());
+        let (stroke, sep_decl) = stroke_attrs(SLICE_SEPARATOR.to_string());
+        assert_eq!(fill, None);
+        assert_eq!(stroke, None);
+        assert_eq!(
+            merge_style([fill_decl, sep_decl]).as_deref(),
+            Some("fill: var(--color-primary); stroke: var(--color-base-100)")
+        );
+    }
+
+    #[test]
+    fn a_literal_slice_colour_still_keeps_its_fill_attribute() {
+        // The separator being routed must not drag literal fills off theirs.
+        let (fill, fill_decl) = paint_attrs("#e05654".to_string());
+        let (_, sep_decl) = stroke_attrs(SLICE_SEPARATOR.to_string());
+        assert_eq!(fill.as_deref(), Some("#e05654"));
+        assert_eq!(
+            merge_style([fill_decl, sep_decl]).as_deref(),
+            Some("stroke: var(--color-base-100)")
+        );
+    }
 }

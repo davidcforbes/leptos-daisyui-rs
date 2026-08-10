@@ -2,7 +2,13 @@
 ///
 /// Shows a temporary line from source task to cursor position while dragging
 /// to create a new dependency.
+use crate::charts::paint::stroke_attrs_with;
 use leptos::prelude::*;
+
+/// The preview line's non-colour declarations. They share the element's single
+/// `style` attribute with a routed colour — see `charts::paint::merge_style`.
+/// Dropping `pointer-events: none` would let the preview swallow the drop.
+const PREVIEW_STYLE: &str = "opacity: 0.7; pointer-events: none";
 
 /// Component that renders the preview line during dependency creation
 #[component]
@@ -45,13 +51,19 @@ pub fn DependencyPreview(
         format!("M {} {} L {} {}", sx, sy, cx, cy)
     });
 
+    // daisyUI 5 renamed the semantic colours: `--su`/`--wa` (and their
+    // `--fallback-*` companions) no longer exist, so the whole `oklch()` that
+    // used to be emitted here failed to parse and `stroke` fell back to its
+    // initial `none` — the preview line was invisible (ldui-xxc).
     let stroke_color = Signal::derive(move || {
         if has_valid_target.get() {
-            "var(--fallback-su,oklch(var(--su)/1))" // Success color when over valid target
+            "var(--color-success)".to_string() // Over a valid drop target
         } else {
-            "var(--fallback-wa,oklch(var(--wa)/1))" // Warning color otherwise
+            "var(--color-warning)".to_string() // Otherwise
         }
     });
+    let preview_stroke = move || stroke_attrs_with(PREVIEW_STYLE, stroke_color.get()).0;
+    let preview_style = move || stroke_attrs_with(PREVIEW_STYLE, stroke_color.get()).1;
 
     view! {
         <Show when=move || is_active.get()>
@@ -59,12 +71,12 @@ pub fn DependencyPreview(
                 <path
                     d=move || path_d.get()
                     class="dependency-preview-line"
-                    stroke=move || stroke_color.get()
+                    stroke=preview_stroke
                     stroke-width="2"
                     stroke-dasharray="5,5"
                     fill="none"
                     marker-end="url(#preview-arrowhead)"
-                    style="opacity: 0.7; pointer-events: none;"
+                    style=preview_style
                 />
             </g>
         </Show>

@@ -1,3 +1,4 @@
+use super::paint::stroke_attrs;
 use leptos::prelude::*;
 
 /// Sparkline component -- an inline mini chart with no axes or labels.
@@ -56,13 +57,19 @@ pub fn Sparkline(
         .collect::<Vec<_>>()
         .join(" ");
 
+    // Stroke is this chart's only mark, so a `var()` that stopped parsing in
+    // the presentation attribute would erase the whole sparkline — see
+    // `super::paint` (ldui-1g5).
+    let (stroke, style) = stroke_attrs(color);
+
     view! {
         <svg viewBox=viewbox class="inline-block align-middle"
             xmlns="http://www.w3.org/2000/svg">
             <polyline
                 points=points
                 fill="none"
-                stroke=color
+                stroke=stroke
+                style=style
                 stroke-width="1.5"
                 stroke-linejoin="round"
                 stroke-linecap="round"

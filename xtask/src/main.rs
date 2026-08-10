@@ -89,11 +89,17 @@ fn gate_steps() -> Vec<Step> {
                 "leptos-daisyui-showcase",
                 "-p",
                 "xtask",
+                "-p",
+                "ldui-audit",
                 "--",
                 "--check",
             ],
             None,
         ),
+        // `--features test-mode`: `src/test_mode.rs` is behind that feature,
+        // so a default-feature clippy never lints it and a default-feature
+        // `cargo test` never runs its unit tests — the module the browser
+        // suites depend on was invisible to the gate.
         cmd(
             "clippy-lib",
             "cargo",
@@ -102,6 +108,8 @@ fn gate_steps() -> Vec<Step> {
                 "-p",
                 "leptos-daisyui-rs",
                 "--all-targets",
+                "--features",
+                "test-mode",
                 "--",
                 "-D",
                 "warnings",
@@ -123,6 +131,40 @@ fn gate_steps() -> Vec<Step> {
             None,
         ),
         cmd(
+            "clippy-audit",
+            "cargo",
+            &[
+                "clippy",
+                "-p",
+                "ldui-audit",
+                "--all-targets",
+                "--",
+                "-D",
+                "warnings",
+            ],
+            None,
+        ),
+        // The gate must lint the crate that IS the gate. Omitting this let a
+        // `needless_borrows_for_generic_args` sit in `xtask` from 2026-07-26
+        // until 2026-08-10 while `verify` reported a clean 13/13 (ldui-mpm).
+        // `test-xtask` was already running its tests, so only the lint was
+        // missing. Per-crate, never `--workspace`: that fails on leptos `csr`
+        // feature unification.
+        cmd(
+            "clippy-xtask",
+            "cargo",
+            &[
+                "clippy",
+                "-p",
+                "xtask",
+                "--all-targets",
+                "--",
+                "-D",
+                "warnings",
+            ],
+            None,
+        ),
+        cmd(
             "build",
             "cargo",
             &["build", "-p", "leptos-daisyui-rs"],
@@ -134,13 +176,28 @@ fn gate_steps() -> Vec<Step> {
             &["check", "-p", "leptos-daisyui-showcase"],
             None,
         ),
+        // `--features test-mode`, same reason as `clippy-lib` above: without
+        // it the 7 `test_mode` unit tests silently do not run.
         cmd(
             "test-lib",
             "cargo",
-            &["test", "-p", "leptos-daisyui-rs", "--lib"],
+            &[
+                "test",
+                "-p",
+                "leptos-daisyui-rs",
+                "--lib",
+                "--features",
+                "test-mode",
+            ],
             None,
         ),
         cmd("test-xtask", "cargo", &["test", "-p", "xtask"], None),
+        cmd(
+            "test-audit",
+            "cargo",
+            &["test", "-p", "ldui-audit", "--lib"],
+            None,
+        ),
         // Guards against the daisyUI 4 form classes coming back. They are
         // no-ops in daisyUI 5 and were silently inert in 206 places
         // (ldui-mai.3) — a pure source scan, so it needs no browser.
@@ -153,6 +210,25 @@ fn gate_steps() -> Vec<Step> {
                 "leptos-daisyui-rs",
                 "--test",
                 "no_dead_daisyui4_classes",
+            ],
+            None,
+        ),
+        // Guards every SVG colour in `src/` against riding on a
+        // `fill=`/`stroke=` presentation attribute, where `var()` substitution
+        // is unspecified (ldui-1g5, widened past `src/charts` in ldui-xxc after
+        // a dead daisyUI-4 token shipped in the Gantt timeline while this step
+        // read green). Also a pure source scan, so also browser-free — and it
+        // has to be its own step: `test-lib` runs the library's unit tests
+        // only, so an integration test not named here never runs in the gate.
+        cmd(
+            "test-svg-paint",
+            "cargo",
+            &[
+                "test",
+                "-p",
+                "leptos-daisyui-rs",
+                "--test",
+                "svg_paint_routing",
             ],
             None,
         ),
@@ -196,6 +272,18 @@ fn layout_step() -> Step {
     }
 }
 
+/// The style-audit step (Task 7 of the visual-quality-checks plan): the
+/// engine's typography/shape/depth sweep plus daisyUI component-drift,
+/// ratcheted per page. Same tooling requirements as the other browser
+/// suites, so it lives alongside them in `verify-full` rather than in the
+/// fast `verify` gate.
+fn style_step() -> Step {
+    Step {
+        name: "test-style",
+        run: Run::BrowserSuite("style_audit_smoke"),
+    }
+}
+
 fn run_step(step: &Step) -> bool {
     eprintln!("\n----- {} -----", step.name);
     match &step.run {
@@ -226,6 +314,37 @@ fn run_step(step: &Step) -> bool {
 /// by cargo, and needs no such treatment.)
 fn npm_bin() -> &'static str {
     if cfg!(windows) { "npm.cmd" } else { "npm" }
+}
+
+/// Build the demo's stylesheet **before** trunk gets a chance to, so a broken
+/// `demo/input.css` fails the gate step in seconds with a message naming the
+/// stylesheet build.
+///
+/// Trunk runs the same script from its own `pre_build` hook, but it
+/// **swallows the hook's non-zero exit** and carries on serving the previous
+/// `output.css` (ldui-hun). Running it here is the fast, loud half of the
+/// guard; the durable half is the run-unique marker `build-css.mjs` stamps
+/// into the stylesheet, which the browser harness verifies against the CSS the
+/// page actually loaded. See `demo/build-css.mjs`.
+fn build_demo_stylesheet() -> Result<(), String> {
+    eprintln!("xtask: building demo stylesheet (node build-css.mjs)");
+    let ok = Command::new("node")
+        .arg("build-css.mjs")
+        .current_dir("demo")
+        .status()
+        .map_err(|e| format!("failed to launch node for the stylesheet build: {e}"))?
+        .success();
+    if ok {
+        Ok(())
+    } else {
+        Err(
+            "the demo STYLESHEET BUILD failed (node demo/build-css.mjs) — \
+             demo/output.css is stale, so the browser suites would be auditing \
+             the last stylesheet that built rather than the current one. Fix \
+             demo/input.css."
+                .into(),
+        )
+    }
 }
 
 /// Ask the OS for an unused loopback port, then release it. Each `xtask`
@@ -271,8 +390,9 @@ struct DemoServer {
 
 impl DemoServer {
     /// Idempotent `npm install` (Trunk's tailwind pre-build hook needs
-    /// `demo/node_modules`, and a fresh worktree has none), then `trunk serve`
-    /// on a free port, then poll until it answers 200.
+    /// `demo/node_modules`, and a fresh worktree has none), then the demo
+    /// stylesheet build (see [`build_demo_stylesheet`]), then `trunk serve` on
+    /// a free port, then poll until it answers 200.
     fn start() -> Result<Self, String> {
         if !std::path::Path::new("demo/node_modules").exists() {
             eprintln!("xtask: npm install in demo/ (tailwind pre-build hook)");
@@ -286,6 +406,8 @@ impl DemoServer {
                 return Err("npm install failed".into());
             }
         }
+
+        build_demo_stylesheet()?;
 
         let port = free_port()?;
         eprintln!("xtask: starting `trunk serve` in demo/ on port {port}");
@@ -1139,6 +1261,7 @@ fn main() -> ExitCode {
             let mut steps = gate_steps();
             steps.push(reactivity_step());
             steps.push(layout_step());
+            steps.push(style_step());
             steps.push(cmd(
                 "trunk-build",
                 "trunk",
@@ -1149,6 +1272,7 @@ fn main() -> ExitCode {
         }
         "test-reactivity" => run_steps(&[reactivity_step()]),
         "test-layout" => run_steps(&[layout_step()]),
+        "test-style" => run_steps(&[style_step()]),
         "gen-tokens" => {
             let check = std::env::args().any(|a| a == "--check");
             gen_tokens(check)
@@ -1162,7 +1286,7 @@ fn main() -> ExitCode {
         other => {
             eprintln!("xtask: unknown subcommand {other:?}");
             eprintln!(
-                "usage: cargo xtask <verify|verify-full|fmt-check|clippy|build|check-demo|test|test-reactivity|test-layout|gen-tokens|check-sibling-tokens|bump>"
+                "usage: cargo xtask <verify|verify-full|fmt-check|clippy|build|check-demo|test|test-reactivity|test-layout|test-style|gen-tokens|check-sibling-tokens|bump>"
             );
             ExitCode::from(2)
         }
@@ -1192,15 +1316,55 @@ mod tests {
     }
 
     #[test]
-    fn clippy_subcommand_runs_both_crate_steps() {
+    fn clippy_subcommand_runs_every_crate_step() {
         let names: Vec<&str> = steps_for("clippy").iter().map(|s| s.name).collect();
-        assert_eq!(names, vec!["clippy-lib", "clippy-demo"]);
+        assert_eq!(
+            names,
+            vec!["clippy-lib", "clippy-demo", "clippy-audit", "clippy-xtask"],
+            "every workspace crate must be lint-gated, including xtask itself"
+        );
     }
 
     #[test]
     fn test_subcommand_runs_lib_and_xtask() {
         let names: Vec<&str> = steps_for("test").iter().map(|s| s.name).collect();
-        assert_eq!(names, vec!["test-lib", "test-xtask", "test-daisyui5"]);
+        assert_eq!(
+            names,
+            vec![
+                "test-lib",
+                "test-xtask",
+                "test-audit",
+                "test-daisyui5",
+                "test-svg-paint"
+            ]
+        );
+    }
+
+    /// Argument-level guard: `src/test_mode.rs` is behind the `test-mode`
+    /// feature, so the two library steps must opt into it. Without the flag
+    /// the module's unit tests do not run and clippy never lints it, while
+    /// the gate still reports green.
+    #[test]
+    fn library_steps_enable_the_test_mode_feature() {
+        for name in ["clippy-lib", "test-lib"] {
+            let steps = gate_steps();
+            let step = steps
+                .iter()
+                .find(|s| s.name == name)
+                .unwrap_or_else(|| panic!("{name} is not a gate step"));
+            let Run::Cmd { args, .. } = &step.run else {
+                panic!("{name} must be a subprocess step");
+            };
+            let i = args
+                .iter()
+                .position(|a| a == "--features")
+                .unwrap_or_else(|| panic!("{name} does not pass --features: {args:?}"));
+            assert_eq!(
+                args.get(i + 1).map(String::as_str),
+                Some("test-mode"),
+                "{name} must enable the test-mode feature: {args:?}"
+            );
+        }
     }
 
     // ---- sibling-token guard (ldui-ae5) --------------------------------
@@ -1363,6 +1527,14 @@ pub fn r() -> f32 { radius::CARD }
         assert!(gate_steps().iter().any(|s| s.name == "sibling-tokens"));
     }
 
+    /// The SVG paint guard is a source scan, so it belongs in the fast gate
+    /// next to the daisyUI-4 class scan — and it must be its OWN step, because
+    /// `test-lib` never runs an integration test (ldui-1g5).
+    #[test]
+    fn svg_paint_guard_is_a_default_gate_step() {
+        assert!(gate_steps().iter().any(|s| s.name == "test-svg-paint"));
+    }
+
     /// The reactivity suite must never leak into the fast, zero-tooling gate.
     #[test]
     fn reactivity_is_not_a_default_gate_step() {
@@ -1389,21 +1561,39 @@ pub fn r() -> f32 { radius::CARD }
     }
 
     #[test]
+    fn style_step_is_in_process() {
+        let s = style_step();
+        assert_eq!(s.name, "test-style");
+        assert!(matches!(s.run, Run::BrowserSuite("style_audit_smoke")));
+    }
+
+    #[test]
     fn browser_suites_are_not_in_the_fast_gate() {
-        // Both need npm/trunk/Chrome and a wasm build; `verify` is
+        // All three need npm/trunk/Chrome and a wasm build; `verify` is
         // deliberately fast and zero-tooling.
         let names: Vec<&str> = gate_steps().iter().map(|s| s.name).collect();
         assert!(!names.contains(&"test-reactivity"));
         assert!(!names.contains(&"test-layout"));
+        assert!(!names.contains(&"test-style"));
     }
 
     #[test]
     fn test_subcommand_does_not_pick_up_the_browser_suites() {
         // `steps_for("test")` filters on the `test` prefix, which
-        // `test-reactivity` and `test-layout` also match by name — but they
-        // are not gate steps, so the filter must not surface them.
+        // `test-reactivity`, `test-layout` and `test-style` also match by
+        // name — but they are not gate steps, so the filter must not surface
+        // them.
         let names: Vec<&str> = steps_for("test").iter().map(|s| s.name).collect();
-        assert_eq!(names, vec!["test-lib", "test-xtask", "test-daisyui5"]);
+        assert_eq!(
+            names,
+            vec![
+                "test-lib",
+                "test-xtask",
+                "test-audit",
+                "test-daisyui5",
+                "test-svg-paint"
+            ]
+        );
     }
 
     /// A port the OS hands out must actually be bindable.
@@ -1548,7 +1738,7 @@ mod gen_tokens_tests {
             ("xl", "1.25rem", "calc(28 / 20)"),
         ] {
             assert!(
-                css.contains(&format!("  --text-{key}: {size}\n").trim_end())
+                css.contains(format!("  --text-{key}: {size}\n").trim_end())
                     || css.contains(&format!("  --text-{key}: {size};")),
                 "text-{key} is not {size}"
             );

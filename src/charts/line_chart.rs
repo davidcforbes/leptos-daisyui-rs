@@ -1,3 +1,4 @@
+use super::paint::{paint_attrs, stroke_attrs};
 use leptos::prelude::*;
 
 /// Number of x-axis ticks to render: capped at 5, but never more than the
@@ -33,7 +34,13 @@ fn tick_label_index(frac: f64, labels_len: usize) -> usize {
 /// other side (`"end"`), so a wide label (e.g. a full `"YYYY-MM-DD"` date)
 /// never overflows the SVG viewBox's left/right edge and gets clipped in a
 /// screenshot; interior ticks stay centered (`"middle"`).
-fn tick_anchor(i: usize, tick_count: usize) -> &'static str {
+///
+/// Shared with [`super::area_chart`] rather than copied: a centered first tick
+/// also overlaps the y-axis scale label sitting at the plot's bottom-left
+/// corner, which is how `AreaChart` failed the layout audit's hard overlap
+/// check (ldui-40g). `StackedAreaChart` reaches the same rule from its own
+/// category-label geometry (`x_label_anchor`).
+pub(super) fn tick_anchor(i: usize, tick_count: usize) -> &'static str {
     if tick_count > 1 && i == 0 {
         "start"
     } else if tick_count > 1 && i == tick_count - 1 {
@@ -171,15 +178,17 @@ pub fn LineChart(
         data.iter()
             .map(|&(x, y)| {
                 let (sx, sy) = to_svg(x, y);
-                let c = color.clone();
+                // A theme token must not ride on the `fill` presentation
+                // attribute — see `super::paint::paint_attrs`.
+                let (c, st) = paint_attrs(color.clone());
                 if minimal {
                     let rx = format!("{:.2}", sx - 2.0);
                     let ry = format!("{:.2}", sy - 2.0);
-                    view! { <rect x=rx y=ry width="4" height="4" fill=c /> }.into_any()
+                    view! { <rect x=rx y=ry width="4" height="4" fill=c style=st /> }.into_any()
                 } else {
                     let cx_str = format!("{sx:.2}");
                     let cy_str = format!("{sy:.2}");
-                    view! { <circle cx=cx_str cy=cy_str r="3" fill=c /> }.into_any()
+                    view! { <circle cx=cx_str cy=cy_str r="3" fill=c style=st /> }.into_any()
                 }
             })
             .collect_view()
@@ -202,9 +211,10 @@ pub fn LineChart(
         let mut views = Vec::new();
         if let Some(&(x, y)) = data.first() {
             let (sx, sy) = to_svg(x, y);
+            let (c, st) = paint_attrs(color.clone());
             views.push(view! {
                 <text x=format!("{:.2}", sx) y=format!("{:.2}", sy - 8.0)
-                    text-anchor="start" fill=color.clone() font-size="12" font-weight="600">
+                    text-anchor="start" fill=c style=st font-size="12" font-weight="600">
                     {fmt(y)}
                 </text>
             });
@@ -213,9 +223,10 @@ pub fn LineChart(
             && let Some(&(x, y)) = data.last()
         {
             let (sx, sy) = to_svg(x, y);
+            let (c, st) = paint_attrs(color.clone());
             views.push(view! {
                 <text x=format!("{:.2}", sx) y=format!("{:.2}", sy - 8.0)
-                    text-anchor="end" fill=color.clone() font-size="12" font-weight="600">
+                    text-anchor="end" fill=c style=st font-size="12" font-weight="600">
                     {fmt(y)}
                 </text>
             });
@@ -278,6 +289,11 @@ pub fn LineChart(
             }
         })
         .collect_view();
+
+    // The line itself is drawn with `stroke` alone, so it needs the same
+    // treatment `fill` gets — a `var()` that stopped parsing there would fall
+    // back to `stroke: none` and the polyline would vanish (ldui-1g5).
+    let (line_stroke, line_style) = stroke_attrs(color);
 
     let viewbox = format!("0 0 {width} {height}");
     let axis_y_end = format!("{:.2}", pad_top + chart_h);
@@ -348,7 +364,8 @@ pub fn LineChart(
             <polyline
                 points=points
                 fill="none"
-                stroke=color
+                stroke=line_stroke
+                style=line_style
                 stroke-width="2"
                 stroke-linejoin="round"
                 stroke-linecap="round"

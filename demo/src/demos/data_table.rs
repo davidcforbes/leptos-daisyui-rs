@@ -1,7 +1,8 @@
 use crate::core::{ContentLayout, Section};
 use leptos::prelude::*;
 use leptos_daisyui_rs::components::*;
-use std::collections::{BTreeSet, HashMap};
+use leptos_daisyui_rs::widgets::{DataTable as WidgetDataTable, TableColumn as WidgetTableColumn};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 #[component]
 pub fn DataTableDemo() -> impl IntoView {
@@ -352,6 +353,141 @@ pub fn DataTableDemo() -> impl IntoView {
             .into_any()
         },
     );
+
+    // ── widgets::DataTable — per-row action column (ldui-3qc) ──
+    //
+    // The consumer shape this was built for: an "Open Work" queue where every
+    // row carries several controls, a few of them disabled with a tooltip that
+    // explains why. The action column is a trailing cell that takes no data
+    // index, so `badge_column_keys` and the sort state keep addressing the same
+    // columns whether or not it (or the leading `bulk_select` checkbox) is on.
+    let widget_columns = vec![
+        WidgetTableColumn {
+            key: "ref".into(),
+            label: "Ref".into(),
+            sortable: true,
+            width: Some("110px".into()),
+        },
+        WidgetTableColumn {
+            key: "work_type".into(),
+            label: "Work Type".into(),
+            sortable: true,
+            width: None,
+        },
+        WidgetTableColumn {
+            key: "status".into(),
+            label: "Status".into(),
+            sortable: true,
+            width: Some("150px".into()),
+        },
+        WidgetTableColumn {
+            key: "owner".into(),
+            label: "Owner".into(),
+            sortable: true,
+            width: Some("160px".into()),
+        },
+    ];
+    // Twelve rows against page_size=5 so the table actually pages (three pages)
+    // — the readout below it then demonstrates that the index the callback
+    // receives survives paging, not just sorting.
+    let widget_rows: Vec<Vec<String>> = [
+        ["WK-1041", "Intake Call", "Active", "M. Gonzalez"],
+        ["WK-1042", "Court Filing", "Blocked", "J. Smith"],
+        ["WK-1043", "Records Request", "Active", "A. Tanaka"],
+        ["WK-1044", "Court Filing", "Under Review", "O. Haddad"],
+        ["WK-1045", "Intake Call", "Active", "P. Patel"],
+        ["WK-1046", "Records Request", "Blocked", "L. Nielsen"],
+        ["WK-1047", "Intake Call", "Under Review", "C. Wei"],
+        ["WK-1048", "Court Filing", "Active", "F. Zahra"],
+        ["WK-1049", "Records Request", "Active", "D. Rivera"],
+        ["WK-1050", "Court Filing", "Blocked", "A. Kowalska"],
+        ["WK-1051", "Intake Call", "Active", "M. Gonzalez"],
+        ["WK-1052", "Records Request", "Under Review", "J. Smith"],
+    ]
+    .into_iter()
+    .map(|r| r.into_iter().map(String::from).collect())
+    .collect();
+
+    let widget_last_action = RwSignal::new(String::from("\u{2014}"));
+    let widget_bulk = RwSignal::new(HashSet::<String>::new());
+
+    // A bare closure: `row_actions` takes `impl Into<Callback<_, _>>`, so no
+    // `Callback::new(...)` wrapper is needed.
+    let widget_row_actions = move |(row_index, row): (usize, Vec<String>)| {
+        // Identity comes from the row id (cell 0), not from `row_index` —
+        // `row_index` is a position into the `rows` snapshot this component was
+        // handed, which is not necessarily a position into the caller's store.
+        let work_ref = row.first().cloned().unwrap_or_default();
+        let work_type = row.get(1).cloned().unwrap_or_default();
+        let status = row.get(2).cloned().unwrap_or_default();
+
+        // Records the click so the demo shows that both the id and the index
+        // stay bound to the right row after sorting and after paging.
+        let record = move |verb: &'static str, subject: String| {
+            move |_| {
+                widget_last_action.set(format!("{verb} {subject} (row_index {row_index})"));
+            }
+        };
+
+        // One control: a live button, or an unavailable one wrapped in a
+        // tooltip that says why.
+        let control = move |label: &'static str,
+                            extra: &'static str,
+                            verb: &'static str,
+                            blocked: Option<&'static str>,
+                            subject: String|
+              -> AnyView {
+            match blocked {
+                None => view! {
+                    <Button size=ButtonSize::Xs class=extra on:click=record(verb, subject)>
+                        {label}
+                    </Button>
+                }
+                .into_any(),
+                // `aria-disabled` on a still-focusable button rather than the
+                // native `disabled` attribute: a natively-disabled button is
+                // removed from the tab order, so a keyboard user could never
+                // reach the tooltip explaining why the control is unavailable.
+                // daisyUI shows the tooltip on `:has(:focus-visible)`, so this
+                // shape surfaces it by keyboard as well as by hover. The click
+                // handler short-circuits, since aria-disabled is advisory only.
+                Some(why) => view! {
+                    <Tooltip
+                        tip=Signal::derive(move || why.to_string())
+                        position=TooltipPosition::Left
+                    >
+                        <button
+                            type="button"
+                            class=format!("btn btn-xs btn-disabled {extra}")
+                            aria-disabled="true"
+                            on:click=move |ev: leptos::ev::MouseEvent| ev.prevent_default()
+                        >
+                            {label}
+                        </button>
+                    </Tooltip>
+                }
+                .into_any(),
+            }
+        };
+
+        // Court filings have no telephony route, and blocked work cannot be
+        // completed — so the control set differs row by row.
+        let no_route = (work_type == "Court Filing")
+            .then_some("No call/SMS route resolves for every work type this row can carry.");
+        let blocked = (status == "Blocked")
+            .then_some("Blocked by an unresolved dependency; clear it before completing.");
+
+        view! {
+            {control("Open", "btn-ghost", "Opened", None, work_ref.clone())}
+            {control("Complete", "btn-ghost", "Completed", blocked, work_ref.clone())}
+            {control("Assign", "btn-ghost", "Assigned", None, work_ref.clone())}
+            {control("Note", "btn-ghost", "Noted", None, work_ref.clone())}
+            {control("Call", "btn-ghost", "Called", no_route, work_ref.clone())}
+            {control("SMS", "btn-ghost", "Texted", no_route, work_ref.clone())}
+            {control("Delete", "btn-ghost text-error", "Deleted", None, work_ref.clone())}
+        }
+        .into_any()
+    };
 
     view! {
         <ContentLayout
@@ -1044,6 +1180,56 @@ pub fn DataTableDemo() -> impl IntoView {
                     row_class_fn=feature_row_class_fn
                     cell_renderers=vec![copy_row_renderer]
                 />
+            </Section>
+
+            // widgets::DataTable per-row action column
+            <Section title="Widget DataTable: Per-Row Action Column (row_actions)">
+                <p class="text-sm opacity-70 mb-2">
+                    <code>"widgets::DataTable"</code>
+                    " is the simpler row-vector table. "
+                    <code>"row_actions"</code>
+                    " gives it a trailing action column: the callback receives "
+                    <code>"(row_index, row_cells)"</code>
+                    " and returns that row's controls, right-aligned on one line. "
+                    "Court filings have no telephony route and blocked work "
+                    "cannot be completed, so those controls render unavailable "
+                    "behind a tooltip \u{2014} focusable rather than natively "
+                    <code>"disabled"</code>
+                    ", so the explanation is reachable by keyboard too. "
+                    "The action column takes no data index: sorting, "
+                    <code>"badge_column_keys"</code>
+                    " and the leading "
+                    <code>"bulk_select"</code>
+                    " checkbox are all unaffected \u{2014} click the headers to check."
+                </p>
+                <p class="text-sm opacity-70 mb-2">
+                    "Twelve rows over three pages: sort by Owner descending, page "
+                    "to the last page and act on a row \u{2014} the readout shows "
+                    "the id and the "
+                    <code>"row_index"</code>
+                    " the callback received, which is the row's position in the "
+                    <code>"rows"</code>
+                    " prop rather than its position on the page. Prefer the id for "
+                    "anything that identifies a record; the index only tracks the "
+                    "snapshot handed to the component."
+                </p>
+                <WidgetDataTable
+                    columns=widget_columns
+                    rows=widget_rows
+                    page_size=5
+                    badge_column_keys=vec!["status"]
+                    bulk_select=widget_bulk
+                    action_header="Actions"
+                    row_actions=widget_row_actions
+                />
+                <p class="text-sm opacity-70 mt-2">
+                    "Last action: "
+                    <span class="font-mono">{move || widget_last_action.get()}</span>
+                    " \u{2022} selected: "
+                    <span class="font-mono">
+                        {move || widget_bulk.with(|s| s.len().to_string())}
+                    </span>
+                </p>
             </Section>
         </ContentLayout>
     }

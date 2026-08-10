@@ -13,10 +13,10 @@
 //! surfaces under the `state.state` key of `window.__APP_DEBUG__.state()` /
 //! `.dump()`.
 //!
-//! [`set`] is a no-op unless [`crate::test_mode::is_test_mode`] is true, so
-//! demo components can call it unconditionally without worrying about
-//! polluting production behavior or paying for JSON serialization when the
-//! harness isn't attached.
+//! [`set`] is a no-op unless [`leptos_daisyui_rs::test_mode::is_test_mode`] is
+//! true, so demo components can call it unconditionally without worrying
+//! about polluting production behavior or paying for JSON serialization when
+//! the harness isn't attached.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -37,7 +37,7 @@ thread_local! {
 /// etc.). See the contract notes in the report for the exact call shape.
 #[allow(dead_code)]
 pub fn set(key: &str, value: impl Serialize) {
-    if !crate::test_mode::is_test_mode() {
+    if !leptos_daisyui_rs::test_mode::is_test_mode() {
         return;
     }
     let Ok(json) = serde_json::to_value(value) else {

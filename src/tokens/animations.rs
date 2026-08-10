@@ -148,14 +148,22 @@ dialog.modal[open]::backdrop {
     animation: ld-message-in var(--ld-duration-fast) var(--ld-ease-decelerate);
 }
 
+/* `--p` was the daisyUI 4 primary token and does not exist in daisyUI 5, so
+   this always resolved to the `currentColor` fallback — the control's own text
+   colour rather than primary. It degraded instead of vanishing, which is why it
+   went unreported: on a plain `btn` the ring came out base-content, while on
+   `btn-primary` it came out primary-content (near-white) against the primary
+   fill, collapsing focus visibility on the most prominent control in the
+   library. `.ld-focus-ring` is applied by eight control types, so this is the
+   widest-reach dead token in the crate (ldui-xxc). */
 .ld-focus-ring:focus-visible {
-    outline: 2px solid var(--p, currentColor);
+    outline: 2px solid var(--color-primary, currentColor);
     outline-offset: 2px;
     animation: ld-focus-ring-in var(--ld-duration-fast) var(--ld-ease-decelerate);
 }
 @keyframes ld-focus-ring-in {
     from { outline-color: transparent; }
-    to   { outline-color: var(--p, currentColor); }
+    to   { outline-color: var(--color-primary, currentColor); }
 }
 
 /* VerticalSteps: a small dash sliding down a "lit" rail segment, giving a

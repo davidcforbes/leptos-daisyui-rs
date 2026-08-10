@@ -8,10 +8,11 @@
 //! from the reference implementation in `llm-wiki`
 //! (`crates/wiki-ui/frontend/src/debug.rs`), with one deliberate difference:
 //! llm-wiki gates this module behind a compile-time `debug-hooks` cargo
-//! feature; here it's gated at the call site by [`crate::test_mode::is_test_mode`]
-//! (the same URL-query-param check `test_mode` uses), so one normal
-//! `trunk build` serves both production and test-mode requests. See
-//! `test_mode.rs` module docs for why a query param beats a feature here.
+//! feature; here it's gated at the call site by
+//! [`leptos_daisyui_rs::test_mode::is_test_mode`] (the same URL-query-param
+//! check `test_mode` uses), so one normal `trunk build` serves both
+//! production and test-mode requests. See the library's `test_mode` module
+//! docs for why a query param beats a feature here.
 //!
 //! Surface (all synchronous, all JSON-friendly, matching the documented
 //! contract exactly):
@@ -154,9 +155,9 @@ where
 }
 
 /// Build `window.__APP_DEBUG__` and install it. No-op if there is no
-/// `window`. Callers must gate this behind [`crate::test_mode::is_test_mode`]
-/// — installing unconditionally would put a debug surface on the production
-/// window.
+/// `window`. Callers must gate this behind
+/// [`leptos_daisyui_rs::test_mode::is_test_mode`] — installing
+/// unconditionally would put a debug surface on the production window.
 pub fn install_debug_bridge() {
     let Some(win) = web_sys::window() else {
         return;

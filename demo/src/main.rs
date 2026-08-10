@@ -2,13 +2,13 @@ mod core;
 mod debug;
 mod debug_state;
 mod demos;
-mod test_mode;
 
 use core::Layout;
 use demos::*;
 use leptos::mount::mount_to_body;
 use leptos::prelude::*;
 use leptos_daisyui_rs::components::*;
+use leptos_daisyui_rs::test_mode;
 use leptos_daisyui_rs::theme::{ThemeProvider, use_theme_context};
 use leptos_daisyui_rs::tokens::{UiAnimationsPreamble, UiTokensPreamble};
 use leptos_icons::Icon;
@@ -102,6 +102,7 @@ fn AppInner() -> impl IntoView {
                     <Route path=path!("/capacity_bar") view=CapacityBarDemo />
                     <Route path=path!("/card") view=CardDemo />
                     <Route path=path!("/carousel") view=CarouselDemo />
+                    <Route path=path!("/charts") view=ChartsDemo />
                     <Route path=path!("/component_customizer") view=ComponentCustomizerDemo />
                     <Route path=path!("/ai-chat") view=AiChatDemo />
                     <Route path=path!("/chat") view=ChatDemo />
@@ -122,6 +123,7 @@ fn AppInner() -> impl IntoView {
                     <Route path=path!("/fieldset") view=FieldsetDemo />
                     <Route path=path!("/file_input") view=FileInputDemo />
                     <Route path=path!("/filter") view=FilterDemo />
+                    <Route path=path!("/filter-sidebar") view=FilterSidebarDemo />
                     <Route path=path!("/footer") view=FooterDemo />
                     <Route path=path!("/hero") view=HeroDemo />
                     <Route path=path!("/hover_3d") view=Hover3dDemo />
@@ -187,6 +189,7 @@ fn AppInner() -> impl IntoView {
                     <Route path=path!("/validator") view=ValidatorDemo />
                     <Route path=path!("/vertical-steps") view=VerticalStepsDemo />
                     <Route path=path!("/week-view") view=WeekViewDemo />
+                    <Route path=path!("/roster-grid") view=RosterGridDemo />
                 </ParentRoute>
             </Routes>
         </Router>

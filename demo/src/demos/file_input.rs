@@ -399,8 +399,8 @@ pub fn FileInputDemo() -> impl IntoView {
                                     <span>"75%"</span>
                                 </div>
                                 <Progress
-                                    attr:value=75.0
-                                    attr:max=100.0
+                                    value=75.0
+                                    max=100.0
                                     color=ProgressColor::Primary
                                     class="w-full"
                                 />
@@ -412,8 +412,8 @@ pub fn FileInputDemo() -> impl IntoView {
                                     <span>"100%"</span>
                                 </div>
                                 <Progress
-                                    attr:value=100.0
-                                    attr:max=100.0
+                                    value=100.0
+                                    max=100.0
                                     color=ProgressColor::Success
                                     class="w-full"
                                 />

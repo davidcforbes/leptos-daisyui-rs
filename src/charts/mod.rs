@@ -8,6 +8,9 @@ mod area_chart;
 mod bar_chart;
 mod heatmap;
 mod line_chart;
+// Not just charts: any SVG paint in the crate routes through here, because the
+// presentation-attribute hazard belongs to the attribute, not to the component.
+pub(crate) mod paint;
 mod pie_chart;
 mod sparkline;
 mod stacked_area_chart;
@@ -15,7 +18,7 @@ mod stacked_bar_chart;
 
 pub use area_chart::AreaChart;
 pub use bar_chart::BarChart;
-pub use heatmap::{Heatmap, HeatmapCell};
+pub use heatmap::{HeatScale, Heatmap, HeatmapCell};
 pub use line_chart::LineChart;
 pub use pie_chart::{PieChart, PieSlice};
 pub use sparkline::Sparkline;

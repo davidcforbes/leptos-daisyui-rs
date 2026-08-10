@@ -79,8 +79,8 @@ pub fn TimelineDemo() -> impl IntoView {
                             </div>
                             <p class="text-sm mt-1">"Building core features - 65% complete"</p>
                             <Progress
-                                attr:value=65.0
-                                attr:max=100.0
+                                value=65.0
+                                max=100.0
                                 color=ProgressColor::Warning
                                 class="w-full mt-2"
                             />

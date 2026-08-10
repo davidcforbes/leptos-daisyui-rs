@@ -1,8 +1,9 @@
 //! # Filter Sidebar Component
 //!
-//! A left-hand collapsible filter panel: header + toggle, filter-search field,
-//! stacked labelled fields, and a collapsed rail carrying the ACTIVE FILTER COUNT
-//! and a vertical label.
+//! A collapsible side panel: header + toggle, filter-search field, stacked
+//! labelled fields, and a collapsed rail carrying the ACTIVE FILTER COUNT and a
+//! vertical label. Docks left (the default) or right via
+//! [`SidebarSide`](style::SidebarSide).
 //!
 //! Every dimension is measured from a running reference (4Ease's
 //! `pilot-filter-sidebar`) rather than chosen. daisyUI has no equivalent: its
@@ -15,8 +16,10 @@
 //! read as the whole list.
 
 mod component;
+mod style;
 
 pub use component::*;
+pub use style::*;
 
 #[cfg(test)]
 mod tests;

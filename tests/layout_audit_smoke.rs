@@ -28,9 +28,34 @@
 //!
 //! Lower a ceiling whenever a fix drops the count. Raising one requires
 //! saying why in the commit message — that is the whole point of the ratchet.
+//!
+//! ## Migration to the engine sweep (ldui-audit Task 7)
+//!
+//! This suite ran a local, hand-rolled sweep (`tests/common/layout_audit.rs`)
+//! until Task 7, which moved the overlap/grid/internal rule model into the
+//! shared `pixelproof-style-audit` engine (`ldui_audit::audit_page`) so the
+//! desktop and web faces of the visual-quality audit share one
+//! implementation. Only overlap/grid/internal are asserted here —
+//! typography/shape/depth/component-drift are `style_audit_smoke`'s business
+//! (that suite runs the same engine sweep with a fuller profile).
 
 mod common;
-use common::{harness_at, layout_report};
+use common::{assert_not_truncated, body_font_family, harness_at};
+use ldui_audit::family;
+
+/// The profile this suite sweeps with: token defaults pinned to the demo's
+/// *real* computed body font.
+///
+/// This used to pass a `"__any__"` sentinel on the grounds that typography is
+/// not asserted here — but the engine compares every text-bearing element's
+/// computed `font-family` against the profile regardless of which families
+/// the caller reads. A sentinel therefore made every element on a text-heavy
+/// page a typography violation, overran the engine's 200-per-family cap, and
+/// latched `truncated` on every run forever. (An empty `type_ramp` would not
+/// have helped: the family comparison is independent of the ramp.)
+async fn profile(h: &ldui_audit::Harness) -> ldui_audit::StyleProfile {
+    ldui_audit::from_ui_tokens(body_font_family(h).await)
+}
 
 /// Pages swept, with their current violation ceilings.
 ///
@@ -39,6 +64,15 @@ use common::{harness_at, layout_report};
 /// The set mirrors the visual smoke suite's complexity tiers: simple,
 /// stateful, and the layout-heavy fork additions where spacing bugs actually
 /// live.
+///
+/// `/components/charts` (ldui-40g) is the SVG tier, and its ceilings behave
+/// differently from the rest: all 14 GRID findings are distances between
+/// `<text>` nodes laid out in a chart's own viewBox coordinate space and then
+/// scaled by `w-full h-auto`, so they are not spacing debt anyone can work off
+/// on the 4px grid — the page's own DOM markup reports nothing. OVERLAP is the
+/// number that earns the page its place here: sweeping it for the first time
+/// caught `AreaChart` drawing its bottom y-scale label over its first x-axis
+/// tick, which was fixed in `AreaChart` rather than absorbed.
 const PAGES: &[(&str, usize, usize)] = &[
     ("/components/button", 0, 0),
     ("/components/alert", 0, 0),
@@ -46,30 +80,42 @@ const PAGES: &[(&str, usize, usize)] = &[
     ("/components/tab", 0, 0),
     ("/components/data-table", 2, 0),
     ("/components/kanban", 34, 2),
+    ("/components/charts", 14, 0),
 ];
 
 async fn audit_page(path: &str, max_grid: usize, max_internal: usize) {
     let h = harness_at(path).await;
-    let report = layout_report(&h).await;
+    let profile = profile(&h).await;
+    let report = ldui_audit::audit_page(&h, &profile, &Default::default())
+        .await
+        .expect("audit_page");
 
-    assert!(
-        report.scanned > 0,
-        "layout sweep scanned 0 elements on {path} — the page did not render"
-    );
+    report.sanity().unwrap();
+    // This suite governs only overlap/grid/internal, so it cannot use
+    // `ldui_audit::verify` (whose ratchet demands a ceiling for *every*
+    // reporting family — typography/shape/depth are `style_audit_smoke`'s
+    // business). Truncation still has to be surfaced, and `verify` only notes
+    // it anyway, so both suites share the same explicit assertion.
+    assert_not_truncated(&report, path);
 
-    assert!(report.overlaps.is_empty(), "{}", report.describe(path));
-
-    assert!(
-        report.grid.len() <= max_grid,
-        "off-grid gaps on {path} rose to {} (ceiling {max_grid}).\n{}",
-        report.grid.len(),
+    assert_eq!(
+        report.count(family::OVERLAP),
+        0,
+        "{}",
         report.describe(path)
     );
 
     assert!(
-        report.internal.len() <= max_internal,
+        report.count(family::GRID) <= max_grid,
+        "off-grid gaps on {path} rose to {} (ceiling {max_grid}).\n{}",
+        report.count(family::GRID),
+        report.describe(path)
+    );
+
+    assert!(
+        report.count(family::INTERNAL) <= max_internal,
         "internal>external violations on {path} rose to {} (ceiling {max_internal}).\n{}",
-        report.internal.len(),
+        report.count(family::INTERNAL),
         report.describe(path)
     );
 }
@@ -91,6 +137,7 @@ audit_test!(card_layout_is_clean, 2);
 audit_test!(tab_layout_is_clean, 3);
 audit_test!(data_table_layout_is_clean, 4);
 audit_test!(kanban_layout_is_clean, 5);
+audit_test!(charts_layout_is_clean, 6);
 
 /// Negative control: prove the sweep actually detects things.
 ///
@@ -103,10 +150,14 @@ audit_test!(kanban_layout_is_clean, 5);
 #[ignore = "needs the demo dev server (trunk serve in demo/)"]
 async fn sweep_detects_injected_violations() {
     let h = harness_at("/components/button").await;
+    let profile = profile(&h).await;
 
-    let before = layout_report(&h).await;
-    assert!(
-        before.overlaps.is_empty(),
+    let before = ldui_audit::audit_page(&h, &profile, &Default::default())
+        .await
+        .expect("audit_page");
+    assert_eq!(
+        before.count(family::OVERLAP),
+        0,
         "control page is not clean to begin with:\n{}",
         before.describe("/components/button")
     );
@@ -135,14 +186,16 @@ async fn sweep_detects_injected_violations() {
         .unwrap_or(false);
     assert!(injected, "probe was not injected");
 
-    let dirty = layout_report(&h).await;
+    let dirty = ldui_audit::audit_page(&h, &profile, &Default::default())
+        .await
+        .expect("audit_page");
     assert!(
-        !dirty.overlaps.is_empty(),
+        dirty.count(family::OVERLAP) > 0,
         "sweep missed a 20px sibling overlap — the overlap check is not working:\n{}",
         dirty.describe("probe")
     );
     assert!(
-        !dirty.grid.is_empty(),
+        dirty.count(family::GRID) > 0,
         "sweep missed a 7px off-grid gap — the grid check is not working:\n{}",
         dirty.describe("probe")
     );
@@ -160,15 +213,17 @@ async fn sweep_detects_injected_violations() {
         .unwrap_or(false);
     assert!(removed);
 
-    let after = layout_report(&h).await;
+    let after = ldui_audit::audit_page(&h, &profile, &Default::default())
+        .await
+        .expect("audit_page");
     assert_eq!(
-        after.overlaps.len(),
-        before.overlaps.len(),
+        after.count(family::OVERLAP),
+        before.count(family::OVERLAP),
         "overlap count did not return to baseline after removing the probe"
     );
     assert_eq!(
-        after.grid.len(),
-        before.grid.len(),
+        after.count(family::GRID),
+        before.count(family::GRID),
         "off-grid count did not return to baseline after removing the probe"
     );
 }
@@ -183,8 +238,13 @@ async fn report_layout_backlog() {
     let mut total = 0;
     for (path, _, _) in PAGES {
         let h = harness_at(path).await;
-        let report = layout_report(&h).await;
-        total += report.total();
+        let profile = profile(&h).await;
+        let report = ldui_audit::audit_page(&h, &profile, &Default::default())
+            .await
+            .expect("audit_page");
+        total += report.count(family::OVERLAP)
+            + report.count(family::GRID)
+            + report.count(family::INTERNAL);
         println!("{}", report.describe(path));
     }
     println!(

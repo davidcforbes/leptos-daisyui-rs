@@ -1,3 +1,4 @@
+use super::paint::paint_attrs;
 use leptos::prelude::*;
 
 /// A single data series within a stacked bar chart.
@@ -119,8 +120,11 @@ pub fn StackedBarChart(
     let segment_views = segments
         .into_iter()
         .map(|seg| {
+            // A theme token must not ride on the `fill` presentation attribute
+            // — see `super::paint::paint_attrs`.
+            let (c, st) = paint_attrs(seg.color);
             view! {
-                <rect x=seg.x y=seg.y width=seg.w height=seg.h fill=seg.color rx="1" />
+                <rect x=seg.x y=seg.y width=seg.w height=seg.h fill=c style=st rx="1" />
             }
         })
         .collect_view();
@@ -145,12 +149,12 @@ pub fn StackedBarChart(
             let lx = pad_left + i as f64 * 100.0;
             let lx_str = format!("{lx:.2}");
             let ly_str = format!("{legend_y:.2}");
-            let col = s.color.clone();
+            let (col, col_style) = paint_attrs(s.color.clone());
             let name = s.name.clone();
             let text_x = format!("{:.2}", lx + 14.0);
             let text_y = ly_str.clone();
             view! {
-                <rect x=lx_str y=ly_str width="10" height="10" fill=col rx="2" />
+                <rect x=lx_str y=ly_str width="10" height="10" fill=col style=col_style rx="2" />
                 <text x=text_x y=text_y dominant-baseline="hanging"
                     fill="currentColor" font-size="10">
                     {name}

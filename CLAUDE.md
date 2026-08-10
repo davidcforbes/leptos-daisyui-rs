@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a Rust crate providing type-safe, reactive daisyUI 5 component wrappers for Leptos framework. The library wraps daisyUI components as Leptos components with proper type safety, leveraging Leptos's spread attributes functionality. Currently designed for CSR (Client-Side Rendering).
 
-**Component Coverage: 109 components** (full daisyUI 5 coverage, plus custom app-shell/data/scheduling/motion components added since the original 96/96 milestone)
+**Component Coverage: 110 components** (full daisyUI 5 coverage, plus custom app-shell/data/scheduling/motion components added since the original 96/96 milestone)
 
 ## Build Commands
 
@@ -47,6 +47,7 @@ cargo make verify         # same, via cargo-make
 cargo xtask verify-full   # + reactivity suite + the real trunk wasm build (needs npm/trunk/Chrome)
 cargo xtask test-reactivity          # reactivity/DOM-oracle suite alone (self-spawns a demo server)
 cargo xtask test-layout              # layout audit: overlap/grid/internal<=external over the real DOM
+cargo xtask test-style               # style audit: typography/shape/depth + daisyUI component-drift, ratcheted per page
 cargo xtask gen-tokens [--check]     # regenerate styles/tokens.css from ui-tokens
 cargo xtask check-sibling-tokens     # preamble.rs's ui_tokens refs must exist on the sibling's DEFAULT branch
 cargo xtask bump patch|minor|major   # bump the library version (human-chosen level)
@@ -54,8 +55,14 @@ cargo xtask bump patch|minor|major   # bump the library version (human-chosen le
 
 **Repo-specific gotchas the gate encodes (do NOT run these directly):**
 `cargo fmt --all` reaches into sibling repos — fmt **per-package**
-(`-p leptos-daisyui-rs -p leptos-daisyui-showcase -p xtask`). `cargo clippy
---workspace` fails on leptos-`csr` feature unification — clippy **per-crate**.
+(`-p leptos-daisyui-rs -p leptos-daisyui-showcase -p xtask -p ldui-audit`).
+`cargo clippy --workspace` fails on leptos-`csr` feature unification — clippy
+**per-crate**. The library's clippy/test steps pass `--features test-mode`;
+without it `src/test_mode.rs` is neither linted nor tested.
+
+**The visual-quality rulebook is [`doc/visual-quality/`](./doc/visual-quality/)** —
+one page per defect pattern the `test-style`/`test-layout` audits detect, with
+the fix rather than the ratchet.
 
 **Doc comments: keep every inline code span on ONE `///` line.** A backtick span
 that wraps across two `///` lines ICEs clippy 1.95 (panic in
@@ -77,11 +84,12 @@ the same for `trunk`, plus a spurious `tokens-fresh` FAIL. npm and trunk are
 fine; the cwd handed to the child is `demo/demo`.
 
 **Budget ~8 minutes for the first browser-suite run.** `test-reactivity`,
-`test-layout` and `verify-full` each build the demo to wasm, which outruns a
-10-minute foreground timeout on a cold target dir — run them in the background.
-Any edit under `demo/src` invalidates that build, so re-run the suites *after*
-the last demo change, not before: `test-layout`'s per-page violation counts are
-ratcheted and a new demo section can move them.
+`test-layout`, `test-style` and `verify-full` each build the demo to wasm, which
+outruns a 10-minute foreground timeout on a cold target dir — run them in the
+background. Any edit under `demo/src` invalidates that build, so re-run the
+suites *after* the last demo change, not before: `test-layout`'s and
+`test-style`'s per-page violation counts are ratcheted and a new demo section
+can move them.
 
 **`styles/tokens.css` is GENERATED — never hand-edit it.** It is the Tailwind
 `@theme` block, produced from the shared `ui-tokens` crate by `cargo xtask
@@ -181,17 +189,61 @@ trunk build --release
 The demo automatically:
 - Runs Tailwind CSS compilation via pre_build hook: `npx tailwindcss -i input.css -o output.css`
 - Watches both `../src` (library) and `./src` (demo) for changes
-- Showcases all 109 components with interactive examples
+- Showcases all 110 components with interactive examples
 
 ## Architecture
 
 ### Core Structure
 
 The crate has two main modules:
-- `src/components/` - daisyUI component wrappers (109 components: full daisyUI 5 coverage plus custom additions)
+- `src/components/` - daisyUI component wrappers (110 components: full daisyUI 5 coverage plus custom additions)
 - `src/utils/` - Utility code: `ClassAttributes` for dynamic class management, plus
   reusable framework hooks (`DebouncedSignal`, `use_swr_resource`)
 - `src/motion/` - Animation primitives (`Lerp`, `Transition`, `Keyframe`/`Track`, easing, spring, `use_animated` hook)
+
+**Two DataTable components exist (`ldui-30p`) — pick by capability, not by habit:**
+`components::DataTable` (`src/components/data_table/`) is the full column-model
+table: `cell_renderers`, `typed_cells`, `row_class_fn`, `Column::action()` action
+cells, `row_key`-based selection identity, the column chooser, per-column filter
+dropdowns, `extra_filter` + `toolbar` composition, `auto_page_size`, and a
+server-driven variant. `widgets::DataTable` (`src/widgets/data_table.rs`) is the
+simple `Vec<Vec<String>>` table; it is the only one with `badge_column_keys`,
+`link_column_keys`, and `bulk_select` (checkbox column keyed by the first cell's
+`String` id). They are not converged — each doc comment names the other and
+lists what only it has, so read those before picking.
+
+### Recent additions (2026-08-10, consumer-requested bead wave)
+
+Nine beads filed by the 4iiz-Office audit, cleared in one pass. Each was
+verified against this repo's code before implementing -- four arrived as
+duplicate pairs cross-filed hours apart, and one described a gap in the wrong
+component.
+
+- **`RosterGrid`** (new, `src/components/roster_grid/`) -- worker x weekday
+  shift matrix. Deliberately NOT WeekView/DayScheduler, which are
+  time-calendars (hours down one axis); a roster is a grid of worker x weekday
+  where a cell carries a shift plus a state. Real `<table>` with `scope`
+  headers, `ShiftState` colour PLUS a solid/dashed accent bar so the state is
+  not colour-only, ragged rows padded by a pure tested `normalize_cells`, and
+  ARIA-grid roving focus (one tab stop, arrows/Home/End, `role="grid"` only
+  when interactive).
+- **`Progress`** -- reactive `value`/`max`. Unset stays *indeterminate*: the
+  attribute is genuinely omitted, not emitted as `value=0`. Do NOT mix these
+  with `attr:value`/`attr:max`; the component writes its own `max`, and a
+  duplicate resolves opposite ways on the CSR and `to_html` paths.
+- **`BarChart` `bar_colors`**, **`Heatmap` `HeatScale::Judgement`** (signed
+  intensity, theme-token hues, sense per-cell so one grid can mix
+  higher-is-better and lower-is-better measures).
+- **`widgets::DataTable` `row_actions`** -- a per-row action column.
+  ⚠ Note there are TWO DataTables and consumers pick by accident; both doc
+  comments now say which to reach for.
+- **`FilterSidebar` `side`** -- `SidebarSide::{Left,Right}` for right-hand
+  panels.
+- **`src/charts/paint.rs`** -- `var()` inside an SVG *presentation attribute*
+  is not specified to substitute, so a theme token there degrades to
+  `fill: black` or `stroke: none` **silently**. Every chart and Gantt SVG paint
+  now routes through it; `tests/svg_paint_routing.rs` scans all of `src/` and
+  is a gate step.
 
 ### Recent additions (2026-08-06, from the office-perf audit)
 

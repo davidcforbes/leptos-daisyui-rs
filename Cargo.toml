@@ -13,8 +13,14 @@ repository = "https://github.com/noshishiRust/leptos-daisyui-rs"
 # so `cargo publish` cannot succeed and is not a goal.
 publish = false
 
+[features]
+# Determinism seam for visual-regression testing (ldui-49w.2): `test_mode`
+# module (query-string parsing + freeze-stylesheet injection). Off by
+# default; enabled by the demo (and any other consumer driving PixelProof).
+test-mode = []
+
 [workspace]
-members = [".", "xtask", "demo"]
+members = [".", "xtask", "demo", "audit"]
 resolver = "3"
 
 [dependencies]
@@ -86,6 +92,8 @@ web-sys = { version = "0.3", features = [
     "AbortSignal",
     "ReadableStream",
     "ReadableStreamDefaultReader",
+    "HtmlHeadElement",
+    "Location",
 ] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -103,3 +111,7 @@ editmark-core = { path = "../editmark/editmark-core" }
 # C:/dev sibling checkout — same convention as the other path deps above.
 pixelproof-web = { path = "../PixelProof/crates/pixelproof-web" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+# Style/layout audit sweep + daisyUI component-drift heuristics
+# (tests/layout_audit_smoke.rs, tests/style_audit_smoke.rs) — a workspace
+# member, not a C:/dev sibling checkout.
+ldui-audit = { path = "audit" }

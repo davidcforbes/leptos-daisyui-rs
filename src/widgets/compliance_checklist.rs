@@ -77,11 +77,7 @@ pub fn ComplianceChecklist(
                         <span>"Overall"</span>
                         <span class="font-mono">{format!("{:.1}%", pct)}</span>
                     </div>
-                    <Progress
-                        color=color
-                        attr:value=pct.to_string()
-                        attr:max="100"
-                    />
+                    <Progress color=color value=pct max=100.0 />
                 </div>
             </CardBody>
         </Card>

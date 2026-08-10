@@ -2,11 +2,22 @@
 ///
 /// Provides vertical markers to highlight key dates like releases, sprints,
 /// holidays, milestones, and custom events with labels, icons, and styling.
+use crate::charts::paint::{paint_attrs_with, stroke_attrs_with};
 use chrono::{DateTime, Utc};
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use web_sys::MouseEvent;
+
+/// Colour used when a marker carries none of its own.
+const DEFAULT_MARKER_COLOR: &str = "#6b7280";
+
+/// The marker line's non-colour declarations; they share the element's single
+/// `style` attribute with the routed colour (`charts::paint::merge_style`).
+const MARKER_LINE_STYLE: &str = "cursor: pointer; opacity: 0.7";
+
+/// The marker label's non-colour declarations. See [`MARKER_LINE_STYLE`].
+const MARKER_LABEL_STYLE: &str = "cursor: pointer; user-select: none";
 
 /// Type of timeline marker
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -443,6 +454,22 @@ pub fn TimelineMarkerComponent(
         }
     };
 
+    // The colour is caller-supplied, so a consumer passing a theme token would
+    // land `var(...)` straight in a presentation attribute, where substitution
+    // is unspecified — the line would vanish and the label would go black.
+    // Route it, merging with each element's own declarations (ldui-xxc).
+    let marker_color = move || {
+        marker
+            .get()
+            .color
+            .clone()
+            .unwrap_or_else(|| DEFAULT_MARKER_COLOR.to_string())
+    };
+    let line_stroke = move || stroke_attrs_with(MARKER_LINE_STYLE, marker_color()).0;
+    let line_style = move || stroke_attrs_with(MARKER_LINE_STYLE, marker_color()).1;
+    let label_fill = move || paint_attrs_with(MARKER_LABEL_STYLE, marker_color()).0;
+    let label_style = move || paint_attrs_with(MARKER_LABEL_STYLE, marker_color()).1;
+
     view! {
         <Show when=move || marker.get().visible>
             <g
@@ -457,11 +484,11 @@ pub fn TimelineMarkerComponent(
                     y1="0"
                     x2=move || x_position.get()
                     y2=move || timeline_height.get()
-                    stroke=move || marker.get().color.clone().unwrap_or_else(|| "#6b7280".to_string())
+                    stroke=line_stroke
                     stroke-width="2"
                     stroke-dasharray=move || marker.get().style.to_dasharray()
                     class="marker-line"
-                    style="cursor: pointer; opacity: 0.7;"
+                    style=line_style
                 />
 
                 // Label (if positioned at top)
@@ -471,10 +498,10 @@ pub fn TimelineMarkerComponent(
                         y="10"
                         class="marker-label"
                         text-anchor="middle"
-                        fill=move || marker.get().color.clone().unwrap_or_else(|| "#6b7280".to_string())
+                        fill=label_fill
                         font-size="12"
                         font-weight="600"
-                        style="cursor: pointer; user-select: none;"
+                        style=label_style
                     >
                         {move || marker.get().label.clone()}
                     </text>

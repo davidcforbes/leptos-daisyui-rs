@@ -22,6 +22,72 @@ enum SortDirection {
     Descending,
 }
 
+/// One rendered cell position in a header row or body row, in visual order.
+///
+/// The component keeps two distinct index spaces and this enum is the map
+/// between them:
+///
+/// - the **data** index space, where `columns[i]` is described by `rows[n][i]`.
+///   `badge_columns`, `link_columns`, the resolved `badge_column_keys` /
+///   `link_column_keys`, and the sort state all address this space;
+/// - the **visual** index space, the actual `<th>` / `<td>` sequence, which
+///   additionally contains the optional leading bulk-select checkbox and the
+///   optional trailing action cell.
+///
+/// Both optional cells are rendered *outside* the loops that enumerate the
+/// columns and the row's cells, so neither ever renumbers a data index. That
+/// invariant is what keeps `badge_columns` and friends pointing at the same
+/// column regardless of which optional cells are switched on, and it is
+/// asserted by the unit tests below.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum VisualCell {
+    /// The leading bulk-select checkbox cell (present when `bulk_select` is set).
+    BulkSelect,
+    /// A data column, carrying its index in the data index space.
+    Data(usize),
+    /// The trailing per-row action cell (present when `row_actions` is set).
+    Action,
+}
+
+/// Builds the visual cell sequence for one header/body row.
+///
+/// This mirrors the render order exactly and is the single source of truth for
+/// the empty-state `colspan`.
+fn visual_layout(data_columns: usize, bulk_select: bool, action_column: bool) -> Vec<VisualCell> {
+    let mut cells = Vec::with_capacity(data_columns + 2);
+    if bulk_select {
+        cells.push(VisualCell::BulkSelect);
+    }
+    cells.extend((0..data_columns).map(VisualCell::Data));
+    if action_column {
+        cells.push(VisualCell::Action);
+    }
+    cells
+}
+
+/// Sorts `rows` (each paired with its original index in the `rows` prop) by the
+/// data column at `col_idx`, numerically when both cells parse as numbers and
+/// lexicographically otherwise.
+///
+/// Extracted from the memo so the "sort the column that was clicked" contract is
+/// unit-testable. The sort is stable, so rows comparing equal keep their
+/// original relative order.
+fn sort_indexed_rows(rows: &mut [(usize, Vec<String>)], col_idx: usize, direction: SortDirection) {
+    rows.sort_by(|a, b| {
+        let va = a.1.get(col_idx).map(|s| s.as_str()).unwrap_or("");
+        let vb = b.1.get(col_idx).map(|s| s.as_str()).unwrap_or("");
+        // Try numeric comparison first, fall back to string
+        let cmp = match (va.parse::<f64>(), vb.parse::<f64>()) {
+            (Ok(na), Ok(nb)) => na.partial_cmp(&nb).unwrap_or(std::cmp::Ordering::Equal),
+            _ => va.cmp(vb),
+        };
+        match direction {
+            SortDirection::Ascending => cmp,
+            SortDirection::Descending => cmp.reverse(),
+        }
+    });
+}
+
 /// Maps cell text values to DaisyUI badge class strings.
 fn badge_class(value: &str) -> String {
     match value {
@@ -114,6 +180,22 @@ fn badge_class(value: &str) -> String {
 ///
 /// Renders tabular data with column-header sort toggles, pagination controls,
 /// and a row count display. Uses DaisyUI table classes with responsive overflow.
+///
+/// ## Which DataTable -- this one, or `components::DataTable`?
+///
+/// This is the simple table: rows are plain `Vec<Vec<String>>`, and it is the
+/// only place for three things `components::DataTable` does not have --
+/// `badge_column_keys` and `link_column_keys` (automatic badge/link styling
+/// resolved by column key) and `bulk_select` (a leading checkbox column keyed
+/// by the first cell's `String` id, feeding a bulk-action toolbar).
+///
+/// `components::DataTable` is the full column-model table: reach for it
+/// instead when you need `cell_renderers`, `typed_cells`, `row_class_fn`,
+/// `Column::action()` action cells, `row_key`-based selection identity that
+/// survives a data replacement, the column chooser, per-column filter
+/// dropdowns, `extra_filter` plus `toolbar` composition, or `auto_page_size`
+/// responsive paging -- plus a server-driven variant. This table has none of
+/// that renderer/selection/filter surface.
 #[component]
 pub fn DataTable(
     /// Column definitions.
@@ -165,6 +247,79 @@ pub fn DataTable(
     /// it to drive the §3.2 bulk-action toolbar's per-verb actions.
     #[prop(optional)]
     bulk_select: Option<RwSignal<std::collections::HashSet<String>>>,
+    /// Optional per-row action renderer. When set, the table grows a trailing
+    /// action column: for every rendered row the callback receives
+    /// `(row_index, row_cells)` and returns the controls for that row, laid out
+    /// right-aligned in a single nowrap line.
+    ///
+    /// `row_index` is the row's index in the `rows` prop — stable across sorting
+    /// and paging, so it still points at the same entry of `rows` after the
+    /// operator re-sorts. `row_cells` is that row's cells, aligned to `columns`
+    /// by index, so the callback can read any field it needs.
+    ///
+    /// **For anything that identifies a record — navigating to it, deleting it,
+    /// completing it — key off the row id, not the index.** The first cell is
+    /// the row id by the same convention `selected_row_key` and `bulk_select`
+    /// already use, and it is an identity rather than a position: if the caller
+    /// built `rows` by filtering or reordering some backing store, `row_index`
+    /// indexes the snapshot handed to this component and `store[row_index]` is
+    /// a different record. Reach for `row_index` when the caller's own state is
+    /// genuinely parallel to `rows` (a `Vec<bool>` of expanded flags, say).
+    ///
+    /// The action column never participates in sorting: its header is inert and
+    /// it is rendered outside the column/cell loops, so `badge_columns`,
+    /// `link_columns` and the sort state keep addressing the same data columns
+    /// whether or not it is present. When this prop is unset no extra `<th>` or
+    /// `<td>` is emitted at all.
+    ///
+    /// The renderer may return any number of controls, enabled or disabled, and
+    /// they may differ per row — wrap a disabled control in a daisyUI
+    /// `tooltip` to explain why it is unavailable.
+    ///
+    /// # Read signals inside the returned view, not in the callback body
+    ///
+    /// This callback runs inside the reactive effect that renders the whole
+    /// `<tbody>` — it has to, because that is the effect sort and pagination
+    /// re-run. So a signal read in the **callback body** is tracked by that
+    /// effect, and every change to it destroys and rebuilds every row's
+    /// controls. That is not an error, it is a silent degradation: focus jumps
+    /// from the clicked button to `<body>` so the next Tab restarts at the top
+    /// of the document, an open tooltip vanishes mid-hover, and the horizontal
+    /// scroll offset of the table's overflow wrapper resets.
+    ///
+    /// Read the signal **inside the view you return** instead, where it is
+    /// tracked by the individual attribute and updates that one node:
+    ///
+    /// ```ignore
+    /// // WRONG — tracked by the tbody effect; rebuilds every row on change.
+    /// row_actions=move |(_idx, row): (usize, Vec<String>)| {
+    ///     let id = row[0].clone();
+    ///     let busy = pending.with(|p| p.contains(&id));
+    ///     view! { <button class="btn btn-xs" disabled=busy>"Complete"</button> }.into_any()
+    /// }
+    ///
+    /// // RIGHT — tracked by the `disabled` attribute; updates one button.
+    /// row_actions=move |(_idx, row): (usize, Vec<String>)| {
+    ///     let id = row[0].clone();
+    ///     view! {
+    ///         <button
+    ///             class="btn btn-xs"
+    ///             disabled=move || pending.with(|p| p.contains(&id))
+    ///         >"Complete"</button>
+    ///     }.into_any()
+    /// }
+    /// ```
+    #[prop(optional, into)]
+    row_actions: Option<Callback<(usize, Vec<String>), AnyView>>,
+    /// Visible header label for the action column. Ignored when `row_actions`
+    /// is unset.
+    ///
+    /// Defaults to a visually-hidden "Actions", so the column always carries an
+    /// accessible name — without one a screen reader announces the row's cells
+    /// and then a blank header followed by unexplained buttons. Pass a label to
+    /// show it, which is worth doing when the column is wide enough to carry it.
+    #[prop(optional, into)]
+    action_header: String,
 ) -> impl IntoView {
     // Resolve key-based column refs to indices, with debug-time validation that
     // the keys actually exist in the column list. Catches drift when columns get
@@ -208,29 +363,20 @@ pub fn DataTable(
     let rows = StoredValue::new(rows);
     let badge_cols = StoredValue::new(all_badge);
     let link_cols = StoredValue::new(all_link);
+    let action_header = StoredValue::new(action_header);
 
     // Sort state: (column_index, direction)
     let sort_state = RwSignal::new(Option::<(usize, SortDirection)>::None);
     // Current page (0-indexed)
     let current_page = RwSignal::new(0_usize);
 
-    // Derived: sorted rows
+    // Derived: sorted rows, each paired with its original index in the `rows`
+    // prop so `row_actions` can identify a row after sorting and paging.
     let sorted_rows = Memo::new(move |_| {
-        let mut data = rows.get_value();
+        let mut data: Vec<(usize, Vec<String>)> =
+            rows.get_value().into_iter().enumerate().collect();
         if let Some((col_idx, direction)) = sort_state.get() {
-            data.sort_by(|a, b| {
-                let va = a.get(col_idx).map(|s| s.as_str()).unwrap_or("");
-                let vb = b.get(col_idx).map(|s| s.as_str()).unwrap_or("");
-                // Try numeric comparison first, fall back to string
-                let cmp = match (va.parse::<f64>(), vb.parse::<f64>()) {
-                    (Ok(na), Ok(nb)) => na.partial_cmp(&nb).unwrap_or(std::cmp::Ordering::Equal),
-                    _ => va.cmp(vb),
-                };
-                match direction {
-                    SortDirection::Ascending => cmp,
-                    SortDirection::Descending => cmp.reverse(),
-                }
-            });
+            sort_indexed_rows(&mut data, col_idx, direction);
         }
         data
     });
@@ -284,7 +430,7 @@ pub fn DataTable(
                                                 if checked {
                                                     let all: std::collections::HashSet<String> =
                                                         visible_rows.with(|rs| rs.iter()
-                                                            .filter_map(|r| r.first().cloned())
+                                                            .filter_map(|r| r.1.first().cloned())
                                                             .collect());
                                                     sel.set(all);
                                                 } else {
@@ -344,14 +490,36 @@ pub fn DataTable(
                                     </th>
                                 }
                             }).collect::<Vec<_>>()}
+                            // Trailing action header. Emitted outside the column
+                            // loop above, so it takes no data index and carries
+                            // no sort handler. An unset label still names the
+                            // column for assistive tech rather than announcing
+                            // a blank header before a run of buttons.
+                            {row_actions.map(|_| {
+                                let label = action_header.get_value();
+                                view! {
+                                    <th class="text-right">
+                                        {if label.is_empty() {
+                                            Either::Left(view! {
+                                                <span class="sr-only">"Actions"</span>
+                                            })
+                                        } else {
+                                            Either::Right(label)
+                                        }}
+                                    </th>
+                                }
+                            })}
                         </tr>
                     </thead>
                     <tbody>
                         {move || {
                             let rows = visible_rows.get();
                             if rows.is_empty() {
-                                let col_count = columns.get_value().len()
-                                    + bulk_select.map(|_| 1).unwrap_or(0);
+                                let col_count = visual_layout(
+                                    columns.get_value().len(),
+                                    bulk_select.is_some(),
+                                    row_actions.is_some(),
+                                ).len();
                                 Either::Left(view! {
                                     <tr>
                                         <td colspan=col_count.to_string() class="text-center text-base-content/40 py-8">
@@ -360,10 +528,25 @@ pub fn DataTable(
                                     </tr>
                                 })
                             } else {
-                                Either::Right(rows.into_iter().map(|row| {
+                                Either::Right(rows.into_iter().map(|(row_index, row)| {
                                     let bcols = badge_cols.get_value();
                                     let lcols = link_cols.get_value();
                                     let cols = columns.get_value();
+                                    // Trailing action cell. Built here (before the
+                                    // cell loop consumes `row`) but rendered after
+                                    // it, so it takes no data index — `badge_cols`,
+                                    // `link_cols` and the sort state are untouched.
+                                    // Only cloned when the prop is actually set.
+                                    let action_cell = row_actions.map(|render| {
+                                        let cells = row.clone();
+                                        view! {
+                                            <td class="text-sm text-right whitespace-nowrap">
+                                                <div class="flex items-center justify-end gap-1">
+                                                    {render.run((row_index, cells))}
+                                                </div>
+                                            </td>
+                                        }
+                                    });
                                     let row_key = row.first().cloned().unwrap_or_default();
                                     let row_class = move || {
                                         let is_selected = selected_row_key
@@ -422,6 +605,7 @@ pub fn DataTable(
                                                     </td>
                                                 }
                                             }).collect::<Vec<_>>()}
+                                            {action_cell}
                                         </tr>
                                     }
                                 }).collect::<Vec<_>>())
@@ -478,5 +662,209 @@ pub fn DataTable(
                 </Show>
             </div>
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The visual positions the data columns occupy, in data-index order.
+    fn data_positions(data_columns: usize, bulk_select: bool, action_column: bool) -> Vec<usize> {
+        let layout = visual_layout(data_columns, bulk_select, action_column);
+        let mut positions = vec![usize::MAX; data_columns];
+        for (visual, cell) in layout.iter().enumerate() {
+            if let VisualCell::Data(data_idx) = cell {
+                positions[*data_idx] = visual;
+            }
+        }
+        positions
+    }
+
+    // ── visual_layout: the optional cells ──
+
+    #[test]
+    fn plain_table_renders_only_its_data_columns() {
+        assert_eq!(
+            visual_layout(3, false, false),
+            vec![
+                VisualCell::Data(0),
+                VisualCell::Data(1),
+                VisualCell::Data(2)
+            ],
+        );
+    }
+
+    #[test]
+    fn the_action_column_is_absent_when_the_prop_is_unset() {
+        // Existing callers must render byte-identically: no extra cell at all.
+        let layout = visual_layout(4, false, false);
+        assert_eq!(layout.len(), 4);
+        assert!(!layout.contains(&VisualCell::Action));
+    }
+
+    #[test]
+    fn the_action_column_is_trailing() {
+        let layout = visual_layout(4, false, true);
+        assert_eq!(layout.len(), 5);
+        assert_eq!(layout.last(), Some(&VisualCell::Action));
+    }
+
+    #[test]
+    fn bulk_select_is_leading() {
+        let layout = visual_layout(4, true, false);
+        assert_eq!(layout.len(), 5);
+        assert_eq!(layout.first(), Some(&VisualCell::BulkSelect));
+    }
+
+    #[test]
+    fn bulk_select_and_the_action_column_bracket_the_data_columns() {
+        assert_eq!(
+            visual_layout(2, true, true),
+            vec![
+                VisualCell::BulkSelect,
+                VisualCell::Data(0),
+                VisualCell::Data(1),
+                VisualCell::Action,
+            ],
+        );
+    }
+
+    // ── the four-combination index matrix ──
+
+    #[test]
+    fn the_action_column_never_shifts_a_data_column() {
+        // The whole correctness risk of the action column: `badge_columns`,
+        // `link_columns` and the sort state address data indices, so appending a
+        // column must not renumber them. Only `bulk_select` shifts the *visual*
+        // position, and it shifts every data column by exactly one.
+        for bulk_select in [false, true] {
+            let offset = usize::from(bulk_select);
+            for action_column in [false, true] {
+                assert_eq!(
+                    data_positions(5, bulk_select, action_column),
+                    (0..5).map(|i| i + offset).collect::<Vec<_>>(),
+                    "bulk_select={bulk_select} action_column={action_column}",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn badge_and_link_indices_resolve_to_the_same_visual_column_in_all_four_combinations() {
+        // Columns: 0=id (link), 1=name, 2=status (badge), 3=owner.
+        const LINK_COL: usize = 0;
+        const BADGE_COL: usize = 2;
+        for bulk_select in [false, true] {
+            let offset = usize::from(bulk_select);
+            for action_column in [false, true] {
+                let positions = data_positions(4, bulk_select, action_column);
+                assert_eq!(
+                    positions[LINK_COL],
+                    LINK_COL + offset,
+                    "link column moved: bulk_select={bulk_select} action_column={action_column}",
+                );
+                assert_eq!(
+                    positions[BADGE_COL],
+                    BADGE_COL + offset,
+                    "badge column moved: bulk_select={bulk_select} action_column={action_column}",
+                );
+            }
+        }
+        // And toggling only the action column leaves every position identical.
+        for bulk_select in [false, true] {
+            assert_eq!(
+                data_positions(4, bulk_select, false),
+                data_positions(4, bulk_select, true),
+            );
+        }
+    }
+
+    #[test]
+    fn empty_state_colspan_matches_the_rendered_cell_count() {
+        assert_eq!(visual_layout(4, false, false).len(), 4);
+        assert_eq!(visual_layout(4, true, false).len(), 5);
+        assert_eq!(visual_layout(4, false, true).len(), 5);
+        assert_eq!(visual_layout(4, true, true).len(), 6);
+    }
+
+    #[test]
+    fn a_zero_column_table_still_renders_its_optional_cells() {
+        assert_eq!(visual_layout(0, false, false).len(), 0);
+        assert_eq!(visual_layout(0, true, true).len(), 2);
+    }
+
+    // ── sort_indexed_rows ──
+
+    fn fixture() -> Vec<(usize, Vec<String>)> {
+        [
+            ["c", "Low", "30"],
+            ["a", "High", "200"],
+            ["b", "Medium", "100"],
+        ]
+        .into_iter()
+        .map(|r| r.map(String::from).to_vec())
+        .enumerate()
+        .collect()
+    }
+
+    #[test]
+    fn sorting_uses_the_data_column_that_was_clicked() {
+        let mut rows = fixture();
+        sort_indexed_rows(&mut rows, 0, SortDirection::Ascending);
+        assert_eq!(
+            rows.iter().map(|(_, r)| r[0].as_str()).collect::<Vec<_>>(),
+            vec!["a", "b", "c"],
+        );
+
+        let mut rows = fixture();
+        sort_indexed_rows(&mut rows, 1, SortDirection::Ascending);
+        assert_eq!(
+            rows.iter().map(|(_, r)| r[1].as_str()).collect::<Vec<_>>(),
+            vec!["High", "Low", "Medium"],
+        );
+    }
+
+    #[test]
+    fn numeric_columns_compare_numerically_not_lexicographically() {
+        let mut rows = fixture();
+        sort_indexed_rows(&mut rows, 2, SortDirection::Ascending);
+        assert_eq!(
+            rows.iter().map(|(_, r)| r[2].as_str()).collect::<Vec<_>>(),
+            vec!["30", "100", "200"],
+        );
+    }
+
+    #[test]
+    fn descending_reverses_the_order() {
+        let mut rows = fixture();
+        sort_indexed_rows(&mut rows, 2, SortDirection::Descending);
+        assert_eq!(
+            rows.iter().map(|(_, r)| r[2].as_str()).collect::<Vec<_>>(),
+            vec!["200", "100", "30"],
+        );
+    }
+
+    #[test]
+    fn sorting_carries_the_original_row_index_so_row_actions_stay_addressable() {
+        // `row_actions` receives this index; it must keep pointing at the row's
+        // position in the `rows` prop, not at its position on the page.
+        let mut rows = fixture();
+        sort_indexed_rows(&mut rows, 0, SortDirection::Ascending);
+        assert_eq!(
+            rows.iter().map(|(i, _)| *i).collect::<Vec<_>>(),
+            vec![1, 2, 0],
+        );
+    }
+
+    #[test]
+    fn an_out_of_range_sort_column_leaves_every_row_comparing_equal() {
+        // Stable sort => original order preserved rather than an arbitrary shuffle.
+        let mut rows = fixture();
+        sort_indexed_rows(&mut rows, 99, SortDirection::Ascending);
+        assert_eq!(
+            rows.iter().map(|(i, _)| *i).collect::<Vec<_>>(),
+            vec![0, 1, 2],
+        );
     }
 }

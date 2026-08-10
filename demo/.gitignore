@@ -2,3 +2,5 @@
 /dist
 /target
 output.css
+# Freshness marker written by build-css.mjs alongside output.css (ldui-hun).
+.ldui-css-stamp

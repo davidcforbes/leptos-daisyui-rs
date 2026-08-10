@@ -892,6 +892,45 @@ overlap hard-fail → `check_ceilings`).
 
 ---
 
+## Amendment (2026-08-08, mid-execution)
+
+The concurrent PixelProof session closed `PixelProof-5af` having landed far
+more than the rule model (commits `088519f..d771f66`): a **generated
+computed-style sweep** (`sweep_js(profile, &SweepOptions)`, ported and
+generalized from this repo's `tests/common/layout_audit.rs`), engine family
+constants `family::{OVERLAP, GRID, INTERNAL}`, a `verify()`
+overlap-hard-fail + ceilings gate, `StyleProfile::line_ramp`,
+`ShadowSpec::with_spread`, and a `web` module (default `web` feature:
+`WebAuditConfig`, `harness_at`, `wait_for_selector`, `run_sweep`, all
+Result-based) — with 8 browser negative controls proving the generic
+families in the engine's own test suite. Consequences:
+
+- **Task 3 (harness plumbing): SUPERSEDED** by `web::WebAuditConfig` +
+  `harness_at` (env-var override, query suffix, ready selectors, isolated
+  profile, 60 s selector budget — all present with the proven defaults).
+- **Task 4 (box-shadow parser): SUPERSEDED** — the generated sweep judges
+  shadows in-page; no Rust-side computed-string parsing is needed.
+- **Task 5 (sweep + judge): SUPERSEDED** — `sweep_js` covers typography /
+  shape / depth / spacing / overlap / grid / internal, judged in-page
+  against the embedded profile JSON.
+- **Task 2 (amended):** additionally sets `.line_ramp(LINE_RAMP)` from
+  `ui_tokens`; absorbs the ldui-flavored web defaults
+  (`ldui_web_config(base_url)` — `?pp-freeze=1` suffix +
+  `style[data-pixelproof="freeze"]` ready selector) and extends the crate
+  re-exports (`verify`, `sweep_js`, `SweepOptions`, `web::*`).
+- **Task 6 (amended):** the drift heuristics become a standalone ldui JS
+  sweep (`DRIFT_JS` + `run_drift(&Harness) -> Vec<Violation>`) merged into
+  the engine report; the four rules are unchanged.
+- **Task 7 (amended):** `audit_page(h, profile, opts)` composes
+  `web::run_sweep` + `run_drift` via `AuditReport::push`; the demo suite
+  migration re-points `tests/common` at the engine web module and engine
+  family constants; negative controls narrow to component-drift plus one
+  engine-family sanity injection (the engine already proves its families).
+- Tasks 1, 8–12 unchanged (1 and 8 were complete before the amendment).
+
+Amended briefs live beside the originals in the SDD workspace as
+`task-{2,6,7}-brief-amended.md` and govern over the sections above.
+
 ## Self-review notes
 
 - Spec coverage: §1a landed externally (noted in header); §1b Tasks 1–7;

@@ -4,19 +4,23 @@
 //! port 3010) through headless Chrome via `pixelproof-web`. Every URL gets
 //! `?pp-freeze=1` appended, which (a) kills CSS animations/transitions/caret
 //! blink/smooth scroll before first paint and (b) installs the
-//! `window.__APP_DEBUG__` state oracle — see `demo/src/test_mode.rs` and
-//! `demo/src/debug.rs` (ldui-49w.2/.3).
+//! `window.__APP_DEBUG__` state oracle — see `src/test_mode.rs` (library,
+//! `test-mode` feature) and `demo/src/debug.rs` (ldui-49w.2/.3).
 //!
 //! Baseline convention (ldui-49w.4): committed PNGs live at
 //! `tests/visual/baselines/<page>/<state>.w<width>.png`, viewport-suffixed
 //! because captures only match baselines taken at the same viewport. The
 //! single smoke viewport is 1280x800 ([`VIEWPORT`]).
+//!
+//! The browser plumbing itself (readiness polling, the freeze/oracle query
+//! suffix, `click`/`oracle`) now lives in `pixelproof-style-audit::web` +
+//! `ldui-audit` (Task 7, ldui-audit's `audit/src/page.rs`); this module
+//! composes those with the SSIM-specific bits (baseline/render/diff roots)
+//! the visual suite still needs.
 
 // Each integration-test binary compiles this module independently, so any
 // helper unused by one binary would warn there.
 #![allow(dead_code)]
-
-pub mod layout_audit;
 
 use pixelproof_web::{Harness, HarnessConfig, ViewportSize};
 use std::path::PathBuf;
@@ -69,25 +73,36 @@ pub fn config() -> HarnessConfig {
     cfg.with_isolated_profile()
 }
 
-/// Launch Chrome, set the smoke viewport, navigate to `path` with the
-/// `?pp-freeze=1` determinism/oracle switch appended, and wait for the CSR
-/// app to actually mount.
+/// Launch Chrome, navigate to `path` with the `?pp-freeze=1`
+/// determinism/oracle switch appended, wait for the CSR app to actually
+/// mount, then set the smoke viewport.
 ///
-/// The fixed `settle_ms` alone is NOT enough here: the dev-profile wasm is
-/// ~60 MB, so first paint of real content can lag navigation by seconds
-/// (the first capture attempt produced six identical blank PNGs). We poll
-/// for (a) the freeze style tag — `test_mode::install_style_kill_switch`
-/// runs in `main()` before `mount_to_body`, so its presence proves the wasm
-/// booted in test mode — and (b) the Layout's `<main>` element, which proves
-/// the component tree mounted.
+/// Composes `ldui_audit::ldui_web_config` (the freeze/oracle query suffix,
+/// the freeze style tag as readiness proof, the demo's base URL) with this
+/// module's SSIM roots grafted onto its `.harness`, so `visual_smoke.rs`'s
+/// `capture_and_compare` still finds the committed baselines. The engine's
+/// `web::harness_at` owns the readiness polling and appends `query_suffix`
+/// itself — no local `?pp-freeze=1` append or extra waits needed here.
+///
+/// The engine harness always launches at `ViewportSize::CANONICAL`
+/// (1440x900, hard-coded in `pixelproof_web::Harness::launch_with_config`)
+/// and has no hook to set a viewport before its own navigate/wait sequence,
+/// so the smoke viewport (1280x800 — what the committed baselines and
+/// ceilings assume) is set *after* it returns, mirroring the order
+/// `pixelproof_web::responsive::capture_at_viewports` uses for its own
+/// per-viewport passes: `set_viewport` (a CDP device-metrics override,
+/// which reflows the already-loaded page) then one settle beat so
+/// fonts/layout are final at the new size before anything reads the DOM.
 pub async fn harness_at(path: &str) -> Harness {
-    let cfg = config();
-    let base = cfg.base_url.clone();
-    let h = Harness::launch_with_config(cfg).await.unwrap_or_else(|e| {
-        panic!("failed to launch headless Chrome: {e}. Is Chrome/Chromium installed?")
-    });
-    h.set_viewport(VIEWPORT).await.expect("set viewport");
-    h.navigate(&format!("{path}?pp-freeze=1"))
+    let mut cfg = ldui_audit::ldui_web_config(DEFAULT_BASE_URL);
+    let ssim = config();
+    cfg.harness.baseline_root = ssim.baseline_root;
+    cfg.harness.render_root = ssim.render_root;
+    cfg.harness.diff_root = ssim.diff_root;
+    let base = cfg.harness.base_url.clone();
+    let settle_ms = cfg.harness.settle_ms;
+
+    let h = ldui_audit::web::harness_at(&cfg, path)
         .await
         .unwrap_or_else(|e| {
             panic!(
@@ -97,75 +112,188 @@ pub async fn harness_at(path: &str) -> Harness {
                  `trunk serve` from demo/ (manual)."
             )
         });
-    wait_for_selector(&h, r#"style[data-pixelproof="freeze"]"#).await;
-    wait_for_selector(&h, "main").await;
-    // One settle beat after mount so fonts/layout are final.
-    tokio::time::sleep(std::time::Duration::from_millis(h.config().settle_ms)).await;
+    assert_stylesheet_is_current(&h, path).await;
+    h.set_viewport(VIEWPORT).await.expect("set viewport");
+    tokio::time::sleep(std::time::Duration::from_millis(settle_ms)).await;
     h
 }
 
-/// Poll (100 ms interval, 60 s budget) until `document.querySelector(sel)`
-/// matches. Panics on timeout with the selector in the message. The budget is
-/// generous because the dev-profile wasm is ~60 MB and Chrome instances can
-/// contend when tests overlap.
-pub async fn wait_for_selector(h: &Harness, sel: &str) {
-    let expr = format!(
-        "document.querySelector({}) !== null",
-        serde_json::to_string(sel).unwrap()
-    );
-    for _ in 0..600 {
-        let found: bool = h
-            .page()
-            .evaluate(expr.as_str())
-            .await
-            .ok()
-            .and_then(|v| v.into_value().ok())
-            .unwrap_or(false);
-        if found {
-            return;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+// ---------------------------------------------------------------------------
+// Stylesheet freshness guard (ldui-hun)
+// ---------------------------------------------------------------------------
+
+/// Where `demo/build-css.mjs` records the marker it stamped into the
+/// stylesheet it just built. Contents: `ok <token>` or `fail <token>`.
+fn css_stamp_file() -> PathBuf {
+    repo_root().join("demo/.ldui-css-stamp")
+}
+
+/// Collect every `#ldui-css-stamp-*` selector present in the stylesheets the
+/// page actually loaded, straight off the CSSOM.
+const COLLECT_STAMPS_JS: &str = r#"(() => {
+  const found = [];
+  for (const sheet of Array.from(document.styleSheets)) {
+    let rules;
+    try { rules = sheet.cssRules; } catch (e) { continue; }
+    for (const rule of Array.from(rules || [])) {
+      const sel = rule.selectorText;
+      if (typeof sel === 'string' && sel.startsWith('#ldui-css-stamp-')) {
+        found.push(sel.slice(1));
+      }
     }
-    panic!("timed out (30s) waiting for selector {sel:?} — did the wasm app mount?");
+  }
+  return found.join(',');
+})()"#;
+
+/// Refuse to audit a stylesheet we cannot prove is the one just built.
+///
+/// **The defect this exists for (ldui-hun):** trunk swallows its `pre_build`
+/// hook's failure, so a `CssSyntaxError` in `demo/input.css` leaves it serving
+/// the *previous* `output.css` — and both audit suites passed green against
+/// that stale stylesheet. Every ceiling and every ratchet in the visual-quality
+/// system was measuring whatever CSS last succeeded rather than the CSS just
+/// written.
+///
+/// Checking tailwind's exit code alone is not enough, because `dist/` also goes
+/// stale for reasons tailwind never sees — a concurrent session's `trunk build`
+/// rewriting `demo/dist` underneath a running suite did exactly that, and
+/// surfaced as nine layout failures on pages it never touched. So the check is
+/// the general one: `demo/build-css.mjs` stamps a **run-unique** marker into
+/// `output.css` on every successful build, and this asserts the marker in the
+/// CSS the browser loaded is the current one.
+///
+/// Called from [`harness_at`], the single funnel every browser suite goes
+/// through (`style_audit_smoke`, `layout_audit_smoke`, `visual_smoke`,
+/// `reactivity_smoke`), and called per navigation rather than once per process
+/// so a rebuild *during* a suite is caught too.
+///
+/// The marker is an unmatchable id rule (`#ldui-css-stamp-<token>`), so it
+/// cannot perturb a computed style — nothing in the demo carries that id.
+pub async fn assert_stylesheet_is_current(h: &Harness, path: &str) {
+    let stamp_path = css_stamp_file();
+    let recorded = std::fs::read_to_string(&stamp_path).unwrap_or_else(|e| {
+        panic!(
+            "STYLESHEET BUILD GUARD (ldui-hun): {} is missing ({e}).\n\
+             The demo stylesheet has not been built by `demo/build-css.mjs`, so there is \
+             nothing proving the CSS being audited is current.\n\
+             Run `node build-css.mjs` in demo/ (or let `cargo xtask test-style` / \
+             `test-layout` start the server, which does it for you).",
+            stamp_path.display()
+        )
+    });
+    let recorded = recorded.trim();
+    let (status, token) = recorded.split_once(' ').unwrap_or(("fail", recorded));
+
+    assert!(
+        status == "ok",
+        "STYLESHEET BUILD FAILED (ldui-hun): {} records `{recorded}`.\n\
+         Tailwind did not produce a stylesheet on the last build, so `demo/output.css` \
+         is STALE and trunk is serving the CSS that last succeeded — not the CSS you \
+         just wrote. Auditing it would be meaningless.\n\
+         Fix `demo/input.css` and re-run; `node build-css.mjs` in demo/ reproduces the \
+         failure on its own.",
+        stamp_path.display()
+    );
+
+    let found: String = h
+        .page()
+        .evaluate(COLLECT_STAMPS_JS)
+        .await
+        .expect("evaluate stylesheet stamp collector")
+        .into_value()
+        .expect("stamp collector returns a string");
+    let expected = format!("ldui-css-stamp-{token}");
+
+    assert!(
+        found.split(',').any(|s| s == expected),
+        "STALE STYLESHEET (ldui-hun): the CSS loaded by {path} is not the CSS that was \
+         last built.\n  expected marker: {expected}   (from {})\n  markers found in the \
+         served stylesheets: {}\n\
+         `demo/output.css` or `demo/dist` is stale — commonly a failed tailwind build \
+         (trunk swallows its pre_build hook's exit code and keeps serving the previous \
+         stylesheet) or a concurrent `trunk build` rewriting `demo/dist` underneath this \
+         run. Every ceiling and ratchet below would have been measured against the wrong \
+         CSS, so the suite stops here rather than reporting a green it cannot justify.",
+        stamp_path.display(),
+        if found.is_empty() {
+            "(none)".to_string()
+        } else {
+            found.clone()
+        },
+    );
+}
+
+/// The demo's real computed `<body>` font family (first family in the stack,
+/// quotes stripped).
+///
+/// Both audit suites pin this into their `StyleProfile` rather than naming a
+/// family: a silent font fallback (the declared family never loads) is itself
+/// a regression the sweep should catch, and a *wrong* declared family is
+/// worse than useless — the engine compares every text-bearing element's
+/// computed family against it, so a sentinel like `"__any__"` makes every
+/// element on a text-heavy page a typography violation, overruns the engine's
+/// 200-per-family cap and latches `truncated` on every run forever (see
+/// `assert_not_truncated`).
+pub async fn body_font_family(h: &Harness) -> String {
+    let raw: String = h
+        .page()
+        .evaluate("getComputedStyle(document.body).fontFamily")
+        .await
+        .expect("evaluate body font-family")
+        .into_value()
+        .expect("font-family computed style is a string");
+    raw.split(',')
+        .next()
+        .unwrap_or(&raw)
+        .trim()
+        .trim_matches(|c| c == '"' || c == '\'')
+        .to_string()
+}
+
+/// Fail when a sweep hit the engine's per-family cap.
+///
+/// The engine caps each family at 200 violations and sets
+/// `AuditReport::truncated`, documenting the counts as "a floor, not a total".
+/// A ratcheted ceiling above the cap is then permanently uncheckable: the
+/// count saturates at 200, stays `<= ceiling` forever, and every further
+/// regression passes while the report reads clean.
+///
+/// Both audit suites call this — `ldui_audit::verify` only *notes* truncation
+/// in its `Ok` path, so surfacing it needs an explicit assertion either way,
+/// and the layout suite cannot adopt `verify` at all (it governs only
+/// overlap/grid/internal, while `verify`'s ratchet demands a ceiling for
+/// every reporting family).
+pub fn assert_not_truncated(report: &ldui_audit::AuditReport, surface: &str) {
+    assert!(
+        !report.truncated,
+        "sweep of {surface} hit the engine's per-family cap — counts are a floor, \
+         not a total, so any ceiling at or above the cap can never fail again.\n{}",
+        report.describe(surface)
+    );
+}
+
+/// Poll until `document.querySelector(sel)` matches (60 s budget). Panics on
+/// timeout with the selector in the message.
+pub async fn wait_for_selector(h: &Harness, sel: &str) {
+    ldui_audit::web::wait_for_selector(h, sel, 60_000)
+        .await
+        .unwrap_or_else(|e| panic!("{e}"))
 }
 
 /// Click `selector` with a real CDP mouse event and wait the settle delay.
 /// (The harness only exposes click_and_capture; reactivity tests need a
 /// capture-free click.)
 pub async fn click(h: &Harness, selector: &str) {
-    h.page()
-        .find_element(selector)
+    ldui_audit::click(h, selector, h.config().settle_ms)
         .await
-        .unwrap_or_else(|e| panic!("find {selector}: {e}"))
-        .click()
-        .await
-        .unwrap_or_else(|e| panic!("click {selector}: {e}"));
-    tokio::time::sleep(std::time::Duration::from_millis(h.config().settle_ms)).await;
+        .unwrap_or_else(|e| panic!("{e}"))
 }
 
 /// Pull the `window.__APP_DEBUG__.state()` snapshot, panicking if the bridge
 /// is absent (it must exist on any page loaded with `?pp-freeze=1`).
 pub async fn oracle(h: &Harness) -> serde_json::Value {
-    h.app_debug_state()
+    ldui_audit::oracle(h)
         .await
         .expect("app_debug_state call failed")
         .expect("window.__APP_DEBUG__ missing — was the page loaded with ?pp-freeze=1?")
-}
-
-/// Run the [`layout_audit`] sweep against the currently-loaded page and
-/// deserialize the report.
-///
-/// The sweep returns a JSON *string* rather than an object: CDP's value
-/// marshalling flattens nested arrays inconsistently across driver versions,
-/// and a string round-trips identically everywhere.
-pub async fn layout_report(h: &Harness) -> layout_audit::AuditReport {
-    let raw: String = h
-        .page()
-        .evaluate(layout_audit::SWEEP_JS.to_string())
-        .await
-        .expect("layout sweep failed to evaluate")
-        .into_value()
-        .expect("layout sweep did not return a string");
-    serde_json::from_str(&raw)
-        .unwrap_or_else(|e| panic!("layout sweep returned unparseable JSON ({e}): {raw}"))
 }
