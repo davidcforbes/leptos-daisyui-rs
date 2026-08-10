@@ -296,6 +296,37 @@ fn npm_bin() -> &'static str {
     if cfg!(windows) { "npm.cmd" } else { "npm" }
 }
 
+/// Build the demo's stylesheet **before** trunk gets a chance to, so a broken
+/// `demo/input.css` fails the gate step in seconds with a message naming the
+/// stylesheet build.
+///
+/// Trunk runs the same script from its own `pre_build` hook, but it
+/// **swallows the hook's non-zero exit** and carries on serving the previous
+/// `output.css` (ldui-hun). Running it here is the fast, loud half of the
+/// guard; the durable half is the run-unique marker `build-css.mjs` stamps
+/// into the stylesheet, which the browser harness verifies against the CSS the
+/// page actually loaded. See `demo/build-css.mjs`.
+fn build_demo_stylesheet() -> Result<(), String> {
+    eprintln!("xtask: building demo stylesheet (node build-css.mjs)");
+    let ok = Command::new("node")
+        .arg("build-css.mjs")
+        .current_dir("demo")
+        .status()
+        .map_err(|e| format!("failed to launch node for the stylesheet build: {e}"))?
+        .success();
+    if ok {
+        Ok(())
+    } else {
+        Err(
+            "the demo STYLESHEET BUILD failed (node demo/build-css.mjs) — \
+             demo/output.css is stale, so the browser suites would be auditing \
+             the last stylesheet that built rather than the current one. Fix \
+             demo/input.css."
+                .into(),
+        )
+    }
+}
+
 /// Ask the OS for an unused loopback port, then release it. Each `xtask`
 /// invocation therefore gets its own port instead of contending on a shared
 /// 3010 (the shared-port flake documented in Rust-DeskApp's `doc/ci-cd.md`).
@@ -339,8 +370,9 @@ struct DemoServer {
 
 impl DemoServer {
     /// Idempotent `npm install` (Trunk's tailwind pre-build hook needs
-    /// `demo/node_modules`, and a fresh worktree has none), then `trunk serve`
-    /// on a free port, then poll until it answers 200.
+    /// `demo/node_modules`, and a fresh worktree has none), then the demo
+    /// stylesheet build (see [`build_demo_stylesheet`]), then `trunk serve` on
+    /// a free port, then poll until it answers 200.
     fn start() -> Result<Self, String> {
         if !std::path::Path::new("demo/node_modules").exists() {
             eprintln!("xtask: npm install in demo/ (tailwind pre-build hook)");
@@ -354,6 +386,8 @@ impl DemoServer {
                 return Err("npm install failed".into());
             }
         }
+
+        build_demo_stylesheet()?;
 
         let port = free_port()?;
         eprintln!("xtask: starting `trunk serve` in demo/ on port {port}");

@@ -112,9 +112,115 @@ pub async fn harness_at(path: &str) -> Harness {
                  `trunk serve` from demo/ (manual)."
             )
         });
+    assert_stylesheet_is_current(&h, path).await;
     h.set_viewport(VIEWPORT).await.expect("set viewport");
     tokio::time::sleep(std::time::Duration::from_millis(settle_ms)).await;
     h
+}
+
+// ---------------------------------------------------------------------------
+// Stylesheet freshness guard (ldui-hun)
+// ---------------------------------------------------------------------------
+
+/// Where `demo/build-css.mjs` records the marker it stamped into the
+/// stylesheet it just built. Contents: `ok <token>` or `fail <token>`.
+fn css_stamp_file() -> PathBuf {
+    repo_root().join("demo/.ldui-css-stamp")
+}
+
+/// Collect every `#ldui-css-stamp-*` selector present in the stylesheets the
+/// page actually loaded, straight off the CSSOM.
+const COLLECT_STAMPS_JS: &str = r#"(() => {
+  const found = [];
+  for (const sheet of Array.from(document.styleSheets)) {
+    let rules;
+    try { rules = sheet.cssRules; } catch (e) { continue; }
+    for (const rule of Array.from(rules || [])) {
+      const sel = rule.selectorText;
+      if (typeof sel === 'string' && sel.startsWith('#ldui-css-stamp-')) {
+        found.push(sel.slice(1));
+      }
+    }
+  }
+  return found.join(',');
+})()"#;
+
+/// Refuse to audit a stylesheet we cannot prove is the one just built.
+///
+/// **The defect this exists for (ldui-hun):** trunk swallows its `pre_build`
+/// hook's failure, so a `CssSyntaxError` in `demo/input.css` leaves it serving
+/// the *previous* `output.css` — and both audit suites passed green against
+/// that stale stylesheet. Every ceiling and every ratchet in the visual-quality
+/// system was measuring whatever CSS last succeeded rather than the CSS just
+/// written.
+///
+/// Checking tailwind's exit code alone is not enough, because `dist/` also goes
+/// stale for reasons tailwind never sees — a concurrent session's `trunk build`
+/// rewriting `demo/dist` underneath a running suite did exactly that, and
+/// surfaced as nine layout failures on pages it never touched. So the check is
+/// the general one: `demo/build-css.mjs` stamps a **run-unique** marker into
+/// `output.css` on every successful build, and this asserts the marker in the
+/// CSS the browser loaded is the current one.
+///
+/// Called from [`harness_at`], the single funnel every browser suite goes
+/// through (`style_audit_smoke`, `layout_audit_smoke`, `visual_smoke`,
+/// `reactivity_smoke`), and called per navigation rather than once per process
+/// so a rebuild *during* a suite is caught too.
+///
+/// The marker is an unmatchable id rule (`#ldui-css-stamp-<token>`), so it
+/// cannot perturb a computed style — nothing in the demo carries that id.
+pub async fn assert_stylesheet_is_current(h: &Harness, path: &str) {
+    let stamp_path = css_stamp_file();
+    let recorded = std::fs::read_to_string(&stamp_path).unwrap_or_else(|e| {
+        panic!(
+            "STYLESHEET BUILD GUARD (ldui-hun): {} is missing ({e}).\n\
+             The demo stylesheet has not been built by `demo/build-css.mjs`, so there is \
+             nothing proving the CSS being audited is current.\n\
+             Run `node build-css.mjs` in demo/ (or let `cargo xtask test-style` / \
+             `test-layout` start the server, which does it for you).",
+            stamp_path.display()
+        )
+    });
+    let recorded = recorded.trim();
+    let (status, token) = recorded.split_once(' ').unwrap_or(("fail", recorded));
+
+    assert!(
+        status == "ok",
+        "STYLESHEET BUILD FAILED (ldui-hun): {} records `{recorded}`.\n\
+         Tailwind did not produce a stylesheet on the last build, so `demo/output.css` \
+         is STALE and trunk is serving the CSS that last succeeded — not the CSS you \
+         just wrote. Auditing it would be meaningless.\n\
+         Fix `demo/input.css` and re-run; `node build-css.mjs` in demo/ reproduces the \
+         failure on its own.",
+        stamp_path.display()
+    );
+
+    let found: String = h
+        .page()
+        .evaluate(COLLECT_STAMPS_JS)
+        .await
+        .expect("evaluate stylesheet stamp collector")
+        .into_value()
+        .expect("stamp collector returns a string");
+    let expected = format!("ldui-css-stamp-{token}");
+
+    assert!(
+        found.split(',').any(|s| s == expected),
+        "STALE STYLESHEET (ldui-hun): the CSS loaded by {path} is not the CSS that was \
+         last built.\n  expected marker: {expected}   (from {})\n  markers found in the \
+         served stylesheets: {}\n\
+         `demo/output.css` or `demo/dist` is stale — commonly a failed tailwind build \
+         (trunk swallows its pre_build hook's exit code and keeps serving the previous \
+         stylesheet) or a concurrent `trunk build` rewriting `demo/dist` underneath this \
+         run. Every ceiling and ratchet below would have been measured against the wrong \
+         CSS, so the suite stops here rather than reporting a green it cannot justify.",
+        stamp_path.display(),
+        if found.is_empty() {
+            "(none)".to_string()
+        } else {
+            found.clone()
+        },
+    );
 }
 
 /// The demo's real computed `<body>` font family (first family in the stack,

@@ -16,7 +16,13 @@ addresses = ["127.0.0.1"]
 port = 3010
 open = false
 
+# Tailwind, wrapped so a FAILED stylesheet build cannot pass unnoticed.
+# Trunk SWALLOWS a pre_build hook's non-zero exit and carries on serving the
+# previous `output.css`, so `build-css.mjs` also stamps a run-unique marker
+# into the stylesheet (and records a `fail` in `demo/.ldui-css-stamp`) that the
+# browser audit harness verifies against the CSS the page actually loaded.
+# See demo/build-css.mjs and doc/ci-cd.md (ldui-hun).
 [[hooks]]
 stage = "pre_build"
-command = "npx.cmd"
-command_arguments = ["tailwindcss", "-i", "input.css", "-o", "output.css"]
+command = "node"
+command_arguments = ["build-css.mjs"]

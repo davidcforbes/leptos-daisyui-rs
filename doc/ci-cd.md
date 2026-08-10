@@ -259,6 +259,50 @@ The suite keeps its `#[ignore]` attributes (the gate passes `--ignored`
 explicitly) so that a bare `cargo test` with no server running still passes.
 `#[ignore]` here means "needs a server", not "is manual".
 
+### The stylesheet freshness guard — why a green audit now means something
+
+Every browser suite audits **computed styles**, so all of them are worthless if
+the stylesheet the browser loaded is not the stylesheet the repo currently
+describes. That was not hypothetical: a `CssSyntaxError` in `demo/input.css`
+made `tailwindcss` exit non-zero, **trunk swallowed its `pre_build` hook's
+failure**, kept serving the *previous* `output.css`, and both audit suites
+passed against it — `test-style` 7/7 and `test-layout` 9/9, exit 0. Every
+ceiling and ratchet in the visual-quality system was measuring whatever CSS last
+succeeded (ldui-hun). `verify` cannot see it either: it runs `cargo check` and
+never invokes trunk.
+
+Checking tailwind's exit code is not sufficient, because `dist/` also goes stale
+for reasons tailwind never sees — a concurrent session's `trunk build` rewriting
+`demo/dist` underneath a running suite failed nine layout tests on pages it
+never touched. So the guard is the general one:
+
+1. Trunk's `pre_build` hook runs [`demo/build-css.mjs`](../demo/build-css.mjs)
+   instead of `npx tailwindcss` directly. On success it appends a **run-unique
+   marker** to `output.css` and records it in `demo/.ldui-css-stamp`
+   (gitignored, like `output.css`); on failure it records `fail` there and
+   leaves `output.css` alone, so the evidence survives even though trunk
+   discards the exit code.
+2. `run_browser_suite`'s `DemoServer::start` runs the same script itself before
+   spawning trunk, so a broken stylesheet fails the step in seconds rather than
+   after an eight-minute wasm build.
+3. `common::harness_at` — the single funnel `style_audit_smoke`,
+   `layout_audit_smoke`, `visual_smoke` and `reactivity_smoke` all navigate
+   through — asserts **per navigation** that the CSS the page loaded carries the
+   current marker, and refuses to audit otherwise. Per navigation, not once per
+   process, so a rebuild *during* a suite is caught too.
+
+The marker is an unmatchable id rule (`#ldui-css-stamp-<token> { … }`), not a
+comment: comments do not appear in the CSSOM (so verifying one would need a
+network fetch) and are stripped by the CSS minifier in release builds. Nothing
+in the demo carries that id, so the rule matches no element and cannot perturb a
+computed style — confirmed empirically by both suites' zero-slack ceilings and
+by `report_layout_backlog` returning identical per-page counts with and without
+it.
+
+Failure names the stylesheet build (`STYLESHEET BUILD FAILED` /
+`STALE STYLESHEET`) rather than surfacing as a ceiling breach or a mount
+timeout, which is where this defect used to send the reader.
+
 ### `cargo xtask test-layout` — the spacing/overlap audit
 
 Same server lifecycle as `test-reactivity` (both go through
