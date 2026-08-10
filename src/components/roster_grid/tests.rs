@@ -409,32 +409,56 @@ fn only_enter_and_space_activate_a_cell() {
 // Roving focus -- key mapping
 // ---------------------------------------------------------------------
 
+/// `roster_focus_move(key, ctrl, alt, meta)` with no modifiers held.
+fn bare(key: &str) -> Option<RosterFocusMove> {
+    roster_focus_move(key, false, false, false)
+}
+
 #[test]
 fn arrows_and_home_end_map_to_movements() {
     use RosterFocusMove::*;
-    assert_eq!(roster_focus_move("ArrowLeft", false), Some(Left));
-    assert_eq!(roster_focus_move("ArrowRight", false), Some(Right));
-    assert_eq!(roster_focus_move("ArrowUp", false), Some(Up));
-    assert_eq!(roster_focus_move("ArrowDown", false), Some(Down));
-    assert_eq!(roster_focus_move("Home", false), Some(RowStart));
-    assert_eq!(roster_focus_move("End", false), Some(RowEnd));
-    assert_eq!(roster_focus_move("Home", true), Some(GridStart));
-    assert_eq!(roster_focus_move("End", true), Some(GridEnd));
+    assert_eq!(bare("ArrowLeft"), Some(Left));
+    assert_eq!(bare("ArrowRight"), Some(Right));
+    assert_eq!(bare("ArrowUp"), Some(Up));
+    assert_eq!(bare("ArrowDown"), Some(Down));
+    assert_eq!(bare("Home"), Some(RowStart));
+    assert_eq!(bare("End"), Some(RowEnd));
 }
 
 /// Tab must reach the browser untouched or the grid becomes a keyboard trap,
 /// and the activation keys must NOT also move focus -- the two vocabularies are
 /// disjoint by construction, which is what makes `cell_key_activates` free to
 /// stay Enter/Space-only.
+///
+/// The modifier axis is part of that disjointness: a chord the browser owns is
+/// not the grid's key no matter which base key it is built on.
 #[test]
 fn movement_and_activation_keys_are_disjoint_and_tab_is_untouched() {
+    const MODS: [(bool, bool, bool); 8] = [
+        (false, false, false),
+        (true, false, false),
+        (false, true, false),
+        (false, false, true),
+        (true, true, false),
+        (true, false, true),
+        (false, true, true),
+        (true, true, true),
+    ];
+
+    // Keys that are never ours, under EVERY modifier combination.
     for key in ["Tab", "Escape", "a", "PageDown", "Spacebar", ""] {
-        assert!(roster_focus_move(key, false).is_none(), "{key} moved focus");
-        assert!(roster_focus_move(key, true).is_none(), "ctrl+{key} moved");
+        for (ctrl, alt, meta) in MODS {
+            assert!(
+                roster_focus_move(key, ctrl, alt, meta).is_none(),
+                "{key} moved focus with ctrl={ctrl} alt={alt} meta={meta}"
+            );
+        }
     }
     for key in ["Enter", " "] {
         assert!(cell_key_activates(key));
-        assert!(roster_focus_move(key, false).is_none());
+        for (ctrl, alt, meta) in MODS {
+            assert!(roster_focus_move(key, ctrl, alt, meta).is_none());
+        }
     }
     for key in [
         "ArrowLeft",
@@ -444,8 +468,100 @@ fn movement_and_activation_keys_are_disjoint_and_tab_is_untouched() {
         "Home",
         "End",
     ] {
-        assert!(roster_focus_move(key, false).is_some());
+        assert!(bare(key).is_some());
         assert!(!cell_key_activates(key), "{key} must not activate");
+    }
+}
+
+/// **Alt+Arrow is browser Back/Forward on Windows and Linux, and Alt+Home is
+/// the home page.** The caller only calls `prevent_default` when this returns
+/// `Some`, so returning `None` here is the whole mechanism by which those
+/// chords still reach the browser. Round-1 review caught this swallowing them:
+/// pressing Alt+Left inside the grid slid focus one column instead of
+/// navigating, and at column 0 the clamped no-op was still `preventDefault`ed,
+/// so the page looked like it had trapped the shortcut.
+#[test]
+fn alt_belongs_to_the_browser_on_every_key_we_otherwise_handle() {
+    for key in [
+        "ArrowLeft",
+        "ArrowRight",
+        "ArrowUp",
+        "ArrowDown",
+        "Home",
+        "End",
+    ] {
+        for (ctrl, meta) in [(false, false), (true, false), (false, true), (true, true)] {
+            assert!(
+                roster_focus_move(key, ctrl, true, meta).is_none(),
+                "alt+{key} (ctrl={ctrl} meta={meta}) must reach the browser"
+            );
+        }
+    }
+}
+
+/// `Cmd+ArrowLeft`/`Cmd+ArrowRight` are Back/Forward on macOS, so the arrows
+/// are not ours when Meta is held either -- even though Meta DOES claim
+/// Home/End (next test). The two rules coexist because the base keys differ.
+#[test]
+fn meta_arrows_belong_to_the_browser_but_meta_home_end_do_not() {
+    for key in ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"] {
+        assert!(
+            roster_focus_move(key, false, false, true).is_none(),
+            "cmd+{key} must reach the browser"
+        );
+        assert!(roster_focus_move(key, true, false, true).is_none());
+    }
+    assert_eq!(
+        roster_focus_move("Home", false, false, true),
+        Some(RosterFocusMove::GridStart)
+    );
+    assert_eq!(
+        roster_focus_move("End", false, false, true),
+        Some(RosterFocusMove::GridEnd)
+    );
+}
+
+/// The grid-extreme modifier is `ctrl OR meta`, the spelling `DataTable`
+/// already uses (`ev.ctrl_key() || ev.meta_key()`). Accepting only `ctrl` left
+/// `Cmd+End` on macOS falling through to `RowEnd` -- the current worker's
+/// Sunday instead of the last worker's -- with no sign the chord was misread,
+/// and then 29 ArrowDowns to reach the last row of a 30-worker roster, which is
+/// the exact ergonomics problem this feature exists to remove.
+#[test]
+fn ctrl_or_meta_promotes_home_end_to_the_grids_extremes() {
+    use RosterFocusMove::*;
+    for (ctrl, meta) in [(true, false), (false, true), (true, true)] {
+        assert_eq!(
+            roster_focus_move("Home", ctrl, false, meta),
+            Some(GridStart)
+        );
+        assert_eq!(roster_focus_move("End", ctrl, false, meta), Some(GridEnd));
+    }
+    // Neither held: the row's extremes, not the grid's.
+    assert_eq!(
+        roster_focus_move("Home", false, false, false),
+        Some(RowStart)
+    );
+    assert_eq!(roster_focus_move("End", false, false, false), Some(RowEnd));
+}
+
+/// Shift is not a browser chord on these keys and this grid has no multi-select
+/// model for it to extend, so it neither blocks a movement nor changes one.
+/// Recorded as a test so a future selection-extension feature has to change it
+/// deliberately.
+#[test]
+fn shift_is_not_part_of_the_signature_and_changes_nothing() {
+    // The function takes no `shift`: a caller cannot accidentally make it
+    // matter, and every movement below is reachable while Shift is held.
+    for key in [
+        "ArrowLeft",
+        "ArrowRight",
+        "ArrowUp",
+        "ArrowDown",
+        "Home",
+        "End",
+    ] {
+        assert!(bare(key).is_some());
     }
 }
 
@@ -669,8 +785,8 @@ fn an_activation_callback_makes_the_grid_interactive() {
 /// The fix for review round 1. `selected_cell` is a READ-ONLY `Signal`, so with
 /// no `on_cell_activate` a click or Enter press does nothing. Treating it as
 /// opting in (which DataTable and DayScheduler correctly do, because THEIR
-/// selection props are writable `RwSignal`s) would stamp `role="button"`,
-/// `tabindex=0` and `aria-pressed` onto every tile of a display-only roster --
+/// selection props are writable `RwSignal`s) would stamp `role="grid"`,
+/// `role="button"` and a tabindex onto every tile of a display-only roster --
 /// 140 unresponsive "buttons" on a 20x7 grid, i.e. WCAG 4.1.2. Flipping this
 /// back to `has_activate || has_selection` fails here.
 #[test]

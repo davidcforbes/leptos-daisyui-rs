@@ -124,7 +124,8 @@ pub fn cell_key_activates(key: &str) -> bool {
 }
 
 /// Whether the grid's tiles carry focus and keyboard semantics: a roving
-/// `tabindex`, `role="button"`, `aria-pressed`, arrow-key navigation and
+/// `tabindex`, `role="button"`, `aria-selected` on the cell, arrow-key
+/// navigation and
 /// Enter/Space activation — and whether the table itself is announced as an
 /// ARIA `grid` widget rather than a plain data table.
 ///
@@ -214,17 +215,43 @@ pub enum RosterFocusMove {
 ///
 /// Deliberately disjoint from [`cell_key_activates`]: Enter and Space activate,
 /// the arrows and Home/End move, and everything else — Tab above all — is left
-/// to the browser so the grid stays escapable. `Ctrl` promotes Home/End from
-/// the row's extremes to the grid's, which is what the ARIA Data Grid pattern
-/// specifies and what a 30-row roster actually needs.
-pub fn roster_focus_move(key: &str, ctrl: bool) -> Option<RosterFocusMove> {
+/// to the browser so the grid stays escapable. The caller only calls
+/// `prevent_default` when this returns `Some`, so **a `None` here is what lets
+/// a chord reach the browser**.
+///
+/// ### Modifiers are not decoration — they decide whose key this is
+///
+/// - **`alt` means the key is never ours.** `Alt+ArrowLeft`/`Alt+ArrowRight`
+///   are browser Back/Forward on Windows and Linux, and `Alt+Home` is the home
+///   page. Swallowing them makes the grid look like it has trapped the Back
+///   shortcut — worse at column 0, where the movement is a clamped no-op and
+///   the press appears to do nothing at all.
+/// - **`meta` means the arrows are never ours either.** `Cmd+ArrowLeft`/
+///   `Cmd+ArrowRight` are Back/Forward on macOS.
+/// - **`ctrl` OR `meta` promotes Home/End** from the row's extremes to the
+///   grid's. The ARIA Data Grid pattern specifies `Ctrl+Home`/`Ctrl+End`, but
+///   the platform modifier on macOS is Cmd; accepting only `ctrl` would hand a
+///   macOS user `RowEnd` when they asked for `GridEnd` — the same row's Sunday
+///   instead of the last worker — with no sign the chord was misread. This is
+///   the spelling `DataTable` already uses for its own modifier reads
+///   (`ev.ctrl_key() || ev.meta_key()`); the merge lives here rather than at
+///   the call site so it is covered by these tests.
+/// - **`shift` is deliberately ignored.** It is not a browser chord on these
+///   keys, and this grid has no multi-select model for it to extend, so
+///   `Shift+Arrow` moves focus like a bare arrow rather than doing nothing.
+pub fn roster_focus_move(key: &str, ctrl: bool, alt: bool, meta: bool) -> Option<RosterFocusMove> {
+    if alt {
+        return None;
+    }
+    let to_extreme = ctrl || meta;
+
     match key {
-        "ArrowLeft" => Some(RosterFocusMove::Left),
-        "ArrowRight" => Some(RosterFocusMove::Right),
-        "ArrowUp" => Some(RosterFocusMove::Up),
-        "ArrowDown" => Some(RosterFocusMove::Down),
-        "Home" if ctrl => Some(RosterFocusMove::GridStart),
-        "End" if ctrl => Some(RosterFocusMove::GridEnd),
+        "ArrowLeft" if !meta => Some(RosterFocusMove::Left),
+        "ArrowRight" if !meta => Some(RosterFocusMove::Right),
+        "ArrowUp" if !meta => Some(RosterFocusMove::Up),
+        "ArrowDown" if !meta => Some(RosterFocusMove::Down),
+        "Home" if to_extreme => Some(RosterFocusMove::GridStart),
+        "End" if to_extreme => Some(RosterFocusMove::GridEnd),
         "Home" => Some(RosterFocusMove::RowStart),
         "End" => Some(RosterFocusMove::RowEnd),
         _ => None,

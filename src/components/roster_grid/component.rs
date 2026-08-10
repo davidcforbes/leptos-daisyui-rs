@@ -151,6 +151,12 @@ pub fn RosterGrid(
     /// roving tabindex giving the whole roster a single tab stop with arrow-key
     /// navigation inside it. A display-only roster gains no tab stops at all
     /// and stays a plain semantic table.
+    ///
+    /// **An interactive roster should carry `label` or `labelled_by`.** ARIA
+    /// 1.2 marks `grid` as name-required, and a grid is announced on entry in a
+    /// way a plain `table` largely is not — so two unnamed interactive rosters
+    /// on one page are both read as "grid, 13 rows, 8 columns", with nothing to
+    /// tell them apart.
     #[prop(optional, into)]
     on_cell_activate: Option<Callback<(usize, usize)>>,
 
@@ -219,7 +225,12 @@ pub fn RosterGrid(
     // shrinks; `focused` clamps it on the READ path so a stale coordinate can
     // never leave the grid with no `tabindex=0` at all. See `clamp_focus_cell`.
     let focus_raw = RwSignal::new((0usize, 0usize));
-    let focused = Signal::derive(move || {
+    // A `Memo`, not a `Signal::derive`: every tile's `tabindex` closure reads
+    // this, so a derived signal would re-run the clamp -- and re-subscribe to
+    // `rows` and `columns` -- once per tile per arrow press (84 times on the
+    // demo's department roster). The memo computes once and only notifies when
+    // the clamped coordinate actually changes.
+    let focused = Memo::new(move |_| {
         clamp_focus_cell(focus_raw.get(), rows.with(Vec::len), columns.with(Vec::len))
     });
 
@@ -230,10 +241,20 @@ pub fn RosterGrid(
     let move_focus = move |movement| {
         let n_rows = rows.with_untracked(Vec::len);
         let n_cols = columns.with_untracked(Vec::len);
-        if let Some(next) = next_focus_cell(focus_raw.get_untracked(), n_rows, n_cols, movement) {
-            focus_raw.set(next);
-            focus_element_by_id(&roster_cell_dom_id(instance, next.0, next.1));
+        let current = focus_raw.get_untracked();
+        let Some(next) = next_focus_cell(current, n_rows, n_cols, movement) else {
+            return;
+        };
+        // A movement that changes nothing (ArrowRight at the last column) must
+        // NOT write: the raw coordinate may be a larger, still-restorable
+        // position that a transient shrink clamped, and overwriting it with the
+        // clamp would quietly discard the user's place. The tile already holds
+        // DOM focus -- the key press came from it -- so there is nothing to do.
+        if Some(next) == clamp_focus_cell(current, n_rows, n_cols) {
+            return;
         }
+        focus_raw.set(next);
+        focus_element_by_id(&roster_cell_dom_id(instance, next.0, next.1));
     };
 
     // The state's announced name, honouring `state_label` when supplied.
@@ -351,10 +372,25 @@ pub fn RosterGrid(
                                                             cb.run((ri, ci));
                                                         }
                                                     };
+                                                    // Selection is the GRID's state, so it belongs
+                                                    // on the gridcell as `aria-selected` -- ARIA's
+                                                    // own selection mechanism, and the repo's
+                                                    // precedent (`DataTable` puts it on rows).
+                                                    // `aria-pressed` on the inner button described
+                                                    // a toggle this never was: activating a tile
+                                                    // runs a consumer callback, and whether
+                                                    // selection follows is the consumer's choice.
+                                                    let aria_selected = move || {
+                                                        (interactive && selected_cell.is_some())
+                                                            .then(|| {
+                                                                if is_selected() { "true" } else { "false" }
+                                                            })
+                                                    };
                                                     view! {
                                                         <td
                                                             role=interactive
                                                                 .then_some("gridcell")
+                                                            aria-selected=aria_selected
                                                             class="p-1 align-middle"
                                                         >
                                                             <div
@@ -386,12 +422,6 @@ pub fn RosterGrid(
                                                                 }
                                                                 title=tooltip
                                                                 aria-label=interactive.then_some(aria)
-                                                                aria-pressed=move || {
-                                                                    (interactive && selected_cell.is_some())
-                                                                        .then(|| {
-                                                                            if is_selected() { "true" } else { "false" }
-                                                                        })
-                                                                }
                                                                 on:click=move |_| {
                                                                     if interactive {
                                                                         // A click is also a focus
@@ -413,8 +443,15 @@ pub fn RosterGrid(
                                                                     } else if let Some(movement) = roster_focus_move(
                                                                         &key,
                                                                         ev.ctrl_key(),
+                                                                        ev.alt_key(),
+                                                                        ev.meta_key(),
                                                                     ) {
-                                                                        // Arrows would otherwise
+                                                                        // Reached only for a chord
+                                                                        // the grid owns, so
+                                                                        // Alt+Arrow (Back/Forward)
+                                                                        // still reaches the
+                                                                        // browser. Bare arrows are
+                                                                        // stopped here or they
                                                                         // scroll the page out from
                                                                         // under the grid.
                                                                         ev.prevent_default();

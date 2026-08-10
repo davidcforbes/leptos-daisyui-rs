@@ -180,10 +180,11 @@ pub fn RosterGridDemo() -> impl IntoView {
 
             <Section title="Interactive: activate and select a cell" col=true>
                 <p class="text-sm opacity-60">
-                    "Supplying on_cell_activate makes the table a role=grid widget whose tiles are role=button with aria-pressed and an accessible name of \"worker, day, label, state\". Tab into the grid, move with the arrow keys, and press Enter or Space."
+                    "Supplying on_cell_activate makes the table a role=grid widget whose cells carry aria-selected and whose tiles are role=button with an accessible name of \"worker, day, label, state\". Tab into the grid, move with the arrow keys, and press Enter or Space. ARIA marks grid as name-required, so this one is named with label - without it a screen reader announces only \"grid, 5 rows, 6 columns\", identical to the roster below."
                 </p>
                 <RosterGrid
                     rows=rows
+                    label="Duty roster, working week"
                     on_cell_activate=on_cell_activate
                     selected_cell=Signal::derive(move || selected.get())
                 />
@@ -194,12 +195,16 @@ pub fn RosterGridDemo() -> impl IntoView {
 
             <Section title="Roving focus: 84 tiles, one tab stop" col=true>
                 <p class="text-sm opacity-60">
-                    "Twelve workers by seven days. With a tabindex on every tile this grid would be 84 sequential Tab presses to cross; the ARIA Data Grid roving tabindex makes the whole thing a single tab stop. Tab in, then: arrow keys move one cell (stopping at the edges rather than wrapping into another worker's week), Home and End jump to the start and end of the row, Ctrl+Home and Ctrl+End to the first and last cell of the grid, and Enter or Space activates. Tab again leaves the grid entirely."
+                    "Twelve workers by seven days. With a tabindex on every tile this grid would be 84 sequential Tab presses to cross; the ARIA Data Grid roving tabindex makes the whole thing a single tab stop. Tab in, then: arrow keys move one cell (stopping at the edges rather than wrapping into another worker's week), Home and End jump to the start and end of the row, Ctrl+Home and Ctrl+End (Cmd on macOS) to the first and last cell of the grid, and Enter or Space activates. Tab again leaves the grid entirely. Modifier chords the browser owns are left alone: Alt+Left and Alt+Right still go Back and Forward."
                 </p>
+                <h3 class="text-base font-medium" id="roster-department-heading">
+                    "Department roster, full week"
+                </h3>
                 <RosterGrid
                     rows=Signal::derive(department_roster)
                     columns=Signal::derive(full_week_columns)
                     density=RosterDensity::Compact
+                    labelled_by="roster-department-heading"
                     on_cell_activate=on_department_activate
                     selected_cell=Signal::derive(move || department_selected.get())
                 />
@@ -210,7 +215,7 @@ pub fn RosterGridDemo() -> impl IntoView {
 
             <Section title="Display-only highlight: selected_cell with no callback" col=true>
                 <p class="text-sm opacity-60">
-                    "selected_cell alone is a read-only highlight - today's shift, a search hit - so it does NOT make the grid interactive. The ring renders, but there is no tabindex, no role=button and no aria-pressed: tabbing through this section skips the grid entirely. Advertising 140 unresponsive buttons on a 20x7 roster would be WCAG 4.1.2."
+                    "selected_cell alone is a read-only highlight - today's shift, a search hit - so it does NOT make the grid interactive. The ring renders, but there is no role=grid, no tabindex and no role=button: tabbing through this section skips the grid entirely. Advertising 140 unresponsive buttons on a 20x7 roster would be WCAG 4.1.2."
                 </p>
                 <RosterGrid rows=rows selected_cell=Signal::derive(|| Some((1, 3))) />
             </Section>
