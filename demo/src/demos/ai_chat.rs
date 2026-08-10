@@ -33,6 +33,12 @@ impl ChatTransport for DemoTransport {
             cost_usd: 0.0006 * self.turn as f64,
             input_tokens: 40 * self.turn as u64,
             output_tokens: 65 * self.turn as u64,
+            // `Usage` lives in the `ai-chat-core` sibling path dep and gains
+            // fields over time (it grew three at once on 2026-08-10). Spreading
+            // the default keeps this scripted fixture compiling across those,
+            // and leaves the new counters at zero, which is what a non-reasoning
+            // uncached turn actually reports.
+            ..Default::default()
         }));
         self.queue.push_back(StreamEvent::Done);
         Ok(())

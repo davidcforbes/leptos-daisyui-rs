@@ -225,6 +225,10 @@ fn format_usage_formats_cost_and_tokens() {
         cost_usd: 0.0021,
         input_tokens: 1234,
         output_tokens: 567,
+        // `..Default::default()` rather than naming every field: `Usage` is a
+        // telemetry struct on a sibling path dep that gains fields over time,
+        // and a struct literal breaks every consumer each time one lands.
+        ..Default::default()
     };
     assert_eq!(
         format_usage(Some(u)),
@@ -238,6 +242,7 @@ fn format_usage_small_token_counts_have_no_commas() {
         cost_usd: 0.0001,
         input_tokens: 12,
         output_tokens: 3,
+        ..Default::default()
     };
     assert_eq!(
         format_usage(Some(u)),
