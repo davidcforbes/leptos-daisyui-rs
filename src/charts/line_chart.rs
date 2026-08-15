@@ -2,6 +2,7 @@ use super::paint::{paint_attrs, stroke_attrs};
 use leptos::prelude::*;
 
 mod geometry;
+mod interaction;
 mod normalize;
 mod types;
 pub use types::{
