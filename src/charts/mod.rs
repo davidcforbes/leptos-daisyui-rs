@@ -19,7 +19,12 @@ mod stacked_bar_chart;
 pub use area_chart::AreaChart;
 pub use bar_chart::BarChart;
 pub use heatmap::{HeatScale, Heatmap, HeatmapCell};
-pub use line_chart::LineChart;
+pub use line_chart::{
+    LineCategory, LineChart, LineChartActivation, LineChartActivationSource,
+    LineChartActivationValue, LineChartData, LineChartDataSource, LineChartModifiers,
+    LineInteractionMode, LineLegendMode, LinePattern, LinePoint, LineSeries, MarkerShape,
+    MarkerStyle,
+};
 pub use pie_chart::{PieChart, PieSlice};
 pub use sparkline::Sparkline;
 pub use stacked_area_chart::StackedAreaChart;

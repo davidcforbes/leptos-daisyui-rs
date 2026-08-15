@@ -1,6 +1,13 @@
 use super::paint::{paint_attrs, stroke_attrs};
 use leptos::prelude::*;
 
+mod types;
+pub use types::{
+    LineCategory, LineChartActivation, LineChartActivationSource, LineChartActivationValue,
+    LineChartData, LineChartDataSource, LineChartModifiers, LineInteractionMode, LineLegendMode,
+    LinePattern, LinePoint, LineSeries, MarkerShape, MarkerStyle,
+};
+
 /// Number of x-axis ticks to render: capped at 5, but never more than the
 /// number of data points. A fixed 5 ticks over a sparse (<=4 point) series
 /// made several ticks round to the SAME source label index and print a
@@ -55,8 +62,9 @@ pub(super) fn tick_anchor(i: usize, tick_count: usize) -> &'static str {
 /// Renders a responsive polyline chart with optional dot markers and axis labels.
 #[component]
 pub fn LineChart(
-    /// Data points as (x, y) pairs.
-    data: Vec<(f64, f64)>,
+    /// Static or reactive chart data; legacy `(x, y)` vectors convert automatically.
+    #[prop(into)]
+    data: LineChartDataSource,
     /// SVG width in pixels (viewBox coordinate space).
     #[prop(default = 400)]
     width: u32,
@@ -88,6 +96,79 @@ pub fn LineChart(
     /// label printed next to the first and last data points. `false` keeps the
     /// full-axis chart.
     #[prop(default = false)]
+    minimal: bool,
+    /// Controls whether categorical data shows a legend; defaults to automatic.
+    #[prop(default = LineLegendMode::Auto)]
+    legend_mode: LineLegendMode,
+    /// Controls categorical point interaction; defaults to automatic.
+    #[prop(default = LineInteractionMode::Auto)]
+    interaction_mode: LineInteractionMode,
+    /// Accessible name for the categorical chart; defaults to `Line chart`.
+    #[prop(default = "Line chart".to_string())]
+    accessible_label: String,
+    /// Optional longer description for categorical chart consumers.
+    #[prop(optional)]
+    description: Option<String>,
+    /// Whether categorical data includes its accessible table; defaults to true.
+    #[prop(default = true)]
+    show_data_table: bool,
+    /// Optional callback invoked by a categorical point activation.
+    #[prop(optional)]
+    on_point_activate: Option<Callback<LineChartActivation>>,
+) -> impl IntoView {
+    let data = Memo::new(move |_| data.get());
+
+    // These settings establish the categorical public API. Task 4 consumes
+    // them when it adds the categorical renderer; legacy XY output remains
+    // intentionally unchanged in this compatibility slice.
+    let _ = (
+        legend_mode,
+        interaction_mode,
+        accessible_label,
+        description,
+        show_data_table,
+        on_point_activate,
+    );
+
+    move || match data.get() {
+        LineChartData::XY(data) => render_xy(
+            data,
+            width,
+            height,
+            color.clone(),
+            show_dots,
+            x_label.clone(),
+            y_label.clone(),
+            x_labels.clone(),
+            minimal,
+        ),
+        // Categorical SVG rendering arrives in Task 4. Until then, use the
+        // established empty-state SVG instead of introducing partial markup.
+        LineChartData::Categorical { .. } => render_xy(
+            Vec::new(),
+            width,
+            height,
+            color.clone(),
+            show_dots,
+            x_label.clone(),
+            y_label.clone(),
+            x_labels.clone(),
+            minimal,
+        ),
+    }
+}
+
+/// Renders the preserved legacy numeric XY chart surface.
+#[allow(clippy::too_many_arguments)]
+fn render_xy(
+    data: Vec<(f64, f64)>,
+    width: u32,
+    height: u32,
+    color: String,
+    show_dots: bool,
+    x_label: Option<String>,
+    y_label: Option<String>,
+    x_labels: Vec<String>,
     minimal: bool,
 ) -> impl IntoView {
     if data.is_empty() {
