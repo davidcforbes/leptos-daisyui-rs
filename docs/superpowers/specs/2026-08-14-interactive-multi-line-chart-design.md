@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-14
 
-**Status:** Approved architecture; revised written specification awaiting final review
+**Status:** Approved for implementation
 
 **Issue:** `ldui-j6k`
 
@@ -89,10 +89,15 @@ and interaction defects.
 
 ## Public Model and Compatibility
 
-`LineChart` changes its `data` prop to `#[prop(into)] data: LineChartData`.
-`From<Vec<(f64, f64)>> for LineChartData` preserves existing Leptos view-macro
-call sites. The generated `LineChartProps` type is implementation detail;
-callers constructing it directly may need `.into()`.
+`LineChart` changes its prop to
+`#[prop(into)] data: LineChartDataSource`. The source wrapper accepts static
+`LineChartData`, reactive `Signal<LineChartData>`/`RwSignal<LineChartData>`, and
+the legacy `Vec<(f64, f64)>`. This explicit transport type is necessary because
+Rust does not chain `Into` conversions from a legacy vector through
+`LineChartData` into a Leptos signal. Existing view-macro call sites therefore
+remain unchanged while categorical consumers can replace data reactively.
+The generated `LineChartProps` type is implementation detail; callers
+constructing it directly may need `.into()`.
 
 ```rust
 pub enum LineChartData {
@@ -101,6 +106,15 @@ pub enum LineChartData {
         categories: Vec<LineCategory>,
         series: Vec<LineSeries>,
     },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct LineChartDataSource(LineChartDataSourceInner);
+
+#[derive(Clone, Debug, PartialEq)]
+enum LineChartDataSourceInner {
+    Static(LineChartData),
+    Reactive(Signal<LineChartData>),
 }
 
 pub struct LineCategory {
@@ -147,7 +161,10 @@ pub struct MarkerStyle {
 }
 ```
 
-All public types are owned, cloneable, debuggable, and `PartialEq` so they work
+`LineChartDataSource` exposes a crate-private tracked getter and implements
+`From<Vec<(f64, f64)>>`, `From<LineChartData>`,
+`From<Signal<LineChartData>>`, and `From<RwSignal<LineChartData>>`. All public
+model types are owned, cloneable, debuggable, and `PartialEq` so they work
 cleanly with Leptos props and signals. Builders/defaults should keep ordinary
 call sites short. `LinePattern::Custom` accepts only finite positive segments;
 an empty or invalid pattern resolves to `Solid` rather than producing invalid
@@ -159,6 +176,14 @@ their stroke and marker styling. New `LineLegendMode::{Auto, Always, Never}`
 and `LineInteractionMode::{Auto, Enabled, Disabled}` props control optional
 behavior. `Auto` shows a legend for two or more categorical series and enables
 categorical interaction; it leaves legacy `XY` output unchanged.
+
+The categorical surface also adds `accessible_label: String` (default
+`"Line chart"`), `description: Option<String>`, `show_data_table: bool`
+(default `true`), and
+`on_point_activate: Option<Callback<LineChartActivation>>`. When an activation
+callback is present, category targets expose button semantics; without one,
+they remain focusable descriptive groups so the chart does not promise an
+action it cannot perform.
 
 ## Normalization and Geometry
 
@@ -313,8 +338,8 @@ axe checks supplement, but do not replace, keyboard journey tests.
   a diagnostic; internal rendering identity includes the input index, callback
   values preserve the supplied identifiers, and reconciliation selects the
   first matching category key.
-- Non-finite dimensions, marker sizes, or stroke widths resolve to documented
-  safe defaults. Width/height are clamped above zero.
+- Non-finite marker sizes or stroke widths resolve to documented safe defaults.
+  The existing integer width/height props are clamped above zero.
 - Removing or replacing data while a category is active reconciles state by
   category key; if the key is gone, the card closes and focus moves to the
   nearest valid category without firing activation.
@@ -420,12 +445,12 @@ cargo make test-visual
 cargo xtask verify-full
 ```
 
-Style and layout ceilings may only ratchet down; a new chart demo page receives
-measured initial ceilings rather than borrowing another page's. Confirm the
-stylesheet freshness marker before trusting browser results. Every new oracle
-must pass a break-and-revert demonstration: inject the defect, observe the
-specific failure, revert, and observe green. Baselines come only from the
-human-reviewed final rendering.
+Style and layout ceilings may only ratchet down; the existing charts page keeps
+its current ceilings unless the measured irreducible count changes with a
+source-level justification. Confirm the stylesheet freshness marker before
+trusting browser results. Every new oracle must pass a break-and-revert
+demonstration: inject the defect, observe the specific failure, revert, and
+observe green. Baselines come only from the human-reviewed final rendering.
 
 ## Acceptance Criteria
 
@@ -453,3 +478,4 @@ human-reviewed final rendering.
 - [WAI-ARIA tooltip pattern](https://www.w3.org/WAI/ARIA/apg/patterns/tooltip/)
 - [W3C complex-image alternatives](https://www.w3.org/WAI/tutorials/images/complex/)
 - [W3C Pointer Events](https://www.w3.org/TR/pointerevents/)
+- [axe-core 4.13.0 release](https://github.com/dequelabs/axe-core/releases/tag/v4.13.0)
