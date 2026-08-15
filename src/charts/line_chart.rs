@@ -1,6 +1,8 @@
 use super::paint::{paint_attrs, stroke_attrs};
 use leptos::prelude::*;
 
+mod geometry;
+mod normalize;
 mod types;
 pub use types::{
     LineCategory, LineChartActivation, LineChartActivationSource, LineChartActivationValue,
