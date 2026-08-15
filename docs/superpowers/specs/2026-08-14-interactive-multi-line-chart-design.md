@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-14
 
-**Status:** Approved architecture; written specification awaiting review
+**Status:** Approved architecture; revised written specification awaiting final review
 
 **Issue:** `ldui-j6k`
 
@@ -38,8 +38,11 @@ filter, navigate, or load detail data.
 - Provide useful names, keyboard navigation, focus indication, and a tabular
   alternative without requiring a mouse.
 - Preserve current `LineChart` call sites and their single-series visual output.
-- Keep rendering dependency-free: Leptos, SVG, CSS, and existing `web-sys`
-  features only.
+- Keep the browser runtime Rust-owned: Leptos constructs the SVG and HTML DOM,
+  while geometry, reactive state, hit testing, tooltip behavior, and activation
+  handlers compile to `wasm32-unknown-unknown`. Use no hand-written JavaScript
+  or third-party JavaScript chart runtime; normal `wasm-bindgen` bootstrap and
+  browser bindings remain part of the Leptos/WASM toolchain.
 
 ## Non-goals
 
@@ -57,7 +60,26 @@ filter, navigate, or load detail data.
 Build a focused SVG engine inside the existing charts module. It retains the
 library's lightweight model, integrates naturally with Leptos signals and
 callbacks, and lets geometry, hit testing, and accessibility be tested without
-a JavaScript chart runtime.
+a JavaScript chart runtime. More precisely, the SVG is browser DOM rather than
+code compiled into WebAssembly: Rust/Leptos code compiled to WebAssembly creates
+and updates that SVG entirely on the client.
+
+`leptos-chartistry` 0.2.3 is the source-shape comparison, not a runtime
+dependency or compatibility target. Its separation of chart orchestration,
+typed series descriptors/renderers, projection and range calculation,
+composable edge/inner layouts, guide overlays, and an HTML tooltip validates
+the proposed Leptos + SVG architecture. Implementation planning should compare
+those boundaries and adopt compatible concepts using this repository's naming,
+public model, and test conventions.
+
+The dependency itself is not selected because its current public surface does
+not cover the complete contract here: per-series dash patterns, arbitrary
+stable categorical keys, host-owned display strings, a typed point-activation
+callback, and the required keyboard/ARIA point model. Wrapping or forking it
+would therefore leave the project owning the hardest interaction and
+accessibility behavior. The comparison is architectural; implementation should
+be original rather than copying library source or creating an implicit
+Chartistry compatibility obligation.
 
 Two alternatives were rejected. Importing a canvas/JavaScript chart library
 would add WASM interop and bundle weight while making DOM and accessibility
@@ -308,6 +330,12 @@ SVG geometry, interaction state, and tooltip rendering. `src/charts/mod.rs`
 re-exports the intentional public types. Shared paint resolution remains in
 `src/charts/paint.rs`.
 
+Before assigning implementation steps, the plan should record a concise
+Chartistry source-shape comparison: which orchestration, series, projection,
+layout, and tooltip boundaries are adopted, adapted, or rejected. This is a
+one-time design check, not a dependency, source-compatibility promise, or
+requirement to mirror Chartistry's internal modules.
+
 The demo gains a deterministic multi-line example with at least fourteen
 categories, a solid actual series, a dashed average series, markers, missing
 data, host-formatted tooltip values, and an activation log visible to the test
@@ -416,6 +444,9 @@ human-reviewed final rendering.
 
 ## Reference Material
 
+- [Leptos Chartistry `Chart` API](https://docs.rs/leptos-chartistry/latest/leptos_chartistry/fn.Chart.html)
+- [Leptos Chartistry `Line` API](https://docs.rs/leptos-chartistry/latest/leptos_chartistry/struct.Line.html)
+- [Leptos Chartistry source](https://github.com/feral-dot-io/leptos-chartistry)
 - [Power BI line-chart formatting](https://learn.microsoft.com/en-gb/power-bi/visuals/power-bi-line-chart)
 - [Power BI report tooltips](https://learn.microsoft.com/en-us/power-bi/create-reports/desktop-tooltips)
 - [Power BI filtering and highlighting](https://learn.microsoft.com/en-us/power-bi/create-reports/power-bi-reports-filters-and-highlighting)
