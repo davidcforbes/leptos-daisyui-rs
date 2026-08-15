@@ -5,6 +5,10 @@ use super::{
 
 const DEFAULT_MARKER_SIZE: f64 = 4.0;
 const DEFAULT_MARKER_STROKE_WIDTH: f64 = 1.0;
+/// Largest rendered marker radius or stroke width, in SVG view-box units.
+const MAX_MARKER_SIZE: f64 = 100.0;
+/// Largest visual marker radius, including half of the maximum stroke width.
+const MAX_MARKER_VISUAL_RADIUS: f64 = MAX_MARKER_SIZE + MAX_MARKER_SIZE / 2.0;
 const MAX_SVG_COORDINATE: f64 = 1_000_000.0;
 
 /// The interior rectangle available for categorical line-chart drawing.
@@ -38,12 +42,27 @@ impl Projection {
 
     /// Returns the SVG y-coordinate for a finite data value.
     pub(super) fn value_y(&self, value: f64) -> f64 {
-        let span = self.domain.max - self.domain.min;
-        if !value.is_finite() || !span.is_finite() || span <= 0.0 {
-            return (self.bounds.top + self.bounds.bottom) / 2.0;
+        let ratio = self.domain_ratio(value).unwrap_or(0.5);
+        self.bounds.bottom - ratio * (self.bounds.bottom - self.bounds.top)
+    }
+
+    fn domain_ratio(&self, value: f64) -> Option<f64> {
+        if !value.is_finite()
+            || !self.domain.min.is_finite()
+            || !self.domain.max.is_finite()
+            || self.domain.min >= self.domain.max
+        {
+            return None;
         }
-        self.bounds.bottom
-            - (value - self.domain.min) / span * (self.bounds.bottom - self.bounds.top)
+        let scale = self.domain.min.abs().max(self.domain.max.abs());
+        if !scale.is_finite() || scale == 0.0 {
+            return None;
+        }
+        let min = self.domain.min / scale;
+        let max = self.domain.max / scale;
+        let span = max - min;
+        let ratio = (value / scale - min) / span;
+        ratio.is_finite().then(|| ratio.clamp(0.0, 1.0))
     }
 
     /// Returns the nearest category index for an SVG x-coordinate.
@@ -167,7 +186,10 @@ pub(super) fn visible_tick_indices(
     if !css_width.is_finite() || !minimum_gap_px.is_finite() || minimum_gap_px <= 0.0 {
         return (0..category_count).collect();
     }
-    let available = (css_width.max(0.0) / minimum_gap_px).floor() as usize + 1;
+    let available = (css_width.max(0.0) / minimum_gap_px)
+        .floor()
+        .min((category_count - 1) as f64) as usize
+        + 1;
     let tick_count = available.clamp(2, category_count);
     (0..tick_count)
         .map(|index| {
@@ -296,12 +318,16 @@ pub(super) fn dasharray(pattern: &LinePattern) -> Option<String> {
 
 /// Resolves invalid marker sizes to the documented safe default.
 pub(super) fn marker_size(marker: &MarkerStyle) -> f64 {
-    positive_or(marker.size, DEFAULT_MARKER_SIZE)
+    capped_positive_or(marker.size, DEFAULT_MARKER_SIZE, MAX_MARKER_SIZE)
 }
 
 /// Resolves invalid marker stroke widths to the documented safe default.
 pub(super) fn marker_stroke_width(marker: &MarkerStyle) -> f64 {
-    positive_or(marker.stroke_width, DEFAULT_MARKER_STROKE_WIDTH)
+    capped_positive_or(
+        marker.stroke_width,
+        DEFAULT_MARKER_STROKE_WIDTH,
+        MAX_MARKER_SIZE,
+    )
 }
 
 /// Formats a finite, bounded SVG numeric attribute.
@@ -328,7 +354,7 @@ fn dimension(value: f64) -> f64 {
 }
 
 fn marker_radius(value: f64) -> f64 {
-    positive_or(value, DEFAULT_MARKER_SIZE).min(100.0)
+    capped_positive_or(value, DEFAULT_MARKER_SIZE, MAX_MARKER_VISUAL_RADIUS)
 }
 
 fn inset(value: f64, dimension: f64) -> f64 {
@@ -338,6 +364,14 @@ fn inset(value: f64, dimension: f64) -> f64 {
 fn positive_or(value: f64, default: f64) -> f64 {
     if value.is_finite() && value > 0.0 {
         value.min(MAX_SVG_COORDINATE)
+    } else {
+        default
+    }
+}
+
+fn capped_positive_or(value: f64, default: f64, maximum: f64) -> f64 {
+    if value.is_finite() && value > 0.0 {
+        value.min(maximum)
     } else {
         default
     }
@@ -413,6 +447,11 @@ mod tests {
     }
 
     #[test]
+    fn tick_thinning_saturates_huge_finite_width_before_usize_arithmetic() {
+        assert_eq!(visible_tick_indices(2, f64::MAX, 1.0), vec![0, 1]);
+    }
+
+    #[test]
     fn paths_are_segmented_at_missing_points() {
         let chart = normalize_categorical(
             &categories(4),
@@ -457,6 +496,73 @@ mod tests {
         assert_eq!(marker_size(&marker), 4.0);
         assert_eq!(marker_stroke_width(&marker), 1.0);
         assert_eq!(svg_number(f64::NAN), "0");
+    }
+
+    #[test]
+    fn capped_marker_visual_radius_is_fully_reserved_by_plot_bounds() {
+        let marker = MarkerStyle {
+            size: f64::MAX,
+            stroke_width: f64::MAX,
+            ..MarkerStyle::default()
+        };
+
+        assert_eq!(marker_size(&marker), 100.0);
+        assert_eq!(marker_stroke_width(&marker), 100.0);
+        let bounds = plot_bounds(
+            1_000.0,
+            500.0,
+            marker_size(&marker) + marker_stroke_width(&marker) / 2.0,
+            false,
+        );
+        assert_eq!(bounds.left, 190.0);
+        assert_eq!(bounds.top, 162.0);
+    }
+
+    #[test]
+    fn opposite_finite_extrema_project_to_distinct_plot_edges() {
+        let projection = Projection {
+            bounds: PlotBounds {
+                left: 0.0,
+                top: 0.0,
+                right: 100.0,
+                bottom: 100.0,
+            },
+            category_count: 2,
+            domain: Domain {
+                min: -f64::MAX,
+                max: f64::MAX,
+            },
+        };
+
+        assert_eq!(projection.value_y(-f64::MAX), 100.0);
+        assert_eq!(projection.value_y(0.0), 50.0);
+        assert_eq!(projection.value_y(f64::MAX), 0.0);
+    }
+
+    #[test]
+    fn nearest_series_distinguishes_opposite_finite_extrema() {
+        let chart = normalize_categorical(
+            &categories(1),
+            &[
+                LineSeries::new("low", "Low", "blue", vec![LinePoint::new(-f64::MAX)]),
+                LineSeries::new("high", "High", "red", vec![LinePoint::new(f64::MAX)]),
+            ],
+        );
+        let projection = Projection {
+            bounds: PlotBounds {
+                left: 0.0,
+                top: 0.0,
+                right: 100.0,
+                bottom: 100.0,
+            },
+            category_count: 1,
+            domain: Domain {
+                min: -f64::MAX,
+                max: f64::MAX,
+            },
+        };
+
+        assert_eq!(nearest_series_at(&chart, projection, 0, 5.0), Some(1));
     }
 
     #[test]

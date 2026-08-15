@@ -120,17 +120,26 @@ fn domain_for(series: &[NormalizedSeries]) -> Option<Domain> {
 
     if min == max {
         let expansion = (min.abs() * 0.05).max(1.0);
+        let expanded_min = min - expansion;
+        let expanded_max = max + expansion;
         Some(Domain {
-            min: min - expansion,
-            max: max + expansion,
+            min: if expanded_min.is_finite() {
+                expanded_min
+            } else {
+                min
+            },
+            max: if expanded_max.is_finite() {
+                expanded_max
+            } else {
+                max
+            },
         })
     } else {
         Some(Domain { min, max })
     }
 }
 
-#[cfg(all(debug_assertions, target_arch = "wasm32"))]
-fn warn_duplicate_identifiers<'a>(kind: &str, values: impl Iterator<Item = &'a str>) {
+fn duplicate_identifier_set<'a>(values: impl Iterator<Item = &'a str>) -> Vec<String> {
     use std::collections::BTreeSet;
 
     let mut seen = BTreeSet::new();
@@ -140,9 +149,16 @@ fn warn_duplicate_identifiers<'a>(kind: &str, values: impl Iterator<Item = &'a s
             duplicates.insert(value);
         }
     }
-    for value in duplicates {
+    duplicates.into_iter().map(str::to_owned).collect()
+}
+
+#[cfg(all(debug_assertions, target_arch = "wasm32"))]
+fn warn_duplicate_identifiers<'a>(kind: &str, values: impl Iterator<Item = &'a str>) {
+    let duplicates = duplicate_identifier_set(values);
+    if !duplicates.is_empty() {
         web_sys::console::warn_1(&wasm_bindgen::JsValue::from_str(&format!(
-            "duplicate line chart {kind}: {value}"
+            "duplicate line chart {kind} set: {}",
+            duplicates.join(", ")
         )));
     }
 }
@@ -305,5 +321,34 @@ mod tests {
                 max: 21.0
             })
         );
+    }
+
+    #[test]
+    fn singleton_extreme_values_keep_a_finite_nonzero_domain() {
+        for value in [f64::MAX, -f64::MAX] {
+            let chart = normalize_categorical(
+                &categories()[..1],
+                &[LineSeries::new(
+                    "actual",
+                    "Actual",
+                    "blue",
+                    vec![LinePoint::new(value)],
+                )],
+            );
+            let domain = chart.domain.expect("a finite point has a domain");
+
+            assert!(domain.min.is_finite(), "{value:?}: {domain:?}");
+            assert!(domain.max.is_finite(), "{value:?}: {domain:?}");
+            assert!(domain.min < domain.max, "{value:?}: {domain:?}");
+        }
+    }
+
+    #[test]
+    fn duplicate_identifier_set_aggregates_all_values_into_one_diagnostic_payload() {
+        assert_eq!(
+            duplicate_identifier_set(["actual", "forecast", "actual", "forecast"].into_iter()),
+            vec!["actual", "forecast"]
+        );
+        assert!(duplicate_identifier_set(["actual", "forecast"].into_iter()).is_empty());
     }
 }
