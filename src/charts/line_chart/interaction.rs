@@ -36,6 +36,7 @@ pub(super) struct InteractionState {
 /// An input event reduced into [`InteractionState`].
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum InteractionAction {
+    PointerEntered,
     PointerMoved(ActivePoint),
     PointerLeft,
     Focused(ActivePoint),
@@ -53,9 +54,12 @@ pub(super) fn reduce(
     next: &NormalizedChart,
 ) -> InteractionState {
     match action {
+        InteractionAction::PointerEntered => InteractionState {
+            dismissed_category_key: None,
+            ..state.clone()
+        },
         InteractionAction::PointerMoved(active) => InteractionState {
             hovered: normalized_active(next, active),
-            dismissed_category_key: None,
             ..state.clone()
         },
         InteractionAction::PointerLeft => InteractionState {
@@ -64,13 +68,18 @@ pub(super) fn reduce(
         },
         InteractionAction::Focused(active) => {
             let focused = normalized_active(next, active);
+            let focus_changed = state.focused != focused;
             InteractionState {
                 roving_category_key: focused
                     .as_ref()
                     .and_then(|active| next.categories.get(active.category_index))
                     .map(|category| category.key.clone()),
                 focused,
-                dismissed_category_key: None,
+                dismissed_category_key: if focus_changed {
+                    None
+                } else {
+                    state.dismissed_category_key.clone()
+                },
                 ..state.clone()
             }
         }
@@ -80,7 +89,7 @@ pub(super) fn reduce(
         },
         InteractionAction::MoveFocus(key) => move_focus(state, key, next),
         InteractionAction::Dismiss => InteractionState {
-            dismissed_category_key: displayed_active(state, next)
+            dismissed_category_key: raw_active(state)
                 .and_then(|active| next.categories.get(active.category_index))
                 .map(|category| category.key.clone()),
             ..state.clone()
@@ -160,6 +169,7 @@ fn move_focus(
     let Some(category_index) = navigation_category_index(state, key, chart, &valid_categories)
     else {
         return InteractionState {
+            hovered: None,
             focused: None,
             roving_category_key: None,
             dismissed_category_key: None,
@@ -178,16 +188,22 @@ fn move_focus(
             .or_else(|| finite_series.first().copied()),
     };
 
+    let focused = ActivePoint {
+        category_index,
+        preferred_series_index,
+    };
+    let focus_changed = state.focused.as_ref() != Some(&focused);
     InteractionState {
-        focused: Some(ActivePoint {
-            category_index,
-            preferred_series_index,
-        }),
+        focused: Some(focused),
         roving_category_key: chart
             .categories
             .get(category_index)
             .map(|category| category.key.clone()),
-        dismissed_category_key: None,
+        dismissed_category_key: if focus_changed {
+            None
+        } else {
+            state.dismissed_category_key.clone()
+        },
         ..state.clone()
     }
 }
@@ -283,14 +299,30 @@ fn reconcile(
     next: &NormalizedChart,
 ) -> InteractionState {
     let old_index = old_category_index(state, previous);
+    let primary = raw_active(state);
+    let reconciled_primary = primary.and_then(|active| reconcile_active(active, previous, next));
+    if primary.is_some() && reconciled_primary.is_none() {
+        return InteractionState {
+            hovered: None,
+            focused: None,
+            roving_category_key: nearest_valid_category_index(next, old_index)
+                .and_then(|index| next.categories.get(index))
+                .map(|category| category.key.clone()),
+            dismissed_category_key: None,
+        };
+    }
     let hovered = state
         .hovered
         .as_ref()
-        .and_then(|active| reconcile_active(active, previous, next));
-    let focused = state
-        .focused
-        .as_ref()
-        .and_then(|active| reconcile_active(active, previous, next));
+        .and_then(|_| reconciled_primary.clone());
+    let focused = if state.hovered.is_some() {
+        state
+            .focused
+            .as_ref()
+            .and_then(|active| reconcile_active(active, previous, next))
+    } else {
+        reconciled_primary
+    };
     let roving_category_key = state
         .roving_category_key
         .as_deref()
@@ -348,10 +380,7 @@ fn reconcile_active(
 }
 
 fn old_category_index(state: &InteractionState, previous: &NormalizedChart) -> Option<usize> {
-    state
-        .focused
-        .as_ref()
-        .or(state.hovered.as_ref())
+    raw_active(state)
         .map(|active| active.category_index)
         .filter(|index| *index < previous.categories.len())
         .or_else(|| {
@@ -360,6 +389,10 @@ fn old_category_index(state: &InteractionState, previous: &NormalizedChart) -> O
                 .as_deref()
                 .and_then(|key| category_index_for_key(previous, key))
         })
+}
+
+fn raw_active(state: &InteractionState) -> Option<&ActivePoint> {
+    state.hovered.as_ref().or(state.focused.as_ref())
 }
 
 fn normalized_active(chart: &NormalizedChart, active: ActivePoint) -> Option<ActivePoint> {
@@ -623,7 +656,7 @@ mod tests {
     }
 
     #[test]
-    fn escape_hides_current_card_until_pointer_or_focus_moves() {
+    fn escape_is_idempotent_and_requires_pointer_reentry_or_a_real_focus_move() {
         let chart = chart(&[(Some(1.0), Some(2.0)), (Some(3.0), Some(4.0))]);
         let state = reduce(
             &InteractionState::default(),
@@ -634,25 +667,75 @@ mod tests {
         let dismissed = reduce(&state, InteractionAction::Dismiss, &chart, &chart);
         assert_eq!(displayed_active(&dismissed, &chart), None);
 
+        let dismissed_again = reduce(&dismissed, InteractionAction::Dismiss, &chart, &chart);
+        assert_eq!(displayed_active(&dismissed_again, &chart), None);
+
+        let pointer_moved = reduce(
+            &dismissed_again,
+            InteractionAction::PointerMoved(active(0, Some(1))),
+            &chart,
+            &chart,
+        );
+        assert_eq!(displayed_active(&pointer_moved, &chart), None);
+
+        let pointer_entered = reduce(
+            &pointer_moved,
+            InteractionAction::PointerEntered,
+            &chart,
+            &chart,
+        );
+        assert_eq!(
+            displayed_active(&pointer_entered, &chart),
+            Some(active(0, Some(1)))
+        );
+
+        let dismissed_for_focus = reduce(&state, InteractionAction::Dismiss, &chart, &chart);
+
         let moved = reduce(
-            &dismissed,
+            &dismissed_for_focus,
             InteractionAction::MoveFocus(NavigationKey::Right),
             &chart,
             &chart,
         );
         assert_eq!(displayed_active(&moved, &chart), Some(active(1, Some(0))));
+    }
 
-        let dismissed_again = reduce(&moved, InteractionAction::Dismiss, &chart, &chart);
-        let pointer_returned = reduce(
-            &dismissed_again,
-            InteractionAction::PointerMoved(active(1, Some(1))),
+    #[test]
+    fn no_op_navigation_does_not_reopen_a_dismissed_card() {
+        let chart = chart(&[(Some(1.0), None)]);
+        let state = InteractionState {
+            focused: Some(active(0, Some(0))),
+            roving_category_key: Some("category-0".into()),
+            ..Default::default()
+        };
+        let dismissed = reduce(&state, InteractionAction::Dismiss, &chart, &chart);
+        let same_focus = reduce(
+            &dismissed,
+            InteractionAction::Focused(active(0, Some(0))),
             &chart,
             &chart,
         );
-        assert_eq!(
-            displayed_active(&pointer_returned, &chart),
-            Some(active(1, Some(1)))
-        );
+        assert_eq!(displayed_active(&same_focus, &chart), None);
+        for key in [
+            NavigationKey::Left,
+            NavigationKey::Right,
+            NavigationKey::Home,
+            NavigationKey::End,
+            NavigationKey::Up,
+            NavigationKey::Down,
+        ] {
+            let after = reduce(
+                &dismissed,
+                InteractionAction::MoveFocus(key),
+                &chart,
+                &chart,
+            );
+            assert_eq!(
+                displayed_active(&after, &chart),
+                None,
+                "{key:?} must not clear Escape without a real focus move"
+            );
+        }
     }
 
     #[test]
@@ -710,6 +793,28 @@ mod tests {
     }
 
     #[test]
+    fn stale_active_points_are_inert_and_do_not_survive_pointer_updates() {
+        let chart = chart(&[(Some(1.0), Some(2.0))]);
+        assert!(
+            activation_for(
+                &chart,
+                active(99, Some(99)),
+                LineChartActivationSource::Pointer,
+                LineChartModifiers::default(),
+            )
+            .is_none()
+        );
+
+        let state = reduce(
+            &InteractionState::default(),
+            InteractionAction::PointerMoved(active(99, Some(99))),
+            &chart,
+            &chart,
+        );
+        assert_eq!(state.hovered, None);
+    }
+
+    #[test]
     fn reconciliation_uses_first_duplicate_key_and_nearest_valid_fallback_without_activation() {
         let previous = chart(&[(Some(1.0), None), (Some(2.0), None), (Some(3.0), None)]);
         let next = normalize_categorical(
@@ -763,5 +868,103 @@ mod tests {
         assert_eq!(removed.focused, None);
         assert_eq!(removed.dismissed_category_key, None);
         assert_eq!(removed.roving_category_key.as_deref(), Some("category-2"));
+    }
+
+    #[test]
+    fn reconciliation_removes_hidden_focus_when_the_raw_hovered_category_disappears() {
+        let previous = chart(&[(Some(1.0), None), (Some(2.0), None), (Some(3.0), None)]);
+        let next = normalize_categorical(
+            &[
+                LineCategory {
+                    key: "category-0".into(),
+                    label: "Category 0".into(),
+                },
+                LineCategory {
+                    key: "category-2".into(),
+                    label: "Category 2".into(),
+                },
+            ],
+            &[LineSeries::new(
+                "first",
+                "First",
+                "blue",
+                vec![LinePoint::new(10.0), LinePoint::new(30.0)],
+            )],
+        );
+        let state = InteractionState {
+            hovered: Some(active(1, Some(0))),
+            focused: Some(active(0, Some(0))),
+            roving_category_key: Some("category-0".into()),
+            dismissed_category_key: Some("category-1".into()),
+        };
+
+        let reconciled = reduce(&state, InteractionAction::ReconcileData, &previous, &next);
+        assert_eq!(reconciled.hovered, None);
+        assert_eq!(reconciled.focused, None);
+        assert_eq!(reconciled.dismissed_category_key, None);
+        assert_eq!(
+            reconciled.roving_category_key.as_deref(),
+            Some("category-2")
+        );
+        assert_eq!(displayed_active(&reconciled, &next), None);
+    }
+
+    #[test]
+    fn nearest_reconciliation_ties_choose_the_lower_category_index() {
+        let previous = chart(&[
+            (Some(1.0), None),
+            (Some(2.0), None),
+            (Some(3.0), None),
+            (Some(4.0), None),
+            (Some(5.0), None),
+        ]);
+        let next = chart(&[
+            (Some(10.0), None),
+            (None, None),
+            (None, None),
+            (None, None),
+            (Some(50.0), None),
+        ]);
+        let state = InteractionState {
+            focused: Some(active(2, Some(0))),
+            roving_category_key: Some("category-2".into()),
+            ..Default::default()
+        };
+
+        let reconciled = reduce(&state, InteractionAction::ReconcileData, &previous, &next);
+        assert_eq!(
+            reconciled.roving_category_key.as_deref(),
+            Some("category-0")
+        );
+    }
+
+    #[test]
+    fn reconciliation_uses_the_first_matching_duplicate_series_id() {
+        let categories = [LineCategory {
+            key: "only".into(),
+            label: "Only".into(),
+        }];
+        let previous = normalize_categorical(
+            &categories,
+            &[
+                LineSeries::new("duplicate", "First", "blue", vec![LinePoint::new(1.0)]),
+                LineSeries::new("duplicate", "Second", "red", vec![LinePoint::new(2.0)]),
+            ],
+        );
+        let next = normalize_categorical(
+            &categories,
+            &[
+                LineSeries::new("duplicate", "First", "blue", vec![LinePoint::new(10.0)]),
+                LineSeries::new("duplicate", "Second", "red", vec![LinePoint::new(20.0)]),
+            ],
+        );
+        let state = InteractionState {
+            focused: Some(active(0, Some(1))),
+            roving_category_key: Some("only".into()),
+            ..Default::default()
+        };
+
+        let reconciled = reduce(&state, InteractionAction::ReconcileData, &previous, &next);
+        assert_eq!(reconciled.focused, Some(active(0, Some(0))));
     }
 }
