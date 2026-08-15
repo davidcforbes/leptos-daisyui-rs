@@ -188,6 +188,110 @@ async fn count_of(h: &pixelproof_web::Harness, sel: &str) -> u32 {
         .expect("number")
 }
 
+/// Categorical line chart (ldui-9tr.4): the first chart example is a
+/// deterministic, non-empty fourteen-week fixture. This is intentionally a
+/// DOM contract rather than a screenshot oracle: Task 7 owns reviewed visual
+/// baselines, while this test pins the semantic SVG/table structure that a
+/// later interaction slice will build upon.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn categorical_line_chart_exposes_static_render_contract() {
+    let h = harness_at("/components/charts").await;
+    let snapshot = eval_json(
+        &h,
+        r#"(() => {
+            const root = document.querySelector('[data-testid="interactive-line-chart"]');
+            if (!root) return null;
+            const series = [...new Map([...root.querySelectorAll('path[data-series-id]:not([data-category-index])')].map(path => [
+                path.dataset.seriesId,
+                { id: path.dataset.seriesId, dash: path.getAttribute('stroke-dasharray') },
+            ])).values()];
+            const marker = (selector) => root.querySelector(selector)?.tagName.toLowerCase() ?? null;
+            const legend = root.querySelector('[data-line-chart-legend]');
+            const table = root.querySelector('[data-line-chart-table]');
+            return {
+                plotCount: root.querySelectorAll('[data-line-chart-plot]').length,
+                series,
+                actualMarker: marker('circle[data-series-id="actual"][data-category-index="0"]'),
+                averageMarker: marker('rect[data-series-id="rolling-average"][data-category-index="0"]'),
+                targetMarker: marker('path[data-series-id="target"][data-category-index="0"]'),
+                missingActual: root.querySelector('[data-series-id="actual"][data-category-key="week-07"]') === null,
+                legendEntries: legend ? [...legend.querySelectorAll('[data-series-id]')].map(entry => entry.textContent.trim()) : [],
+                legendSwatches: legend ? legend.querySelectorAll('[data-line-chart-pattern-swatch]').length : 0,
+                caption: table?.querySelector('caption')?.textContent.trim() ?? null,
+                bodyRows: table?.querySelectorAll('tbody tr').length ?? 0,
+                seriesColumns: table?.querySelectorAll('thead th').length ?? 0,
+                emptyCount: root.querySelectorAll('[data-line-chart-empty]').length,
+            };
+        })()"#,
+    )
+    .await;
+
+    assert!(
+        !snapshot.is_null(),
+        "categorical chart wrapper must exist: {snapshot}"
+    );
+    assert_eq!(
+        snapshot["plotCount"],
+        json!(1),
+        "one categorical SVG plot: {snapshot}"
+    );
+    assert_eq!(
+        snapshot["series"],
+        json!([
+            { "id": "actual", "dash": null },
+            { "id": "rolling-average", "dash": "6 4" },
+            { "id": "target", "dash": "2 3" },
+        ]),
+        "three distinct series retain their solid/dashed/dotted identities: {snapshot}"
+    );
+    assert_eq!(
+        snapshot["actualMarker"],
+        json!("circle"),
+        "actual uses circles: {snapshot}"
+    );
+    assert_eq!(
+        snapshot["averageMarker"],
+        json!("rect"),
+        "rolling average uses squares: {snapshot}"
+    );
+    assert_eq!(
+        snapshot["targetMarker"],
+        json!("path"),
+        "target uses diamonds: {snapshot}"
+    );
+    assert_eq!(
+        snapshot["missingActual"],
+        json!(true),
+        "missing actual point remains a gap: {snapshot}"
+    );
+    assert_eq!(
+        snapshot["legendEntries"],
+        json!(["Actual", "Rolling average", "Target"])
+    );
+    assert_eq!(
+        snapshot["legendSwatches"],
+        json!(3),
+        "legend retains patterned swatches: {snapshot}"
+    );
+    assert_eq!(snapshot["caption"], json!("Weekly resolution trend"));
+    assert_eq!(
+        snapshot["bodyRows"],
+        json!(14),
+        "one table row per category: {snapshot}"
+    );
+    assert_eq!(
+        snapshot["seriesColumns"],
+        json!(4),
+        "category plus three series columns: {snapshot}"
+    );
+    assert_eq!(
+        snapshot["emptyCount"],
+        json!(0),
+        "populated fixture must not render empty state: {snapshot}"
+    );
+}
+
 /// Controlled custom filter (beads-je5r / `extra_filter` + `toolbar`): the
 /// demo's "Admins only" toggle lives in the toolbar slot and its predicate
 /// ANDs with the built-in filters. Toggling narrows the 25-row table to its

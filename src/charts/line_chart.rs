@@ -1,5 +1,6 @@
-use super::paint::{paint_attrs, stroke_attrs};
+use super::paint::{merge_style, paint_attrs, stroke_attrs};
 use leptos::prelude::*;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 mod geometry;
 mod interaction;
@@ -10,6 +11,11 @@ pub use types::{
     LineChartData, LineChartDataSource, LineChartModifiers, LineInteractionMode, LineLegendMode,
     LinePattern, LinePoint, LineSeries, MarkerShape, MarkerStyle,
 };
+
+/// Per-instance sequence for categorical SVG title, description, tooltip, and
+/// focus-target IDs. Multiple charts can therefore coexist without ARIA ids
+/// colliding, following the same pattern as `RosterGrid`.
+static LINE_CHART_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// Number of x-axis ticks to render: capped at 5, but never more than the
 /// number of data points. A fixed 5 ticks over a sparse (<=4 point) series
@@ -120,18 +126,7 @@ pub fn LineChart(
     on_point_activate: Option<Callback<LineChartActivation>>,
 ) -> impl IntoView {
     let data = Memo::new(move |_| data.get());
-
-    // These settings establish the categorical public API. Task 4 consumes
-    // them when it adds the categorical renderer; legacy XY output remains
-    // intentionally unchanged in this compatibility slice.
-    let _ = (
-        legend_mode,
-        interaction_mode,
-        accessible_label,
-        description,
-        show_data_table,
-        on_point_activate,
-    );
+    let instance = LINE_CHART_SEQ.fetch_add(1, Ordering::Relaxed);
 
     move || match data.get() {
         LineChartData::XY(data) => render_xy(
@@ -144,21 +139,399 @@ pub fn LineChart(
             y_label.clone(),
             x_labels.clone(),
             minimal,
-        ),
-        // Categorical SVG rendering arrives in Task 4. Until then, use the
-        // established empty-state SVG instead of introducing partial markup.
-        LineChartData::Categorical { .. } => render_xy(
-            Vec::new(),
+        )
+        .into_any(),
+        LineChartData::Categorical { categories, series } => render_categorical(
+            categories,
+            series,
             width,
             height,
-            color.clone(),
-            show_dots,
-            x_label.clone(),
-            y_label.clone(),
-            x_labels.clone(),
-            minimal,
+            legend_mode,
+            interaction_mode,
+            accessible_label.clone(),
+            description.clone(),
+            show_data_table,
+            on_point_activate.clone(),
+            instance,
         ),
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_categorical(
+    categories: Vec<LineCategory>,
+    series: Vec<LineSeries>,
+    width: u32,
+    height: u32,
+    legend_mode: LineLegendMode,
+    interaction_mode: LineInteractionMode,
+    accessible_label: String,
+    description: Option<String>,
+    show_data_table: bool,
+    on_point_activate: Option<Callback<LineChartActivation>>,
+    instance: u64,
+) -> AnyView {
+    use geometry::{
+        Projection, dasharray, marker_size, marker_stroke_width, path_segments, plot_bounds,
+        svg_number, visible_tick_indices,
+    };
+    use normalize::normalize_categorical;
+
+    let chart = normalize_categorical(&categories, &series);
+    let Some(domain) = chart.domain else {
+        return render_empty_categorical(&chart, accessible_label, show_data_table, instance);
+    };
+    if chart.categories.is_empty() || chart.series.is_empty() {
+        return render_empty_categorical(&chart, accessible_label, show_data_table, instance);
+    }
+
+    let max_marker_radius = chart
+        .series
+        .iter()
+        .map(|series| marker_size(&series.marker) + marker_stroke_width(&series.marker) / 2.0)
+        .fold(0.0_f64, f64::max);
+    let has_data_labels = chart.series.iter().any(|series| series.show_data_labels);
+    let bounds = plot_bounds(
+        width as f64,
+        height as f64,
+        max_marker_radius,
+        has_data_labels,
+    );
+    let projection = Projection {
+        bounds,
+        category_count: chart.categories.len(),
+        domain,
+    };
+    let plot_width = (bounds.right - bounds.left).max(1.0);
+    // Task 5 replaces this deterministic viewBox-width initial value with a
+    // measured CSS width after mount.
+    let tick_indices = visible_tick_indices(chart.categories.len(), width as f64, 48.0);
+    let title_id = format!("line-chart-{instance}-title");
+    let desc_id = format!("line-chart-{instance}-desc");
+    let tooltip_id = format!("line-chart-{instance}-tooltip");
+    let first_category_key = chart.categories[0].key.clone();
+    let preferred_series = chart
+        .series
+        .iter()
+        .find(|series| series.points.iter().any(|point| point.value.is_some()))
+        .map(|series| series.id.clone())
+        .unwrap_or_default();
+    let show_legend = match legend_mode {
+        LineLegendMode::Auto => chart.series.len() >= 2,
+        LineLegendMode::Always => true,
+        LineLegendMode::Never => false,
+    };
+    let interaction_enabled = match interaction_mode {
+        LineInteractionMode::Auto | LineInteractionMode::Enabled => true,
+        LineInteractionMode::Disabled => false,
+    };
+    let _ = on_point_activate;
+
+    let grid_lines = (0..=4)
+        .map(|index| {
+            let y = bounds.top + (bounds.bottom - bounds.top) * index as f64 / 4.0;
+            view! {
+                <line x1=svg_number(bounds.left) y1=svg_number(y) x2=svg_number(bounds.right) y2=svg_number(y)
+                    stroke="currentColor" stroke-opacity="0.14" stroke-width="1" />
+            }
+        })
+        .collect_view();
+    let y_ticks = (0..=4)
+        .map(|index| {
+            let fraction = index as f64 / 4.0;
+            let value = domain.max - (domain.max - domain.min) * fraction;
+            let y = bounds.top + (bounds.bottom - bounds.top) * fraction;
+            view! {
+                <text x=svg_number(bounds.left - 6.0) y=svg_number(y) text-anchor="end" dominant-baseline="middle"
+                    fill="currentColor" font-size="12" opacity="0.65">
+                    {format!("{value:.1}")}
+                </text>
+            }
+        })
+        .collect_view();
+    let x_ticks = tick_indices
+        .into_iter()
+        .map(|index| {
+            let category = &chart.categories[index];
+            let anchor = tick_anchor(index, chart.categories.len());
+            view! {
+                <text x=svg_number(projection.category_x(index)) y=svg_number(bounds.bottom + 18.0)
+                    text-anchor=anchor fill="currentColor" font-size="12" opacity="0.7">
+                    {category.label.clone()}
+                </text>
+            }
+        })
+        .collect_view();
+
+    let line_paths = chart
+        .series
+        .iter()
+        .flat_map(|series| {
+            let (stroke, stroke_style) = stroke_attrs(series.color.clone());
+            let dash = dasharray(&series.pattern);
+            path_segments(series, projection).into_iter().map(move |d| {
+                view! {
+                    <path d=d data-series-id=series.id.clone() fill="none" stroke=stroke.clone() style=stroke_style.clone()
+                        stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray=dash.clone() />
+                }
+            })
+        })
+        .collect_view();
+    let mut marker_views = Vec::new();
+    let mut data_label_views = Vec::new();
+    for series in &chart.series {
+        for (index, point) in series.points.iter().enumerate() {
+            let Some(value) = point.value else {
+                continue;
+            };
+            marker_views.push(marker_view(
+                &series.id,
+                index,
+                &chart.categories[index].key,
+                projection.category_x(index),
+                projection.value_y(value),
+                series,
+                point.marker_color.as_deref(),
+            ));
+            if series.show_data_labels
+                && let Some(label) = point.data_label.clone()
+            {
+                let anchor = tick_anchor(index, chart.categories.len());
+                let (fill, style) = paint_attrs(series.color.clone());
+                data_label_views.push(view! {
+                    <text x=svg_number(projection.category_x(index)) y=svg_number(projection.value_y(value) - marker_size(&series.marker) - 5.0)
+                        text-anchor=anchor fill=fill style=style font-size="12" font-weight="600">
+                        {label}
+                    </text>
+                });
+            }
+        }
+    }
+    let markers = marker_views.collect_view();
+    let data_labels = data_label_views.collect_view();
+    let focus_targets = interaction_enabled.then(|| {
+        chart
+            .categories
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| chart.series.iter().any(|series| series.points[*index].value.is_some()))
+            .map(|(index, category)| {
+                let values = chart
+                    .series
+                    .iter()
+                    .filter_map(|series| series.points[index].value.map(|value| format!("{} {value}", series.name)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                view! {
+                    <rect id=format!("line-chart-{instance}-category-{index}") x=svg_number(projection.category_x(index) - plot_width / (chart.categories.len().max(2) - 1) as f64 / 2.0)
+                        y=svg_number(bounds.top) width=svg_number(plot_width / (chart.categories.len().max(2) - 1) as f64)
+                        height=svg_number(bounds.bottom - bounds.top) fill="transparent" role="button"
+                        tabindex=if index == 0 { "0" } else { "-1" }
+                        aria-describedby=tooltip_id.clone() aria-label=format!("{}: {values}", category.label)
+                        data-category-index=index data-category-key=category.key.clone()
+                        data-active-category=first_category_key.clone() data-preferred-series=preferred_series.clone() />
+                }
+            })
+            .collect_view()
+    });
+    let overlay = interaction_enabled.then(|| {
+        view! {
+            <rect data-line-chart-pointer-overlay="" x=svg_number(bounds.left) y=svg_number(bounds.top)
+                width=svg_number(plot_width) height=svg_number(bounds.bottom - bounds.top) fill="transparent" pointer-events="all" />
+        }
+    });
+    let legend = show_legend.then(|| {
+        chart
+            .series
+            .iter()
+            .map(|series| legend_entry(series))
+            .collect_view()
+    });
+    let description =
+        description.unwrap_or_else(|| "Categorical multi-series line chart".to_string());
+    let viewbox = format!("0 0 {width} {height}");
+
+    view! {
+        <div data-testid="interactive-line-chart" role="group" aria-label=accessible_label.clone()
+            data-active-category=first_category_key.clone() data-preferred-series=preferred_series class="w-full">
+            {show_legend.then(|| view! {
+                <div data-line-chart-legend class="flex flex-wrap gap-x-4 gap-y-2 text-sm" aria-label="Chart legend">
+                    {legend}
+                </div>
+            })}
+            <div data-line-chart-stage class="relative mt-2">
+                <svg data-line-chart-plot role="img" aria-labelledby=format!("{title_id} {desc_id}")
+                    viewBox=viewbox class="h-auto w-full" xmlns="http://www.w3.org/2000/svg">
+                    <title id=title_id.clone()>{accessible_label.clone()}</title>
+                    <desc id=desc_id.clone()>{description}</desc>
+                    {grid_lines}
+                    <line x1=svg_number(bounds.left) y1=svg_number(bounds.bottom) x2=svg_number(bounds.right) y2=svg_number(bounds.bottom)
+                        stroke="currentColor" stroke-opacity="0.35" stroke-width="1" />
+                    <line x1=svg_number(bounds.left) y1=svg_number(bounds.top) x2=svg_number(bounds.left) y2=svg_number(bounds.bottom)
+                        stroke="currentColor" stroke-opacity="0.35" stroke-width="1" />
+                    {y_ticks}
+                    {x_ticks}
+                    {line_paths}
+                    {markers}
+                    {data_labels}
+                    {focus_targets}
+                    {overlay}
+                </svg>
+                <div data-testid="line-chart-tooltip" id=tooltip_id role="tooltip" class="hidden text-xs"></div>
+            </div>
+            {show_data_table.then(|| categorical_table(&chart, accessible_label.clone()))}
+        </div>
+    }
+    .into_any()
+}
+
+fn marker_view(
+    series_id: &str,
+    category_index: usize,
+    category_key: &str,
+    x: f64,
+    y: f64,
+    series: &normalize::NormalizedSeries,
+    point_marker_color: Option<&str>,
+) -> AnyView {
+    use geometry::{marker_size, marker_stroke_width, svg_number};
+
+    let size = marker_size(&series.marker);
+    let (fill, fill_style) = paint_attrs(
+        series
+            .marker
+            .fill
+            .as_deref()
+            .or(point_marker_color)
+            .unwrap_or(&series.color)
+            .to_string(),
+    );
+    let (stroke, stroke_style) = stroke_attrs(series.color.clone());
+    let style = merge_style([fill_style, stroke_style]);
+    let common = (
+        series_id.to_string(),
+        category_index,
+        category_key.to_string(),
+        fill,
+        stroke,
+        style,
+        svg_number(marker_stroke_width(&series.marker)),
+    );
+    match series.marker.shape {
+        MarkerShape::None => ().into_any(),
+        MarkerShape::Circle => view! {
+            <circle cx=svg_number(x) cy=svg_number(y) r=svg_number(size) fill=common.3 stroke=common.4 style=common.5 stroke-width=common.6
+                data-series-id=common.0 data-category-index=common.1 data-category-key=common.2 data-marker-shape="circle" />
+        }
+        .into_any(),
+        MarkerShape::Square => view! {
+            <rect x=svg_number(x - size) y=svg_number(y - size) width=svg_number(size * 2.0) height=svg_number(size * 2.0)
+                fill=common.3 stroke=common.4 style=common.5 stroke-width=common.6
+                data-series-id=common.0 data-category-index=common.1 data-category-key=common.2 data-marker-shape="square" />
+        }
+        .into_any(),
+        MarkerShape::Diamond => view! {
+            <path d=format!("M {} {} L {} {} L {} {} L {} {} Z", svg_number(x), svg_number(y - size), svg_number(x + size), svg_number(y), svg_number(x), svg_number(y + size), svg_number(x - size), svg_number(y))
+                fill=common.3 stroke=common.4 style=common.5 stroke-width=common.6
+                data-series-id=common.0 data-category-index=common.1 data-category-key=common.2 data-marker-shape="diamond" />
+        }
+        .into_any(),
+    }
+}
+
+fn legend_entry(series: &normalize::NormalizedSeries) -> AnyView {
+    use geometry::{dasharray, marker_size, svg_number};
+    let (stroke, stroke_style) = stroke_attrs(series.color.clone());
+    let (fill, fill_style) = paint_attrs(
+        series
+            .marker
+            .fill
+            .as_deref()
+            .unwrap_or(&series.color)
+            .to_string(),
+    );
+    let marker_style = merge_style([fill_style, stroke_style.clone()]);
+    let dash = dasharray(&series.pattern);
+    let marker = match series.marker.shape {
+        MarkerShape::None => ().into_any(),
+        MarkerShape::Circle => view! {
+            <circle cx="14" cy="7" r=svg_number(marker_size(&series.marker).min(3.5)) fill=fill stroke=stroke.clone() style=marker_style stroke-width="1" />
+        }
+        .into_any(),
+        MarkerShape::Square => view! {
+            <rect x="11" y="4" width="6" height="6" fill=fill stroke=stroke.clone() style=marker_style stroke-width="1" />
+        }
+        .into_any(),
+        MarkerShape::Diamond => view! {
+            <path d="M 14 3 L 18 7 L 14 11 L 10 7 Z" fill=fill stroke=stroke.clone() style=marker_style stroke-width="1" />
+        }
+        .into_any(),
+    };
+    view! {
+        <span data-series-id=series.id.clone() class="inline-flex items-center gap-2 whitespace-nowrap">
+            <svg data-line-chart-pattern-swatch="" aria-hidden="true" viewBox="0 0 28 14" class="h-4 w-7">
+                <line x1="1" y1="7" x2="27" y2="7" fill="none" stroke=stroke style=stroke_style stroke-width="2" stroke-dasharray=dash />
+                {marker}
+            </svg>
+            {series.name.clone()}
+        </span>
+    }
+    .into_any()
+}
+
+fn categorical_table(chart: &normalize::NormalizedChart, accessible_label: String) -> AnyView {
+    let header = chart
+        .series
+        .iter()
+        .map(|series| view! { <th scope="col">{series.name.clone()}</th> })
+        .collect_view();
+    let rows = chart
+        .categories
+        .iter()
+        .enumerate()
+        .map(|(index, category)| {
+            let cells = chart
+                .series
+                .iter()
+                .map(|series| {
+                    let value = series.points[index]
+                        .value
+                        .map(|value| {
+                            series.points[index]
+                                .display_value
+                                .clone()
+                                .unwrap_or_else(|| value.to_string())
+                        })
+                        .unwrap_or_else(|| "No value".to_string());
+                    view! { <td>{value}</td> }
+                })
+                .collect_view();
+            view! { <tr><th scope="row">{category.label.clone()}</th>{cells}</tr> }
+        })
+        .collect_view();
+    view! {
+        <table data-line-chart-table class="sr-only">
+            <caption>{accessible_label}</caption>
+            <thead><tr><th scope="col">"Category"</th>{header}</tr></thead>
+            <tbody>{rows}</tbody>
+        </table>
+    }
+    .into_any()
+}
+
+fn render_empty_categorical(
+    chart: &normalize::NormalizedChart,
+    accessible_label: String,
+    show_data_table: bool,
+    _instance: u64,
+) -> AnyView {
+    view! {
+        <div data-testid="interactive-line-chart" role="group" aria-label=accessible_label.clone() class="w-full">
+            <div data-line-chart-empty role="status" class="text-sm opacity-70">"No chart data"</div>
+            {show_data_table.then(|| categorical_table(chart, accessible_label.clone()))}
+        </div>
+    }
+    .into_any()
 }
 
 /// Renders the preserved legacy numeric XY chart surface.

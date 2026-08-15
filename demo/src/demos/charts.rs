@@ -4,7 +4,8 @@ use leptos::prelude::*;
 // rather than glob because `charts` also exports a `Sparkline`, which would
 // collide with the reactive daisyUI-framed `components::Sparkline`.
 use leptos_daisyui_rs::charts::{
-    AreaChart, BarChart, ChartSeries, HeatScale, Heatmap, HeatmapCell, LineChart, PieChart,
+    AreaChart, BarChart, ChartSeries, HeatScale, Heatmap, HeatmapCell, LineCategory, LineChart,
+    LineChartData, LinePattern, LinePoint, LineSeries, MarkerShape, MarkerStyle, PieChart,
     PieSlice, Sparkline, StackedAreaChart, StackedBarChart,
 };
 
@@ -29,6 +30,15 @@ pub fn ChartsDemo() -> impl IntoView {
                 <p class="text-sm opacity-70">
                     "Categorical x_labels replace the raw fractional x values, and the tick count is capped at the number of data points so a sparse series cannot print a duplicated date. Axis titles are optional."
                 </p>
+                <div class="w-full max-w-2xl">
+                    <LineChart
+                        data=interactive_line_data()
+                        accessible_label="Weekly resolution trend".to_string()
+                        description="Actual, rolling average, and target resolution counts by week.".to_string()
+                        width=560
+                        height=260
+                    />
+                </div>
                 <div class="w-full max-w-xl">
                     <LineChart
                         data=weekly_series()
@@ -227,6 +237,109 @@ fn week_labels() -> Vec<String> {
 /// makes `x_labels` necessary.
 fn weekly_series() -> Vec<(f64, f64)> {
     vec![(0.0, 18.0), (1.0, 24.0), (2.0, 21.0), (3.0, 31.0)]
+}
+
+/// Deterministic categorical fixture for the interactive `LineChart` demo.
+/// It deliberately includes a missing interior actual, a short target series,
+/// host-formatted values, labels, and three redundant paint/shape patterns.
+fn interactive_line_data() -> LineChartData {
+    LineChartData::categorical(
+        (1..=14)
+            .map(|week| LineCategory {
+                key: format!("week-{week:02}"),
+                label: format!("W{week:02}"),
+            })
+            .collect(),
+        vec![actual_series(), rolling_average_series(), target_series()],
+    )
+}
+
+fn actual_series() -> LineSeries {
+    let values = [
+        42.0, 45.0, 44.0, 49.0, 52.0, 50.0, 0.0, 55.0, 58.0, 57.0, 61.0, 64.0, 62.0, 67.0,
+    ];
+    LineSeries {
+        id: "actual".to_string(),
+        name: "Actual".to_string(),
+        points: values
+            .into_iter()
+            .enumerate()
+            .map(|(index, value)| {
+                if index == 6 {
+                    LinePoint::missing()
+                } else {
+                    let point =
+                        LinePoint::new(value).with_display_value(format!("{value:.0} resolved"));
+                    if index == 0 || index == 13 {
+                        point.with_data_label(format!("{value:.0}"))
+                    } else {
+                        point
+                    }
+                }
+            })
+            .collect(),
+        color: "var(--color-primary)".to_string(),
+        pattern: LinePattern::Solid,
+        marker: MarkerStyle {
+            shape: MarkerShape::Circle,
+            size: 4.0,
+            fill: None,
+            stroke_width: 1.0,
+        },
+        show_data_labels: true,
+    }
+}
+
+fn rolling_average_series() -> LineSeries {
+    let values = [
+        43.0, 44.0, 45.0, 47.0, 49.0, 50.0, 51.0, 53.0, 55.0, 57.0, 59.0, 61.0, 63.0, 65.0,
+    ];
+    LineSeries {
+        id: "rolling-average".to_string(),
+        name: "Rolling average".to_string(),
+        points: values
+            .into_iter()
+            .map(|value| LinePoint::new(value).with_display_value(format!("{value:.1} average")))
+            .collect(),
+        color: "var(--color-secondary)".to_string(),
+        pattern: LinePattern::Dashed,
+        marker: MarkerStyle {
+            shape: MarkerShape::Square,
+            size: 3.5,
+            fill: None,
+            stroke_width: 1.0,
+        },
+        show_data_labels: false,
+    }
+}
+
+fn target_series() -> LineSeries {
+    let values = [48.0, 48.0, 50.0, 50.0, 52.0, 52.0, 54.0, 54.0, 56.0, 56.0];
+    LineSeries {
+        id: "target".to_string(),
+        name: "Target".to_string(),
+        points: values
+            .into_iter()
+            .enumerate()
+            .map(|(index, value)| {
+                let point = LinePoint::new(value).with_display_value(format!("Target {value:.0}"));
+                if index == 9 {
+                    point.with_data_label("56 target")
+                } else {
+                    point
+                }
+            })
+            .collect(),
+        color: "var(--color-accent)".to_string(),
+        pattern: LinePattern::Dotted,
+        marker: MarkerStyle {
+            shape: MarkerShape::Diamond,
+            size: 4.0,
+            fill: None,
+            stroke_width: 1.0,
+        },
+        show_data_labels: true,
+    }
 }
 
 /// Weekly closed-work counts for the per-bar-colour example.
