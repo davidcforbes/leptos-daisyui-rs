@@ -65,6 +65,11 @@ pub fn SegmentedBar(
     #[prop(optional, into)]
     class: &'static str,
 
+    /// Accessible name for the distribution image. Callers should summarize
+    /// the categories the colored segments encode.
+    #[prop(optional, into)]
+    label: MaybeProp<String>,
+
     /// Node reference to the wrapping div element
     #[prop(optional)]
     node_ref: NodeRef<Div>,
@@ -73,6 +78,7 @@ pub fn SegmentedBar(
         <div
             node_ref=node_ref
             role="img"
+            aria-label=move || label.get()
             class=move || {
                 merge_classes!("flex h-2 w-full overflow-hidden rounded bg-base-200", class)
             }

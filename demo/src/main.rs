@@ -134,6 +134,7 @@ fn AppInner() -> impl IntoView {
                     <Route path=path!("/input") view=InputDemo />
                     <Route path=path!("/join") view=JoinDemo />
                     <Route path=path!("/gantt") view=GanttDemo />
+                    <Route path=path!("/gauge") view=GaugeDemo />
                     <Route path=path!("/kanban") view=KanbanDemo />
                     <Route path=path!("/kbd") view=KbdDemo />
                     <Route path=path!("/label") view=LabelDemo />
@@ -153,6 +154,7 @@ fn AppInner() -> impl IntoView {
                     <Route path=path!("/nav_rail") view=NavRailDemo />
                     <Route path=path!("/pagination") view=PaginationDemo />
                     <Route path=path!("/persona") view=PersonaDemo />
+                    <Route path=path!("/phase_progress") view=PhaseProgressDemo />
                     <Route path=path!("/progress") view=ProgressDemo />
                     <Route path=path!("/radial_progress") view=RadialProgressDemo />
                     <Route path=path!("/radio") view=RadioDemo />

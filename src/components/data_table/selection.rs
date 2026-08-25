@@ -149,6 +149,28 @@ pub fn row_click_kind(ctrl: bool, shift: bool, has_activate: bool) -> RowClickKi
     }
 }
 
+/// Whether a click event should be swallowed because it is a repeat click of
+/// a double-click aimed at `on_row_inspect` (`ldui-tmr`).
+///
+/// A double-click fires `click` (detail 1), `click` (detail 2), `dblclick` --
+/// so with an inspect callback wired, letting every click through would run
+/// `on_row_activate` twice before the inspector opens. Swallowing clicks
+/// with `detail > 1` keeps activation to exactly one call per double-click
+/// (the first click still activates: standard dblclick discrimination is
+/// acceptable because single-click navigation is non-destructive). Without
+/// an inspect callback nothing changes.
+pub fn click_swallowed_by_inspect(detail: i32, has_inspect: bool) -> bool {
+    has_inspect && detail > 1
+}
+
+/// Whether a keydown should fire `on_row_inspect`: Shift+Enter with an
+/// inspect callback wired (`ldui-tmr`). Ctrl+Shift+Enter stays with the
+/// selection state machine (range select), as does Shift+Space, so the
+/// keyboard selection ergonomics survive an inspect-enabled table.
+pub fn key_inspects(key: &str, ctrl: bool, shift: bool, has_inspect: bool) -> bool {
+    has_inspect && shift && !ctrl && key == "Enter"
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -184,6 +206,34 @@ mod tests {
         // No `on_row_activate` registered -- behavior is unchanged from
         // before this callback existed: every click feeds selection.
         assert_eq!(row_click_kind(false, false, false), RowClickKind::Select);
+    }
+
+    // ── click_swallowed_by_inspect / key_inspects (ldui-tmr) ──
+
+    #[test]
+    fn repeat_click_of_a_double_click_is_swallowed_only_with_inspect_wired() {
+        assert!(click_swallowed_by_inspect(2, true));
+        assert!(click_swallowed_by_inspect(3, true));
+        // Without an inspect callback, behavior is unchanged: every click
+        // (whatever its detail) feeds activate/select as before.
+        assert!(!click_swallowed_by_inspect(2, false));
+        assert!(!click_swallowed_by_inspect(1, true));
+        assert!(!click_swallowed_by_inspect(1, false));
+    }
+
+    #[test]
+    fn shift_enter_inspects_only_with_inspect_wired() {
+        assert!(key_inspects("Enter", false, true, true));
+        assert!(!key_inspects("Enter", false, true, false));
+    }
+
+    #[test]
+    fn other_keys_and_modifier_combos_do_not_inspect() {
+        // Plain Enter activates; Shift+Space range-selects; Ctrl+Shift+Enter
+        // stays with the selection state machine.
+        assert!(!key_inspects("Enter", false, false, true));
+        assert!(!key_inspects(" ", false, true, true));
+        assert!(!key_inspects("Enter", true, true, true));
     }
 
     // ── row_is_interactive ──

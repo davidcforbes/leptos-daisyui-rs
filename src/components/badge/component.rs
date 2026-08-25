@@ -32,6 +32,26 @@ pub fn Badge(
     #[prop(optional, into)]
     class: &'static str,
 
+    /// Let the badge's content WRAP, growing the outline with it (owner,
+    /// 2026-08-17: a wrapped value spilled past the badge's fixed height in
+    /// every data table). daisyUI's `.badge` pins height and forbids
+    /// wrapping in the FRAMEWORK stylesheet, so the escape hatch is a class:
+    /// `badge-wrap` — ship it in the consuming app's `input.css`:
+    ///
+    /// ```css
+    /// .badge-wrap {
+    ///   height: auto;
+    ///   min-height: calc(var(--size, 1.25rem));
+    ///   white-space: normal;
+    ///   line-height: 1.2;
+    ///   padding-top: 0.125rem;
+    ///   padding-bottom: 0.125rem;
+    ///   text-align: left;
+    /// }
+    /// ```
+    #[prop(optional, into)]
+    wrap: Signal<bool>,
+
     /// Node reference for the badge element
     #[prop(optional)]
     node_ref: NodeRef<Div>,
@@ -49,6 +69,7 @@ pub fn Badge(
                     style.get().as_str(),
                     color.get().as_str(),
                     size.get().as_str(),
+                    if wrap.get() { "badge-wrap" } else { "" },
                     class
                 )
             }

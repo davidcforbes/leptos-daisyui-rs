@@ -4,6 +4,7 @@ use crate::components::data_table::filter::{
     ColumnFilters, DataTableFilterRow, distinct_values, has_filterable_columns,
 };
 use crate::components::data_table::header::DataTableHeader;
+use crate::components::data_table::selection::{RowClickKind, row_click_kind, row_is_interactive};
 use crate::components::data_table::types::{
     CellRenderer, Column, DataTableClasses, DataTableTexts, SortOrder, TableRow, TypedCellFn,
 };
@@ -205,11 +206,50 @@ pub fn ServerDataTable(
     /// from the row's absolute index and data. Merged with `classes.row`.
     #[prop(optional)]
     row_class_fn: Option<Callback<(usize, TableRow), String>>,
+
+    /// Optional callback fired on a **plain** row click (no Ctrl/Shift) or a
+    /// keyboard Enter/Space, receiving the row's index **within the current
+    /// page** (the server variant renders one page at a time; combine with
+    /// `current_page`/`page_size` for a global position). Same contract as
+    /// [`DataTable`](super::DataTable)'s `on_row_activate` (`ldui-1gp`) —
+    /// e.g. navigate to the row's detail page. A modified click stays inert
+    /// here (the server variant has no selection state machine).
+    #[prop(optional, into)]
+    on_row_activate: Option<Callback<usize>>,
+
+    /// Optional secondary activation fired on a row **double-click** or
+    /// Shift+Enter, receiving the page-local row index — same dblclick
+    /// discrimination as the client-paged table (`ldui-tmr`/`ldui-1gp`): the
+    /// first click still activates once, the repeat click is swallowed so
+    /// activation never fires twice, and the inspector fires exactly once.
+    #[prop(optional, into)]
+    on_row_inspect: Option<Callback<usize>>,
 ) -> impl IntoView {
     // Column-width overrides from dragging a header divider, keyed by
     // column id. Shared between the header (writer) and body (reader) so
     // resized columns stay aligned.
     let column_widths = RwSignal::new(HashMap::<&'static str, f64>::new());
+
+    // Row activation, forwarded to the shared body exactly like the
+    // client-paged DataTable (ldui-1gp): a plain click/Enter/Space activates;
+    // a modified click is inert here because the server variant has no
+    // selection state machine to feed. `on_row_inspect` rides the body's own
+    // dblclick discrimination (detail > 1 swallow), so the timing matches
+    // the client table by construction.
+    // A bare Callback (not Option) so the body's `optional, into` prop takes
+    // it the same way DataTable's own forwarding does — passing an Option
+    // here is the E0308 trap the ldui-tmr CI fix documented.
+    let on_row_click = Callback::new(move |(index, ctrl, shift): (usize, bool, bool)| {
+        let Some(callback) = on_row_activate else {
+            return;
+        };
+        if matches!(row_click_kind(ctrl, shift, true), RowClickKind::Activate) {
+            callback.run(index);
+        }
+    });
+    // Inspect alone still needs focusable rows for its Shift+Enter path.
+    let row_interactive =
+        row_is_interactive(false, on_row_activate.is_some() || on_row_inspect.is_some());
     let container_class = merge_classes!(classes.container, class);
 
     // Search state with debounce (only used when on_search is provided).
@@ -416,6 +456,9 @@ pub fn ServerDataTable(
                         column_widths=Signal::derive(move || column_widths.get())
                         typed_cells=typed_cells
                         row_class_fn=row_class_fn
+                        on_row_click=on_row_click
+                        on_row_inspect=on_row_inspect
+                        interactive=row_interactive
                     />
                 </Table>
             </div>

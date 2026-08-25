@@ -515,9 +515,19 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     value: "empty_state",
                 },
                 ComponentItem {
+                    name: "Gauge",
+                    href: "/components/gauge",
+                    value: "gauge",
+                },
+                ComponentItem {
                     name: "Loading",
                     href: "/components/loading",
                     value: "loading",
+                },
+                ComponentItem {
+                    name: "Phase Progress",
+                    href: "/components/phase_progress",
+                    value: "phase_progress",
                 },
                 ComponentItem {
                     name: "Progress",

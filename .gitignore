@@ -8,3 +8,8 @@
 # Dolt database files (added by bd init)
 .dolt/
 *.db
+
+# Beads runtime/credential files (bd doctor required patterns)
+.beads-credential-key
+.beads/proxieddb/
+*.gate.lock*

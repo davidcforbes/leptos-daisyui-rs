@@ -94,6 +94,19 @@ mod tests {
         }
     }
 
+    /// The library's `Pressable` primitive emits `data-pressable="true"` as
+    /// its auditable marker; the button rule must recognize it so a designed
+    /// unstyled action never counts as drift (and the counts drop honestly,
+    /// not via exemption comments). Genuinely raw buttons keep flagging.
+    #[test]
+    fn button_rule_recognizes_the_pressable_marker() {
+        let js = drift_js("main");
+        assert!(
+            js.contains("hasAttribute('data-pressable')"),
+            "button-without-btn must accept the Pressable marker attribute"
+        );
+    }
+
     #[test]
     fn drift_report_deserializes_the_sweep_shape() {
         let r: DriftReport = serde_json::from_str(

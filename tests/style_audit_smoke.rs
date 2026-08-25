@@ -178,7 +178,11 @@ const PAGES: &[(&str, &[(&str, usize)])] = &[
     (
         "/components/data-table",
         &[
-            (family::TYPOGRAPHY, 83),
+            // 90, was 83: the on_row_inspect demo additions (ldui-tmr) put
+            // seven more <code>/<kbd> spans into the page prose — the same
+            // monospace-in-sans-context class as the rest of this page's
+            // typography debt (code font-family vs the sans profile).
+            (family::TYPOGRAPHY, 90),
             (family::SHAPE, 0),
             (family::DEPTH, 18),
             (family::GRID, 2),

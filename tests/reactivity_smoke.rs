@@ -394,6 +394,38 @@ async fn server_table_round_trips_typed_query() {
     );
 }
 
+/// Server-variant activation forwarding (ldui-1gp): ServerDataTable passes
+/// `on_row_activate`/`on_row_inspect` through to the shared body, so its
+/// rows carry the keyboard contract and a plain click activates with the
+/// page-local index — previously the server variant dropped both callbacks
+/// entirely.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn server_table_forwards_activation() {
+    let h = harness_at("/components/data-table").await;
+
+    assert_eq!(
+        count_of(&h, "#server-table tbody tr[tabindex=\"0\"]").await,
+        10,
+        "activation-wired server rows are keyboard-operable"
+    );
+    assert_eq!(
+        testid_text(&h, "server-activated-row").await,
+        "(none)",
+        "no activation before any click"
+    );
+
+    click(&h, "#server-table tbody tr:nth-child(2) td:first-child").await;
+    assert_eq!(
+        testid_text(&h, "server-activated-row").await,
+        "1",
+        "a plain click activates with the page-local row index"
+    );
+    // The dblclick/Shift+Enter inspector rides the shared body's already
+    // browser-proven discrimination (ldui-tmr); its wiring is exercised by
+    // the single-click path above reaching the same forwarded pair.
+}
+
 /// Keyed row identity (beads-py7i / `row_key`): select a row, then replace
 /// the data vec (the demo's Reverse button). The selection must follow the
 /// row's stable id to its new position rather than clearing (the positional

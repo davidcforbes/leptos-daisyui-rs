@@ -586,6 +586,8 @@ pub fn AppShellContent(
     view! {
         <div
             node_ref=node_ref
+            role="main"
+            tabindex="0"
             class=move || merge_classes!("flex-1 overflow-y-auto", class)
         >
             {children()}

@@ -9,7 +9,7 @@ pub const CAPACITY_BAR_DEFAULT_MAX_FACTOR: f64 = 1.25;
 /// (`Primary`/`Error`) -- mirroring d2d-ui's `CapacityBar`, which stored
 /// separate `fill_color`/`over_color` fields rather than deriving one from
 /// the other.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum CapacityBarColor {
     /// Neutral color
     Neutral,
@@ -47,6 +47,21 @@ pub enum CapacityBarColor {
     /// Rendered as a diagonal hatch rather than a fill: a solid block asserts a magnitude, and
     /// the magnitude is not the point once the series has ended.
     Stopped,
+}
+
+impl CapacityBarColor {
+    /// The DIRECTION color for a value measured against a baseline: green at
+    /// or above, red below. Factual, not judgemental — components that carry a
+    /// separate good/bad affordance (badges, pills) keep it; this only stops a
+    /// bar from wearing one color in both directions (a dashboard of twelve
+    /// KPI cards once showed every bar red, above-baseline cards included).
+    pub fn for_direction(value: f64, baseline: f64) -> Self {
+        if value >= baseline {
+            Self::Success
+        } else {
+            Self::Error
+        }
+    }
 }
 
 impl CapacityBarColor {
@@ -122,5 +137,26 @@ pub fn capacity_bar_overflow_band(value_percent: f64, cap_percent: f64) -> Optio
         Some((cap_percent, value_percent - cap_percent))
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod direction_tests {
+    use super::*;
+
+    #[test]
+    fn direction_color_is_green_at_or_above_and_red_below() {
+        assert_eq!(
+            CapacityBarColor::for_direction(278.0, 250.0),
+            CapacityBarColor::Success
+        );
+        assert_eq!(
+            CapacityBarColor::for_direction(250.0, 250.0),
+            CapacityBarColor::Success
+        );
+        assert_eq!(
+            CapacityBarColor::for_direction(5739.0, 6705.0),
+            CapacityBarColor::Error
+        );
     }
 }

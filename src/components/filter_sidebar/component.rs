@@ -96,6 +96,14 @@ pub fn FilterSidebar(
     /// every existing call site is unchanged.
     #[prop(optional, into)]
     side: Signal<SidebarSide>,
+    /// Expanded width classes. Defaults to the measured `220px`, which every
+    /// existing call site keeps. Override for a panel hosting content wider
+    /// than a filter column (e.g. an assistant card) — pass the full class
+    /// pair (`"w-[360px] min-w-[360px]"`), and remember the consumer's CSS
+    /// must `@source inline(...)` any arbitrary-value classes it passes,
+    /// exactly as the type docs require for this crate's own.
+    #[prop(default = String::from("w-[220px] min-w-[220px]"), into)]
+    expanded_width: String,
     /// Reference to the panel element
     /// ([HTMLElement](https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement)).
     #[prop(optional)]
@@ -107,9 +115,9 @@ pub fn FilterSidebar(
 ) -> impl IntoView {
     let width_class = move || {
         if collapsed.get() {
-            "w-[44px] min-w-[44px]"
+            "w-[44px] min-w-[44px]".to_string()
         } else {
-            "w-[220px] min-w-[220px]"
+            expanded_width.clone()
         }
     };
     // `opacity-0 pointer-events-none` rather than unmounting — see the type docs.
@@ -167,9 +175,12 @@ pub fn FilterSidebar(
                     type="button"
                     aria-label=move || toggle_label.get()
                     aria-expanded=move || (!collapsed.get()).to_string()
-                    class="flex size-7 shrink-0 items-center justify-center rounded-md \
+                    // `btn` first so this reads as a real daisyUI button to
+                    // style tooling; every utility after it re-asserts the
+                    // panel toggle's own geometry and quiet palette.
+                    class="btn btn-square btn-xs size-7 shrink-0 rounded-md \
                            border border-black/[.12] bg-base-100 text-base-content/75 \
-                           hover:bg-black/[.06] hover:text-base-content"
+                           shadow-none hover:bg-black/[.06] hover:text-base-content"
                     on:click=move |_| on_toggle.run(())
                 >
                     // The arrow points where the panel would GO, so it depends

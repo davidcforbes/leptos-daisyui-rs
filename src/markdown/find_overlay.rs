@@ -95,7 +95,7 @@ pub fn FindOverlay(
         let new_value = format!(
             "{}{}{}",
             &value[..range.start],
-            &snapshot.replace,
+            snapshot.replace,
             &value[range.end..]
         );
         source.set(new_value.clone());
