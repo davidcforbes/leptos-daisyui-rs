@@ -216,6 +216,10 @@ pub fn DataTableDemo() -> impl IntoView {
     let server_page = RwSignal::new(1_i64);
     let server_total = RwSignal::new(0_i64);
     let last_query = RwSignal::new(String::new());
+    // Server-variant activation forwarding (ldui-1gp): the same
+    // click/dblclick contract as the client table, with page-local indices.
+    let server_activated = RwSignal::new(Option::<usize>::None);
+    let server_inspected = RwSignal::new(Option::<usize>::None);
     let server_columns = RwSignal::new(vec![
         Column::new("name", "Name"),
         Column::new("email", "Email"),
@@ -1166,6 +1170,24 @@ pub fn DataTableDemo() -> impl IntoView {
                 <p class="text-xs opacity-60 mb-4">
                     "Last query: "
                     <code data-testid="server-last-query">{move || last_query.get()}</code>
+                    " \u{b7} Activated (page-local): "
+                    <code data-testid="server-activated-row">
+                        {move || {
+                            server_activated
+                                .get()
+                                .map(|i| i.to_string())
+                                .unwrap_or_else(|| "(none)".to_string())
+                        }}
+                    </code>
+                    " \u{b7} Inspected: "
+                    <code data-testid="server-inspected-row">
+                        {move || {
+                            server_inspected
+                                .get()
+                                .map(|i| i.to_string())
+                                .unwrap_or_else(|| "(none)".to_string())
+                        }}
+                    </code>
                 </p>
                 <ServerDataTable
                     rows=server_rows
@@ -1183,6 +1205,12 @@ pub fn DataTableDemo() -> impl IntoView {
                             ("role", distinct_values(&all, "role")),
                             ("status", distinct_values(&all, "status")),
                         ])
+                    })
+                    on_row_activate=Callback::new(move |idx: usize| {
+                        server_activated.set(Some(idx));
+                    })
+                    on_row_inspect=Callback::new(move |idx: usize| {
+                        server_inspected.set(Some(idx));
                     })
                     attr:id="server-table"
                 />
