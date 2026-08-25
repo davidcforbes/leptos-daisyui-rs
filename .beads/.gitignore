@@ -59,6 +59,18 @@ backup/
 *.db-shm
 db.sqlite
 bd.db
+# Required patterns (bd doctor v1.2.2)
+.env
+*.gate.lock*
+export-state.json
+last_pull
+embeddeddolt/
+proxieddb/
+dolt-server.activity
+.beads-credential-key
+proxied_server_client_info.json
+dolt-server-config.yaml
+
 # NOTE: Do NOT add negation patterns here.
 # They would override fork protection in .git/info/exclude.
 # Config files (metadata.json, config.yaml) are tracked by git by default
