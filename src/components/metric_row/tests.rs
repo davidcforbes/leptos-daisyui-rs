@@ -93,12 +93,12 @@ fn test_container_class_stacked() {
 
 #[test]
 fn test_label_class_row() {
-    assert_eq!(label_class(false), "text-sm opacity-60");
+    assert_eq!(label_class(false), "text-sm opacity-75");
 }
 
 #[test]
 fn test_label_class_stacked() {
-    assert_eq!(label_class(true), "text-xs opacity-60");
+    assert_eq!(label_class(true), "text-xs opacity-75");
 }
 
 // value_class tests

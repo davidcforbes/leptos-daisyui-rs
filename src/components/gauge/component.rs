@@ -1,6 +1,4 @@
-use super::style::{
-    gauge_arc_path, gauge_bands, gauge_fraction, gauge_readout, gauge_value_paint,
-};
+use super::style::{gauge_arc_path, gauge_bands, gauge_fraction, gauge_readout, gauge_value_paint};
 use crate::charts::paint::stroke_attrs;
 use crate::merge_classes;
 use leptos::{html::Div, prelude::*};
@@ -139,14 +137,14 @@ pub fn Gauge(
 
     let readout = move || display.get().unwrap_or_else(|| gauge_readout(value.get()));
     let accessible_name = move || {
-        label.get().unwrap_or_else(|| {
-            match (caption.get(), unit.get()) {
+        label
+            .get()
+            .unwrap_or_else(|| match (caption.get(), unit.get()) {
                 (Some(caption), Some(unit)) => format!("{caption} ({unit})"),
                 (Some(caption), None) => caption,
                 (None, Some(unit)) => format!("gauge ({unit})"),
                 (None, None) => "gauge".to_string(),
-            }
-        })
+            })
     };
 
     view! {

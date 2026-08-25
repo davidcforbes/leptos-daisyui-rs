@@ -343,8 +343,15 @@ impl Default for DataTableClasses {
             header_cell: "cursor-pointer select-none",
             body_cell: "",
             row: "",
-            loading_row: "animate-pulse",
-            empty_row: "text-center text-base-content/50",
+            // Muted + italic, NOT animate-pulse: the pulse animates opacity to 0.5,
+            // so a contrast scanner (and a user, half the time) sees the loading
+            // text at half its contrast — a real WCAG AA fail measured by axe.
+            loading_row: "text-base-content/75 italic",
+            // /75, not /50: base-content at 50% alpha fails WCAG AA color-contrast
+            // on base-100 (axe BLOCKING, found by office-perf tier1_a11y
+            // 2026-08-16 on the queue empty state); 75% is the muted-text
+            // level the op-srip AA pass cleared across the consuming app.
+            empty_row: "text-center text-base-content/75",
             selected_row: "bg-base-200",
             pagination: "flex justify-between items-center mt-4",
             pagination_button: "btn btn-sm",
@@ -644,8 +651,8 @@ mod tests {
         assert_eq!(classes.header_cell, "cursor-pointer select-none");
         assert_eq!(classes.body_cell, "");
         assert_eq!(classes.row, "");
-        assert_eq!(classes.loading_row, "animate-pulse");
-        assert_eq!(classes.empty_row, "text-center text-base-content/50");
+        assert_eq!(classes.loading_row, "text-base-content/75 italic");
+        assert_eq!(classes.empty_row, "text-center text-base-content/75");
         assert_eq!(classes.selected_row, "bg-base-200");
         assert_eq!(classes.pagination, "flex justify-between items-center mt-4");
         assert_eq!(classes.pagination_button, "btn btn-sm");

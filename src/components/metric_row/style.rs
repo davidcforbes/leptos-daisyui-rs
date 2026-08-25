@@ -1,7 +1,7 @@
 /// Text-color override for MetricRow's label and value slots.
 ///
 /// `Default` applies no override class, so each slot keeps its static
-/// resting appearance (a muted `opacity-60` label, a plain
+/// resting appearance (a muted `opacity-75` label (75, not 60: 60 fails WCAG AA color-contrast on base-100 — axe BLOCKING, office-perf tier1_a11y 2026-08-16), a plain
 /// `text-base-content` value). The other variants add a `text-*` utility
 /// class on top -- useful for status-tinted values, e.g. a red overdue
 /// amount or a green positive delta. Mirrors d2d-ui's `MetricRow`, which
@@ -69,12 +69,12 @@ pub fn container_class(stacked: bool) -> &'static str {
 
 /// Label slot classes. The stacked variant uses a smaller label size
 /// (mirrors d2d-ui's `fmt_small` for the stacked label vs. the row variant's
-/// body-sized muted label); both stay muted via `opacity-60`.
+/// body-sized muted label); both stay muted via `opacity-75` (the AA-passing muted level).
 pub fn label_class(stacked: bool) -> &'static str {
     if stacked {
-        "text-xs opacity-60"
+        "text-xs opacity-75"
     } else {
-        "text-sm opacity-60"
+        "text-sm opacity-75"
     }
 }
 

@@ -175,9 +175,12 @@ pub fn FilterSidebar(
                     type="button"
                     aria-label=move || toggle_label.get()
                     aria-expanded=move || (!collapsed.get()).to_string()
-                    class="flex size-7 shrink-0 items-center justify-center rounded-md \
+                    // `btn` first so this reads as a real daisyUI button to
+                    // style tooling; every utility after it re-asserts the
+                    // panel toggle's own geometry and quiet palette.
+                    class="btn btn-square btn-xs size-7 shrink-0 rounded-md \
                            border border-black/[.12] bg-base-100 text-base-content/75 \
-                           hover:bg-black/[.06] hover:text-base-content"
+                           shadow-none hover:bg-black/[.06] hover:text-base-content"
                     on:click=move |_| on_toggle.run(())
                 >
                     // The arrow points where the panel would GO, so it depends

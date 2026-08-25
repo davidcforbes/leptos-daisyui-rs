@@ -50,9 +50,12 @@ for (const el of els) {
   const tag = el.tagName;
 
   // 1. button-without-btn: a <button> whose classList lacks .btn, unless it
-  // sits inside one of the exempt overlay/nav constructs.
+  // sits inside one of the exempt overlay/nav constructs, or declares itself
+  // a designed unstyled action via the `data-pressable` marker — emitted by
+  // the library's Pressable primitive, so intent lives in the markup rather
+  // than in an exemption comment. Genuinely raw, unmarked buttons still flag.
   if (tag === 'BUTTON' && !el.classList.contains('btn')) {
-    if (!el.closest(EXEMPT_CLOSEST)) {
+    if (!el.closest(EXEMPT_CLOSEST) && !el.hasAttribute('data-pressable')) {
       push(path(el), 'button-without-btn: raw <button> lacks .btn');
     }
   }

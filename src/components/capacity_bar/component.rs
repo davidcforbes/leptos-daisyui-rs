@@ -41,8 +41,8 @@ use leptos::{html::Div, prelude::*};
 /// ### Add to `input.css`
 /// ```css
 /// @source inline("relative h-3 w-full overflow-hidden rounded-full bg-base-200");
-/// @source inline("absolute inset-y-0 left-0 top-0 h-full rounded-full w-px");
-/// @source inline("bg-info/30 bg-base-content/50");
+/// @source inline("absolute inset-y-0 left-0 top-0 h-full rounded-full w-0.5");
+/// @source inline("bg-info/30 bg-base-content/80");
 /// @source inline("bg-neutral bg-primary bg-secondary bg-accent bg-info bg-success bg-warning bg-error");
 /// ```
 ///
@@ -158,9 +158,11 @@ pub fn CapacityBar(
                 ></span>
             </Show>
 
-            // Cap-line tick — a thin vertical marker at the threshold.
+            // Cap-line tick — the threshold marker. 2px at 80% (owner,
+            // 2026-08-17): the 1px/50% tick disappeared against a filled bar,
+            // and on the stat cards the 12-week mark IS the story.
             <span
-                class="bg-base-content/50 absolute inset-y-0 top-0 h-full w-px"
+                class="bg-base-content/80 absolute inset-y-0 top-0 h-full w-0.5"
                 style:left=move || format!("{}%", cap_percent())
             ></span>
         </div>

@@ -57,7 +57,7 @@ mod server_component;
 
 /// Every DataTable variant keeps wide columns reachable instead of clipping
 /// the right-hand side of the table at constrained viewport widths.
-pub(super) const TABLE_SCROLL_WRAPPER_CLASS: &str = "overflow-x-auto";
+pub(super) const TABLE_SCROLL_WRAPPER_CLASS: &str = crate::components::table::TABLE_VIEWPORT_CLASS;
 
 /// Typed column sorting: `SortAs` plus the cell parsers/comparator behind it
 pub mod sort;
@@ -90,6 +90,14 @@ mod responsive_contract {
             TABLE_SCROLL_WRAPPER_CLASS
                 .split_ascii_whitespace()
                 .any(|class| class == "overflow-x-auto")
+        );
+
+        // ONE contract, not two that happen to match today: DataTable's
+        // wrapper is an alias of the public TableViewport class, so a bare
+        // Table in a TableViewport and a DataTable scroll identically.
+        assert_eq!(
+            TABLE_SCROLL_WRAPPER_CLASS,
+            crate::components::table::TABLE_VIEWPORT_CLASS,
         );
 
         for source in [

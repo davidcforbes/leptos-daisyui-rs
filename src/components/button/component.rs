@@ -2,6 +2,7 @@ use super::style::{ButtonColor, ButtonShape, ButtonSize, ButtonStyle};
 use crate::merge_classes;
 use crate::utils::{RippleOverlay, use_ripple};
 use leptos::{
+    ev,
     html::{A, Button as HTMLButton},
     prelude::*,
 };
@@ -56,6 +57,11 @@ pub fn Button(
     #[prop(optional)]
     node_ref: NodeRef<HTMLButton>,
 
+    /// Optional click callback. This composes with the built-in ripple handler
+    /// so consumers do not have to fall back to a raw `<button>` for actions.
+    #[prop(optional)]
+    on_click: Option<Callback<ev::MouseEvent>>,
+
     /// Additional CSS classes
     #[prop(optional, into)]
     class: &'static str,
@@ -66,6 +72,7 @@ pub fn Button(
     let ripple_handle = use_ripple();
     view! {
         <button
+            type="button"
             disabled=disabled
             node_ref=node_ref
             class=move || {
@@ -85,7 +92,10 @@ pub fn Button(
             class:ld-ripple-host=ripple
             on:click=move |ev| {
                 if ripple.get_untracked() {
-                    ripple_handle.trigger.run(ev);
+                    ripple_handle.trigger.run(ev.clone());
+                }
+                if let Some(callback) = on_click {
+                    callback.run(ev);
                 }
             }
         >

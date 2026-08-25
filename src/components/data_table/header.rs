@@ -70,11 +70,8 @@ pub fn DataTableHeader(
                         let min_width_opt = col.min_width;
                         let min_w = effective_min_width(min_width_opt);
 
-                        let cell_class = if is_sortable {
-                            merge_classes!(header_cell_class, col.class.unwrap_or(""), "relative")
-                        } else {
-                            merge_classes!(header_cell_class, col.class.unwrap_or(""), "opacity-50 relative")
-                        };
+                        let cell_class =
+                            merge_classes!(header_cell_class, col.class.unwrap_or(""), "relative");
 
                         let aria_sort = if is_sorted {
                             Some(sort_order.get().as_aria_str())
