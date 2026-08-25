@@ -1,4 +1,5 @@
 use crate::components::badge::Badge;
+use crate::components::data_table::selection::{click_swallowed_by_inspect, key_inspects};
 use crate::components::data_table::types::{
     CellRenderer, Column, DataTableTexts, TableRow, TypedCell, TypedCellFn,
 };
@@ -55,6 +56,13 @@ pub fn DataTableBody(
     /// same path serves both a mouse click and a keyboard Enter/Space.
     #[prop(optional, into)]
     on_row_click: Option<Callback<(usize, bool, bool)>>,
+
+    /// Secondary row activation: fired with the row's absolute index on a
+    /// double-click, or Shift+Enter from the keyboard (`ldui-tmr`). When set,
+    /// the repeat click of a double-click (`detail > 1`) is swallowed so
+    /// `on_row_click` fires exactly once per double-click.
+    #[prop(optional, into)]
+    on_row_inspect: Option<Callback<usize>>,
 
     /// Whether rows are keyboard-operable: focusable (`tabindex=0`) with
     /// Enter/Space activating the same behaviour as a click, and carrying
@@ -158,22 +166,46 @@ pub fn DataTableBody(
                                 tabindex=tabindex
                                 aria-selected=aria_selected
                                 on:click=move |ev: web_sys::MouseEvent| {
+                                    // The repeat click of a double-click is the
+                                    // inspector's, not the activator's -- letting
+                                    // it through would run on_row_click twice per
+                                    // double-click (ldui-tmr).
+                                    if click_swallowed_by_inspect(ev.detail(), on_row_inspect.is_some()) {
+                                        return;
+                                    }
                                     if let Some(cb) = on_row_click {
                                         cb.run((abs_idx, ev.ctrl_key() || ev.meta_key(), ev.shift_key()));
+                                    }
+                                }
+                                on:dblclick=move |ev: web_sys::MouseEvent| {
+                                    if let Some(cb) = on_row_inspect {
+                                        ev.prevent_default();
+                                        cb.run(abs_idx);
                                     }
                                 }
                                 on:keydown=move |ev: web_sys::KeyboardEvent| {
                                     if !interactive {
                                         return;
                                     }
+                                    let key = ev.key();
+                                    let ctrl = ev.ctrl_key() || ev.meta_key();
+                                    // Shift+Enter is the keyboard equivalent of a
+                                    // double-click when an inspector is wired;
+                                    // Shift+Space keeps range selection.
+                                    if key_inspects(&key, ctrl, ev.shift_key(), on_row_inspect.is_some()) {
+                                        ev.prevent_default();
+                                        if let Some(cb) = on_row_inspect {
+                                            cb.run(abs_idx);
+                                        }
+                                        return;
+                                    }
                                     // Enter and Space activate/select, matching a
                                     // click; Space additionally would scroll the
                                     // page, so suppress its default.
-                                    let key = ev.key();
                                     if key == "Enter" || key == " " {
                                         ev.prevent_default();
                                         if let Some(cb) = on_row_click {
-                                            cb.run((abs_idx, ev.ctrl_key() || ev.meta_key(), ev.shift_key()));
+                                            cb.run((abs_idx, ctrl, ev.shift_key()));
                                         }
                                     }
                                 }

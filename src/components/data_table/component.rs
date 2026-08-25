@@ -309,6 +309,16 @@ pub fn DataTable(
     #[prop(optional, into)]
     on_row_activate: Option<Callback<usize>>,
 
+    /// Optional secondary activation fired with the row's absolute index on a
+    /// **double-click** (or Shift+Enter from the keyboard), so a list page can
+    /// use plain click = drilldown navigation and double-click = raw record
+    /// inspector (`ldui-tmr`). Standard dblclick discrimination: the first
+    /// click of a double-click still runs `on_row_activate` once (single-click
+    /// navigation is non-destructive), and the repeat click is swallowed so
+    /// activation never fires twice. Opt-in: when unset, nothing changes.
+    #[prop(optional, into)]
+    on_row_inspect: Option<Callback<usize>>,
+
     /// Node reference to container element
     #[prop(optional)]
     node_ref: NodeRef<Div>,
@@ -652,7 +662,12 @@ pub fn DataTable(
     // so plain display tables don't sprout a tab stop per row. Captured before
     // `selected_rows` is unwrapped into a local signal below, which would erase
     // whether the consumer supplied one.
-    let row_interactive = row_is_interactive(selected_rows.is_some(), on_row_activate.is_some());
+    // `on_row_inspect` counts as an activation callback here: an inspect-only
+    // table still needs focusable rows for its Shift+Enter equivalent.
+    let row_interactive = row_is_interactive(
+        selected_rows.is_some(),
+        on_row_activate.is_some() || on_row_inspect.is_some(),
+    );
 
     // Selection state — owned locally if the consumer didn't pass their own.
     let selected_rows = selected_rows.unwrap_or_else(|| RwSignal::new(BTreeSet::new()));
@@ -957,6 +972,7 @@ pub fn DataTable(
                         loading_row_class=classes.loading_row
                         empty_row_class=classes.empty_row
                         on_row_click=on_row_click
+                        on_row_inspect=on_row_inspect
                         interactive=row_interactive
                         cell_renderers=cell_renderers
                         column_widths=Signal::derive(move || column_widths.get())

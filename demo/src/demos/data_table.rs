@@ -152,6 +152,11 @@ pub fn DataTableDemo() -> impl IntoView {
     let activated_row = RwSignal::new(Option::<usize>::None);
     let activate_count = RwSignal::new(0_usize);
     let activate_selected = RwSignal::new(BTreeSet::<usize>::new());
+    // Secondary activation (`on_row_inspect`, ldui-tmr): double-click or
+    // Shift+Enter. The count exists so a double-click firing activate twice
+    // (the defect the detail>1 swallow prevents) cannot pass unnoticed.
+    let inspected_row = RwSignal::new(Option::<usize>::None);
+    let inspect_count = RwSignal::new(0_usize);
 
     // Action column for the activation demo: clicking "Open" must NOT also
     // activate the row — `Column::action()` scopes the cell's events away
@@ -976,7 +981,12 @@ pub fn DataTableDemo() -> impl IntoView {
                     "exactly as before it existed. Keyboard works the same: "
                     <kbd class="kbd kbd-xs">"Enter"</kbd> " / " <kbd class="kbd kbd-xs">"Space"</kbd>
                     " activates, " <kbd class="kbd kbd-xs">"Ctrl"</kbd> " / "
-                    <kbd class="kbd kbd-xs">"Shift"</kbd> " + Enter selects."
+                    <kbd class="kbd kbd-xs">"Shift"</kbd> " + Enter selects. With "
+                    <code>"on_row_inspect"</code>
+                    " also set, a double-click (or " <kbd class="kbd kbd-xs">"Shift"</kbd> "+"
+                    <kbd class="kbd kbd-xs">"Enter"</kbd>
+                    ") fires the inspector instead \u{2014} the first click still activates once, "
+                    "and the repeat click is swallowed so activation never fires twice."
                 </p>
                 <div class="flex flex-wrap gap-4 mb-4 text-sm">
                     <span>
@@ -1011,6 +1021,21 @@ pub fn DataTableDemo() -> impl IntoView {
                         "Opens (action cell, never activates): "
                         <code data-testid="open-count">{move || open_count.get()}</code>
                     </span>
+                    <span>
+                        "Last inspected (dblclick / Shift+Enter): "
+                        <code data-testid="inspected-row">
+                            {move || {
+                                inspected_row
+                                    .get()
+                                    .map(|i| i.to_string())
+                                    .unwrap_or_else(|| "(none)".to_string())
+                            }}
+                        </code>
+                    </span>
+                    <span>
+                        "Inspects: "
+                        <code data-testid="inspect-count">{move || inspect_count.get()}</code>
+                    </span>
                 </div>
                 <DataTable
                     data=selection_data
@@ -1021,6 +1046,10 @@ pub fn DataTableDemo() -> impl IntoView {
                     on_row_activate=Callback::new(move |idx: usize| {
                         activated_row.set(Some(idx));
                         activate_count.update(|n| *n += 1);
+                    })
+                    on_row_inspect=Callback::new(move |idx: usize| {
+                        inspected_row.set(Some(idx));
+                        inspect_count.update(|n| *n += 1);
                     })
                     attr:id="activation-table"
                 />
