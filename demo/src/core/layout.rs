@@ -520,6 +520,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     value: "loading",
                 },
                 ComponentItem {
+                    name: "Phase Progress",
+                    href: "/components/phase_progress",
+                    value: "phase_progress",
+                },
+                ComponentItem {
                     name: "Progress",
                     href: "/components/progress",
                     value: "progress",
