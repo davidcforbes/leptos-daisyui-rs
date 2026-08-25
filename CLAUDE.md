@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a Rust crate providing type-safe, reactive daisyUI 5 component wrappers for Leptos framework. The library wraps daisyUI components as Leptos components with proper type safety, leveraging Leptos's spread attributes functionality. Currently designed for CSR (Client-Side Rendering).
 
-**Component Coverage: 110 components** (full daisyUI 5 coverage, plus custom app-shell/data/scheduling/motion components added since the original 96/96 milestone)
+**Component Coverage: 113 components** (full daisyUI 5 coverage, plus custom app-shell/data/scheduling/motion components added since the original 96/96 milestone; Gauge, PhaseProgress and Pressable landed 2026-08-25)
 
 ## Build Commands
 
@@ -211,6 +211,43 @@ simple `Vec<Vec<String>>` table; it is the only one with `badge_column_keys`,
 `link_column_keys`, and `bulk_select` (checkbox column keyed by the first cell's
 `String` id). They are not converged — each doc comment names the other and
 lists what only it has, so read those before picking.
+
+### Recent additions (2026-08-25, merged to main)
+
+The interactive-chart epic (ldui-9tr), the 4iiz-etl portal bead wave, and a
+previously in-flight a11y lane, all merged and verified (native gate 14/14 +
+all three browser suites + visual 14/14 on the merged tree):
+
+- **`LineChart` categorical mode is now fully interactive** (ldui-9tr):
+  pointer hover cards, roving keyboard focus (Arrow/Home/End/Escape), typed
+  `LineChartActivation` on click/Enter/Space (targets are `role="button"`
+  only when a callback is wired; the interactive SVG is `role="group"` —
+  `role="img"` makes focusable children presentational, an axe blocker),
+  measured/clamped tooltip, ResizeObserver-driven tick thinning, and
+  reconciliation-by-key across data changes. Legacy `Vec<(f64,f64)>` callers
+  compile unchanged. The reactivity suite now carries a **vendored axe-core
+  zero-blocking gate** (`tests/vendor/axe-core/`) and D1 browser-error
+  capture seams in `tests/common`.
+- **`Gauge`** (ldui-nx5) — 240-degree arc dial with warn/error budget bands
+  at threshold fractions, zone-escalating value arc, tabular-nums readout;
+  `role=meter`; paints routed via `charts::paint`.
+- **`PhaseProgress`** (ldui-ymf) — equal phase segments, partial current
+  fill, failed tone; `role=progressbar` with phase+pct valuetext.
+- **`Pressable`** + **`TableViewport`** — unstyled action primitive and the
+  shared horizontal-scroll viewport (`TABLE_VIEWPORT_CLASS`, aliased by
+  DataTable's wrapper), landed with an AA-contrast pass (muted text at 75%
+  base-content; `opacity-60`/`/50` variants fail axe).
+- **DataTable `on_row_inspect`** (ldui-tmr) — dblclick/Shift+Enter secondary
+  activation with `detail > 1` click swallowing so `on_row_activate` fires
+  exactly once per double-click; **`ServerDataTable` forwards both
+  callbacks** (ldui-1gp, page-local indices).
+- **Timer/unmount safety** (ldui-d54) — the auto-rows measure timer and both
+  search debounces are cancelled in `on_cleanup` and their late closures
+  degrade to no-ops (try-forms) instead of panicking the wasm app; pinned by
+  `data_table_timers_survive_unmount`. If you add a
+  `set_timeout_with_handle` whose closure touches component signals, follow
+  that pattern: store the handle, clear it in `on_cleanup`, try-forms in the
+  closure.
 
 ### Recent additions (2026-08-10, consumer-requested bead wave)
 
