@@ -80,7 +80,12 @@ const PAGES: &[(&str, usize, usize)] = &[
     ("/components/tab", 0, 0),
     ("/components/data-table", 2, 0),
     ("/components/kanban", 34, 2),
-    ("/components/charts", 14, 0),
+    // 16, was 14: the two interactive categorical LineChart fixtures
+    // (ldui-9tr) add scaled-viewBox text distances — the same class of
+    // non-workable finding the doc comment above describes. Overlap
+    // stays 0 (an edge-tick label collision was found and fixed at the
+    // source in visible_tick_indices rather than absorbed here).
+    ("/components/charts", 16, 0),
 ];
 
 async fn audit_page(path: &str, max_grid: usize, max_internal: usize) {

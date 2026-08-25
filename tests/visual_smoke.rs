@@ -146,3 +146,139 @@ async fn kanban_default_matches_baseline() {
         .expect("capture kanban/default");
     assert!(r.passed, "{}", r.summary());
 }
+
+// ── Interactive line chart component-region baselines (ldui-9tr.7) ──────────
+//
+// Component-scoped (`capture_and_compare_region` on the chart root) so a
+// small chart regression cannot be diluted by the full showcase page. Every
+// interactive state is produced by real CDP input through the Task 5 seams,
+// and DOM-boxed floaters (the tooltip card) are containment-asserted before
+// the pixel compare.
+
+/// Pointer overlay of the interactive (first) categorical chart.
+const CHART_ROOT: &str = "[data-testid=\"interactive-line-chart\"]";
+const CHART_OVERLAY: &str =
+    "[data-testid=\"interactive-line-chart\"] [data-line-chart-pointer-overlay]";
+const CHART_STAGE: &str = "[data-testid=\"interactive-line-chart\"] [data-line-chart-stage]";
+const CHART_TOOLTIP: &str =
+    "[data-testid=\"interactive-line-chart\"] [data-testid=\"line-chart-tooltip\"]";
+const CHART_TAB_STOP: &str =
+    "[data-testid=\"interactive-line-chart\"] [data-line-chart-focus][tabindex=\"0\"]";
+
+/// Default: no active point; three patterned lines, legend, labels, markers.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn line_chart_default_matches_baseline() {
+    let h = harness_at("/components/charts").await;
+    let r = h
+        .capture_and_compare_region(
+            "charts",
+            "interactive-line-chart",
+            &state("default"),
+            CHART_ROOT,
+        )
+        .await
+        .expect("capture charts/interactive-line-chart/default");
+    assert!(r.passed, "{}", r.summary());
+}
+
+/// Hovered: real pointer at category 8; card lists all values and stays
+/// inside the stage.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn line_chart_hovered_matches_baseline() {
+    let h = harness_at("/components/charts").await;
+    common::move_pointer_to_svg_fraction(&h, CHART_OVERLAY, 7.0 / 13.0, 0.5).await;
+    h.assert_region_within(CHART_TOOLTIP, CHART_STAGE)
+        .await
+        .expect("hover card contained in stage");
+    let r = h
+        .capture_and_compare_region(
+            "charts",
+            "interactive-line-chart",
+            &state("hovered"),
+            CHART_ROOT,
+        )
+        .await
+        .expect("capture charts/interactive-line-chart/hovered");
+    assert!(r.passed, "{}", r.summary());
+}
+
+/// Focused: real focus + arrow input; visible focus cue, same card contract.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn line_chart_focused_matches_baseline() {
+    let h = harness_at("/components/charts").await;
+    h.page()
+        .find_element(CHART_TAB_STOP)
+        .await
+        .expect("find tab stop")
+        .focus()
+        .await
+        .expect("focus tab stop");
+    h.press_key_sequence(&[
+        pixelproof_web::Key::ArrowRight,
+        pixelproof_web::Key::ArrowRight,
+    ])
+    .await
+    .expect("arrows");
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    h.assert_region_within(CHART_TOOLTIP, CHART_STAGE)
+        .await
+        .expect("focus card contained in stage");
+    let r = h
+        .capture_and_compare_region(
+            "charts",
+            "interactive-line-chart",
+            &state("focused"),
+            CHART_ROOT,
+        )
+        .await
+        .expect("capture charts/interactive-line-chart/focused");
+    assert!(r.passed, "{}", r.summary());
+}
+
+/// Missing data: the `Show gaps` control swaps in the deterministic multi-gap
+/// fixture; paths must never bridge an interior gap.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn line_chart_missing_data_matches_baseline() {
+    let h = harness_at("/components/charts").await;
+    common::click(&h, "[data-testid=\"line-chart-gaps\"]").await;
+    let r = h
+        .capture_and_compare_region(
+            "charts",
+            "interactive-line-chart",
+            &state("missing-data"),
+            CHART_ROOT,
+        )
+        .await
+        .expect("capture charts/interactive-line-chart/missing-data");
+    assert!(r.passed, "{}", r.summary());
+}
+
+/// Narrow (tablet width): ticks thin, legend wraps, edge label and card stay
+/// inside the stage.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn line_chart_narrow_matches_baseline() {
+    let h = harness_at("/components/charts").await;
+    h.set_viewport(pixelproof_web::ViewportSize::TABLET)
+        .await
+        .expect("tablet viewport");
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    common::move_pointer_to_svg_fraction(&h, CHART_OVERLAY, 0.999, 0.3).await;
+    h.assert_region_within(CHART_TOOLTIP, CHART_STAGE)
+        .await
+        .expect("narrow edge card contained in stage");
+    let r = h
+        .capture_and_compare_region(
+            "charts",
+            "interactive-line-chart",
+            &common::state_at("narrow", 768),
+            CHART_ROOT,
+        )
+        .await
+        .expect("capture charts/interactive-line-chart/narrow");
+    assert!(r.passed, "{}", r.summary());
+}
