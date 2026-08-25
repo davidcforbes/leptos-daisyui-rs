@@ -176,7 +176,6 @@ fn move_focus(
             focused: None,
             roving_category_key: None,
             dismissed_category_key: None,
-            ..state.clone()
         };
     };
     let finite_series = finite_series_indices(chart, category_index);

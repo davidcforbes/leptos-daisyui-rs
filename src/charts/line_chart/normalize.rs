@@ -139,6 +139,9 @@ fn domain_for(series: &[NormalizedSeries]) -> Option<Domain> {
     }
 }
 
+// Called from the wasm32 debug warning path and unit tests only, so the
+// native non-test lint pass sees it as dead.
+#[cfg_attr(not(all(debug_assertions, target_arch = "wasm32")), allow(dead_code))]
 fn duplicate_identifier_set<'a>(values: impl Iterator<Item = &'a str>) -> Vec<String> {
     use std::collections::BTreeSet;
 

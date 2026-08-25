@@ -34,10 +34,16 @@ pub const VIEWPORT: ViewportSize = ViewportSize::SMALL;
 /// port from `demo/Trunk.toml`). Override with `VISUAL_TEST_BASE_URL`.
 pub const DEFAULT_BASE_URL: &str = "http://127.0.0.1:3010";
 
+/// Viewport-suffix a state name at an explicit width, for captures taken at
+/// a non-default viewport (e.g. the tablet-width chart baseline).
+pub fn state_at(name: &str, width: u32) -> String {
+    format!("{name}.w{width}")
+}
+
 /// Viewport-suffix a state name: `"default"` -> `"default.w1280"`, so the
 /// harness writes/reads `tests/visual/baselines/<page>/default.w1280.png`.
 pub fn state(name: &str) -> String {
-    format!("{name}.w{}", VIEWPORT.width)
+    state_at(name, VIEWPORT.width)
 }
 
 /// Repo root (this crate's manifest dir).
@@ -296,4 +302,126 @@ pub async fn oracle(h: &Harness) -> serde_json::Value {
         .await
         .expect("app_debug_state call failed")
         .expect("window.__APP_DEBUG__ missing — was the page loaded with ?pp-freeze=1?")
+}
+
+// ── Line-chart interaction seams (ldui-9tr.5) ────────────────────────────────
+//
+// Real CDP input at fractional positions inside an element's box, plus a
+// buffered browser-error observer (D1: no browser panic or hidden error).
+
+use chromiumoxide::cdp::browser_protocol::input::{
+    DispatchMouseEventParams, DispatchMouseEventType, MouseButton,
+};
+
+async fn fraction_point(
+    h: &Harness,
+    selector: &str,
+    x_fraction: f64,
+    y_fraction: f64,
+) -> (f64, f64) {
+    let b = h
+        .element_box(selector)
+        .await
+        .unwrap_or_else(|e| panic!("element_box {selector}: {e}"));
+    (b.x + b.width * x_fraction, b.y + b.height * y_fraction)
+}
+
+async fn dispatch_mouse(h: &Harness, params: DispatchMouseEventParams, what: &str) {
+    h.page()
+        .execute(params)
+        .await
+        .unwrap_or_else(|e| panic!("dispatch {what}: {e}"));
+}
+
+/// Move the real CDP pointer to `(x_fraction, y_fraction)` of `selector`'s
+/// bounding box (0.0 = left/top edge, 1.0 = right/bottom), then settle.
+pub async fn move_pointer_to_svg_fraction(
+    h: &Harness,
+    selector: &str,
+    x_fraction: f64,
+    y_fraction: f64,
+) {
+    let (x, y) = fraction_point(h, selector, x_fraction, y_fraction).await;
+    let moved = DispatchMouseEventParams::builder()
+        .r#type(DispatchMouseEventType::MouseMoved)
+        .x(x)
+        .y(y)
+        .build()
+        .expect("mouse move params");
+    dispatch_mouse(h, moved, "MouseMoved").await;
+    tokio::time::sleep(std::time::Duration::from_millis(h.config().settle_ms)).await;
+}
+
+/// Click at `(x_fraction, y_fraction)` of `selector`'s bounding box with real
+/// CDP `MousePressed`/`MouseReleased` events (a move first, so hover state
+/// matches what a person's click produces), then settle.
+pub async fn click_svg_fraction(h: &Harness, selector: &str, x_fraction: f64, y_fraction: f64) {
+    move_pointer_to_svg_fraction(h, selector, x_fraction, y_fraction).await;
+    let (x, y) = fraction_point(h, selector, x_fraction, y_fraction).await;
+    let pressed = DispatchMouseEventParams::builder()
+        .r#type(DispatchMouseEventType::MousePressed)
+        .x(x)
+        .y(y)
+        .button(MouseButton::Left)
+        .click_count(1)
+        .build()
+        .expect("mouse press params");
+    dispatch_mouse(h, pressed, "MousePressed").await;
+    let released = DispatchMouseEventParams::builder()
+        .r#type(DispatchMouseEventType::MouseReleased)
+        .x(x)
+        .y(y)
+        .button(MouseButton::Left)
+        .click_count(1)
+        .build()
+        .expect("mouse release params");
+    dispatch_mouse(h, released, "MouseReleased").await;
+    tokio::time::sleep(std::time::Duration::from_millis(h.config().settle_ms)).await;
+}
+
+/// Install (or reset) one buffered `console.error` / `window.error` /
+/// `unhandledrejection` observer. Call once before a journey; read the
+/// buffer back with [`assert_no_browser_errors`] after it.
+pub async fn begin_browser_error_capture(h: &Harness) {
+    let installed: bool = h
+        .page()
+        .evaluate(
+            r#"(() => {
+                if (window.__lduiErrs) { window.__lduiErrs.length = 0; return true; }
+                window.__lduiErrs = [];
+                const push = (kind, message) => {
+                    window.__lduiErrs.push(kind + ': ' + String(message));
+                };
+                const original = console.error.bind(console);
+                console.error = (...args) => {
+                    push('console.error', args.map(String).join(' '));
+                    original(...args);
+                };
+                window.addEventListener('error', (e) => push('window.error', e.message));
+                window.addEventListener('unhandledrejection', (e) => push('unhandledrejection', e.reason));
+                return true;
+            })()"#,
+        )
+        .await
+        .expect("install browser error capture")
+        .into_value()
+        .expect("error capture installer returns a bool");
+    assert!(installed, "browser error capture failed to install");
+}
+
+/// Panic (naming `context`) if the error buffer holds anything.
+pub async fn assert_no_browser_errors(h: &Harness, context: &str) {
+    let raw: String = h
+        .page()
+        .evaluate("JSON.stringify(window.__lduiErrs || [])")
+        .await
+        .expect("read browser error buffer")
+        .into_value()
+        .expect("error buffer serializes");
+    let errors: Vec<String> = serde_json::from_str(&raw).expect("error buffer is a string array");
+    assert!(
+        errors.is_empty(),
+        "browser errors after {context}:\n  {}",
+        errors.join("\n  ")
+    );
 }

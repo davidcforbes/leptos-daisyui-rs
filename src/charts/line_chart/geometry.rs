@@ -136,7 +136,13 @@ pub(super) fn plot_bounds(
     let marker = marker_radius(max_marker_radius);
     let left = inset(40.0 + marker, width);
     let right_padding = 12.0 + marker + if has_data_labels { 40.0 } else { 0.0 };
-    let top = inset(12.0 + marker, height);
+    // Data-label baselines sit five units above the marker. Reserve their
+    // approximate 10px ascent as well, so a top-domain value remains inside
+    // the SVG viewBox rather than being clipped at its first glyph.
+    let top = inset(
+        12.0 + marker + if has_data_labels { 5.0 + 10.0 } else { 0.0 },
+        height,
+    );
     let bottom_padding = 32.0 + marker;
 
     PlotBounds {
@@ -191,11 +197,25 @@ pub(super) fn visible_tick_indices(
         .min((category_count - 1) as f64) as usize
         + 1;
     let tick_count = available.clamp(2, category_count);
-    (0..tick_count)
-        .map(|index| {
-            (index as f64 * (category_count - 1) as f64 / (tick_count - 1) as f64).round() as usize
-        })
-        .collect()
+    if tick_count == category_count {
+        return (0..category_count).collect();
+    }
+    // Even integer stride, never rounded interpolation: rounding a
+    // near-full tick count left ADJACENT categories selected at the ends,
+    // where the start/end-anchored edge labels extend toward their
+    // neighbours and collided (style-audit hard OVERLAP, ldui-9tr.7). The
+    // final category is always labelled; a stepped pick closer than one
+    // stride to it is dropped instead of letting the two labels touch.
+    let stride = (((category_count - 1) as f64 / (tick_count - 1) as f64).ceil() as usize).max(1);
+    let mut indices: Vec<usize> = (0..category_count - 1).step_by(stride).collect();
+    while indices
+        .last()
+        .is_some_and(|&last| category_count - 1 - last < stride)
+    {
+        indices.pop();
+    }
+    indices.push(category_count - 1);
+    indices
 }
 
 /// Selects the finite series point closest to an SVG y-coordinate.
@@ -379,7 +399,7 @@ fn capped_positive_or(value: f64, default: f64, maximum: f64) -> f64 {
 
 fn finite_nonnegative(value: f64) -> f64 {
     if value.is_finite() {
-        value.max(0.0).min(MAX_SVG_COORDINATE)
+        value.clamp(0.0, MAX_SVG_COORDINATE)
     } else {
         0.0
     }
@@ -430,7 +450,10 @@ mod tests {
         assert!(tiny.right - tiny.left >= 1.0);
         assert!(tiny.bottom - tiny.top >= 1.0);
         assert!(labelled.right < unlabelled.right);
-        assert!(labelled.top > 0.0);
+        assert!(
+            labelled.top >= 35.0,
+            "a 12px point label needs its 10px ascent plus the 5px marker gap above the top marker"
+        );
     }
 
     #[test]
@@ -444,6 +467,23 @@ mod tests {
         assert_eq!(visible_tick_indices(10, 100.0, 30.0), vec![0, 3, 6, 9]);
         assert_eq!(visible_tick_indices(1, 100.0, 30.0), vec![0]);
         assert_eq!(visible_tick_indices(0, 100.0, 30.0), Vec::<usize>::new());
+    }
+
+    #[test]
+    fn tick_thinning_never_selects_adjacent_categories_when_thinning() {
+        // The regression: 14 categories at 672px/56px min gap used to pick a
+        // near-full 13 ticks whose rounded positions left W01/W02 (and
+        // W13/W14) adjacent — exactly where the edge labels anchor toward
+        // each other and collide.
+        let picked = visible_tick_indices(14, 672.0, 56.0);
+        assert_eq!(*picked.last().expect("non-empty"), 13, "last category kept");
+        assert_eq!(picked[0], 0, "first category kept");
+        for pair in picked.windows(2) {
+            assert!(
+                pair[1] - pair[0] >= 2,
+                "thinned ticks must never be adjacent: {picked:?}"
+            );
+        }
     }
 
     #[test]
