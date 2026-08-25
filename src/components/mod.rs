@@ -41,6 +41,7 @@ mod filter_sidebar;
 mod footer;
 /// Gantt chart component for project timeline visualization
 pub mod gantt;
+mod gauge;
 mod hero;
 mod hover_3d;
 mod hover_gallery;
@@ -154,6 +155,7 @@ pub use file_input::*;
 pub use filter::*;
 pub use filter_sidebar::*;
 pub use footer::*;
+pub use gauge::*;
 pub use hero::*;
 pub use hover_3d::*;
 pub use hover_gallery::*;
