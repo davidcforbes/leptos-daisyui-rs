@@ -22,8 +22,7 @@ pub fn gauge_fraction(value: f64, max: f64) -> f64 {
 
 /// Point on the dial circle at `frac` of the sweep, in viewBox units.
 pub fn gauge_point(cx: f64, cy: f64, r: f64, frac: f64) -> (f64, f64) {
-    let angle =
-        (GAUGE_START_DEG + GAUGE_SWEEP_DEG * frac.clamp(0.0, 1.0)).to_radians();
+    let angle = (GAUGE_START_DEG + GAUGE_SWEEP_DEG * frac.clamp(0.0, 1.0)).to_radians();
     (cx + r * angle.cos(), cy + r * angle.sin())
 }
 
@@ -39,9 +38,16 @@ pub fn gauge_arc_path(cx: f64, cy: f64, r: f64, from: f64, to: f64) -> String {
     }
     let (x0, y0) = gauge_point(cx, cy, r, from);
     let (x1, y1) = gauge_point(cx, cy, r, to);
-    let large_arc = if (to - from) * GAUGE_SWEEP_DEG > 180.0 { 1 } else { 0 };
+    let large_arc = if (to - from) * GAUGE_SWEEP_DEG > 180.0 {
+        1
+    } else {
+        0
+    };
     format!("M {x0:.2} {y0:.2} A {r:.2} {r:.2} 0 {large_arc} 1 {x1:.2} {y1:.2}")
 }
+
+/// A `(from, to)` span of the dial sweep, both fractions in `[0, 1]`.
+pub type GaugeBand = (f64, f64);
 
 /// `(warn_band, error_band)` as `(from, to)` sweep fractions, from the
 /// threshold fractions. The warn band runs from `warn_from` to the error
@@ -52,11 +58,13 @@ pub fn gauge_arc_path(cx: f64, cy: f64, r: f64, from: f64, to: f64) -> String {
 pub fn gauge_bands(
     warn_from: Option<f64>,
     error_from: Option<f64>,
-) -> (Option<(f64, f64)>, Option<(f64, f64)>) {
+) -> (Option<GaugeBand>, Option<GaugeBand>) {
     let error = error_from.map(|f| f.clamp(0.0, 1.0));
     let warn = warn_from.map(|f| f.clamp(0.0, 1.0));
     let warn_end = error.unwrap_or(1.0);
-    let warn_band = warn.filter(|from| *from < warn_end).map(|from| (from, warn_end));
+    let warn_band = warn
+        .filter(|from| *from < warn_end)
+        .map(|from| (from, warn_end));
     let error_band = error.filter(|from| *from < 1.0).map(|from| (from, 1.0));
     (warn_band, error_band)
 }
