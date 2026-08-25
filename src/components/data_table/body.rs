@@ -61,7 +61,13 @@ pub fn DataTableBody(
     /// double-click, or Shift+Enter from the keyboard (`ldui-tmr`). When set,
     /// the repeat click of a double-click (`detail > 1`) is swallowed so
     /// `on_row_click` fires exactly once per double-click.
-    #[prop(optional, into)]
+    ///
+    /// `optional_no_strip` on purpose: the parent forwards its own
+    /// `Option<Callback<usize>>` prop verbatim. Plain `optional` strips the
+    /// `Option` (the setter wants a bare `Callback`, E0308), and `into` has
+    /// no `IntoReactiveValue` impl for `Option<Callback<_>>` in this leptos
+    /// version (E0277) — both found by this workspace's CI, 2026-08-24.
+    #[prop(optional_no_strip)]
     on_row_inspect: Option<Callback<usize>>,
 
     /// Whether rows are keyboard-operable: focusable (`tabindex=0`) with
