@@ -383,6 +383,72 @@ callback maps `category_key` to the report's week filter or route and owns
 loading, empty, and error states. Consumer migration and drilldown side-effect
 tests are separate follow-up work, not part of the library implementation.
 
+### Exact `WeekPointDto -> LineChartData` mapping (ldui-9tr.8)
+
+`WeekPointDto` carries (at least) `week_key: String` (stable, e.g.
+`"2026-W31"`), `week_label: String` (display, e.g. `"W31"`), `actual: f64`,
+`actual_fmt: String`, and `avg12: Option<f64>` (with `avg12_fmt` if formatted
+upstream). Map one DTO vector to one categorical model:
+
+```rust
+use leptos_daisyui_rs::charts::{LineCategory, LineChartData, LinePattern, LinePoint, LineSeries};
+
+fn week_points_to_chart(points: &[WeekPointDto]) -> LineChartData {
+    let categories = points
+        .iter()
+        .map(|p| LineCategory { key: p.week_key.clone(), label: p.week_label.clone() })
+        .collect();
+    let actual = LineSeries {
+        pattern: LinePattern::Solid,
+        ..LineSeries::new(
+            "actual",
+            "Actual",
+            "var(--color-primary)",
+            points
+                .iter()
+                .map(|p| LinePoint::new(p.actual).with_display_value(p.actual_fmt.clone()))
+                .collect(),
+        )
+    };
+    let average = LineSeries {
+        pattern: LinePattern::Dashed,
+        ..LineSeries::new(
+            "avg12",
+            "12-week average",
+            "var(--color-secondary)",
+            points
+                .iter()
+                .map(|p| match p.avg12 {
+                    Some(value) => {
+                        LinePoint::new(value).with_display_value(format!("{value:.1} average"))
+                    }
+                    None => LinePoint::missing(),
+                })
+                .collect(),
+        )
+    };
+    LineChartData::categorical(categories, vec![actual, average])
+}
+```
+
+A missing `avg12` becomes `LinePoint::missing()` — the chart renders a gap
+and announces `No value`; never substitute `0.0`. The activation callback
+shape is:
+
+```rust
+let on_point_activate = Callback::new(move |intent: LineChartActivation| {
+    // intent.category_key == the WeekPointDto.week_key that was activated;
+    // intent.preferred_series_id names the series the user was nearest.
+    week_filter.set(Some(intent.category_key));
+});
+```
+
+The consumer owns everything downstream of that signal: issuing the filtered
+request, its loading/empty/error journeys, and any routing. Those journeys
+(and their D2 side-effect tests) remain a separate `4iiz-office` issue — no
+change in this repository covers them, and nothing here may be "verified" by
+editing that sibling repository.
+
 ## Verification Strategy
 
 This web/WASM component uses the repository's PixelProof A/B/C/D methodology
