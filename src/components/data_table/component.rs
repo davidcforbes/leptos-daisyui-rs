@@ -444,8 +444,11 @@ pub fn DataTable(
         let value_for_timeout = value.clone();
         match set_timeout_with_handle(
             move || {
-                set_debounced_search.set(value_for_timeout);
-                set_current_page.set(0);
+                // try-forms: a debounce that outlives the table (navigate
+                // within 300 ms of a keystroke) degrades to a no-op instead
+                // of setting disposed signals (ldui-d54).
+                let _ = set_debounced_search.try_set(value_for_timeout);
+                let _ = set_current_page.try_set(0);
             },
             std::time::Duration::from_millis(300),
         ) {
@@ -457,6 +460,13 @@ pub fn DataTable(
             }
         }
     };
+    // Cancel a pending debounce on unmount — its closure writes this owner's
+    // signals (ldui-d54).
+    on_cleanup(move || {
+        if let Some(handle) = debounce_handle.try_get_untracked().flatten() {
+            handle.clear();
+        }
+    });
 
     // ── Column chooser (opt-in via `column_chooser`) ──
 
@@ -752,7 +762,13 @@ pub fn DataTable(
     // are only fallbacks for when there is nothing to measure (empty table, or
     // the first paint before rows exist).
     let measure_rows = move || {
-        if !auto_page_size.get_untracked() {
+        // Late-firing guard (ldui-d54): this runs from a zero-delay macrotask,
+        // so a router navigation scheduled-then-navigated in one task disposes
+        // this table's reactive owner before the timer fires. The try-read
+        // doubles as the auto_page_size check — on a disposed owner it yields
+        // None and the whole measurement degrades to a no-op instead of
+        // panicking the entire wasm app.
+        if !auto_page_size.try_get_untracked().unwrap_or(false) {
             return;
         }
         let Some(wrapper) = table_wrapper_ref.get_untracked() else {
@@ -789,8 +805,12 @@ pub fn DataTable(
         // Write only on a real change. This is what ends the settle pass below:
         // with `viewport` independent of the row count, the second measurement
         // agrees with the first, writes nothing, and nothing re-renders.
-        if auto_rows.get_untracked() != Some(rows) {
-            auto_rows.set(Some(rows));
+        // try-forms, not plain get/set (ldui-d54 belt-and-braces): a straggler
+        // that slipped past the entry guard still must not panic. A disposed
+        // try_get_untracked returns None, which never equals Some(Some(rows)),
+        // and the try_set below is then a no-op.
+        if auto_rows.try_get_untracked() != Some(Some(rows)) {
+            let _ = auto_rows.try_set(Some(rows));
         }
     };
 
@@ -798,13 +818,36 @@ pub fn DataTable(
     // callback can run before the surrounding layout has settled, and latching
     // a mid-reflow height leaves the table a row short with no further resize
     // to correct it.
+    // The pending measure timer, kept so unmount can cancel it (ldui-d54).
+    // The search debounce a few hundred lines up stores its handle the same
+    // way — keep the two consistent.
+    let measure_handle: StoredValue<Option<TimeoutHandle>> = StoredValue::new(None);
     let schedule_measure = move || {
-        if set_timeout_with_handle(measure_rows, std::time::Duration::ZERO).is_err() {
+        // One pending measure at a time: cancel a not-yet-fired timer so the
+        // Effect + ResizeObserver double-schedule collapses to one macrotask
+        // and the stored handle is always the live one.
+        if let Some(handle) = measure_handle.try_get_value().flatten() {
+            handle.clear();
+        }
+        match set_timeout_with_handle(measure_rows, std::time::Duration::ZERO) {
+            Ok(handle) => {
+                measure_handle.try_update_value(|slot| *slot = Some(handle));
+            }
             // No `window` to schedule against (non-browser context): measuring
             // now is better than not at all.
-            measure_rows();
+            Err(_) => measure_rows(),
         }
     };
+    // A zero-delay macrotask must not outlive the reactive owner: without
+    // this, any navigation immediately after mount or a data change fired
+    // measure_rows into disposed signals and panicked the whole wasm app
+    // (ldui-d54; caught by 4iiz-etl's visual gate on a History->Errors
+    // transition, which had to pace navigations 150 ms apart to dodge it).
+    on_cleanup(move || {
+        if let Some(handle) = measure_handle.try_get_value().flatten() {
+            handle.clear();
+        }
+    });
 
     // Re-measure when anything that moves the arithmetic changes: the opt-in
     // itself, row height (table size / density), the rows available to measure,

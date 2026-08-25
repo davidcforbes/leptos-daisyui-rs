@@ -318,6 +318,13 @@ pub fn ServerDataTable(
         let value_for_timeout = value.clone();
         match set_timeout_with_handle(
             move || {
+                // Late-firing guard (ldui-d54): `fire` reaches emit_query,
+                // which untracked-reads several of this owner's signals. A
+                // debounce that outlives the table must be a no-op, not a
+                // process-wide disposed-signal panic.
+                if search_query.try_get_untracked().is_none() {
+                    return;
+                }
                 fire(value_for_timeout);
             },
             std::time::Duration::from_millis(300),
@@ -329,6 +336,13 @@ pub fn ServerDataTable(
             }
         }
     };
+    // Cancel a pending debounce on unmount — mirrors DataTable's own search
+    // debounce cleanup; keep the two in sync (ldui-d54).
+    on_cleanup(move || {
+        if let Some(handle) = debounce_handle.try_get_untracked().flatten() {
+            handle.clear();
+        }
+    });
 
     // Header sort: toggle the indicator state and report through the typed
     // query (the server does the actual ordering). Without `on_query_change`

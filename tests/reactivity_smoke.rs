@@ -1234,6 +1234,54 @@ async fn server_table_forwards_activation() {
     // the single-click path above reaching the same forwarded pair.
 }
 
+/// Unmount safety (ldui-d54): DataTable's zero-delay auto-rows measure timer
+/// and both search debounces (client + server variants) must not fire into a
+/// disposed reactive owner. Arms all three timers and navigates away in the
+/// same task — before the fix, a late timer panicked the entire wasm app
+/// ("Tried to access a reactive value that has already been disposed"),
+/// which 4iiz-etl's visual gate only dodged by pacing navigations 150 ms
+/// apart.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn data_table_timers_survive_unmount() {
+    let h = harness_at("/components/data-table").await;
+    begin_browser_error_capture(&h).await;
+
+    // One synchronous task: arm the client and server search debounces
+    // (300 ms each), force a data change (the auto-rows Effect schedules its
+    // ZERO-delay measure macrotask), then navigate — so every pending timer
+    // fires only after the DataTable's owner is disposed.
+    let armed = eval_json(
+        &h,
+        r#"(() => {
+            const arm = (sel) => {
+                const input = document.querySelector(sel);
+                if (!input) return false;
+                input.value = 'x';
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                return true;
+            };
+            const client = arm('#custom-filter-table input[aria-label="Search table"]');
+            const server = arm('#server-table input[aria-label="Search table"]');
+            document.querySelector('#keyed-reverse').click();
+            document.querySelector('a[href="/components/button"]').click();
+            return client && server;
+        })()"#,
+    )
+    .await;
+    assert_eq!(armed, json!(true), "both search boxes found and armed");
+
+    // Let the 0 ms measure timer and both 300 ms debounces fire post-unmount.
+    tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+    let s = oracle(&h).await;
+    assert_eq!(
+        s["route"],
+        json!("/components/button"),
+        "navigation away happened: {s}"
+    );
+    assert_no_browser_errors(&h, "DataTable timers firing after unmount").await;
+}
+
 /// Keyed row identity (beads-py7i / `row_key`): select a row, then replace
 /// the data vec (the demo's Reverse button). The selection must follow the
 /// row's stable id to its new position rather than clearing (the positional
