@@ -1,9 +1,9 @@
 /target
 .vercel
 
-# PixelProof ephemeral outputs (committed baselines live in tests/visual/baselines)
-.review/visual-renders/
-.review/visual-diffs/
+# Ephemeral review/staging outputs (committed baselines live in
+# tests/visual/baselines; tests/vendor holds the reviewed vendor copies)
+.review/
 
 # Dolt database files (added by bd init)
 .dolt/

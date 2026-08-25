@@ -1,11 +1,14 @@
 use crate::core::{ContentLayout, Section};
+use crate::debug_state;
 use leptos::prelude::*;
 // The SVG chart family lives in `charts`, not `components`. Imported by name
 // rather than glob because `charts` also exports a `Sparkline`, which would
 // collide with the reactive daisyUI-framed `components::Sparkline`.
 use leptos_daisyui_rs::charts::{
-    AreaChart, BarChart, ChartSeries, HeatScale, Heatmap, HeatmapCell, LineChart, PieChart,
-    PieSlice, Sparkline, StackedAreaChart, StackedBarChart,
+    AreaChart, BarChart, ChartSeries, HeatScale, Heatmap, HeatmapCell, LineCategory, LineChart,
+    LineChartActivation, LineChartActivationSource, LineChartData, LinePattern, LinePoint,
+    LineSeries, MarkerShape, MarkerStyle, PieChart, PieSlice, Sparkline, StackedAreaChart,
+    StackedBarChart,
 };
 
 /// Every chart in `leptos_daisyui_rs::charts`, each shown with at least one
@@ -20,6 +23,47 @@ use leptos_daisyui_rs::charts::{
 /// browser-visible evidence for that fix.
 #[component]
 pub fn ChartsDemo() -> impl IntoView {
+    // Interactive categorical fixture: reactive so the reorder/remove/restore
+    // controls exercise reconciliation-by-key, with every activation mirrored
+    // into the debug oracle. The count is written alongside the payload so a
+    // duplicated callback cannot pass by overwriting the same key.
+    let line_data = RwSignal::new(interactive_line_data());
+    let activation_count = RwSignal::new(0_u64);
+    let on_line_activate = Callback::new(move |activation: LineChartActivation| {
+        let count = activation_count.get_untracked() + 1;
+        activation_count.set(count);
+        debug_state::set("chart.activation_count", count);
+        debug_state::set(
+            "chart.activation",
+            serde_json::json!({
+                "categoryIndex": activation.category_index,
+                "categoryKey": activation.category_key,
+                "categoryLabel": activation.category_label,
+                "preferredSeriesId": activation.preferred_series_id,
+                "values": activation
+                    .values
+                    .iter()
+                    .map(|value| serde_json::json!({
+                        "seriesId": value.series_id,
+                        "seriesName": value.series_name,
+                        "value": value.value,
+                        "displayValue": value.display_value,
+                    }))
+                    .collect::<Vec<_>>(),
+                "source": match activation.source {
+                    LineChartActivationSource::Pointer => "pointer",
+                    LineChartActivationSource::Keyboard => "keyboard",
+                },
+                "modifiers": {
+                    "shift": activation.modifiers.shift,
+                    "ctrl": activation.modifiers.ctrl,
+                    "alt": activation.modifiers.alt,
+                    "meta": activation.modifiers.meta,
+                },
+            }),
+        );
+    });
+
     view! {
         <ContentLayout
             title="Charts"
@@ -27,7 +71,50 @@ pub fn ChartsDemo() -> impl IntoView {
         >
             <Section title="LineChart" col=true>
                 <p class="text-sm opacity-70">
-                    "Categorical x_labels replace the raw fractional x values, and the tick count is capped at the number of data points so a sparse series cannot print a duplicated date. Axis titles are optional."
+                    "Categorical data keeps each named series aligned to the same weeks, renders gaps without joining them, and pairs solid, dashed, and dotted lines with circle, square, and diamond markers. The responsive legend and screen-reader table carry the same labels and values."
+                </p>
+                <div class="w-full max-w-2xl">
+                    <LineChart
+                        data=line_data
+                        accessible_label="Weekly resolution trend".to_string()
+                        description="Actual, rolling average, and target resolution counts by week.".to_string()
+                        width=560
+                        height=260
+                        on_point_activate=on_line_activate
+                    />
+                </div>
+                <div class="flex flex-wrap gap-2">
+                    <button class="btn btn-sm" data-testid="line-chart-reorder"
+                        on:click=move |_| line_data.update(|data| *data = reorder_line_data(data))>
+                        "Reorder data"
+                    </button>
+                    <button class="btn btn-sm" data-testid="line-chart-remove"
+                        on:click=move |_| line_data.update(|data| *data = remove_week(data, "week-08"))>
+                        "Remove active week"
+                    </button>
+                    <button class="btn btn-sm" data-testid="line-chart-restore"
+                        on:click=move |_| line_data.set(interactive_line_data())>
+                        "Restore data"
+                    </button>
+                    <button class="btn btn-sm" data-testid="line-chart-gaps"
+                        on:click=move |_| line_data.set(gapped_line_data())>
+                        "Show gaps"
+                    </button>
+                </div>
+                <p class="text-sm opacity-70">
+                    "Without an activation callback the same chart keeps descriptive group semantics: hover and keyboard navigation still show the card, but nothing claims button behavior."
+                </p>
+                <div class="w-full max-w-xl">
+                    <LineChart
+                        data=static_line_data()
+                        accessible_label="Weekly intake trend".to_string()
+                        description="Intake and staffed-capacity counts by week.".to_string()
+                        width=480
+                        height=200
+                    />
+                </div>
+                <p class="text-sm opacity-70">
+                    "For the preserved numeric XY chart, x_labels replace raw fractional x values, and the tick count is capped at the number of data points so a sparse series cannot print a duplicated date. Axis titles are optional."
                 </p>
                 <div class="w-full max-w-xl">
                     <LineChart
@@ -227,6 +314,226 @@ fn week_labels() -> Vec<String> {
 /// makes `x_labels` necessary.
 fn weekly_series() -> Vec<(f64, f64)> {
     vec![(0.0, 18.0), (1.0, 24.0), (2.0, 21.0), (3.0, 31.0)]
+}
+
+/// Deterministic categorical fixture for the interactive `LineChart` demo.
+/// It deliberately includes a missing interior actual, a short target series,
+/// host-formatted values, labels, and three redundant paint/shape patterns.
+fn interactive_line_data() -> LineChartData {
+    LineChartData::categorical(
+        (1..=14)
+            .map(|week| LineCategory {
+                key: format!("week-{week:02}"),
+                label: format!("W{week:02}"),
+            })
+            .collect(),
+        vec![actual_series(), rolling_average_series(), target_series()],
+    )
+}
+
+fn actual_series() -> LineSeries {
+    let values = [
+        42.0, 45.0, 44.0, 49.0, 52.0, 50.0, 0.0, 55.0, 58.0, 57.0, 61.0, 64.0, 62.0, 67.0,
+    ];
+    LineSeries {
+        id: "actual".to_string(),
+        name: "Actual".to_string(),
+        points: values
+            .into_iter()
+            .enumerate()
+            .map(|(index, value)| {
+                if index == 6 {
+                    LinePoint::missing()
+                } else {
+                    let mut point =
+                        LinePoint::new(value).with_display_value(format!("{value:.0} resolved"));
+                    if index == 0 {
+                        point.marker_color = Some("var(--color-success)".to_string());
+                    }
+                    if index == 0 || index == 13 {
+                        point.with_data_label(format!("{value:.0}"))
+                    } else {
+                        point
+                    }
+                }
+            })
+            .collect(),
+        color: "var(--color-primary)".to_string(),
+        pattern: LinePattern::Solid,
+        marker: MarkerStyle {
+            shape: MarkerShape::Circle,
+            size: 4.0,
+            fill: Some("var(--color-primary)".to_string()),
+            stroke_width: 1.0,
+        },
+        show_data_labels: true,
+    }
+}
+
+fn rolling_average_series() -> LineSeries {
+    let values = [
+        43.0, 44.0, 45.0, 47.0, 49.0, 50.0, 51.0, 53.0, 55.0, 57.0, 59.0, 61.0, 63.0, 65.0,
+    ];
+    LineSeries {
+        id: "rolling-average".to_string(),
+        name: "Rolling average".to_string(),
+        points: values
+            .into_iter()
+            .map(|value| LinePoint::new(value).with_display_value(format!("{value:.1} average")))
+            .collect(),
+        color: "var(--color-secondary)".to_string(),
+        pattern: LinePattern::Dashed,
+        marker: MarkerStyle {
+            shape: MarkerShape::Square,
+            size: 3.5,
+            fill: None,
+            stroke_width: 1.0,
+        },
+        show_data_labels: false,
+    }
+}
+
+fn target_series() -> LineSeries {
+    let values = [48.0, 48.0, 50.0, 50.0, 52.0, 52.0, 54.0, 54.0, 56.0, 56.0];
+    LineSeries {
+        id: "target".to_string(),
+        name: "Target".to_string(),
+        points: values
+            .into_iter()
+            .enumerate()
+            .map(|(index, value)| {
+                let point = LinePoint::new(value).with_display_value(format!("Target {value:.0}"));
+                if index == 9 {
+                    point.with_data_label("56 target")
+                } else {
+                    point
+                }
+            })
+            .collect(),
+        color: "var(--color-accent)".to_string(),
+        pattern: LinePattern::Dotted,
+        marker: MarkerStyle {
+            shape: MarkerShape::Diamond,
+            size: 4.0,
+            fill: None,
+            stroke_width: 1.0,
+        },
+        show_data_labels: true,
+    }
+}
+
+/// Reverses category order (and every series' aligned points) so the
+/// reconciliation journeys can prove active/focused state follows a
+/// category's *key* through a reorder, not its index.
+fn reorder_line_data(data: &LineChartData) -> LineChartData {
+    match data {
+        LineChartData::Categorical { categories, series } => LineChartData::categorical(
+            categories.iter().rev().cloned().collect(),
+            series
+                .iter()
+                .map(|series| {
+                    let mut series = series.clone();
+                    series.points.reverse();
+                    series
+                })
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+/// Removes one category (and every series' aligned point) by key. The demo
+/// button removes `week-08` — the same category the removal journey holds
+/// active — so the card-close/focus-move behavior is deterministic.
+fn remove_week(data: &LineChartData, key: &str) -> LineChartData {
+    match data {
+        LineChartData::Categorical { categories, series } => {
+            let Some(removed) = categories.iter().position(|category| category.key == key) else {
+                return data.clone();
+            };
+            let mut categories = categories.clone();
+            categories.remove(removed);
+            LineChartData::categorical(
+                categories,
+                series
+                    .iter()
+                    .map(|series| {
+                        let mut series = series.clone();
+                        if removed < series.points.len() {
+                            series.points.remove(removed);
+                        }
+                        series
+                    })
+                    .collect(),
+            )
+        }
+        other => other.clone(),
+    }
+}
+
+/// Deterministic multi-gap variant for the `Show gaps` control and the
+/// missing-data visual baseline: several interior gaps per series, which the
+/// renderer must segment around rather than bridge.
+fn gapped_line_data() -> LineChartData {
+    let LineChartData::Categorical { categories, series } = interactive_line_data() else {
+        unreachable!("interactive fixture is categorical");
+    };
+    LineChartData::categorical(
+        categories,
+        series
+            .into_iter()
+            .map(|mut series| {
+                let gaps: &[usize] = match series.id.as_str() {
+                    "actual" => &[2, 3, 6, 10],
+                    "rolling-average" => &[7, 8],
+                    _ => &[4],
+                };
+                for &index in gaps {
+                    if index < series.points.len() {
+                        series.points[index] = LinePoint::missing();
+                    }
+                }
+                series
+            })
+            .collect(),
+    )
+}
+
+/// Small callback-less categorical fixture: proves descriptive `group`
+/// semantics (no false button roles) on a chart with no activation callback.
+fn static_line_data() -> LineChartData {
+    LineChartData::categorical(
+        (1..=4)
+            .map(|week| LineCategory {
+                key: format!("intake-{week:02}"),
+                label: format!("W{week:02}"),
+            })
+            .collect(),
+        vec![
+            LineSeries::new(
+                "intake",
+                "Intake",
+                "var(--color-primary)",
+                vec![
+                    LinePoint::new(12.0),
+                    LinePoint::new(15.0),
+                    LinePoint::new(11.0),
+                    LinePoint::new(17.0),
+                ],
+            ),
+            LineSeries::new(
+                "capacity",
+                "Staffed capacity",
+                "var(--color-secondary)",
+                vec![
+                    LinePoint::new(14.0),
+                    LinePoint::new(14.0),
+                    LinePoint::new(16.0),
+                    LinePoint::new(16.0),
+                ],
+            ),
+        ],
+    )
 }
 
 /// Weekly closed-work counts for the per-bar-colour example.

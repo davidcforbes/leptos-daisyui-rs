@@ -107,7 +107,11 @@ pub fn Layout() -> impl IntoView {
         <div class="h-screen w-screen bg-base-100 flex flex-col">
             <Navbar class="w-screen bg-base-200 border-b border-base-300 flex-none">
                 <NavbarStart class="gap-4">
-                    <Icon icon=icondata::CgComponents />
+                    // Decorative logo mark: hidden from AT so axe's
+                    // svg-img-alt doesn't demand a name for it (ldui-9tr.6).
+                    <span aria-hidden="true">
+                        <Icon icon=icondata::CgComponents />
+                    </span>
                     <h1 class="text-xl font-bold">"daisyUI + Leptos Showcase"</h1>
                 </NavbarStart>
                 <NavbarEnd class="gap-2">
@@ -115,8 +119,13 @@ pub fn Layout() -> impl IntoView {
                         href="https://github.com/noshishiRust/leptos-daisyui-rs"
                         style=ButtonStyle::Ghost
                         shape=ButtonShape::Circle
+                        // Icon-only link: the name lives on the link, the
+                        // glyph is decorative (axe link-name + svg-img-alt).
+                        attr:aria-label="GitHub repository"
                     >
-                        <Icon icon=icondata::AiGithubFilled />
+                        <span aria-hidden="true">
+                            <Icon icon=icondata::AiGithubFilled />
+                        </span>
                     </LinkButton>
                 </NavbarEnd>
             </Navbar>
@@ -171,7 +180,7 @@ pub fn Layout() -> impl IntoView {
                 <div class="flex items-center text-xs text-base-content/70 font-mono">
                     // Left: Path
                     <span class="flex items-center gap-1">
-                        <span class="w-3 h-3">
+                        <span class="w-3 h-3" aria-hidden="true">
                             <Icon icon=icondata::AiFolderOutlined />
                         </span>
                         {move || location.pathname.get()}
@@ -180,7 +189,7 @@ pub fn Layout() -> impl IntoView {
                     // Center: Memory (with flex-1 to take remaining space and center content)
                     <div class="flex-1 flex justify-center">
                         <span class="flex items-center gap-1">
-                            <span class="w-3 h-3">
+                            <span class="w-3 h-3" aria-hidden="true">
                                 <Icon icon=icondata::AiDatabaseOutlined />
                             </span>
                             "Memory: "
@@ -190,7 +199,7 @@ pub fn Layout() -> impl IntoView {
 
                     // Right: Clock
                     <span class="flex items-center gap-1">
-                        <span class="w-3 h-3">
+                        <span class="w-3 h-3" aria-hidden="true">
                             <Icon icon=icondata::AiClockCircleOutlined />
                         </span>
                         {move || current_time.get()}

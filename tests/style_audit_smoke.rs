@@ -206,8 +206,17 @@ const PAGES: &[(&str, &[(&str, usize)])] = &[
             (family::TYPOGRAPHY, 78),
             (family::SHAPE, 0),
             (family::DEPTH, 0),
-            (family::GRID, 14),
+            // 16, was 14: the two interactive categorical LineChart fixtures
+            // (ldui-9tr) add scaled-viewBox tick/label text distances — the
+            // same not-workable-on-the-4px-grid class as the rest of this
+            // page (see the module doc note above).
+            (family::GRID, 16),
             (family::INTERNAL, 0),
+            // The categorical charts' screen-reader data tables are raw
+            // <table class="sr-only"> by design — the daisyUI .table drift
+            // heuristic flags them, but they are invisible, so there is no
+            // visual drift to fix (ldui-9tr.7). Exactly the two fixtures.
+            (family::COMPONENT_DRIFT, 2),
         ],
     ),
 ];

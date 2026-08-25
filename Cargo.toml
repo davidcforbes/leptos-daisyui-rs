@@ -115,3 +115,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 # (tests/layout_audit_smoke.rs, tests/style_audit_smoke.rs) — a workspace
 # member, not a C:/dev sibling checkout.
 ldui-audit = { path = "audit" }
+# Raw CDP input params (Input.dispatchMouseEvent) for the line-chart pointer
+# journeys in tests/common/mod.rs. Version-matched to pixelproof-web's own
+# chromiumoxide so the Page/command types unify.
+chromiumoxide = { version = "0.7", default-features = false, features = ["tokio-runtime"] }

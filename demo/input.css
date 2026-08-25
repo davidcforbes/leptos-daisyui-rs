@@ -289,3 +289,10 @@
   transition: background-color 0.2s ease-in-out, color 0.2s ease-in-out,
               border-color 0.2s ease-in-out;
 }
+
+/* daisyUI's .menu-title ships at ~2.5:1 against base-100/200 (axe
+   color-contrast Serious, found by the ldui-9tr.6 gate). 75% base-content is
+   the AA-passing muted level this portfolio standardized on (op-srip). */
+.menu-title {
+  color: color-mix(in oklab, var(--color-base-content) 75%, transparent);
+}
