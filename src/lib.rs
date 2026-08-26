@@ -6,6 +6,7 @@ pub mod charts;
 pub mod components;
 pub mod markdown;
 pub mod motion;
+pub mod patterns;
 #[cfg(feature = "test-mode")]
 pub mod test_mode;
 pub mod theme;
