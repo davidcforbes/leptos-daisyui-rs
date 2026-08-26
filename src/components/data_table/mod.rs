@@ -72,6 +72,8 @@ pub use filter::{
     ColumnFilters, DataTableFilterRow, FILTER_ALL, distinct_values, has_filterable_columns,
     prune_stale_filters, row_matches_filters, row_matches_search,
 };
+pub(crate) use pagination::{PageSlot, page_window, row_range};
+pub(crate) use resize::{MAX_COLUMN_WIDTH, effective_min_width, resized_width};
 pub use selection::{
     RowClickKind, click_swallowed_by_inspect, handle_row_click, key_inspects, row_click_kind,
     row_is_interactive,

@@ -80,6 +80,10 @@ pub fn Select(
     #[prop(optional, into)]
     value: Option<Signal<String>>,
 
+    /// Optional callback invoked with the newly selected value.
+    #[prop(optional)]
+    on_change: Option<Callback<String>>,
+
     /// Child elements (typically SelectOption components)
     children: Children,
 ) -> impl IntoView {
@@ -131,6 +135,11 @@ pub fn Select(
             }
             name=move || name.get()
             disabled=disabled
+            on:change=move |event| {
+                if let Some(callback) = on_change {
+                    callback.run(event_target_value(&event));
+                }
+            }
         >
             {children()}
         </select>
