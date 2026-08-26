@@ -170,3 +170,80 @@ fn client_snapshot_contract_keeps_row_identity_and_filtering_typed() {
     assert!(!PilotSnapshot::matches(&"Other".into(), &filters));
     assert_eq!(PilotSnapshot::SCHEMA_VERSION, 1);
 }
+
+#[test]
+fn list_page_and_filter_bar_defaults_are_full_width_and_wrapping() {
+    let list = list_page_class("pilot-page");
+    assert!(list.split_ascii_whitespace().any(|class| class == "w-full"));
+    assert!(
+        list.split_ascii_whitespace()
+            .any(|class| class == "min-w-0")
+    );
+    assert!(
+        list.split_ascii_whitespace()
+            .any(|class| class == "pilot-page")
+    );
+    assert!(!list.contains("max-w-"));
+
+    let filters = filter_bar_class("pilot-filters");
+    assert!(
+        filters
+            .split_ascii_whitespace()
+            .any(|class| class == "flex-wrap")
+    );
+    assert!(
+        filters
+            .split_ascii_whitespace()
+            .any(|class| class == "items-end")
+    );
+    assert!(filters.contains("pilot-filters"));
+}
+
+#[test]
+fn dataset_selector_resolves_the_selected_dataset_without_filter_semantics() {
+    let options = vec![
+        DatasetOption::new("mx", "Mexico City"),
+        DatasetOption::new("in", "New Delhi"),
+    ];
+    assert_eq!(selected_dataset_label(&options, "in"), Some("New Delhi"));
+    assert_eq!(selected_dataset_label(&options, "missing"), None);
+}
+
+#[test]
+fn active_filter_summary_is_explicit_and_pluralized() {
+    assert_eq!(active_filter_summary(0), "No active filters");
+    assert_eq!(active_filter_summary(1), "1 active filter");
+    assert_eq!(active_filter_summary(3), "3 active filters");
+}
+
+#[test]
+fn async_section_retains_usable_snapshots_for_non_initial_states() {
+    for state in [
+        PageState::Ready,
+        PageState::Revalidating,
+        PageState::RefreshError,
+        PageState::Stale,
+        PageState::Claiming,
+        PageState::ClaimSucceeded,
+        PageState::ClaimConflict,
+        PageState::ClaimFailed,
+        PageState::LiveInterrupted,
+    ] {
+        assert!(
+            state_shows_content(state),
+            "{state:?} should retain content"
+        );
+    }
+    for state in [
+        PageState::InitialLoading,
+        PageState::InitialError,
+        PageState::NeverLoaded,
+        PageState::Empty,
+        PageState::FilteredEmpty,
+    ] {
+        assert!(
+            !state_shows_content(state),
+            "{state:?} should replace content"
+        );
+    }
+}
