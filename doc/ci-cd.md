@@ -96,6 +96,46 @@ Each step is scoped per-crate; that scoping **is** the xtask's logic.
 | `test-daisyui5` | `cargo test -p leptos-daisyui-rs --test no_dead_daisyui4_classes` | Source scan (no browser) guarding against `.form-control` / `.label-text` / `.label-text-alt` coming back — removed in daisyUI 5, so they are silently inert. |
 | `test-svg-paint` | `cargo test -p leptos-daisyui-rs --test svg_paint_routing` | Source scan (no browser) over **all of `src/`**: no `fill=`/`stroke=`/`stop-color=`/`flood-color=`/`lighting-color=` may carry a custom property, and any non-literal value must be a `charts::paint` binding. `var()` substitution is not specified to run in a presentation attribute, so a token there degrades to `fill: black` or `stroke: none` **silently, with no console error**. It has to be its own step because `test-lib` runs unit tests only — an integration test not named here never runs in the gate at all. Scoped to `src/charts` originally, which is exactly how it read green over four live defects in `src/components/gantt/` (ldui-1g5, widened in ldui-xxc). |
 
+### Pattern-scoped verification
+
+Opinionated patterns have a checked, fail-closed manifest in
+`xtask/src/pattern_checks.rs`. For the client-snapshot list:
+
+```bash
+cargo xtask verify-pattern client-snapshot-list --inner
+cargo xtask verify-pattern client-snapshot-list --browser
+
+# Thin cargo-make aliases:
+cargo make verify-client-snapshot-inner
+cargo make verify-client-snapshot-browser
+```
+
+`--inner` runs only the page-contract/pattern unit tests and typed
+`EntityTable` model/storage tests. `--browser` compiles and serves
+`demo/client-snapshot-test-host.html`, whose dedicated binary links the one
+story under test rather than the full component catalog, then runs only
+`tests/entity_table_smoke.rs`. Unknown pattern names and lane flags exit 2;
+there is no fallback to a broad suite.
+
+The browser lane records
+`target/pattern-checks/client-snapshot-list/browser.fingerprint` only after the
+page host starts successfully. The manifest includes aggregate relevant-source
+hashes, `Cargo.lock`, generated `styles/tokens.css`, Rust and Trunk versions,
+and a command-version marker. A matching run explicitly reuses Cargo/Trunk
+artifacts; a changed input delegates safe incremental invalidation to those
+tools. The fingerprint is evidence and selection metadata, not a replacement
+build cache or a bespoke pipeline runner.
+
+The page-scoped journey covers the semantic/responsive table contract, local
+filter/sort/page/column behavior, dataset-selector isolation, refresh DOM
+retention, action isolation, and engine-driven style/layout checks at wide and
+compact widths. Its visual ratchet is zero for overlap, typography, shape,
+grid, internal spacing, and component drift. Depth is exactly 5 for daisyUI's
+`oklab()`/`oklch()` form-control shadows, an existing parser limitation; the
+test declares the showcase's authored button shadows instead of spending
+ceiling on known values. An inject/catch/remove negative control proves the
+new style and layout rules are live.
+
 ### `cargo xtask check-sibling-tokens` — a path dep hides an unmerged branch
 
 `ui-tokens` is a **path** dependency, so cargo resolves it to whatever
@@ -167,15 +207,22 @@ different theme values.
 
 ### `cargo xtask verify-full` — with the browser suites and the real wasm build
 
-`verify-full` runs `verify`, then the reactivity/DOM-oracle suite
-(`test-reactivity`), then the layout audit (`test-layout`, below), then the
-style audit (`test-style`, below), then
-`trunk build --release` in `demo/` — the real
-`wasm32-unknown-unknown` compile plus the Tailwind CSS build. It is a **separate
-task**, not part of the default gate, because it needs `npm` + `trunk` +
-`tailwindcss` + Chrome installed and takes minutes — keeping `verify` fast and
-zero-tooling. Run `verify-full` before a release or when touching wasm-only /
-CSS-affecting code.
+`verify-full` runs `verify`, then the client-snapshot page-scoped browser lane,
+then builds the full catalog once in release mode and reuses that same verified
+server for the reactivity/DOM-oracle suite (`test-reactivity`), layout audit
+(`test-layout`, below), and style audit (`test-style`, below). That catalog
+server is the real `wasm32-unknown-unknown` release build, so a second standalone
+`trunk build --release` would only repeat the same pipeline and is intentionally
+absent. It is a **separate task**, not part of the default gate, because it needs
+`npm` + `trunk` + `tailwindcss` + Chrome installed and takes minutes — keeping
+`verify` fast and zero-tooling. Run `verify-full` before a release or when
+touching wasm-only / CSS-affecting code.
+
+The page-scoped host and catalog are two distinct HTML/Wasm targets and therefore
+require two server builds. Consecutive suites for the same target share one
+server. In measured warm runs, Cargo's catalog compile was under one second but
+Trunk's Wasm optimization took roughly two minutes per invocation; sharing the
+catalog server removes two redundant optimization passes from `verify-full`.
 
 ## Testing policy — screenshot vs. no-screenshot
 
@@ -241,20 +288,26 @@ PowerShell script stays the manual/screenshot path):
    it) and `trunk serve` on it. Each invocation gets its own port rather than
    contending on the shared `:3010` — the shared-port flake documented in
    Rust-DeskApp's `doc/ci-cd.md`.
-3. Poll `GET /` until it answers `200`, which means Trunk finished the first wasm
-   build and wrote `index.html` (a stricter signal than "the port is bound",
-   which Trunk does *before* building). 15-minute budget; aborts early if the
-   `trunk` child exits.
+3. Poll the served HTML and its hashed `output-*.css` until the HTML references
+   the requested Wasm binary and the CSS carries the current build's unique
+   stamp. A plain `200` is insufficient: Trunk can bind its port and serve a
+   previous target from `dist/` while the new pipeline is still running.
+   15-minute budget; aborts early if the `trunk` child exits.
 4. Run `cargo test -p leptos-daisyui-rs --test reactivity_smoke -- --ignored
    --test-threads=1` with `VISUAL_TEST_BASE_URL` pointed at that port.
    `--test-threads=1` because each test drives its own headless Chrome loading
-   the ~60 MB dev wasm; parallel instances starve each other past the mount-wait
+   the catalog Wasm; parallel instances starve each other past the mount-wait
    budget.
 5. Kill the `trunk` process tree on drop (`taskkill /T /F` on Windows — Trunk
    spawns cargo/wasm-bindgen children).
 
 Setting `VISUAL_TEST_BASE_URL` yourself skips steps 1-3 and 5 and reuses your
 already-running dev server.
+
+When these catalog suites are adjacent inside `verify-full`, steps 1-3 and 5
+wrap the group once: reactivity, layout, and style all use the same current
+release server. Their standalone subcommands continue to own an isolated server
+so they remain independently reproducible.
 
 The suite keeps its `#[ignore]` attributes (the gate passes `--ignored`
 explicitly) so that a bare `cargo test` with no server running still passes.
@@ -286,7 +339,10 @@ never touched. So the guard is the general one:
 2. `run_browser_suite`'s `DemoServer::start` runs the same script itself before
    spawning trunk, so a broken stylesheet fails the step in seconds rather than
    after an eight-minute wasm build.
-3. `common::harness_at` — the single funnel `style_audit_smoke`,
+3. Before launching any test, `DemoServer::start` fetches the served HTML and
+   hashed stylesheet and requires both the requested Wasm binary and current CSS
+   marker. This rejects an old `dist/` even when it already answers `200`.
+4. `common::harness_at` — the single funnel `style_audit_smoke`,
    `layout_audit_smoke`, `visual_smoke` and `reactivity_smoke` all navigate
    through — asserts **per navigation** that the CSS the page loaded carries the
    current marker, and refuses to audit otherwise. Per navigation, not once per

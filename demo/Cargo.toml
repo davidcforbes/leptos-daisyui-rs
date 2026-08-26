@@ -3,6 +3,16 @@ name = "leptos-daisyui-showcase"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "leptos-daisyui-showcase"
+path = "src/main.rs"
+
+[[bin]]
+name = "client-snapshot-test-host"
+path = "src/client_snapshot_test_host.rs"
+test = false
+bench = false
+
 [dependencies]
 leptos-daisyui-rs = { path = "../", features = ["test-mode"] }
 

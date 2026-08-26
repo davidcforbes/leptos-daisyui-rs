@@ -180,16 +180,26 @@ command = "cargo"
 args = ["xtask", "verify"]
 
 [tasks.verify-full]
-description = "verify + the reactivity suite + the real trunk wasm build"
+description = "verify + page-scoped proof + browser suites sharing one release catalog build"
 command = "cargo"
 args = ["xtask", "verify-full"]
 
 [tasks.test-reactivity]
 description = """Run the reactivity/DOM-oracle suite (no screenshots) against a
-self-spawned demo dev server on a free port. Also a step of verify-full.
+self-spawned release catalog server on a free port. Also a step of verify-full.
 Needs npm + trunk + Chrome. The screenshot suite stays manual: test-visual."""
 command = "cargo"
 args = ["xtask", "test-reactivity"]
+
+[tasks.verify-client-snapshot-inner]
+description = "Run only native contract/model tests for the client-snapshot-list pattern"
+command = "cargo"
+args = ["xtask", "verify-pattern", "client-snapshot-list", "--inner"]
+
+[tasks.verify-client-snapshot-browser]
+description = "Run the page-scoped client-snapshot-list browser journey and visual audit"
+command = "cargo"
+args = ["xtask", "verify-pattern", "client-snapshot-list", "--browser"]
 
 [tasks.bump-patch]
 description = "Bump the library patch version"

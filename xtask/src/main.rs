@@ -5,11 +5,16 @@
 //! PASS/FAIL summary is printed, and the process exit code is the number of
 //! failed steps (0 = all green).
 
+mod pattern_checks;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitCode, Stdio};
 use std::time::{Duration, Instant};
+
+use pattern_checks::{PatternCheck, PatternLane};
 
 /// What a gate step actually does.
 enum Run {
@@ -21,7 +26,10 @@ enum Run {
     },
     /// Spawn the demo dev server on a free port, run a browser-driven test
     /// binary against it, then tear the server down. See [`run_browser_suite`].
-    BrowserSuite(&'static str),
+    BrowserSuite {
+        test: &'static str,
+        html_target: Option<&'static str>,
+    },
 }
 
 /// A single gate step, named for the summary.
@@ -257,8 +265,42 @@ fn steps_for(sub: &str) -> Vec<Step> {
 fn reactivity_step() -> Step {
     Step {
         name: "test-reactivity",
-        run: Run::BrowserSuite("reactivity_smoke"),
+        run: Run::BrowserSuite {
+            test: "reactivity_smoke",
+            html_target: None,
+        },
     }
+}
+
+/// Focused browser proof for the opinionated client-snapshot list pattern.
+fn client_snapshot_step() -> Step {
+    Step {
+        name: "test-client-snapshot",
+        run: Run::BrowserSuite {
+            test: "entity_table_smoke",
+            html_target: Some("client-snapshot-test-host.html"),
+        },
+    }
+}
+
+fn pattern_steps(pattern: &str, lane: PatternLane) -> Result<Vec<Step>, String> {
+    pattern_checks::checks_for(pattern, lane)?
+        .iter()
+        .map(|check| match check {
+            PatternCheck::Cargo { name, args } => Ok(cmd(name, "cargo", args, None)),
+            PatternCheck::Browser {
+                name,
+                test,
+                html_target,
+            } => Ok(Step {
+                name,
+                run: Run::BrowserSuite {
+                    test,
+                    html_target: Some(html_target),
+                },
+            }),
+        })
+        .collect()
 }
 
 /// The layout-audit step (ldui-dg2): overlap / grid / internal-vs-external
@@ -268,7 +310,10 @@ fn reactivity_step() -> Step {
 fn layout_step() -> Step {
     Step {
         name: "test-layout",
-        run: Run::BrowserSuite("layout_audit_smoke"),
+        run: Run::BrowserSuite {
+            test: "layout_audit_smoke",
+            html_target: None,
+        },
     }
 }
 
@@ -280,8 +325,23 @@ fn layout_step() -> Step {
 fn style_step() -> Step {
     Step {
         name: "test-style",
-        run: Run::BrowserSuite("style_audit_smoke"),
+        run: Run::BrowserSuite {
+            test: "style_audit_smoke",
+            html_target: None,
+        },
     }
+}
+
+/// The full release gate. The catalog browser suites are deliberately
+/// consecutive: [`run_steps`] reuses one verified release server for adjacent
+/// suites targeting the same HTML entry point.
+fn full_steps() -> Vec<Step> {
+    let mut steps = gate_steps();
+    steps.push(client_snapshot_step());
+    steps.push(reactivity_step());
+    steps.push(layout_step());
+    steps.push(style_step());
+    steps
 }
 
 fn run_step(step: &Step) -> bool {
@@ -301,7 +361,7 @@ fn run_step(step: &Step) -> bool {
                 }
             }
         }
-        Run::BrowserSuite(test) => run_browser_suite(test),
+        Run::BrowserSuite { test, html_target } => run_browser_suite(test, *html_target),
     }
 }
 
@@ -347,6 +407,140 @@ fn build_demo_stylesheet() -> Result<(), String> {
     }
 }
 
+const CLIENT_SNAPSHOT_FINGERPRINT_FILE: &str =
+    "target/pattern-checks/client-snapshot-list/browser.fingerprint";
+const CLIENT_SNAPSHOT_SOURCE_INPUTS: &[&str] = &[
+    "src",
+    "demo/src/demos/client_snapshot_list.rs",
+    "demo/src/client_snapshot_test_host.rs",
+    "demo/client-snapshot-test-host.html",
+    "demo/Cargo.toml",
+    "demo/input.css",
+    "demo/custom-components.css",
+    "Cargo.toml",
+];
+
+struct BrowserBuildFingerprint {
+    path: PathBuf,
+    manifest: String,
+    matched: bool,
+}
+
+impl BrowserBuildFingerprint {
+    fn store(&self) -> Result<(), String> {
+        let parent = self
+            .path
+            .parent()
+            .ok_or_else(|| format!("fingerprint path has no parent: {}", self.path.display()))?;
+        std::fs::create_dir_all(parent)
+            .map_err(|error| format!("could not create {}: {error}", parent.display()))?;
+        std::fs::write(&self.path, &self.manifest)
+            .map_err(|error| format!("could not write {}: {error}", self.path.display()))
+    }
+}
+
+fn browser_build_fingerprint(
+    html_target: Option<&str>,
+) -> Result<Option<BrowserBuildFingerprint>, String> {
+    let Some(html_target) = html_target else {
+        return Ok(None);
+    };
+    if html_target != "client-snapshot-test-host.html" {
+        return Err(format!(
+            "no checked browser-build fingerprint manifest for {html_target:?}"
+        ));
+    }
+
+    let source_hash = hash_paths(CLIENT_SNAPSHOT_SOURCE_INPUTS)?;
+    let cargo_lock_hash = hash_file(Path::new("Cargo.lock"))?;
+    let generated_token_hash = hash_file(Path::new("styles/tokens.css"))?;
+    let rust_version = tool_version("rustc")?;
+    let trunk_version = tool_version("trunk")?;
+    let manifest = pattern_checks::BrowserFingerprintParts {
+        command_version: pattern_checks::BROWSER_FINGERPRINT_COMMAND_VERSION,
+        source_hash: &source_hash,
+        cargo_lock_hash: &cargo_lock_hash,
+        generated_token_hash: &generated_token_hash,
+        rust_version: &rust_version,
+        trunk_version: &trunk_version,
+    }
+    .manifest();
+    let path = PathBuf::from(CLIENT_SNAPSHOT_FINGERPRINT_FILE);
+    let matched = std::fs::read_to_string(&path).is_ok_and(|stored| stored == manifest);
+    Ok(Some(BrowserBuildFingerprint {
+        path,
+        manifest,
+        matched,
+    }))
+}
+
+fn hash_paths(paths: &[&str]) -> Result<String, String> {
+    let mut files = Vec::new();
+    for path in paths {
+        collect_input_files(Path::new(path), &mut files)?;
+    }
+    files.sort();
+    files.dedup();
+
+    let mut material = Vec::new();
+    for path in files {
+        material.extend_from_slice(path.to_string_lossy().replace('\\', "/").as_bytes());
+        material.push(0);
+        material.extend_from_slice(
+            &std::fs::read(&path)
+                .map_err(|error| format!("could not read {}: {error}", path.display()))?,
+        );
+        material.push(0xff);
+    }
+    Ok(pattern_checks::hash_bytes(&material))
+}
+
+fn collect_input_files(path: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
+    if path.is_file() {
+        files.push(path.to_owned());
+        return Ok(());
+    }
+    if !path.is_dir() {
+        return Err(format!(
+            "browser fingerprint input is missing: {}",
+            path.display()
+        ));
+    }
+    let entries = std::fs::read_dir(path)
+        .map_err(|error| format!("could not enumerate {}: {error}", path.display()))?;
+    for entry in entries {
+        let entry =
+            entry.map_err(|error| format!("could not enumerate {}: {error}", path.display()))?;
+        let child = entry.path();
+        if child.is_dir() {
+            collect_input_files(&child, files)?;
+        } else if child.is_file() {
+            files.push(child);
+        }
+    }
+    Ok(())
+}
+
+fn hash_file(path: &Path) -> Result<String, String> {
+    std::fs::read(path)
+        .map(|bytes| pattern_checks::hash_bytes(&bytes))
+        .map_err(|error| format!("could not read {}: {error}", path.display()))
+}
+
+fn tool_version(program: &str) -> Result<String, String> {
+    let output = Command::new(program)
+        .arg("--version")
+        .output()
+        .map_err(|error| format!("could not launch `{program} --version`: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "`{program} --version` failed with {}",
+            output.status
+        ));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+}
+
 /// Ask the OS for an unused loopback port, then release it. Each `xtask`
 /// invocation therefore gets its own port instead of contending on a shared
 /// 3010 (the shared-port flake documented in Rust-DeskApp's `doc/ci-cd.md`).
@@ -354,32 +548,210 @@ fn build_demo_stylesheet() -> Result<(), String> {
 /// This is a bind-then-close race in principle; in practice the window is
 /// microseconds and the server binds immediately after.
 fn free_port() -> Result<u16, String> {
-    TcpListener::bind("127.0.0.1:0")
-        .and_then(|l| l.local_addr())
-        .map(|a| a.port())
-        .map_err(|e| format!("could not reserve a free port: {e}"))
+    for _ in 0..32 {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .map_err(|e| format!("could not reserve a free port: {e}"))?;
+        let port = listener
+            .local_addr()
+            .map_err(|e| format!("could not read the reserved port: {e}"))?
+            .port();
+        if browser_allows_port(port) {
+            return Ok(port);
+        }
+    }
+    Err("the OS repeatedly selected ports Chromium refuses to navigate to".into())
 }
 
-/// `GET /` over a raw socket, true only on `HTTP/1.1 200`. Std-only because
-/// `xtask` deliberately has zero dependencies (see `doc/ci-cd.md`).
+/// Mirrors Chromium's generic restricted-port list for HTTP navigation.
 ///
-/// A 200 on `/` means Trunk has written `index.html` into `dist`, i.e. the
-/// first wasm build finished — a stricter and more useful signal than "the
-/// port is bound", which Trunk does before it starts building.
-fn http_ok(port: u16) -> bool {
-    let Ok(mut s) = TcpStream::connect(("127.0.0.1", port)) else {
-        return false;
+/// An ephemeral listener can still receive one of these values (Windows chose
+/// X11 port 6000 in CI), which otherwise surfaces later as `ERR_UNSAFE_PORT`.
+/// Source: Chromium `net/base/port_util.cc`.
+fn browser_allows_port(port: u16) -> bool {
+    !matches!(
+        port,
+        0 | 1
+            | 7
+            | 9
+            | 11
+            | 13
+            | 15
+            | 17
+            | 19
+            | 20
+            | 21
+            | 22
+            | 23
+            | 25
+            | 37
+            | 42
+            | 43
+            | 53
+            | 69
+            | 77
+            | 79
+            | 87
+            | 95
+            | 101
+            | 102
+            | 103
+            | 104
+            | 109
+            | 110
+            | 111
+            | 113
+            | 115
+            | 117
+            | 119
+            | 123
+            | 135
+            | 137
+            | 139
+            | 143
+            | 161
+            | 179
+            | 389
+            | 427
+            | 465
+            | 512
+            | 513
+            | 514
+            | 515
+            | 526
+            | 530
+            | 531
+            | 532
+            | 540
+            | 548
+            | 554
+            | 556
+            | 563
+            | 587
+            | 601
+            | 636
+            | 989
+            | 990
+            | 993
+            | 995
+            | 1719
+            | 1720
+            | 1723
+            | 2049
+            | 3659
+            | 4045
+            | 5060
+            | 5061
+            | 6000
+            | 6566
+            | 6665
+            | 6666
+            | 6667
+            | 6668
+            | 6669
+            | 6697
+            | 10080
+    )
+}
+
+/// Stable Trunk arguments for a headless browser-suite server.
+fn trunk_serve_args(port: u16, html_target: Option<&str>) -> Vec<String> {
+    let mut args: Vec<String> = [
+        "serve".to_owned(),
+        "--address".to_owned(),
+        "127.0.0.1".to_owned(),
+        "--port".to_owned(),
+        port.to_string(),
+        "--no-autoreload=true".to_owned(),
+        "--open=false".to_owned(),
+        "--color".to_owned(),
+        "never".to_owned(),
+    ]
+    .into();
+    if html_target.is_none() {
+        args.push("--release=true".to_owned());
+    }
+    if let Some(target) = html_target {
+        args.push(target.to_owned());
+    }
+    args
+}
+
+/// Fetch an asset from Trunk over a raw socket. Std-only because `xtask`
+/// deliberately has zero dependencies (see `doc/ci-cd.md`).
+fn http_get(port: u16, path: &str) -> Result<String, String> {
+    let mut stream = TcpStream::connect(("127.0.0.1", port))
+        .map_err(|error| format!("server is not accepting connections: {error}"))?;
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+    let request =
+        format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|error| format!("could not request {path}: {error}"))?;
+    let mut response = Vec::new();
+    stream
+        .read_to_end(&mut response)
+        .map_err(|error| format!("could not read {path}: {error}"))?;
+    let header_end = response
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .ok_or_else(|| format!("{path} returned an invalid HTTP response"))?;
+    let headers = String::from_utf8_lossy(&response[..header_end]);
+    let status = headers.lines().next().unwrap_or_default();
+    if !status.starts_with("HTTP/1.1 200") && !status.starts_with("HTTP/1.0 200") {
+        return Err(format!("{path} returned {status}"));
+    }
+    Ok(String::from_utf8_lossy(&response[header_end + 4..]).into_owned())
+}
+
+fn output_stylesheet_path(html: &str) -> Option<&str> {
+    const PREFIX: &str = "href=\"/output-";
+    let start = html.find(PREFIX)? + "href=\"".len();
+    let remainder = &html[start..];
+    let end = remainder.find('"')?;
+    Some(&remainder[..end])
+}
+
+fn browser_assets_match(html: &str, css: &str, stamp: &str, html_target: Option<&str>) -> bool {
+    let expected_app = if html_target.is_some() {
+        "client-snapshot-test-host-"
+    } else {
+        "leptos-daisyui-showcase-"
     };
-    let _ = s.set_read_timeout(Some(Duration::from_secs(5)));
-    let req = format!("GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
-    if s.write_all(req.as_bytes()).is_err() {
+    if !html.contains(expected_app) {
         return false;
     }
-    let mut buf = [0u8; 64];
-    let Ok(n) = s.read(&mut buf) else {
+
+    let mut stamp_parts = stamp.split_whitespace();
+    let Some("ok") = stamp_parts.next() else {
         return false;
     };
-    String::from_utf8_lossy(&buf[..n]).starts_with("HTTP/1.1 200")
+    let Some(token) = stamp_parts.next() else {
+        return false;
+    };
+    stamp_parts.next().is_none() && css.contains(&format!("#ldui-css-stamp-{token}"))
+}
+
+/// A listening Trunk port is not enough: during a cold build it can serve the
+/// previous contents of `dist/` before the new asset pipeline completes. Wait
+/// for both the requested app binary and this build's run-unique CSS stamp.
+fn browser_server_ready(port: u16, html_target: Option<&str>) -> Result<bool, String> {
+    let html = match http_get(port, "/") {
+        Ok(html) => html,
+        Err(_) => return Ok(false),
+    };
+    let Some(stylesheet_path) = output_stylesheet_path(&html) else {
+        return Ok(false);
+    };
+    let css = match http_get(port, stylesheet_path) {
+        Ok(css) => css,
+        Err(_) => return Ok(false),
+    };
+    let stamp = std::fs::read_to_string("demo/.ldui-css-stamp")
+        .map_err(|error| format!("could not read demo/.ldui-css-stamp: {error}"))?;
+    if stamp.starts_with("fail ") {
+        return Err("Trunk's stylesheet hook failed; demo/output.css was not regenerated".into());
+    }
+    Ok(browser_assets_match(&html, &css, &stamp, html_target))
 }
 
 /// A `trunk serve` child, killed (with its whole process tree) on drop.
@@ -392,8 +764,19 @@ impl DemoServer {
     /// Idempotent `npm install` (Trunk's tailwind pre-build hook needs
     /// `demo/node_modules`, and a fresh worktree has none), then the demo
     /// stylesheet build (see [`build_demo_stylesheet`]), then `trunk serve` on
-    /// a free port, then poll until it answers 200.
-    fn start() -> Result<Self, String> {
+    /// a free port, then poll until the requested app and current stylesheet
+    /// are both present in the served distribution.
+    fn start(html_target: Option<&str>) -> Result<Self, String> {
+        let build_fingerprint = browser_build_fingerprint(html_target)?;
+        if let Some(fingerprint) = &build_fingerprint {
+            if fingerprint.matched {
+                eprintln!("xtask: matching page-build fingerprint; reusing Cargo/Trunk artifacts");
+            } else {
+                eprintln!(
+                    "xtask: page-build fingerprint changed; Cargo/Trunk will rebuild affected inputs"
+                );
+            }
+        }
         if !std::path::Path::new("demo/node_modules").exists() {
             eprintln!("xtask: npm install in demo/ (tailwind pre-build hook)");
             let ok = Command::new(npm_bin())
@@ -410,27 +793,35 @@ impl DemoServer {
         build_demo_stylesheet()?;
 
         let port = free_port()?;
-        eprintln!("xtask: starting `trunk serve` in demo/ on port {port}");
+        let target_label = html_target.unwrap_or("index.html");
+        eprintln!("xtask: starting `trunk serve {target_label}` in demo/ on port {port}");
         let child = Command::new("trunk")
-            .args([
-                "serve",
-                "--address",
-                "127.0.0.1",
-                "--port",
-                &port.to_string(),
-                "--no-autoreload=true",
-                "--open=false",
-            ])
+            // Trunk 0.21 treats the conventional `NO_COLOR=1` value as a
+            // Boolean CLI value and rejects it. Isolate the child from that
+            // ambient setting and express the intent through Trunk's stable
+            // color enum instead.
+            .env_remove("NO_COLOR")
+            .args(trunk_serve_args(port, html_target))
             .current_dir("demo")
-            .stdout(Stdio::null())
+            // Trunk reports asset-pipeline failures on stdout and keeps its
+            // watcher alive. Preserve that output so an ambiguous/missing
+            // Wasm target or asset failure is visible immediately in CI.
+            .stdout(Stdio::inherit())
             .spawn()
             .map_err(|e| format!("failed to launch trunk: {e}"))?;
 
         let mut server = DemoServer { child, port };
 
-        // The first dev-profile wasm build can take several minutes.
+        // A first full-catalog release build can take several minutes. Do not
+        // accept a mere HTTP 200: Trunk may temporarily serve the previous
+        // `dist/` while its new asset pipeline is still finishing.
         let deadline = Instant::now() + Duration::from_secs(900);
-        while !http_ok(port) {
+        loop {
+            match browser_server_ready(port, html_target) {
+                Ok(true) => break,
+                Ok(false) => {}
+                Err(error) => return Err(error),
+            }
             match server.child.try_wait() {
                 Ok(Some(status)) => return Err(format!("trunk serve exited early: {status}")),
                 Ok(None) => {}
@@ -443,7 +834,10 @@ impl DemoServer {
             }
             std::thread::sleep(Duration::from_secs(3));
         }
-        eprintln!("xtask: demo server is up on port {port}");
+        eprintln!("xtask: demo server assets are current on port {port}");
+        if let Some(fingerprint) = &build_fingerprint {
+            fingerprint.store()?;
+        }
         Ok(server)
     }
 
@@ -477,12 +871,12 @@ impl Drop for DemoServer {
 /// comparisons are DPI/monitor-specific. See `doc/ci-cd.md`.
 ///
 /// `--test-threads=1`: each test drives its own headless Chrome loading the
-/// ~60 MB dev wasm; parallel instances starve each other past the mount-wait
+/// catalog Wasm; parallel instances starve each other past the mount-wait
 /// budget.
 ///
 /// An externally supplied `VISUAL_TEST_BASE_URL` (a server the caller already
 /// has running) is honoured, and no server is spawned.
-fn run_browser_suite(test: &str) -> bool {
+fn run_browser_suite(test: &str, html_target: Option<&str>) -> bool {
     let reused = std::env::var("VISUAL_TEST_BASE_URL").ok();
     let _server;
     let base = match &reused {
@@ -490,7 +884,7 @@ fn run_browser_suite(test: &str) -> bool {
             eprintln!("xtask: reusing demo server at {url} (VISUAL_TEST_BASE_URL)");
             url.clone()
         }
-        None => match DemoServer::start() {
+        None => match DemoServer::start(html_target) {
             Ok(s) => {
                 let url = s.base_url();
                 _server = s;
@@ -503,6 +897,11 @@ fn run_browser_suite(test: &str) -> bool {
         },
     };
 
+    run_browser_test(test, &base)
+    // `_server` drops here -> trunk process tree killed.
+}
+
+fn run_browser_test(test: &str, base: &str) -> bool {
     Command::new("cargo")
         .args([
             "test",
@@ -514,14 +913,13 @@ fn run_browser_suite(test: &str) -> bool {
             "--ignored",
             "--test-threads=1",
         ])
-        .env("VISUAL_TEST_BASE_URL", &base)
+        .env("VISUAL_TEST_BASE_URL", base)
         .status()
         .map(|s| s.success())
         .unwrap_or_else(|e| {
             eprintln!("xtask: failed to launch cargo test: {e}");
             false
         })
-    // `_server` drops here -> trunk process tree killed.
 }
 
 /// Pure: render the PASS/FAIL summary and compute the exit code
@@ -1237,14 +1635,88 @@ fn check_sibling_tokens() -> ExitCode {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct BrowserTarget(Option<&'static str>);
+
+#[cfg(test)]
+fn browser_server_segment_count(steps: &[Step]) -> usize {
+    let mut active = None;
+    let mut starts = 0;
+    for step in steps {
+        match &step.run {
+            Run::BrowserSuite { html_target, .. } => {
+                let requested = BrowserTarget(*html_target);
+                if active != Some(requested) {
+                    starts += 1;
+                    active = Some(requested);
+                }
+            }
+            Run::Cmd { .. } => active = None,
+        }
+    }
+    starts
+}
+
 /// Run a set of steps advisory-first: every step runs, then print the summary
-/// and return the failure count as the exit code.
+/// and return the failure count as the exit code. Consecutive browser suites
+/// with the same HTML target share one current Trunk server/build.
 fn run_steps(steps: &[Step]) -> ExitCode {
     if steps.is_empty() {
         eprintln!("xtask: no steps to run");
         return ExitCode::from(2);
     }
-    let results: Vec<(&str, bool)> = steps.iter().map(|s| (s.name, run_step(s))).collect();
+    let reused = std::env::var("VISUAL_TEST_BASE_URL").ok();
+    let mut active_target = None;
+    let mut server: Option<DemoServer> = None;
+    let mut results = Vec::with_capacity(steps.len());
+
+    for step in steps {
+        let passed = match &step.run {
+            Run::Cmd { .. } => {
+                server.take();
+                active_target = None;
+                run_step(step)
+            }
+            Run::BrowserSuite { test, html_target } => {
+                eprintln!("\n----- {} -----", step.name);
+                if let Some(base) = &reused {
+                    eprintln!("xtask: reusing demo server at {base} (VISUAL_TEST_BASE_URL)");
+                    run_browser_test(test, base)
+                } else {
+                    let requested = BrowserTarget(*html_target);
+                    if active_target != Some(requested) {
+                        server.take();
+                        active_target = Some(requested);
+                        server = match DemoServer::start(*html_target) {
+                            Ok(started) => Some(started),
+                            Err(error) => {
+                                eprintln!("xtask: {error}");
+                                None
+                            }
+                        };
+                    } else if server.is_some() {
+                        eprintln!(
+                            "xtask: reusing current {} server",
+                            html_target.unwrap_or("index.html")
+                        );
+                    }
+
+                    match &server {
+                        Some(current) => run_browser_test(test, &current.base_url()),
+                        None => {
+                            eprintln!(
+                                "xtask: {} server is unavailable; build was not retried",
+                                html_target.unwrap_or("index.html")
+                            );
+                            false
+                        }
+                    }
+                }
+            }
+        };
+        results.push((step.name, passed));
+    }
+
     let (summary, code) = summarize(&results);
     println!("{summary}");
     ExitCode::from(code)
@@ -1255,22 +1727,31 @@ fn main() -> ExitCode {
     match sub.as_str() {
         "verify" => run_steps(&gate_steps()),
         "fmt-check" | "clippy" | "build" | "check-demo" | "test" => run_steps(&steps_for(&sub)),
-        "verify-full" => {
-            // verify + the reactivity suite + the real wasm build
-            // (needs npm/trunk/tailwind/Chrome installed).
-            let mut steps = gate_steps();
-            steps.push(reactivity_step());
-            steps.push(layout_step());
-            steps.push(style_step());
-            steps.push(cmd(
-                "trunk-build",
-                "trunk",
-                &["build", "--release"],
-                Some("demo"),
-            ));
-            run_steps(&steps)
-        }
+        "verify-full" => run_steps(&full_steps()),
         "test-reactivity" => run_steps(&[reactivity_step()]),
+        "test-client-snapshot" => run_steps(&[client_snapshot_step()]),
+        "verify-pattern" => {
+            let pattern = std::env::args().nth(2).unwrap_or_default();
+            let lane_flag = std::env::args().nth(3).unwrap_or_default();
+            if std::env::args().nth(4).is_some() {
+                eprintln!("xtask: verify-pattern accepts exactly one pattern and one lane");
+                return ExitCode::from(2);
+            }
+            let lane = match PatternLane::parse_flag(&lane_flag) {
+                Ok(lane) => lane,
+                Err(error) => {
+                    eprintln!("xtask: {error}; expected --inner or --browser");
+                    return ExitCode::from(2);
+                }
+            };
+            match pattern_steps(&pattern, lane) {
+                Ok(steps) => run_steps(&steps),
+                Err(error) => {
+                    eprintln!("xtask: {error}");
+                    ExitCode::from(2)
+                }
+            }
+        }
         "test-layout" => run_steps(&[layout_step()]),
         "test-style" => run_steps(&[style_step()]),
         "gen-tokens" => {
@@ -1286,7 +1767,7 @@ fn main() -> ExitCode {
         other => {
             eprintln!("xtask: unknown subcommand {other:?}");
             eprintln!(
-                "usage: cargo xtask <verify|verify-full|fmt-check|clippy|build|check-demo|test|test-reactivity|test-layout|test-style|gen-tokens|check-sibling-tokens|bump>"
+                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|gen-tokens|check-sibling-tokens|bump>"
             );
             ExitCode::from(2)
         }
@@ -1550,21 +2031,136 @@ pub fn r() -> f32 { radius::CARD }
     fn reactivity_step_is_in_process() {
         let s = reactivity_step();
         assert_eq!(s.name, "test-reactivity");
-        assert!(matches!(s.run, Run::BrowserSuite("reactivity_smoke")));
+        assert!(matches!(
+            s.run,
+            Run::BrowserSuite {
+                test: "reactivity_smoke",
+                html_target: None
+            }
+        ));
+    }
+
+    #[test]
+    fn client_snapshot_step_is_targeted_and_in_process() {
+        let step = client_snapshot_step();
+        assert_eq!(step.name, "test-client-snapshot");
+        assert!(matches!(
+            step.run,
+            Run::BrowserSuite {
+                test: "entity_table_smoke",
+                html_target: Some("client-snapshot-test-host.html")
+            }
+        ));
+        assert!(
+            !gate_steps()
+                .iter()
+                .any(|step| step.name == "test-client-snapshot")
+        );
+    }
+
+    #[test]
+    fn trunk_serve_args_pin_color_without_the_legacy_no_color_flag() {
+        let args = trunk_serve_args(4321, None);
+        assert!(args.windows(2).any(|pair| pair == ["--color", "never"]));
+        assert!(!args.iter().any(|arg| arg.starts_with("--no-color")));
+    }
+
+    #[test]
+    fn client_snapshot_trunk_args_select_the_page_scoped_host() {
+        let args = trunk_serve_args(4321, Some("client-snapshot-test-host.html"));
+        assert_eq!(
+            args.last().map(String::as_str),
+            Some("client-snapshot-test-host.html")
+        );
+    }
+
+    #[test]
+    fn every_demo_html_entry_selects_exactly_one_wasm_binary() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("xtask has a repository parent");
+        let catalog = std::fs::read_to_string(repo.join("demo/index.html")).expect("catalog HTML");
+        assert!(catalog.contains("data-bin=\"leptos-daisyui-showcase\""));
+
+        let page_host = std::fs::read_to_string(repo.join("demo/client-snapshot-test-host.html"))
+            .expect("page-host HTML");
+        assert!(page_host.contains("data-bin=\"client-snapshot-test-host\""));
+    }
+
+    #[test]
+    fn catalog_browser_suites_use_the_reliable_release_bundle() {
+        let catalog = trunk_serve_args(4321, None);
+        assert!(catalog.iter().any(|arg| arg == "--release=true"));
+
+        let page_scoped = trunk_serve_args(4321, Some("client-snapshot-test-host.html"));
+        assert!(!page_scoped.iter().any(|arg| arg.starts_with("--release")));
+    }
+
+    #[test]
+    fn browser_readiness_rejects_a_stale_stylesheet() {
+        let html = r#"<script src="/leptos-daisyui-showcase-current.js"></script>
+            <link rel="stylesheet" href="/output-current.css">"#;
+        let stale_css = "#ldui-css-stamp-previous { --ldui-css-stamp: 1 }";
+
+        assert!(!browser_assets_match(html, stale_css, "ok current", None));
+    }
+
+    #[test]
+    fn browser_readiness_rejects_the_previous_html_target() {
+        let html = r#"<script src="/client-snapshot-test-host-current.js"></script>
+            <link rel="stylesheet" href="/output-current.css">"#;
+        let css = "#ldui-css-stamp-current { --ldui-css-stamp: 1 }";
+
+        assert!(!browser_assets_match(html, css, "ok current", None));
+        assert!(browser_assets_match(
+            html,
+            css,
+            "ok current",
+            Some("client-snapshot-test-host.html")
+        ));
+    }
+
+    #[test]
+    fn browser_readiness_requires_a_successful_current_stamp() {
+        let html = r#"<script src="/leptos-daisyui-showcase-current.js"></script>
+            <link rel="stylesheet" href="/output-current.css">"#;
+        let css = "#ldui-css-stamp-current { --ldui-css-stamp: 1 }";
+
+        assert!(browser_assets_match(html, css, "ok current\n", None));
+        assert!(!browser_assets_match(html, css, "fail current\n", None));
+        assert!(!browser_assets_match(html, css, "ok different\n", None));
+    }
+
+    #[test]
+    fn browser_readiness_extracts_the_hashed_stylesheet_path() {
+        let html = r#"<link rel="stylesheet" href="/output-a1b2c3.css" integrity="x">"#;
+        assert_eq!(output_stylesheet_path(html), Some("/output-a1b2c3.css"));
     }
 
     #[test]
     fn layout_step_is_in_process() {
         let s = layout_step();
         assert_eq!(s.name, "test-layout");
-        assert!(matches!(s.run, Run::BrowserSuite("layout_audit_smoke")));
+        assert!(matches!(
+            s.run,
+            Run::BrowserSuite {
+                test: "layout_audit_smoke",
+                html_target: None
+            }
+        ));
     }
 
     #[test]
     fn style_step_is_in_process() {
         let s = style_step();
         assert_eq!(s.name, "test-style");
-        assert!(matches!(s.run, Run::BrowserSuite("style_audit_smoke")));
+        assert!(matches!(
+            s.run,
+            Run::BrowserSuite {
+                test: "style_audit_smoke",
+                html_target: None
+            }
+        ));
     }
 
     #[test]
@@ -1575,6 +2171,27 @@ pub fn r() -> f32 { radius::CARD }
         assert!(!names.contains(&"test-reactivity"));
         assert!(!names.contains(&"test-layout"));
         assert!(!names.contains(&"test-style"));
+    }
+
+    #[test]
+    fn verify_full_browser_steps_need_only_two_server_builds() {
+        let steps = full_steps();
+        assert_eq!(browser_server_segment_count(&steps), 2);
+    }
+
+    #[test]
+    fn verify_full_catalog_server_is_the_release_build() {
+        let steps = full_steps();
+        assert!(!steps.iter().any(|step| step.name == "trunk-build"));
+        assert!(steps.iter().any(|step| {
+            matches!(
+                step.run,
+                Run::BrowserSuite {
+                    html_target: None,
+                    ..
+                }
+            )
+        }));
     }
 
     #[test]
@@ -1601,14 +2218,25 @@ pub fn r() -> f32 { radius::CARD }
     fn free_port_is_bindable() {
         let p = free_port().expect("free port");
         assert!(p > 0);
+        assert!(browser_allows_port(p));
         std::net::TcpListener::bind(("127.0.0.1", p)).expect("port should be free");
+    }
+
+    #[test]
+    fn chromium_restricted_ports_are_not_browser_safe() {
+        for port in [0, 21, 554, 6000, 6566, 6667, 10080] {
+            assert!(!browser_allows_port(port), "port {port}");
+        }
+        for port in [3010, 4321, 49152, u16::MAX] {
+            assert!(browser_allows_port(port), "port {port}");
+        }
     }
 
     /// Nothing is listening on a just-released port, so the probe says "not up".
     #[test]
-    fn http_ok_is_false_when_nothing_listens() {
+    fn http_get_fails_when_nothing_listens() {
         let p = free_port().expect("free port");
-        assert!(!http_ok(p));
+        assert!(http_get(p, "/").is_err());
     }
 
     #[test]
