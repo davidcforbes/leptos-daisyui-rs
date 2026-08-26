@@ -1,825 +1,1426 @@
-# Future Architecture for leptos-daisyui-rs
+# Future Architecture: Opinionated Pages and Independent Wasm Satellites
 
-**Status:** Validated direction after the No-Hires pilot; broader rollout conditional
+**Status:** Owner-approved target architecture
 
-**Date:** 2026-08-26
+**Last updated:** 2026-08-26
 
-**Scope:** `leptos-daisyui-rs`, `4iiz-office`, and `4iiz-inventory`
+**Scope:** `leptos-daisyui-rs`, `4iiz-Office`, and `4iiz-Inventory`
 
-## Executive summary
+**Audience:** Codex, Claude Code, reviewers, and the migration coordinator
 
-`leptos-daisyui-rs` has broad component coverage, but it does not yet provide sufficient guidance on how complete application pages should be assembled. AI coding agents therefore make the same design, composition, state, and testing decisions independently on every screen. The result is duplicated components, inconsistent layouts, large screen modules, visual drift, slow feedback, and repeated rework.
+**Tracking:** framework architecture `ldui-pwx`; No-Hires pilot `op-vzoiv`
 
-The recommended architecture adds an opinionated composition layer between components and application screens:
+## 1. Authority and purpose
 
-```text
-semantic tokens
-      |
-      v
-low-level primitives
-      |
-      v
-opinionated patterns
-      |
-      v
-page archetypes/templates
-      |
-      v
-small domain-specific slots
-```
+This document is the canonical contract for building and converting 4iiz web
+pages. Give an AI coding agent this document together with one page assignment
+and that page's product requirements.
 
-A machine-readable UI contract should drive the entire development workflow:
+This document supersedes the earlier recommendation to retain one shipping
+Office Wasm application. The No-Hires test capsule proved useful isolation, but
+it was not a production satellite. The next step is to implement No-Hires as a
+real independently built, loaded, authenticated, tested, and deployed
+satellite. If the production pilot satisfies the measurements in this
+document, pages that do not require in-process interaction with the core will
+be converted in parallel using the same contract.
 
-```text
-component registry
-      +--> generated documentation
-      +--> page scaffolding
-      +--> agent skills and local instructions
-      +--> dependency/impact graph
-      +--> state, accessibility, and visual tests
-```
+The architecture has two equally important goals:
 
-The first vertical slice is now implemented on the production Office No-Hires route. It uses `PageHeader`, `DatasetSelector`, `FilterBar`, `ActiveFilterChips`, `AsyncDataSection`, `ListPage`, and `EntityTable<T>`, with typed `page_contract!`, `filter_schema!`, and `entity_columns!` declarations. `KpiStrip` was deliberately omitted because that page has no KPI job; templates should constrain decisions without forcing irrelevant chrome.
+1. Make the visual and behavioral result explicit enough that agents do not
+   invent page structure or component behavior.
+2. Make each independent page a build, test, artifact, and deployment unit so
+   changing it does not rebuild the core or unrelated pages.
 
-The pilot also implements semantic affected-test selection and an independently linked, non-shipping No-Hires Wasm capsule. A warmed native inner lane ran 49 tests in 10.746 seconds; browser and visual lanes ran only when selected. The capsule was 313,289 Brotli bytes versus the legacy full application's 3,305,899 bytes. This validates capsules for test isolation, not a production micro-frontend per page. Office continues to ship one Wasm application until production measurements justify a different delivery architecture.
+The CI/CD changes described here are prerequisites, not optional follow-up
+work. Page isolation is not real if the pipeline still rebuilds and retests the
+portfolio for every page edit.
 
-The decision is therefore a conditional go. Keep the contract, patterns, local-snapshot model, and page-aware verification. Do not yet claim 99% page coverage or lower total implementation cost: the first consumer paid for 1,882 reusable framework source lines plus substantial Office snapshot, live-update, and verification infrastructure. The next list/queue consumer must demonstrate amortized reuse and a much smaller page-specific composition surface.
+## 2. Decision status
 
-## Goals
+### 2.1 What the existing pilot proved
 
-- Cover approximately 99% of recurring UI behavior with supported patterns and page templates.
-- Make page appearance and behavior explicit before implementation.
-- Give Codex and Claude Code one unambiguous, versioned implementation path.
-- Prevent application-local reinvention of tables, filters, pagers, stat cards, section cards, and common page states.
-- Select only the tests affected by a change during local development while retaining complete release and scheduled gates.
-- Prevent a page or component test from linking to every unrelated page and heavy framework dependencies.
-- Preserve typed Rust APIs and compile-time validation.
+The No-Hires pilot established that:
 
-## Non-goals
+- an opinionated snapshot-table page can cover the page's real interaction
+  model;
+- office selection can load a bounded dataset while search, filtering,
+  sorting, pagination, and claim removal remain client-side;
+- a separately linked test capsule can exclude unrelated Office pages;
+- native, browser, accessibility, and visual tests can be selected by semantic
+  ownership instead of running the full workspace gate;
+- named states, stable fixtures, semantic selectors, and negative controls
+  give agents an objective definition of done;
+- the dominant warm verification cost is browser and visual work, not the
+  native page tests.
 
-- Replacing Leptos or daisyUI.
-- Creating a general-purpose runtime UI language capable of arbitrary markup.
-- Creating a separate crate or Cargo feature for every individual component.
-- Eliminating complete test runs from release and scheduled CI.
-- Forcing domain-specific charts and operational visualizations into generic components.
-- Treating screenshot baselines as the source of design intent.
+### 2.2 What the existing pilot did not prove
 
-## Research findings
+The current production `/no-hires` route is still part of the monolithic
+`office-perf-web` bundle. The test capsule:
 
-### leptos-daisyui-rs
+- is not served by the production route;
+- does not use the production child-session lifecycle;
+- is not independently released or rolled back;
+- does not prove that a core release can remain byte-for-byte unchanged;
+- does not provide an apples-to-apples production startup comparison.
 
-The framework already contains 116 component directories and substantial mechanical functionality. The full [`components::DataTable`](src/components/data_table/component.rs) already supports:
+The existing measurements therefore prove test isolation and page behavior.
+They do not yet prove production delivery isolation.
 
-- resizable columns;
-- typed sorting;
-- per-column filtering;
-- pagination and responsive page sizing;
-- search and a column chooser;
-- selection, activation, and inspection;
-- custom and action cells;
-- client-side and server-driven query models.
+### 2.3 Corrected architectural verdict
 
-The server-driven API is represented by [`TableQuery`](src/components/data_table/server_component.rs), and the column model is defined in [`types.rs`](src/components/data_table/types.rs).
+Implement No-Hires as the first production satellite. Measure it against the
+current production route. Do not generalize the result to every page until
+that comparison is complete.
 
-The problem is therefore not an absence of table mechanics. It is ambiguity and insufficient policy:
+The target portfolio is:
 
-- A second public [`widgets::DataTable`](src/widgets/data_table.rs) accepts `Vec<Vec<String>>`, leaving agents to choose between overlapping APIs.
-- Other public concepts such as Toolbar and Sparkline also overlap.
-- [`QuickFilterRow`](src/widgets/quick_filter_row.rs) includes raw controls, hard-coded emerald styling, runtime class leaking, and broad class override escape hatches.
-- Public `class` props and `DataTableClasses` allow valid but visually unrelated screens.
-- Component counts in README, CLAUDE.md, and Component_Library.md disagree.
-- Only a small fraction of components have dedicated usage documentation.
-- Consumer Tailwind source configuration depends on manually copied class information.
+- a small core for master authentication, session ownership, navigation, and
+  truly shared in-process workflows;
+- many independently compiled satellite pages for bounded workflows;
+- server-owned manifests and generic launch routing so adding a satellite
+  does not rebuild the core;
+- a shared opinionated UI framework and page contracts;
+- page-level verification throughout a migration wave;
+- one full rebuild and cross-page end-to-end gate after all isolated page
+  changes in that wave have been integrated.
 
-The visual-quality documentation already captures the most important testing limitation: a page can use legally computed styles yet still select the wrong component variant. There is no machine-readable design intent against which an audit can validate the selection. See [`default-component-not-specced.md`](doc/visual-quality/default-component-not-specced.md).
+## 3. Goals and non-goals
 
-### 4iiz-office
+### 3.1 Goals
 
-Office demonstrates the cost of leaving page composition to each screen:
+- Cover at least 99% of routine page composition with approved patterns and
+  archetypes.
+- Make page layout, states, data ownership, persistence, and tests explicit.
+- Let an agent implement one page without redesigning foundational controls.
+- Preserve responsive behavior on low-bandwidth networks in Mexico and India.
+- Keep office-sized snapshots, including roughly 2,000 No-Hires rows,
+  interactive without a server round trip for each view change.
+- Allow several satellite pages, or several tabs of one satellite, to remain
+  open side by side.
+- Build, verify, package, deploy, and roll back one satellite independently.
+- Prove with artifact hashes that unrelated surfaces did not change.
+- Run expensive tests only when their declared inputs or behaviors can change.
+- Keep the final full release gate authoritative without paying its cost after
+  every isolated page edit.
 
-- The web application consumes a vendored framework copy in `vendor/leptos-daisyui-rs`, so framework fixes require an explicit vendor-sync
-  and provenance check.
-- The application contains approximately 270 local Leptos component functions.
-- Several major screen modules are between 1,400 and 2,041 lines.
-- Only two actual full `components::DataTable` instances were found, while many screens manually assemble tables, filters, pagination, row identity, and row actions.
-- Application-local StatCard, SectionCard, filter, pager, and pagination variants have proliferated.
-- The repository's own `screens/queue_analysis.md` describes table behavior being rebuilt despite most of it already existing in the framework.
+### 3.2 Non-goals
 
-Office has meaningful visual, DOM/model, accessibility, and effect testing. However, much of it was introduced after screens had already been composed. Regression baselines consequently protect an implementation but do not prove that it matches the intended design reference. Ordinary page baselines at 800x600 also provide a materially different design surface from the larger operational mockups and the 1440x900 style-audit viewport.
+- A generic low-code page builder or runtime JSON UI renderer.
+- One macro that generates an entire business application.
+- Cross-page shared mutable browser memory.
+- Treating a public tab identifier as an authentication credential.
+- Persisting every transient interaction.
+- Replacing the server's authorization checks with client-side claims.
+- Loading an entire all-office dataset merely because client-side filtering is
+  available.
+- Eliminating all duplicate dependency bytes across independently compiled
+  satellites before measuring whether that is material.
+- Skipping verification because a previous run passed.
+- Building a custom CI task graph or checkpoint engine in Rust.
 
-### 4iiz-inventory
+## 4. Terminology
 
-Inventory is closer to the intended direction:
-
-- It uses the full DataTable on seven screens.
-- Inventory Explorer is the strongest existing candidate for a canonical `ListPage` reference implementation.
-- It has strong in-progress visual-state and model/DOM testing.
-
-The remaining issues are still structural:
-
-- Major screens range from approximately 740 to 3,159 lines.
-- Metrics, cards, page sections, and page geometry are frequently composed locally.
-- Every page is referenced by one router and linked into one Wasm binary.
-- The fast verification lane is not automatically scoped from the changed files and their semantic consumers.
-
-The checked-in architecture baselines recorded:
-
-- 846.48 seconds for a full verification;
-- 113.95 seconds for the engine unit suite;
-- 211.14 seconds for the server API suite;
-- 377.55 seconds for a warmed full gate;
-- desired scoped engine and web commands that had not yet been implemented in the recorded baseline.
-
-See `C:\dev\4iiz-inventory\docs\operations\future-architecture-baseline.md`
-and
-`C:\dev\4iiz-inventory\docs\operations\architecture-compliance-baseline.md`.
-
-## No-Hires pilot evidence
-
-The Office evidence is recorded in
-`C:\dev\4iiz-office\docs\testing\no-hires-pilot\comparison.md`, with machine-readable before/after JSON beside it. Both controlled runs use the same serialized 2,000-row fixture hash, browser family, 800x600 viewport, five warmups, and 30 DOM-confirmed iterations.
-
-| Measure | Legacy baseline | Opinionated No-Hires page |
-|---|---:|---:|
-| Brotli snapshot | 9,533 B | 9,801 B |
-| Time to rows in controlled harness | 1,656.5 ms | 149.6 ms |
-| Search p50 | 35.4 ms with Apply | 27.5 ms immediate |
-| Filter p50 | 125.5 ms | 33.3 ms |
-| Sort p50 | unsupported | 33.2 ms |
-| Pagination p50 | 156.7 ms for 5 rows | 33.2 ms for 25 rows |
-| JavaScript heap | 6,639,949 B | 2,783,932 B |
-| Authoritative claim to local removal | not isolated | 32.9 ms, no snapshot GET |
-| SSE delta to local removal | unsupported | 33.3 ms, no snapshot GET |
-| Warm native affected lane | not available | 49 tests in 10.746 s |
-| Exact page-test Wasm, Brotli | not available | 313,289 B |
-
-The baseline runs inside the full legacy application while the after browser measurement uses the exact-page capsule, so time-to-rows, heap, Wasm, and startup differences are directional isolation evidence rather than production real-user A/B results. Snapshot bytes and DOM-confirmed local operations use the same data/workflow and are directly comparable. Production telemetry on representative Mexico and India connections remains required.
-
-The first migration also increased maintained source. It added approximately 1,882 reusable framework lines and 3,323 Office production lines for the shared No-Hires UI/model, shipping controller, snapshot DTO/API, and live-event infrastructure, plus isolated test code. The legacy 210-line page lacked most of the resulting behavior, so this is not a functionality-equivalent line comparison. More importantly, it means the first page cannot prove amortization. A second consumer must reuse these layers without repeating them before broad adoption.
-
-## Root-cause model
-
-The month-long UI effort and repeated agent errors are a system-design problem, not merely a model-quality problem.
-
-The primary causes are:
-
-1. Too many equally valid low-level choices.
-2. No typed page-level composition contract.
-3. Duplicate and overlapping public components.
-4. Broad styling escape hatches.
-5. Stale and contradictory documentation.
-6. Regression tests without a separate design-intent oracle.
-7. Large always-loaded agent instruction files.
-8. Slow compilation and monolithic Wasm linking between corrections.
-9. Framework version drift between live path dependencies and vendored copies.
-10. Reactive promotion of app-local fixes into the framework rather than a planned pattern architecture.
-
-## Target framework architecture
-
-### Layer 0: semantic foundations
-
-Extend the token system from raw values to organizational roles:
-
-- page canvas, raised surface, and inset surface;
-- primary, secondary, muted, and critical text;
-- compact and comfortable density;
-- control height and table row height;
-- page maximum width and section spacing;
-- positive and negative business outcomes;
-- increasing and decreasing trends, which are not always equivalent to good and bad outcomes;
-- loading, stale, incomplete, unavailable, and permission-denied states.
-
-Application screens should not choose raw colors, arbitrary padding, one-off border radii, or independent typography scales.
-
-### Layer 1: primitives
-
-The existing daisyUI wrappers remain the low-level implementation vocabulary. They should primarily be used inside the framework's patterns rather than directly throughout application screen modules.
-
-Primitives should continue to provide:
-
-- typed variants and sizes;
-- accessible structure;
-- semantic theme colors;
-- predictable class merging;
-- stable DOM hooks for testing.
-
-### Layer 2: opinionated patterns
-
-The initial pattern catalog should include:
-
-| Pattern | Owned decisions |
+| Term | Meaning |
 |---|---|
-| `PageHeader` | Breadcrumbs, title, subtitle, primary/secondary actions, responsive wrapping |
-| `DatasetSelector` | Dataset identity, loading trigger, disabled/loading state, accessible label, and separation from local filters |
-| `Section` | Heading hierarchy, spacing, optional actions, surface treatment |
-| `KpiStrip` | Metric order, density, value formatting, context, trend, drill-down, loading |
-| `FilterBar` | Horizontal filter layout, immediate-local or submitted execution mode, reset scope, persistence, active count, narrow-screen behavior |
-| `ActiveFilterChips` | Active-state summary, individual removal, clear-all behavior |
-| `EntityTable<T>` | Typed columns, sorting, resizing, pagination, query ownership, actions, selection |
-| `AsyncDataSection` | Never-loaded, loading, loaded, empty, partial, stale, error, and denied states |
-| `ActionBar` | Primary, secondary, destructive, and overflow action hierarchy |
-| `BulkActionBar` | Selection summary, bulk actions, progress, and clearing selection |
-| `EntitySummary` | Description-list/property-grid layout and responsive behavior |
-| `FormSection` | Field grouping, help/error placement, save/cancel behavior |
-| `MasterDetail` | List/detail sizing, selection, route state, and narrow-screen transition |
-| `ChartPanel` | Heading, legend, date range, loading/empty/error states, data table alternative |
-| `TimelineSection` | Temporal grouping, density, status semantics, and overflow |
+| **Core** | The primary application that owns master authentication, master session state, navigation, and workflows that genuinely require shared in-process state. |
+| **Satellite** | A same-origin, independently compiled and deployed Wasm page opened in its own tab. It does not import the core or another satellite. |
+| **Surface** | Any independently versioned browser artifact: the core or one satellite. |
+| **Page contract** | Typed declaration of a page's archetype, dataset selector, local controls, persisted settings, states, capabilities, and test obligations. |
+| **Surface manifest** | Server-readable metadata mapping a stable route to an immutable artifact and declaring compatibility and launch policy. |
+| **Shared foundation** | Versioned tokens, primitives, opinionated patterns, page archetypes, audit rules, and contract schema consumed by surfaces. |
+| **Page receipt** | Machine-verifiable evidence binding page inputs and foundation version to artifact hashes and selected test results. |
+| **Page-level gate** | Tests and packaging for one page plus only its real dependencies. |
+| **Final integration gate** | The one complete workspace build, all affected shared checks, and cross-page end-to-end release suite after a migration wave is assembled. |
+| **Dataset selector** | A control that replaces the source snapshot. Office is a dataset selector, not a filter. |
+| **Local view state** | Search, filters, sort, pagination, and table layout applied in the satellite without fetching a replacement dataset. |
 
-These patterns must own layout, responsiveness, accessibility, keyboard behavior, state rendering, and semantic styling. A pattern that only wraps a `div` does not sufficiently reduce the decision surface.
+Normative words `MUST`, `MUST NOT`, `SHOULD`, and `MAY` carry their usual
+requirements meaning.
 
-#### KpiStrip contract
+## 5. Delivery topology
 
-Each KPI should describe:
+### 5.1 Dependency rule
 
-- label;
-- value and formatter;
-- comparison or context;
-- business intent;
-- trend direction;
-- help text;
-- optional drill-down action;
-- loading and unavailable representations.
+The required compile-time dependency direction is:
 
-The pattern decides geometry, density, wrapping, typography, and responsive behavior.
+```text
+versioned shared foundation
+        │
+        ├────────► core surface
+        ├────────► no-hires surface
+        ├────────► inventory-aging surface
+        └────────► other satellite surfaces
 
-#### FilterBar contract
+server launch/session/static-asset layer
+        ├────────► reads surface manifests
+        ├────────► launches core
+        └────────► launches each satellite
+```
 
-The pattern should own:
+The following dependencies are forbidden:
 
-- supported filter control types;
-- an explicit `ImmediateLocal` or `SubmitServer` execution mode;
-- reset semantics and which state is outside reset scope;
-- active-filter count and chips;
-- versioned local, URL/query, or application-owned persistence;
-- keyboard order;
-- responsive collapse into a drawer or disclosure;
-- distinction between no data, no matching results, and unavailable data.
+```text
+core ──X──► satellite
+satellite ──X──► core
+satellite A ──X──► satellite B
+```
 
-Dataset selection is not a filter. A `DatasetSelector` changes the downloaded population and may trigger a network request. Local filters, sorting, page size, column visibility, and column widths operate within that population. A dataset change resets only transient pagination; persistent local table settings remain until the user explicitly resets them unless a page contract declares otherwise.
+A satellite MAY depend on a small versioned shared crate. It MUST NOT depend
+on the core application's page modules, router, global app state, or compiled
+artifact. The core MUST NOT contain a compile-time registry of satellite
+pages.
 
-#### EntityTable contract
+### 5.2 Server-provided page directory
 
-The existing full DataTable should become the implementation foundation rather than creating another independent table.
+The core's page launcher reads a server-provided list of authorized surfaces.
+The list contains labels, icons, launch URLs, and authorization metadata. It
+is data, not Rust source linked into the core.
 
-The canonical wrapper should provide:
+Therefore:
 
-- typed `TableSpec<T>` columns rather than string maps;
-- resizing, sorting, and pagination by default;
-- one controlled query model for client and server modes;
-- standard filtering and column chooser integration;
-- standard row actions and bulk actions;
-- standard loading, never-loaded, empty, partial, stale, error, and permission states;
-- narrow, reviewed styling extension points.
+- registering a new satellite does not rebuild core Wasm;
+- changing a satellite label or artifact does not rebuild core Wasm;
+- removing authorization from a user does not require a browser artifact
+  rebuild;
+- the server remains authoritative about which launch links a user receives.
 
-The simple widget DataTable should be migrated or deprecated.
+### 5.3 Stable routes and immutable assets
 
-The pilot `EntityTable<T>` reuses paging primitives from the full DataTable but currently owns a separate client-snapshot renderer and preference model. That was a bounded way to prove the required behavior, not the desired long-term duplication boundary. Before broad rollout, converge the two implementations behind shared column/rendering mechanics or make their modes explicitly non-overlapping: `EntityTable<T>` for complete client snapshots and the server-driven DataTable for remote queries. Agents must not face two apparently equivalent choices. This follow-up is tracked as `ldui-aqo`.
+No implementation detail such as `/satellites/` appears in user-facing URLs.
+For No-Hires, use:
 
-The No-Hires pilot implements this subset. The full snapshot is usually one office and rarely All Offices; search, status, case type, sorting, pagination, column widths, and column visibility are immediate client state. An authoritative claim or an ordinary dataset-scoped server event removes a row locally without a second snapshot request. Revision gaps, reconnect uncertainty, and explicit invalidation remain rare refresh paths.
+```text
+POST /no-hires/launch
+GET  /no-hires/t/<public-tab-id>/
+GET  /no-hires/assets/<build-id>/<content-hashed-file>
+GET  /no-hires/t/<public-tab-id>/api/snapshot?office=<office-id>
+POST /no-hires/t/<public-tab-id>/api/claims/<row-id>
+GET  /no-hires/t/<public-tab-id>/api/events
+GET  /no-hires/t/<public-tab-id>/api/preferences
+PUT  /no-hires/t/<public-tab-id>/api/preferences
+```
 
-### Layer 3: page archetypes
+The exact API resource names may change, but the tab-scoped route boundary
+MUST remain.
 
-Six templates should cover nearly all recurring page structures:
+HTML boot documents are stable route responses with short or no-cache
+semantics. Wasm, JavaScript glue, CSS, and other static assets are immutable
+and content-addressed. A surface manifest atomically points the stable route
+to one compatible artifact set.
 
-1. `ListPage` or queue
-2. `DashboardPage` or overview
-3. `DetailPage`
-4. `WorkbenchPage` or master-detail
-5. `FormPage` or settings/wizard
-6. `TimelinePage` or planner
+### 5.4 Independent production artifacts
 
-Templates own:
+Each surface produces its own:
 
-- page width and outer spacing;
-- header and action placement;
-- density and section hierarchy;
-- allowed pattern slots;
-- responsive transformations;
-- complete state contracts;
-- accessibility landmarks;
-- stable visual-test anchors.
+- optimized Wasm;
+- JavaScript loader;
+- CSS needed by that surface;
+- immutable asset directory;
+- source map and symbol archive, where policy permits;
+- surface manifest;
+- software bill of materials or dependency record;
+- page receipt.
 
-The target is approximately 99% coverage of recurring UI behavior, not 99% of literal markup. Bespoke domain charts and operational visualizations remain typed slots inside the controlled page skeleton.
+Publishing No-Hires MUST NOT rewrite the core or another satellite's asset
+directory. Promotion changes only the No-Hires manifest pointer. Rollback
+restores only that pointer.
 
-### Layer 4: domain composition
+The server's generic static and manifest layer MUST discover surface
+manifests without compiling a central Rust match statement. Suitable
+implementations include a manifest directory or immutable object-store
+prefix assembled during release.
 
-Application repositories should normally provide only:
+### 5.5 Browser-tab model
 
-- domain data and query adapters;
-- labels and formatting rules;
-- typed columns and filters;
-- role and permission rules;
-- domain actions;
-- exceptional custom visualization slots.
+- Core launches a satellite with `window.open` or an ordinary target-blank
+  navigation after a successful launch POST.
+- Every launch creates a distinct tab-scoped child session, even for the same
+  user and page.
+- A satellite is self-contained after boot and keeps transient page state in
+  its own Wasm instance.
+- Tabs do not use `window.opener` as an authority or shared state channel.
+- The same satellite artifact is cacheable across tabs; additional tabs
+  SHOULD not transfer the Wasm bytes again while the immutable asset remains
+  cached.
+- Core logout MAY broadcast a best-effort close-or-lock notification through
+  `BroadcastChannel`. Server-side revocation is authoritative because
+  browsers cannot reliably force-close unrelated tabs.
+- A satellite has no logout action. The user closes its tab.
 
-They should not recreate page chrome, state containers, filters, tables, pagers, metric cards, section cards, or responsive policies.
+This model intentionally permits side-by-side work. Separate tabs are an
+interaction requirement, not an accidental consequence of routing.
 
-## Page contracts
+### 5.6 Physical package topology
 
-Every page should have a small, versioned, machine-readable contract. The No-Hires pilot demonstrated that this can remain Rust-first rather than requiring a separate page-generator program:
+Every surface is a real Cargo/Trunk build root, not a feature flag or second
+`main` function inside the core package. A representative consumer layout is:
+
+```text
+app/
+  server/                         # generic launch/API/static-manifest layer
+  surfaces/
+    core/
+      Cargo.toml
+      Cargo.lock
+      Trunk.toml
+      src/
+    no-hires/
+      Cargo.toml
+      Cargo.lock
+      Trunk.toml
+      surface.toml
+      src/
+      tests/
+    inventory-aging/
+      Cargo.toml
+      Cargo.lock
+      Trunk.toml
+      surface.toml
+      src/
+      tests/
+  receipts/                       # generated release inputs
+```
+
+The exact directories may differ, but these properties are mandatory:
+
+- a page build names its own `--manifest-path` and Trunk target;
+- a satellite's dependency graph has no core or sibling page package;
+- adding a page does not require editing a central Rust module or enumerated
+  Cargo workspace member list;
+- each independently released surface has a reproducible dependency lock
+  boundary, or an equivalently isolated generated lock artifact;
+- package discovery reads per-page manifests;
+- page output and cache directories are page-specific;
+- the final integration task enumerates discovered surfaces and invokes their
+  independent builds.
+
+A shared root workspace MAY be used for development utilities only if adding
+or building one surface does not mutate a portfolio-wide lockfile or make
+unrelated surfaces inputs to that build. A per-surface package can consume a
+pinned framework release, immutable source revision, or a validated local
+foundation artifact. Its receipt records the exact choice.
+
+Independent Wasm bundles will duplicate some framework and Leptos bytes across
+different pages. Browsers reuse the immutable bundle across tabs of the same
+page, but cannot assume byte reuse across separately linked Wasm modules.
+Measure this portfolio tradeoff before introducing a more complex shared-Wasm
+runtime.
+
+## 6. Authentication and child sessions
+
+### 6.1 Launch protocol
+
+1. The authenticated core sends `POST /<page>/launch` with the master session
+   and CSRF protection.
+2. The server confirms the user may launch that surface.
+3. The server generates:
+   - a high-entropy public tab identifier for the URL;
+   - a separate high-entropy secret;
+   - a database record containing only a hash of the secret.
+4. The response installs the secret in a cookie scoped to the exact tab route
+   and redirects or returns the tab URL.
+5. The satellite loads its own HTML and assets, then calls APIs beneath its
+   tab-scoped route.
+
+The cookie MUST use `Secure`, `HttpOnly`, and an appropriate `SameSite`
+setting. Its `Path` MUST be `/<page>/t/<public-tab-id>/`. Do not put the secret
+in the URL, HTML, JavaScript, local storage, session storage, logs, or
+analytics.
+
+### 6.2 Child-session record
+
+The server-side child-session record includes at least:
+
+- child-session ID;
+- public tab ID;
+- secret hash;
+- master-session ID;
+- user ID;
+- surface ID;
+- issued time;
+- last-seen time;
+- absolute expiry;
+- revocation time and reason;
+- optional current dataset identity for event routing and diagnostics.
+
+The public tab ID is routing metadata, not authentication.
+
+### 6.3 Lifetime and renewal
+
+- Default renewable inactivity lease: 15 minutes.
+- Successful authenticated activity renews the lease.
+- Renewal MUST NOT extend beyond the master session's absolute expiry.
+- Core logout, master timeout, user disablement, or authorization removal
+  invalidates all affected child sessions.
+- Each API and event-stream authorization checks both the child record and
+  the master-session validity.
+- Expired and revoked child records are cleaned up by an idempotent server
+  task.
+- Losing connectivity does not convert a lease into an unlimited session.
+
+On `401` or `403`, the satellite enters a locked/expired state, stops
+mutations and event reconnect loops, and tells the user to return to the core.
+
+### 6.4 Security boundary
+
+Satellites are same-origin trusted first-party code. A compromised same-origin
+surface can attack other same-origin content regardless of process
+separation. Independent bundles improve delivery and fault isolation; they do
+not create a browser security origin.
+
+The server MUST:
+
+- validate every requested office identifier and authorize every mutation;
+- permit a No-Hires user to select any canonical office or the explicit
+  All Offices dataset; No-Hires has no office-specific access restriction;
+- validate `Origin`/CSRF as appropriate;
+- bind events to authorized sessions and datasets;
+- reject guessed public tab IDs without the secret;
+- avoid sensitive data in URLs and client logs;
+- rate-limit launch and mutation endpoints;
+- audit launch, claim, preference write, revocation, and authorization
+  failures.
+
+## 7. State and persistence
+
+### 7.1 State ownership
+
+| State | Owner | Lifetime | Survives refresh? | Survives session? |
+|---|---|---:|---:|---:|
+| Master identity/session | Core and server | Master session | Yes | No |
+| Child page session | Server | Tab lease | Usually | No |
+| Loaded office snapshot | Satellite memory | Current page instance | No | No |
+| Search text | Satellite memory | Current page instance | No | No |
+| Active filters | Satellite memory | Current page instance | No, unless reloaded from saved default | Only when explicitly saved |
+| Sort | Satellite memory | Current page instance | No, unless reloaded from saved default | Only when explicitly saved |
+| Current page number | Satellite memory | Current page instance | No | No |
+| Column width/order/visibility | Satellite memory | Current page instance | No, unless reloaded from saved default | Only when explicitly saved |
+| Saved default | Server `user-state.sqlite` | Until changed/deleted | Yes | Yes |
+| Cached reporting snapshot/cubes | Server `dashboard.sqlite` | Rebuildable cache lifecycle | N/A | N/A |
+
+### 7.2 Separate SQLite files
+
+Durable user settings live in a physically separate server-side
+`user-state.sqlite`. Cached PostgreSQL mirrors and calculated cubes remain in
+the rebuildable `dashboard.sqlite`.
+
+This separation is mandatory:
+
+- rebuilding or replacing dashboard cache data cannot erase user settings;
+- backup and retention policies can differ;
+- migrations of durable preferences are explicit;
+- no satellite opens a SQLite file directly; all access is through
+  authenticated server APIs.
+
+### 7.3 Save as Default
+
+Filters and sorts apply immediately in memory. Persistence occurs only when
+the user selects **Save as Default**.
+
+For a snapshot-table page, save:
+
+- filter values;
+- sort column and direction;
+- page size;
+- column visibility;
+- column order;
+- column widths.
+
+Do not save:
+
+- selected office;
+- free-text search;
+- current page number;
+- row data;
+- snapshot revision;
+- child-session or tab identifiers.
+
+The preference key is at least `(user_id, surface_id, contract_version)`.
+Preferences MUST have a versioned schema and deterministic migration or reset
+behavior. Saving is idempotent. A successful response updates the locally
+known preference revision; a conflict or failure is shown without discarding
+the active in-memory choices.
+
+## 8. Opinionated UI architecture
+
+The framework is not merely a collection of low-level DaisyUI wrappers.
+Routine pages are assembled from five bounded layers.
+
+### 8.1 Layer 0: semantic foundations
+
+This layer owns:
+
+- design tokens and generated CSS;
+- typography, spacing, density, radius, elevation, and motion policies;
+- semantic color and status vocabulary;
+- breakpoint and responsive rules;
+- focus, keyboard, reduced-motion, and accessibility rules;
+- visual-quality audit rules.
+
+Consumers MUST use semantic tokens. They MUST NOT introduce arbitrary colors,
+spacing, shadows, or breakpoints in page code.
+
+### 8.2 Layer 1: primitives
+
+Primitives include Button, Input, Select, Badge, Alert, Dialog, Drawer,
+Tooltip, Spinner, Skeleton, Tabs, Pagination controls, and accessible
+form-field composition.
+
+Primitives expose typed variants and merge caller classes through the
+framework's approved mechanism. A business page SHOULD rarely compose raw
+DaisyUI class strings.
+
+### 8.3 Layer 2: opinionated patterns
+
+Patterns encode recurring layout and behavior:
+
+| Pattern | Contract |
+|---|---|
+| `PageHeader` | Title, concise context, primary actions, status/last-updated slot, responsive action wrapping. |
+| `DatasetSelector` | Visually distinct source-snapshot selector with loading, failure, and current-dataset labeling. |
+| `KpiStrip` | Responsive row of consistently sized stat cards with value, label, optional trend/help, and semantic status. |
+| `FilterBar` | Horizontal filter row above content; search, filter controls, active-filter summary, Reset, and Save as Default. |
+| `EntityTable` | Client-snapshot table with local filter/sort/page, resizable/reorderable/hideable columns, stable row identity, empty/loading/error states, and keyboard/accessibility behavior. |
+| `ServerDataTable` | Explicit server-query table for datasets that cannot be safely or efficiently loaded as a snapshot. |
+| `PageStatePanel` | Consistent loading, empty, no-results, error, expired-session, and forbidden presentation. |
+| `ActionFeedback` | Pending, success, recoverable conflict, stale-row, and failure behavior for row actions. |
+
+Patterns own spacing, alignment, responsive collapse, labels, keyboard
+behavior, and state presentation. Page code supplies typed content and domain
+callbacks.
+
+`EntityTable` and the existing server-oriented DataTable MUST converge on
+shared column, cell, resize, reorder, visibility, pagination, and
+accessibility contracts where practical. They MUST remain explicit about
+their data mode. Silently switching between client and server filtering is
+forbidden. Framework tracking issue `ldui-aqo` owns this convergence.
+
+### 8.4 Layer 3: page archetypes
+
+The initial archetype catalog is:
+
+1. `SnapshotTablePage`
+2. `ServerTablePage`
+3. `RecordDetailPage`
+4. `FormWorkflowPage`
+5. `DashboardPage`
+6. `SettingsPage`
+
+Each archetype owns the broad composition and state model. A page may request
+a new archetype only when its information architecture cannot fit an existing
+one without violating user needs. Cosmetic preference is not sufficient.
+
+### 8.5 Layer 4: domain composition
+
+Domain pages provide:
+
+- typed row and form models;
+- column definitions;
+- allowed filters;
+- dataset loader;
+- mutations and event reducers;
+- authorization-derived capabilities;
+- copy and domain-specific cells;
+- named story fixtures.
+
+Domain pages do not redefine table mechanics, filter layout, responsive
+behavior, loading panels, or visual tokens.
+
+### 8.6 No generic page generator
+
+Agents are the code generators. We will not build another general program that
+tries to infer a business UI. Page-contract macros exist to declare intent,
+provide typed metadata, and validate invariants. They do not replace ordinary
+Rust implementation of domain behavior.
+
+### 8.7 Repository responsibilities
+
+| Repository | Owns |
+|---|---|
+| `leptos-daisyui-rs` | Tokens, primitives, opinionated patterns, archetypes, contract/registry schemas, browser audit rules, reference states, and framework verification. |
+| `4iiz-Office` | Office core, Office satellite domain code, snapshot/mutation/event APIs, child sessions, Office preferences, production surface manifests/receipts, and Office delivery orchestration. |
+| `4iiz-Inventory` | Inventory core/satellites, Inventory domain APIs and adapters, Inventory manifests/receipts, and Inventory delivery orchestration. |
+
+A consumer needing a generally reusable component opens or claims one central
+framework change. It does not copy the component into Office and Inventory.
+A product-specific cell, reducer, query adapter, or label remains in the
+consumer.
+
+## 9. Page contracts
+
+Every new or converted page MUST declare a contract next to the page. The
+exact macro syntax may evolve, but it must express the following information
+without relying on prose.
 
 ```rust
 page_contract! {
-    pub NO_HIRES_PAGE_CONTRACT {
-        id: "no-hires",
-        route: "/no-hires",
-        pattern: PagePattern::ClientSnapshotList,
-        dataset: DatasetBehavior::SelectorTriggersLoad { key: "office" },
-        local_state: [
-            "filters", "sort", "page_size", "hidden_columns", "column_widths",
+    id: "no-hires",
+    title: "No Hires",
+    owner: "office",
+    delivery: Satellite,
+    archetype: SnapshotTablePage,
+    route: "/no-hires/",
+    dataset: {
+        selector: Office,
+        default: UserContextOffice,
+        allow_all: true,
+        load: AtomicSnapshot,
+    },
+    table: {
+        mode: ClientSnapshot,
+        row_key: NoHireRow::id,
+        features: [
+            Search,
+            LocalFilters,
+            MultiColumnSort,
+            ResizeColumns,
+            ReorderColumns,
+            ToggleColumns,
+            Pagination,
         ],
-        required_states: [
-            InitialLoading, Ready, Revalidating, InitialError, RefreshError,
-            NeverLoaded, Empty, FilteredEmpty, Stale, Claiming,
-            ClaimSucceeded, ClaimConflict, ClaimFailed, LiveInterrupted,
-        ],
-        breakpoints: [Compact, Wide],
-    }
+    },
+    persisted_default: [
+        Filters,
+        Sort,
+        PageSize,
+        ColumnVisibility,
+        ColumnOrder,
+        ColumnWidths,
+    ],
+    transient: [
+        Office,
+        Search,
+        CurrentPage,
+        Rows,
+        SnapshotRevision,
+    ],
+    realtime: {
+        transport: ServerSentEvents,
+        events: [Claimed, SnapshotInvalidated],
+    },
+    states: [
+        Loading,
+        Ready,
+        EmptyDataset,
+        NoFilterResults,
+        SnapshotError,
+        ClaimPending,
+        ClaimConflict,
+        StreamDisconnected,
+        SessionExpired,
+        Forbidden,
+    ],
 }
-
-filter_schema! {
-    pub NO_HIRES_FILTER_SCHEMA: NoHireFilterState {
-        dataset_selector: "office",
-        filters: [search, status, case_type],
-    }
-}
 ```
 
-`entity_columns!` provides the corresponding compile-time column declaration. The macros give the compiler typed filter fields, row accessors, and state enums; the contracts' `validate()` methods and focused tests reject duplicate names, dataset/filter overlap, missing states/breakpoints, and incorrect reset behavior. They are a constrained declaration layer, not a second programming language and not a substitute for the code-generating agent.
+The contract schema MUST require:
 
-The complete contract should also declare:
+- stable page/surface ID and product owner;
+- core-versus-satellite decision;
+- archetype and route;
+- dataset scope and selector semantics;
+- client-snapshot or server-query data mode;
+- row identity;
+- controls and capabilities;
+- persistence allowlist and transient-state list;
+- mutation and real-time event model;
+- permissions/capability rules;
+- responsive behavior;
+- named UI states;
+- accessibility obligations;
+- page-owned source globs;
+- required native, browser, visual, artifact, and security tests;
+- performance and bundle budgets;
+- compatibility versions for shared foundation, server API, and preference
+  schema.
 
-- user job and intended outcome;
-- title, subtitle, breadcrumbs, and primary action;
-- metric definitions and order;
-- filters, defaults, and persistence;
-- columns, formats, default sort, and row actions;
-- section hierarchy;
-- responsive invariants;
-- interaction effects;
-- expected accessibility behavior;
-- named design reference and reviewer;
-- acceptance thresholds.
+The macro or validator MUST reject contradictory declarations, including:
 
-Runtime page implementations remain typed Rust. A future registry may project these declarations into JSON/TOML documentation and impact graphs, but Rust is the canonical source unless a measured consumer need justifies otherwise. Contracts contain data and policy, not arbitrary markup or classes.
+- `ClientSnapshot` with server-side sort callbacks;
+- a dataset selector also listed as a local filter;
+- persisted row/snapshot/session data;
+- a satellite importing core state;
+- a mutation without pending, success/removal, conflict, and failure states;
+- a real-time page without disconnect and resynchronization behavior;
+- a visual page with no named baselines.
 
-## Component and pattern registry
+### 9.1 Per-page surface manifest
 
-Each public framework item should declare:
+Each satellite owns a manifest in its own directory. Agents do not add entries
+to a central source file.
 
-- stable ID;
-- maturity and deprecation state;
-- `use_when` and `do_not_use_when` guidance;
-- props, variants, and organizational defaults;
-- accessibility and keyboard contract;
-- responsive contract;
-- required states;
-- story/demo route and fixture IDs;
-- downstream pattern, template, and page consumers;
-- permitted overrides;
-- replacement for deprecated APIs.
-
-The registry should generate:
-
-- component and pattern documentation;
-- usage examples;
-- Tailwind source/safelist configuration;
-- page scaffolding;
-- agent reference material;
-- visual and interaction story matrices;
-- the test impact graph;
-- stale-documentation and duplicate-public-name checks.
-
-## Enforcement
-
-Instructions alone cannot enforce the architecture. Add mechanical rules:
-
-- Screen modules may import templates and patterns. Direct primitive imports require an explicit exception.
-- Ban raw `button`, `input`, `select`, and `table` elements in application screen modules.
-- Ban hard-coded colors and arbitrary layout values in screens.
-- Ban app-local StatCard, SectionCard, FilterBlock, PagerRow, and equivalent primitives after canonical replacements exist.
-- Deprecate duplicate public concepts.
-- Restrict `class` and `DataTableClasses` overrides to framework internals or a reviewed exception registry.
-- Give page composition modules a size budget; state, query, and transformation logic belong in separate modules.
-- Record each exception with a reason, owner, scope, and expiry.
-- Fail CI if generated registry outputs, documentation, agent packs, or consumer version locks are stale.
-
-## Agent integration
-
-### Instruction structure
-
-Root `AGENTS.md` and `CLAUDE.md` files should be concise routers containing only facts and rules needed in every session. Multi-step UI procedures should live in a task-specific skill.
-
-The framework should ship one canonical `ldui-page` agent pack and generate the tool-specific projections:
-
-```text
-agent-pack/ldui-page/             # canonical source
-.agents/skills/ldui-page/         # Codex projection
-.claude/skills/ldui-page/         # Claude Code projection
+```toml
+id = "no-hires"
+contract_version = 1
+delivery = "satellite"
+route = "/no-hires/"
+artifact = "dist/no-hires/<build-id>/"
+api_compat = "office-page-v1"
+foundation_compat = "ldui-page-v1"
+preference_schema = 1
+launch_policy = "office.no-hires.read"
 ```
 
-The skill workflow should require an agent to:
+Packaging fills immutable hashes and sizes into generated release metadata.
+The server discovers manifests. Duplicate IDs/routes, incompatible versions,
+missing artifacts, or mutable asset names fail assembly.
 
-1. Read the page contract.
-2. Select the declared archetype.
-3. Use registry-approved patterns.
-4. Compose the page shell from the typed template and contract macros; no separate generator is required.
-5. Avoid primitives, raw controls, and arbitrary classes unless an exception is declared.
-6. Run the selected page lane or `verify-affected --base <merge-base>` and inspect its explanation.
-7. Inspect the rendered page against its named design reference.
-8. Exercise the required state, accessibility, interaction, and effect oracles.
+## 10. `SnapshotTablePage` contract
 
-### Consumer synchronization
+### 10.1 Required layout
 
-The framework should publish a contract/version manifest containing:
+From top to bottom:
 
-- framework commit or release ID;
-- registry schema version;
-- token version;
-- agent-pack version;
-- generated CSS-source version.
+1. `PageHeader`
+2. office `DatasetSelector`
+3. optional full-width `KpiStrip`
+4. horizontal `FilterBar`
+5. active status/error feedback when needed
+6. full-width `EntityTable`
+7. table pagination integrated with the table pattern
 
-Inventory's sibling path dependency and Office's vendored dependency should both verify this manifest. Office additionally needs an explicit vendor-sync command that copies the framework and agent pack together and verifies the stored commit provenance.
+Office is not placed among the filters. The filter row is horizontal at
+desktop widths and follows the framework's defined responsive wrapping at
+narrow widths. Agents do not invent a sidebar alternative for this archetype.
 
-### Scaffolding and diagnostics
+### 10.2 Client-snapshot data flow
 
-Recommended commands:
+For No-Hires:
 
-```text
-cargo xtask ui doctor
-cargo xtask ui explain-page inventory.explorer
-cargo xtask verify-affected --base origin/main
-```
+1. Load the user's default office snapshot after boot.
+2. Normalize and index rows once for local operations.
+3. Apply saved default filters, sort, page size, and column layout.
+4. Apply search, filter, and sort changes immediately in memory.
+5. Paginate the derived local result.
+6. On a claim, send the mutation with row/revision identity.
+7. On success or an event that another user claimed the row, remove it from
+   the local source set and recompute the derived view.
+8. Re-request the snapshot only on explicit office selection, authoritative
+   invalidation, detected revision gap, or recovery that cannot be applied
+   incrementally.
 
-`ui doctor` should identify raw controls, unsupported imports, arbitrary values, duplicate local patterns, undocumented exceptions, and stale generated files.
+For the expected office-level dataset of approximately 2,000 rows, this
+reduces repeated bandwidth and latency. It also keeps interaction responsive
+when the user is far from the server. `All Offices` is explicit and MAY have a
+different size budget or server strategy if production measurements require
+it.
 
-An optional scaffold command may be added only if repeated migrations demonstrate that it saves time. It is not part of the validated architecture: Codex or Claude Code can author the small macro declarations and typed composition directly.
+### 10.3 Atomic office changes
 
-## Testing architecture
+Selecting another office starts a new dataset load. During the load:
 
-### Design intent versus regression baselines
+- retain the old snapshot rather than blanking the table;
+- label it with the office it actually represents;
+- show the pending destination office;
+- prevent an old response from overwriting a newer selection;
+- swap rows, revision, counts, and office label atomically only after the new
+  snapshot validates;
+- preserve filters, sort, page size, and column layout;
+- reset current page only as needed to produce a valid page;
+- on failure, keep the prior snapshot and provide Retry.
 
-A screenshot baseline answers the question: "Did this implementation change?"
+Filters and sorts are local settings. Office changes do not reset them.
 
-It does not answer the question: "Did the implementation select the intended hierarchy, variant, density, or component?"
+### 10.4 Claims and real-time events
 
-Each page therefore needs two distinct references:
+Claim mutations are idempotent or carry an idempotency key. The server remains
+authoritative.
 
-1. A named design-intent reference or approved page contract.
-2. A regression baseline accepted only after comparison with that reference.
+- Own successful claim: remove the row locally.
+- Another user's claim event: remove the row locally.
+- Already-claimed conflict: remove or reconcile the row and explain the
+  conflict without treating it as a fatal page error.
+- Temporary mutation failure: restore enabled state and permit retry.
+- Event disconnect: show non-blocking stale/reconnecting status and reconnect
+  with bounded backoff.
+- Revision gap or `SnapshotInvalidated`: load one replacement dataset.
+- Duplicate or out-of-order event: ignore safely using event/revision identity.
+- Office switch: unsubscribe or logically detach from the prior dataset before
+  applying events to the new one.
 
-No new baseline should be accepted without its design reference, viewport, and reviewer being recorded.
+The server signals clients that currently hold the affected dataset. It may
+send a row-level event or request a full resnapshot. Full resnapshot should be
+rare.
 
-### Story/state catalog
+## 11. Registry and mechanical enforcement
 
-Each pattern should have Storybook-like Leptos stories for meaningful states:
+The framework publishes machine-readable metadata for components, patterns,
+archetypes, tokens, and audit rules. For each approved item, the registry
+records:
 
-- default;
-- loading;
-- never loaded;
-- empty;
-- partial;
-- stale;
-- error;
-- permission denied;
-- overflow and long labels;
-- compact and comfortable density;
-- narrow and wide viewports;
-- keyboard interaction;
-- supported themes and contrast modes;
-- localization fixtures where applicable.
+- stable name and version;
+- import path;
+- intended use and prohibited use;
+- typed properties and variants;
+- accessibility contract;
+- responsive behavior;
+- named states;
+- compatible archetypes;
+- examples;
+- test selectors;
+- deprecation/replacement metadata.
 
-Stories should be executable test cases, not documentation-only examples. The story concept is useful because it captures each interesting component state independently; it does not require adopting Storybook's JavaScript runtime.
+CI enforces:
 
-### Test layers
+- no raw hex/rgb colors in consumer page code;
+- no unapproved DaisyUI component classes in domain pages;
+- no arbitrary breakpoint/spacing values outside the foundation;
+- no duplicate local reimplementation of registered patterns;
+- every page has a valid contract and manifest;
+- every contract state has a fixture/story or a documented nonvisual test;
+- every visual baseline has review metadata;
+- a satellite has no forbidden dependency edge;
+- the core has no compile-time satellite registry;
+- persisted state is allowlisted;
+- source ownership is unambiguous.
 
-Retain the repository's visual-quality methodology:
+Enforcement should produce a direct diagnostic and approved replacement, not
+merely fail on a style string.
 
-- Layer A: pixels and computed style.
-- Layer B: DOM state, model state, and desynchronization checks.
-- Layer C: accessibility and keyboard behavior.
-- Layer D1: correlated browser/network traces and errors.
-- Layer D2: independent completion or rows-affected evidence.
+## 12. CI/CD architecture
 
-New test rules should include a break-and-revert negative control to prove that the test catches the defect it claims to guard against.
+### 12.1 Governing principle
 
-The No-Hires pilot exercises all four layers. Its contract and fixture catalog agree on 16 named states; 13 reviewed image baselines cover the visually distinct states at wide and compact sizes. The browser suite verifies the complete local table workflow, dataset switching without preference loss, claim/SSE removal without a snapshot GET, focus recovery, correlation IDs, and zero axe violations. Semantic and visual inject/catch/revert controls corrupt the real dataset-reset, accessible-name, theme-token, and layout paths, fail for the intended reason, restore the exact source, and then pass. The existing Office rows-affected completion barrier supplies Layer D2; browser state alone is not treated as proof of a write.
+Keep orchestration in the existing `cargo-make`/CI runner. Put
+project-specific build, manifest, hashing, compatibility, packaging, and
+verification logic in the Rust `xtask`. Steps are idempotent and inspect their
+required outputs.
 
-## Affected-test selection
+Do not create a general Rust task runner, custom DAG, or checkpoint engine.
+Use the CI platform's rerun-failed-job support. Cache validated compilation and
+browser artifacts, never a test verdict.
 
-The general target remains:
+Local commands and CI jobs MUST call the same underlying tasks.
 
-```text
-cargo xtask verify-changed --base <merge-base> --explain
-```
+### 12.2 Required page commands
 
-The algorithm should:
-
-1. Read changed paths from Git.
-2. Resolve files to registry components, patterns, templates, and page specs.
-3. Walk the transitive reverse-consumer graph.
-4. Select the required native, story, DOM/model, accessibility, visual, and effect tests.
-5. Escalate unknown or unmapped changes to the full gate.
-6. Print the reason every selected test is required.
-7. Persist timings and selection evidence for later optimization.
-
-Suggested selection policy:
-
-| Change | Required checks |
-|---|---|
-| Documentation only | Registry and documentation generation checks |
-| One primitive | Its unit tests and directly consuming stories |
-| Pattern | Pattern tests plus every template/page using it |
-| Page implementation or spec | That page's model, DOM, accessibility, interaction, and visual states |
-| DTO/API contract | Changed package and reverse dependents; UI tests only when rendered behavior changes |
-| Token, theme, macro, or base CSS | Full affected UI matrix |
-| Cargo features, build logic, or audit infrastructure | Full relevant gate |
-| Unknown or unmapped file | Full gate |
-
-Use distinct feedback lanes:
-
-- Inner loop: targeted check and unit tests, with a goal below 60 seconds.
-- Pre-push: all affected stories and page contracts.
-- Main/release: complete repository and release gate.
-- Nightly: all supported themes, roles, states, and viewports.
-
-Periodic full gates are necessary to detect errors in the selector itself.
-
-The pilot implements the first consumer-specific form in Office:
+The implementation may refine spelling, but must provide these capabilities:
 
 ```text
 cargo xtask verify-page no-hires --inner
 cargo xtask verify-page no-hires --browser
 cargo xtask verify-page no-hires --visual
-cargo xtask verify-affected --base main
+cargo xtask verify-page no-hires --all
+cargo xtask package-page no-hires
+cargo xtask write-page-receipt no-hires
+cargo xtask verify-page-receipt no-hires <receipt>
+cargo xtask assemble-surface-manifest <receipt-directory>
+cargo make ui-final-integration
+cargo make ship-page -- no-hires
 ```
 
-The warmed inner lane ran 49 tests in 10.746 seconds without building Wasm. The browser lane ran four tests in 22.089 seconds and the visual lane ran two tests in 99.466 seconds, both against the exact same content-addressed capsule build. Cache entries contain only validated build artifacts; no passing test result is cached, so every selected test still executes. Documentation-only changes avoid Rust/Wasm work, known page paths select their declared lanes, and shared or unknown paths escalate to the full gate.
+`verify-page` resolves the contract and ownership metadata, runs the selected
+lane, and records timings. `package-page` builds the exact production
+satellite, not a test-only substitute. `ship-page` packages, verifies,
+publishes immutable assets, performs compatibility checks, and atomically
+promotes only that page's manifest.
 
-## Build-time findings
+### 12.3 Semantic affected-test selection
 
-A live `cargo xtask test-style` run on 2026-08-25 took approximately 14.5 minutes. The seven browser tests executed in 19.66 seconds. More than 95% of the elapsed time was spent on Wasm compilation and linking rather than on assertion execution.
+Selection is based on declared ownership and behavior, not file extensions
+alone.
 
-During the run:
+During a parallel migration wave:
 
-- `rust-lld` reached approximately 1.85 GB;
-- it crashed with Windows status `0xC0000005`;
-- the audit freshness marker correctly rejected the stale served bundle;
-- no false-green visual result was produced.
+| Changed input | Required action |
+|---|---|
+| One page's domain source, contract, fixture, or page-owned style | Run that page's declared lanes and package it. |
+| That page's browser harness | Run that page's browser and dependent visual lanes. |
+| Reviewed visual baseline only | Validate review metadata and run that page's visual lane. |
+| Documentation with no executable contract input | Markdown/document checks only. |
+| Frozen shared foundation, root workspace, central CI, generic server routing, or unknown ownership | Fail with an ownership/foundation error. Do **not** silently run the full gate. |
 
-Observed local debug Wasm artifacts were:
+The last row is deliberate. Page agents are not allowed to change shared
+inputs during the fan-out. Escalating to a full gate would hide an ownership
+violation and recreate the month-long feedback loop.
 
-| Application | Debug Wasm size |
+In steady state, an approved shared-foundation change selects the reverse
+dependency set declared by surface manifests. It can select many surfaces if
+the shared behavior genuinely affects many surfaces. Unknown ownership still
+fails closed.
+
+### 12.4 Build caching
+
+Cache keys include all real inputs:
+
+- Rust source and relevant `Cargo.toml`/lock data;
+- target triple, profile, Rust/Cargo version, and Wasm tools;
+- foundation and contract schema versions;
+- generated token/schema inputs;
+- npm lockfile and browser harness version where applicable;
+- environment variables that alter output;
+- exact build command and required output list.
+
+Cache entries contain build artifacts only. Selected tests execute on every
+run. A missing or malformed expected output invalidates the cache even when
+the key matches.
+
+Each parallel worktree uses a distinct `CARGO_TARGET_DIR` and page-owned
+browser output directory. Shared mutable target directories are forbidden.
+
+### 12.5 Page receipts
+
+A page receipt makes isolated verification portable across integration
+commits. It is not bound solely to a Git commit SHA because merging a page
+changes the commit without changing the page bytes.
+
+A receipt includes:
+
+- page ID and contract version;
+- digest of every page-owned source/config/fixture input;
+- shared-foundation artifact/digest and compatibility version;
+- server API and preference schema compatibility;
+- toolchain and build-profile identity;
+- production artifact hashes and compressed/raw sizes;
+- selected test names, timestamps, durations, and outcomes;
+- visual baseline IDs and review metadata;
+- browser/OS identity for environment-sensitive checks;
+- source commit and worktree metadata for traceability;
+- receipt schema version and signature or trusted CI attestation.
+
+A receipt is valid after merge only when recomputing its declared input
+digests yields the same values. It is invalidated by:
+
+- a changed page-owned input;
+- a changed compatible foundation input in its dependency closure;
+- a changed contract, API, preference, build-tool, or test-harness input;
+- a missing artifact or mismatched hash;
+- an expired policy-defined verification window;
+- an unverifiable or untrusted attestation.
+
+The integration coordinator verifies receipts; it does not blindly trust a
+green page branch.
+
+### 12.6 Migration-wave pipeline
+
+The pipeline has three distinct scopes:
+
+| Stage | What runs | What does not run |
+|---|---|---|
+| Page implementation | Page contract/native tests, exact satellite build, page browser/accessibility/visual tests, package checks, receipt generation | Core rebuild, unrelated satellite builds/tests, portfolio E2E |
+| Integration of one completed page | Receipt/input verification, manifest collision/compatibility checks, cheap repository checks | Full workspace rebuild and cross-page E2E |
+| Wave completion | One final integration gate over the fully assembled tree | Nothing is deferred beyond release |
+
+The final full rebuild and end-to-end suite is held until all planned
+page-level changes are complete in isolation and integrated. It runs once on
+the exact release candidate.
+
+This rule applies to the migration wave. It does not remove the final gate,
+and it does not permit release from page receipts alone.
+
+### 12.7 Final integration gate
+
+`cargo make ui-final-integration` must:
+
+1. verify the tree contains only approved integrated work;
+2. validate every page contract and unique route/surface ID;
+3. recompute and validate every page receipt;
+4. validate dependency direction;
+5. rebuild the shared foundation from clean declared inputs;
+6. rebuild core and every migrated satellite;
+7. confirm rebuilt artifact hashes match receipt expectations where inputs
+   are identical;
+8. prove unrelated surface boundaries and immutable asset names;
+9. run full native/workspace checks;
+10. run all browser, accessibility, and reviewed visual suites against the
+    assembled production artifacts;
+11. run cross-page launch, auth, revocation, manifest, compatibility, and
+    rollback journeys;
+12. generate one signed release manifest and measurement report.
+
+Failure is fixed at the narrowest owning layer. A failed final gate does not
+justify rerunning unchanged page suites repeatedly while diagnosing an
+unrelated issue.
+
+### 12.8 Independent steady-state delivery
+
+After the migration wave has passed its final gate and the satellite platform
+is established, an isolated satellite release may use:
+
+1. affected-input validation;
+2. page-level tests;
+3. exact production package and artifact checks;
+4. compatibility and security launch tests;
+5. immutable publish;
+6. page-only canary/health check;
+7. atomic manifest promotion.
+
+The job MUST verify that core and unrelated surface artifact hashes and
+manifest pointers did not change. Core, server, shared-foundation, schema, or
+cross-surface protocol changes use their broader declared release gates.
+
+### 12.9 Deployment and rollback
+
+- Publish immutable assets before changing a manifest pointer.
+- Verify assets by downloading/hashing or another independent read-back, not
+  by trusting an upload success echo.
+- Retain the previous compatible manifest and assets for rollback.
+- Promote one surface atomically.
+- Do not garbage-collect artifacts still referenced by active/recent
+  manifests or boot documents.
+- Record page ID, build ID, hashes, compatibility versions, and promoter.
+- A failed satellite promotion does not roll back an unchanged core.
+
+## 13. Parallel agent protocol
+
+### 13.1 Prerequisites before fan-out
+
+The coordinator completes and freezes:
+
+- shared semantic tokens and opinionated patterns required by the wave;
+- archetype and page-contract schema;
+- manifest schema and generic server discovery;
+- child-session and preference APIs;
+- page-level CI/CD commands and receipt validation;
+- ownership map and protected shared paths;
+- named test fixtures and visual-review process;
+- the production No-Hires pilot and its measured acceptance decision.
+
+If a required shared component is missing, add it centrally before assigning
+dependent pages. Do not ask every page agent to invent a local version.
+
+### 13.2 Core versus satellite decision
+
+A page remains in core only if it requires ongoing in-process access to core
+state or participates in a tightly coupled workflow that cannot be expressed
+through authenticated server APIs and normal navigation.
+
+The following are not reasons to keep a page in core:
+
+- it needs the current user;
+- it needs authorization;
+- it needs an office list;
+- it needs saved settings;
+- it needs real-time server events;
+- users launch it from core;
+- it uses the same design system.
+
+Those are supported satellite capabilities.
+
+### 13.3 Agent assignment packet
+
+Every agent receives:
+
+- this document;
+- exactly one page/surface ID;
+- product acceptance criteria and current-page route;
+- selected archetype;
+- approved component/pattern list;
+- dataset and API contract;
+- state/persistence matrix;
+- authorization and event rules;
+- named stories and journey list;
+- performance/bundle budgets;
+- owned path globs and forbidden shared paths;
+- exact page-level commands;
+- expected receipt location.
+
+An assignment is incomplete if the agent must guess layout, data mode,
+persistence, or test scope.
+
+### 13.4 Worktree and ownership rules
+
+- One page per agent and one worktree/branch per page.
+- Claim the page's bead before editing.
+- Use a page-specific `CARGO_TARGET_DIR`.
+- Edit only declared page-owned paths.
+- Do not edit root lockfiles, root workspace membership, shared tokens,
+  shared patterns, central translations, core router, generic launch/session
+  code, global CI, or release-manifest assembly.
+- Do not add the page to a hand-maintained central registry.
+- Do not weaken a test, audit ceiling, or budget to make the page pass.
+- Do not commit generated/cache output except approved manifests, receipts, or
+  reviewed baselines.
+- Preserve unrelated work and verify the worktree is not behind `main` before
+  asserting that a capability is missing.
+
+The coordinator preallocates workspace/package hooks or uses discovery so
+page branches do not contend on shared files.
+
+### 13.5 Agent implementation workflow
+
+1. Read this document, the page assignment, repo instructions, and relevant
+   framework examples.
+2. Claim the page issue and confirm owned/forbidden paths.
+3. Capture the current page's matched baseline where one exists.
+4. Add or refine the page contract and named fixtures.
+5. Write failing contract/behavior tests for the assigned acceptance criteria.
+6. Implement using the selected archetype and registered patterns.
+7. Run the smallest inner lane while iterating.
+8. Run the page browser/accessibility lane when behavior is ready.
+9. Run the visual lane for every changed named state and review diffs.
+10. Build the exact production satellite and run it through the real launch
+    and child-session boundary.
+11. Run negative controls for new test/audit rules, then revert the fault.
+12. Record after measurements and generate the page receipt.
+13. Confirm only owned files changed; commit and push the page branch.
+14. Hand the receipt and material risks to the coordinator.
+
+### 13.6 Stop and escalate
+
+An agent stops and reports the blocker when:
+
+- a required shared component or token is missing;
+- the archetype cannot express a real product requirement;
+- a shared schema/API change is required;
+- owned paths overlap another page;
+- a manifest route/ID collides;
+- the dataset exceeds the page's client-snapshot budget;
+- auth, accessibility, data integrity, or measurement evidence fails;
+- page isolation requires editing core or another satellite.
+
+The agent does not solve a shared problem with page-local duplication.
+
+### 13.7 Coordinator integration workflow
+
+For each page:
+
+1. verify branch/worktree base and changed-file ownership;
+2. verify the receipt against merged inputs;
+3. check route, package, and manifest uniqueness;
+4. integrate without broadening that page's scope;
+5. rerun only cheap receipt/manifest checks;
+6. record the integrated surface as pending final gate.
+
+If the shared foundation must change mid-wave:
+
+1. pause dependent page work;
+2. make and verify one central foundation change;
+3. publish a new foundation digest/version;
+4. identify reverse-dependent page receipts;
+5. rerun only those pages' required lanes;
+6. resume fan-out.
+
+After all pages are integrated, freeze the candidate and run the final
+integration gate once.
+
+## 14. Testing contract
+
+### 14.1 Test the production artifact
+
+Browser, visual, launch, and bundle tests MUST exercise the artifact that will
+ship. A minimized test capsule is useful for inner-loop diagnostics only. Its
+size or startup time is not production-satellite evidence.
+
+### 14.2 A/B/C/D proof
+
+Every new page behavior or audit rule follows:
+
+- **A — Baseline:** demonstrate the relevant test passes on known-good code.
+- **B — Break:** inject a targeted fault and show the intended test fails for
+  the intended reason.
+- **C — Fix:** revert/fix the fault and show the test passes.
+- **D — Regression:** keep the test and reviewed fixture/baseline in the
+  owning suite.
+
+The injected fault must be reverted. A test that has never detected its
+targeted failure mode is not proven.
+
+### 14.3 Standard page lanes
+
+| Lane | Purpose | Typical trigger |
+|---|---|---|
+| Contract/static | Page-contract validity, ownership, forbidden dependencies/classes, manifest schema | Every page change |
+| Native inner | Pure reducer/model/filter/sort/pagination/preferences/event logic | Relevant Rust/model changes |
+| Production build | Exact satellite compilation, artifact/size/hash checks | Every shippable page change |
+| Browser behavior | Launch, loading, controls, table interaction, claims, events, recovery | Behavior or browser harness changes |
+| Accessibility | Keyboard, focus, names, roles, contrast/axe rules | Relevant UI changes; final page gate |
+| Visual | Reviewed named-state screenshots and visual audit | Any presentation-affecting change |
+| Security/session | Launch, cookie scope, renewal, revocation, office authorization | Auth/session/API changes; required pilot gate |
+| Final integration | Core/satellite launch matrix, all artifacts, cross-page compatibility | Once after the migration wave |
+
+Visual comparison uses stable rendering and reviewed similarity thresholds,
+not byte-for-byte PNG equality. Dynamic fields are fixed or masked only when
+they are not the subject under test.
+
+### 14.4 No-Hires named journeys
+
+The production pilot must cover at least:
+
+1. launch from an authenticated core;
+2. direct URL without a valid child secret is rejected;
+3. default office snapshot loads;
+4. office changes atomically while local view settings remain;
+5. All Offices is explicit;
+6. search, filters, sort, pagination, resize, reorder, and visibility are
+   local and responsive;
+7. Reset changes current local settings;
+8. Save as Default persists only the allowlisted fields;
+9. refresh rebuilds transient state and reloads saved defaults;
+10. own claim removes a row;
+11. another user's claim event removes a row;
+12. conflict and transient failure recover correctly;
+13. disconnect/reconnect and revision-gap resnapshot work;
+14. two tabs maintain independent local state;
+15. two tabs reuse cached immutable assets;
+16. core logout/timeout invalidates existing satellite operations;
+17. expired tabs stop reconnect/mutation loops;
+18. any canonical office and All Offices can be selected, while an invalid or
+    noncanonical office identifier is rejected server-side;
+19. artifact rollback restores the prior page without changing core;
+20. Mexico/India-like latency and constrained bandwidth remain usable.
+
+## 15. Measurements and budgets
+
+### 15.1 Existing pilot evidence
+
+The existing controlled pilot recorded:
+
+| Measure | Result |
 |---|---:|
-| Framework showcase | 87.5 MB |
-| Office | 95.6 MB |
-| Inventory | 22.8 MB |
-
-These are not compressed production transfer sizes. They are, nevertheless, the artifacts that the local linker and browser audit process must produce and load.
-
-Immediate optimizations should include:
-
-1. Build once and share one running server across style, layout, and reactivity suites.
-2. Combine style and layout collection where both audit the same route.
-3. Content-hash the generated stylesheet and prevent xtask and Trunk from rebuilding identical CSS.
-4. Split the showcase into smaller independently linked audit targets.
-5. Record per-step wall time and Cargo timing reports.
-6. Measure a reduced-debug-information development profile such as `debug = "line-tables-only"`.
-7. Use stable target directories and canonical feature sets to maximize cache reuse.
-8. Normalize `NO_COLOR=1` to a value accepted by Trunk 0.21.
-9. Terminate before browser startup when the Wasm build or link fails.
-
-Test-name filtering alone is insufficient because Cargo may still compile and link the entire test executable. Test selection must be paired with smaller build targets.
-
-The No-Hires result confirms the distinction. Its first inner run spent 171.6 seconds compiling a fresh native test binary; the unchanged second run spent 10.746 seconds executing 49 selected tests. The exact-page browser build is independently linked and validated by a fingerprint covering Rust/Cargo inputs, tool versions, vendor provenance, the build command, and required outputs. Browser and visual tests reuse that build but never reuse a prior verdict. The visual lane remains the slowest selected lane at 99.466 seconds, so agents should run it only for changes that can alter presentation.
-
-## Wasm bundle architecture
-
-### Current state
-
-The framework showcase directly references every component demo route in [`demo/src/main.rs`](demo/src/main.rs). Office and Inventory similarly reference every application route within a single executable. Consequently, all reachable page code enters a single Wasm compilation and linking step.
-
-The root framework crate also has only the `test-mode` feature. Data-table, chart, Gantt, AI, Markdown, Mermaid, and other dependency families all belong to one crate closure.
-
-### Option A: Leptos lazy routes
-
-Leptos 0.8 supports `#[lazy]`, `#[lazy_route]`, `LazyRoute`, and `cargo leptos --split`. This creates a base Wasm module and routes chunks loaded on demand.
-
-Benefits:
-
-- smaller initial browser payload;
-- route code downloads only when needed;
-- one router, shell, and reactive application model;
-- nested route chunks can load concurrently with route data.
-
-Limitations for the current problem:
-
-- `cargo-leptos` first completes the full Cargo Wasm build and link, then reads that linked Wasm and splits it;
-- it therefore does not remove unrelated routes from the original linker job;
-- splitting adds another post-link processing step;
-- current projects use Trunk CSR, while the supported lazy-route example uses cargo-leptos and SSR/hydration;
-- the tooling is comparatively new and requires a Windows/toolchain validation spike.
-
-Conclusion: use lazy routes to improve production delivery after a successful spike, but do not treat them as the solution to local link time or linker memory.
-
-### Option B: separate Trunk page targets
-
-Trunk can select a particular Cargo binary through `data-bin` or `data-target-name`. A page or story can therefore be a genuinely independent Wasm target.
-
-Benefits:
-
-- a selected target does not link unrelated page binaries;
-- browser tests build only the requested page or pattern fixture;
-- failures are isolated;
-- CI can distribute targets across a matrix;
-- pages can be opened independently or embedded in a catalog iframe.
-
-Costs:
-
-- each bundle contains its own reachable Leptos/runtime code;
-- independent Wasm applications do not naturally share a Rust heap, reactive owner, or in-memory state;
-- navigation between production bundles normally causes a full page load or requires an explicit JavaScript/browser-storage boundary;
-- building every one of 1,000 binaries still requires 1,000 link jobs;
-- a monolithic shared framework crate can still cause broad compilation even when final page linking is isolated.
-
-Conclusion: this is the recommended architecture for story, component, pattern, and page-level visual-test capsules. It is not the default recommendation for 1,000 production application bundles.
-
-The No-Hires capsule validates this conclusion with real code. It links the exact UI/model contract shared by the shipping route while excluding unrelated Office pages. Its release Wasm measured 1,298,905 raw bytes and 313,289 Brotli bytes, compared with 14,502,870 and 3,305,899 bytes for the recorded legacy full application. Startup in the controlled harness fell from 989.7 to 32.5 milliseconds. These are capsule-versus-full-app measurements, not an equivalent production delivery A/B, so they justify test isolation only.
-
-### Option C: bounded framework crates and domain bundles
-
-Split the framework into a small number of stable dependency families:
-
-```text
-ldui-core
-ldui-patterns
-ldui-data
-ldui-charts
-ldui-planning
-ldui-ai
-leptos-daisyui-rs      # compatibility facade/re-exports
-```
-
-This prevents a table page from compiling and linking Gantt, AI chat, Mermaid, and unrelated visualization dependencies. Avoid one crate or feature per component; that would create excessive maintenance and feature combinations.
-
-Applications that remain on Trunk CSR can optionally build a small number of domain bundles, such as:
-
-- core/authentication;
-- queue and tabular operations;
-- conversations;
-- planning;
-- reporting and charts;
-- administration/settings.
-
-Five to twenty domain bundles are more manageable than one bundle per page and still materially bound link size.
-
-### Option D: template runtime plus data-only page specifications
-
-Hundreds or thousands of standard pages should not require hundreds or thousands of Rust component implementations.
-
-The preferred scale model is:
-
-```text
-shared shell and template runtime
-              +
-validated page specification loaded by route
-              +
-domain data/query adapter
-```
-
-Six compiled page archetypes can render many validated `PageSpec` instances. Page count then adds mostly data, not new generated control-flow code or a new Wasm linker target. Exceptional custom pages can remain separately compiled modules or route chunks.
-
-This should remain a bounded archetype system, not an arbitrary UI DSL. Specs may choose registered metrics, filters, columns, actions, and slots, but cannot inject arbitrary markup or CSS.
-
-### Recommended Wasm strategy
-
-Use a hybrid:
-
-1. Data-only page specifications for standard pages.
-2. Six typed, compiled page templates.
-3. Independently linked Trunk capsules for component, pattern, and page tests; this is validated by the No-Hires pilot.
-4. Five to eight bounded framework dependency crates.
-5. Build-on-demand locally and a parallel all-capsule CI matrix.
-6. A measured `cargo-leptos --split` spike for production route delivery.
-7. Coarse domain bundles if applications remain on Trunk CSR and the monolithic production link remains unacceptable.
-
-Retain one shipping Office application for now. Do not extrapolate the capsule result into hundreds or thousands of independent production applications: duplicated runtime code, cross-bundle state, navigation, cache invalidation, deployment atomicity, and 1,000 linker jobs remain unresolved. Collect final full-bundle and representative Mexico/India real-user measurements first. If production splitting becomes necessary, test lazy routes and a small number of domain bundles before page-level micro-frontends.
-
-## Proposed repository shape
-
-```text
-crates/
-  ldui-core/
-  ldui-patterns/
-  ldui-data/
-  ldui-charts/
-  ldui-planning/
-  ldui-ai/
-
-src/
-  registry/
-  page_specs/
-
-ui-fixtures/
-  primitives/
-  patterns/
-  templates/
-  consumer-pages/
-
-agent-pack/
-  ldui-page/
-
-doc/
-  generated/
-  visual-quality/
-```
-
-The existing root package can remain as a compatibility facade while consumers migrate to narrower packages or feature groups.
-
-## Migration sequence
-
-### Phase 0: No-Hires golden vertical slice - implemented
-
-- Added typed page/filter/column contracts and the client-snapshot page pattern.
-- Implemented `PageHeader`, `DatasetSelector`, `FilterBar`, `ActiveFilterChips`, `AsyncDataSection`, `EntityTable<T>`, and `ListPage`.
-- Migrated the production Office No-Hires route to a complete office-selected snapshot with immediate local filtering, sorting, pagination, column preferences, authoritative claims, and dataset-scoped live deltas.
-- Created one exact-page, non-shipping Wasm capsule shared with the shipping UI implementation.
-- Added page-aware native/browser/visual lanes, content-addressed build reuse, fail-closed affected selection, and candidate-bound reports.
-- Approved the 16-state contract, 13 visual baselines, accessibility/keyboard behavior, and inject/catch/revert controls.
-- Synchronized Office's vendored framework with exact commit provenance.
-
-The remaining acceptance items for this phase are the final Office release gate, the final shipping-bundle measurement, and rollout telemetry. Those do not change the architectural source decision.
-
-### Phase 1: prove amortization on a second consumer
-
-- Select one existing Inventory Explorer or Office queue/list page whose behavior fits the same archetype.
-- Reuse the current contracts and patterns without adding another generic table, filter row, pager, page-state container, or capsule runner.
-- Converge `EntityTable<T>` and the full DataTable's shared mechanics, or document and enforce their non-overlapping client-snapshot versus server-query roles.
-- Add `KpiStrip` only if the selected page has a real KPI decision job.
-- Measure implementation elapsed time, page-specific executable lines, agent correction count, affected-lane time, state coverage, and defects against No-Hires.
-- Accept broad list-page rollout only if the second page is materially smaller and faster to implement while retaining equivalent quality evidence.
-- Complete the machine-readable component/pattern registry and generated Codex/Claude reference pack from the two proven consumers rather than speculative APIs.
-
-### Phase 2: Broaden the template system
-
-- Extract `DashboardPage` from real dashboard/coordinator screens.
-- Extract `DetailPage` from account, Matter, or stage-detail screens.
-- Extract `WorkbenchPage` from coordinator/manager workflows.
-- Add `FormPage` and `TimelinePage` only from demonstrated consumer needs.
-- Remove the replaced app-local cards, filters, tables, and pagers.
-
-### Phase 3: Enforce the architecture
-
-- Enable forbidden-import and raw-control checks.
-- Require exception registry entries.
-- Generate and distribute the agent skill pack.
-- Require page contracts for new pages.
-- Require affected tests and design-reference review before baseline acceptance.
-- Introduce bounded framework dependency crates and Wasm fixture shards.
-
-### Phase 4: optimize production delivery
-
-- Benchmark production and debug compilation separately.
-- Spike `cargo-leptos --split` on one representative nested route.
-- Measure full link time, split processing time, initial payload, navigation, caching, and Windows reliability.
-- Adopt lazy routes only if the measurements and operational model are better.
-- Otherwise, introduce coarse Trunk domain bundles where justified.
-
-## Success measures
-
-Track outcomes rather than component count:
-
-- At least 90-95% of ordinary screen composition comes from approved patterns and templates.
-- Approximately 99% of repeated mechanical UI behavior is framework-owned.
-- One canonical public table API.
-- No application-local StatCard, pager, filter-row, or generic SectionCard replacements without an exception.
-- No raw interactive elements or hard-coded design values in screen modules.
-- Every page declares required states, roles, viewports, and a design reference.
-- Every page baseline is approved against that reference.
-- Page composition files remain small; query and state logic are separated.
-- Median affected inner-loop feedback is below 60 seconds.
-- Visual test capsules link only their declared dependency family.
-- Full release and nightly gates remain green and periodically validate the affected-test selector.
-- Agent retries, review corrections, UI defect escape rate, and implementation time decline measurably after each template migration.
-
-The No-Hires pilot already satisfies the canonical typed table path, explicit dataset/filter separation, complete declared-state coverage, reviewed responsive/accessibility evidence, sub-60-second warmed inner feedback, and independently linked page-test capsule measures. It does not yet satisfy the small-composition-file, cross-page reuse, registry/agent-pack, or declining implementation-time measures. Those are acceptance criteria for the second consumer, not conclusions that can be inferred from this first infrastructure-bearing migration.
-
-## External references
+| Deterministic 2,000-row fixture SHA-256 | `79168fd44e01bdd97270a3e014ffa31e27dd8d965a0d745bbed66a00d4a5ef8f` |
+| Snapshot payload, Brotli | 9,801 B |
+| Test capsule, Brotli | 313,289 B |
+| Legacy recorded full app, Brotli | 3,305,899 B |
+| Controlled time to rows, capsule | 149.6 ms |
+| Controlled time to rows, legacy full app | 1,656.5 ms |
+| Search | 27.5 ms |
+| Filter | 33.3 ms |
+| Sort | 33.2 ms |
+| Pagination | 33.2 ms |
+| Claim removal | 32.9 ms |
+| Server-event removal | 33.3 ms |
+| Measured heap, capsule | 2,783,932 B |
+| Measured heap, legacy harness | 6,639,949 B |
+| Warm native affected lane | 49 tests / 10.746 s |
+| Browser lane | 4 tests / 22.089 s |
+| Visual lane | 2 tests / 99.466 s |
+| Selected total | 55 tests / 132.301 s |
+| Named/reviewed UI evidence | 16 named states / 13 reviewed baselines |
+
+The current real production Wasm grew from 3,305,899 Brotli bytes to
+3,480,254 bytes, an increase of 174,355 bytes or approximately 5.27%.
+That growth occurred because the shipping No-Hires code remained linked into
+the monolith. It is evidence of the problem, not the expected result of a
+production satellite.
+
+The capsule-versus-full startup comparison is directional evidence only. It
+did not hold the production routing, authentication, network, and asset
+topology constant.
+
+### 15.2 Required matched production comparison
+
+Measure the current production-shaped monolithic route immediately before
+extraction and the production-shaped satellite immediately after extraction
+using the same:
+
+- data fixture and snapshot bytes;
+- browser/host;
+- cold-cache and warm-cache definitions;
+- network latency/bandwidth profiles;
+- server/API behavior;
+- authentication path;
+- instrumentation and sample count.
+
+Record at minimum:
+
+- core raw, gzip, and Brotli bytes;
+- satellite raw, gzip, and Brotli bytes;
+- JS glue and CSS bytes;
+- cold and warm bytes transferred;
+- cache reuse for a second tab;
+- navigation-to-first-row and navigation-to-interactive p50/p95;
+- local search/filter/sort/page p50/p95;
+- office-switch bytes and time;
+- heap after load and after repeated interactions;
+- build, package, and each test-lane duration, cold and warm;
+- session launch/renew/revoke latency;
+- event-to-row-removal latency;
+- server CPU/memory and error rate under child-session concurrency.
+
+Store the report next to the page receipt and retain the raw machine-readable
+measurements.
+
+### 15.3 No-Hires production-satellite acceptance budgets
+
+These are initial budgets for proving the architecture. Tighten them after
+the matched run; do not silently relax them.
+
+| Measure | Initial budget |
+|---|---:|
+| Core Brotli Wasm after extraction | No more than 1% above the pre-pilot 3,305,899 B baseline, with the difference explained |
+| No-Hires satellite Brotli Wasm | At most 500 KiB |
+| Local search/filter/sort/page p95 on 2,000 rows | At most 100 ms |
+| Warm native page lane | At most 20 s |
+| Cached browser plus visual page lanes | At most 3 min |
+| Second tab Wasm transfer | 0 additional Wasm payload when the immutable artifact is cached |
+| Expired child-session cleanup | Within 60 s of policy expiry |
+| Core logout to mutation rejection | Within 5 s |
+| 1,000 concurrent child sessions | Under 1% request errors, no cross-session events, API p95 under 1 s |
+| 4,000 concurrent child sessions | Characterize resource curve and failure behavior before setting a release budget |
+
+All performance comparisons report sample count and variance, not one
+best-case run.
+
+### 15.4 Per-page migration measurements
+
+Every converted page records before and after:
+
+- linked core and page bytes;
+- first useful render;
+- interaction latency;
+- page-owned build/test duration;
+- full-gate contribution;
+- number of local component/style exceptions removed;
+- number of named states and reviewed baselines;
+- accessibility findings;
+- transferred bytes for the normal dataset;
+- any new shared-foundation dependency.
+
+### 15.5 Production telemetry
+
+After opt-in/privacy review, collect aggregate real-user measures by broad
+region/network class, particularly Mexico and India:
+
+- launch and first-row p75/p95;
+- office-switch bytes/time;
+- local interaction latency;
+- satellite boot failures;
+- child-session expiry/reconnect outcomes;
+- snapshot/event resync frequency;
+- asset cache-hit effectiveness.
+
+Do not collect row content, search text, filter values, or public tab IDs in
+analytics.
+
+## 16. Migration sequence
+
+### Phase 0 — Shared foundation and CI/CD
+
+- finalize the page-contract and manifest schemas;
+- implement/finalize the required opinionated patterns;
+- add generic manifest discovery and satellite launch/session support;
+- add separate `user-state.sqlite` preference storage and APIs;
+- implement page-level build/test/package/receipt commands;
+- protect shared paths and validate ownership;
+- implement final integration assembly and gate;
+- freeze versioned inputs for the wave.
+
+### Phase 1 — Real No-Hires production satellite
+
+- move the shipping No-Hires route to an independent production artifact;
+- remove its code from core linkage;
+- use the real child-session and preference boundaries;
+- run the named journeys and A/B/C/D controls;
+- capture the matched before/after report;
+- verify core and unrelated artifacts remain unchanged on a page-only edit;
+- canary, roll back, and promote the page independently;
+- review results before authorizing broad fan-out.
+
+### Phase 2 — Freeze and fan out
+
+- incorporate only lessons proven by the No-Hires production pilot;
+- version and freeze the shared foundation;
+- select bounded pages that fit approved archetypes;
+- give each agent one complete assignment packet and worktree;
+- generate page receipts from isolated page gates;
+- resolve shared gaps centrally, not inside page branches.
+
+### Phase 3 — Integrate without portfolio rebuilds
+
+- merge completed page branches one at a time;
+- validate ownership, receipts, compatibility, and manifest uniqueness;
+- do not rebuild core, unrelated pages, or run cross-page E2E after each
+  integration;
+- freeze the final assembled candidate only after all page work is integrated.
+
+### Phase 4 — One final full gate
+
+- run `cargo make ui-final-integration` once on the complete release
+  candidate;
+- fix failures at their owning layer and invalidate only affected receipts;
+- rerun the final gate on the corrected candidate;
+- publish the signed release manifest and measurement report.
+
+### Phase 5 — Rollout and steady state
+
+- canary satellite manifests independently;
+- monitor launch, RUM, auth/session, and event health;
+- use page-only delivery for isolated satellite changes;
+- use dependency-selected broader gates for shared/protocol changes;
+- keep periodic portfolio/full-gate runs as defense in depth.
+
+## 17. Decisions agents must not reopen
+
+Unless the owner explicitly changes this document:
+
+- No-Hires is a production satellite, not only a test capsule.
+- Satellites open in their own tabs.
+- User-facing routes do not contain `/satellites/`.
+- The core owns the master session; satellites use minimal tab-scoped child
+  sessions.
+- The URL contains only a public tab ID; the secret is in an exact-path
+  `Secure`/`HttpOnly` cookie.
+- Core logout/timeout invalidates child sessions; satellites have no logout.
+- Satellite transient state stays inside its Wasm instance.
+- Durable user settings use separate server-side `user-state.sqlite`.
+- Persistence requires an explicit **Save as Default** action.
+- Office is a dataset selector and may select any canonical office without an
+  office-specific restriction; it is not a filter.
+- Filters and sorts are local and survive office changes.
+- The No-Hires layout uses a horizontal filter row above a full-width table.
+- Office-sized snapshots use local search/filter/sort/pagination.
+- Satellites do not import core or each other.
+- Page contracts and macros validate and document; they are not a generic page
+  generator.
+- Page agents do not modify frozen shared foundation or central registries.
+- Page-level gates run during fan-out.
+- The complete rebuild and cross-page end-to-end gate is held until the end of
+  the integrated migration wave.
+- Exact production artifacts, not test-only capsules, determine bundle and
+  launch acceptance.
+
+## 18. Success measures
+
+The architecture succeeds when:
+
+- No-Hires ships as a real independent surface and meets its accepted
+  production budgets;
+- a No-Hires-only change leaves core and unrelated artifact hashes unchanged;
+- a second tab reuses immutable page assets while maintaining independent
+  local state;
+- logout and timeout reliably invalidate all child tabs;
+- agents implement routine pages primarily from approved patterns and one
+  archetype;
+- at least 99% of routine composition requires no page-local control or layout
+  invention;
+- page contracts make persistence, state, data mode, and tests mechanically
+  discoverable;
+- isolated page feedback completes in minutes rather than requiring the full
+  portfolio gate;
+- multiple page agents integrate without shared-file conflicts;
+- the final assembled release passes one authoritative full gate;
+- low-bandwidth production telemetry confirms useful responsiveness;
+- page-only steady-state releases rebuild and deploy only the changed
+  satellite.
+
+## 19. Relevant references
+
+### Local sources of truth
+
+- `AGENTS.md` — repository workflow and verification rules
+- `doc/visual-quality/` — visual-quality policy and audit rules
+- `audit/` — reusable browser-audit implementation
+- `xtask/` — build/test/package logic
+- `C:\Users\david\.claude\rust-ci-cd-build-strategy.md` — Rust build and
+  CI/CD layering
+- `C:\dev\4iiz-Office\TEST_STRATEGY.md` — Office test lanes and release-gate
+  policy; update it during Phase 0 to match this architecture
+
+### External design and implementation references
 
 - [Leptos components and typed props](https://book.leptos.dev/view/03_components.html)
 - [Leptos component children and composition](https://book.leptos.dev/view/09_component_children.html)
 - [Leptos Wasm code splitting](https://book.leptos.dev/deployment/binary_size.html#code-splitting)
-- [Current cargo-leptos frontend build sequence](https://raw.githubusercontent.com/leptos-rs/cargo-leptos/main/src/compile/front.rs)
-- [Trunk Rust targets and `data-bin`](https://github.com/trunk-rs/trunk/blob/main/guide/src/assets/index.md#rust)
-- [daisyUI design and flexibility model](https://daisyui.com/docs/intro/)
+- [Trunk Rust targets and `data-bin`](https://trunkrs.dev/assets/#rust)
+- [daisyUI design model](https://daisyui.com/docs/intro/)
 - [daisyUI semantic colors](https://daisyui.com/docs/colors/)
 - [GOV.UK Design System patterns](https://design-system.service.gov.uk/patterns/)
 - [Storybook stories as captured component states](https://storybook.js.org/docs/get-started/whats-a-story)
 - [Cargo test selection](https://doc.rust-lang.org/cargo/commands/cargo-test.html)
 - [Cargo build timings](https://doc.rust-lang.org/stable/cargo/reference/timings.html)
 - [Cargo profiles](https://doc.rust-lang.org/cargo/reference/profiles.html)
-- [Codex AGENTS.md guidance](https://learn.chatgpt.com/docs/agent-configuration/agents-md)
-- [Codex skills](https://learn.chatgpt.com/docs/build-skills)
-- [Claude Code project instructions](https://code.claude.com/docs/en/memory)
-- [Claude Code skills](https://code.claude.com/docs/en/skills)
-- [Claude Code hooks](https://code.claude.com/docs/en/hooks-guide)
+
+The external links explain underlying tools and design-system concepts. This
+document remains authoritative for 4iiz decisions.
