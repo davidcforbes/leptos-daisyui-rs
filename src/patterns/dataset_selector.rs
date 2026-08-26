@@ -39,6 +39,13 @@ pub fn selected_dataset_label<'a>(options: &'a [DatasetOption], selected: &str) 
         .map(|option| option.label.as_str())
 }
 
+/// A busy dataset replacement remains supersedable. Only an explicit caller
+/// gate disables the selector; `loading` controls busy semantics and progress
+/// presentation without trapping the user in the in-flight choice.
+pub(super) const fn selector_disabled(disabled: bool, _loading: bool) -> bool {
+    disabled
+}
+
 /// Selector whose value determines which complete dataset is downloaded.
 ///
 /// This component deliberately exposes `data-resettable-filter="false"` and
@@ -87,7 +94,9 @@ pub fn DatasetSelector(
                     class="select-sm min-w-44 bg-base-100"
                     label=Signal::derive(move || Some(label.get()))
                     value=selected
-                    disabled=Signal::derive(move || disabled.get() || loading.get())
+                    disabled=Signal::derive(move || {
+                        selector_disabled(disabled.get(), loading.get())
+                    })
                     on_change=on_change
                 >
                     {move || options.get().into_iter().map(|option| view! {

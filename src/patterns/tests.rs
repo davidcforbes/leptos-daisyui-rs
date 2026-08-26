@@ -240,6 +240,13 @@ fn dataset_selector_resolves_the_selected_dataset_without_filter_semantics() {
 }
 
 #[test]
+fn dataset_selector_stays_changeable_while_a_supersedable_load_is_busy() {
+    assert!(!super::dataset_selector::selector_disabled(false, true));
+    assert!(super::dataset_selector::selector_disabled(true, false));
+    assert!(super::dataset_selector::selector_disabled(true, true));
+}
+
+#[test]
 fn active_filter_summary_is_explicit_and_pluralized() {
     assert_eq!(active_filter_summary(0), "No active filters");
     assert_eq!(active_filter_summary(1), "1 active filter");
