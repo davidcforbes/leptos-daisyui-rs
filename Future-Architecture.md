@@ -1,6 +1,6 @@
-# Future Architecture: Opinionated Pages and Independent Wasm Satellites
+# Adopted Architecture: Opinionated Pages and Independent Wasm Satellites
 
-**Status:** Owner-approved target architecture
+**Status:** Adopted — full-scale implementation in progress
 
 **Last updated:** 2026-08-26
 
@@ -8,7 +8,8 @@
 
 **Audience:** Codex, Claude Code, reviewers, and the migration coordinator
 
-**Tracking:** framework architecture `ldui-pwx`; No-Hires pilot `op-vzoiv`
+**Tracking:** framework architecture `ldui-pwx`; No-Hires first production
+conversion `op-vzoiv`
 
 ## 1. Authority and purpose
 
@@ -17,12 +18,16 @@ pages. Give an AI coding agent this document together with one page assignment
 and that page's product requirements.
 
 This document supersedes the earlier recommendation to retain one shipping
-Office Wasm application. The No-Hires test capsule proved useful isolation, but
-it was not a production satellite. The next step is to implement No-Hires as a
-real independently built, loaded, authenticated, tested, and deployed
-satellite. If the production pilot satisfies the measurements in this
-document, pages that do not require in-process interaction with the core will
-be converted in parallel using the same contract.
+Office Wasm application. It is an implementation directive, not a proposal or
+an experiment. The No-Hires test capsule supplied baseline evidence but was
+not a production satellite. No-Hires is now the first production conversion
+and reference implementation: it will be independently built, loaded,
+authenticated, tested, deployed, and measured. All other eligible pages will
+then be converted in parallel using the same contract.
+
+No-Hires measurements tune budgets, implementation details, and operating
+limits. They do not decide whether the adopted satellite and page-contract
+architecture proceeds.
 
 The architecture has two equally important goals:
 
@@ -35,11 +40,11 @@ The CI/CD changes described here are prerequisites, not optional follow-up
 work. Page isolation is not real if the pipeline still rebuilds and retests the
 portfolio for every page edit.
 
-## 2. Decision status
+## 2. Implementation mandate and baseline evidence
 
-### 2.1 What the existing pilot proved
+### 2.1 What the prototype baseline established
 
-The No-Hires pilot established that:
+The completed No-Hires prototype work established that:
 
 - an opinionated snapshot-table page can cover the page's real interaction
   model;
@@ -53,7 +58,7 @@ The No-Hires pilot established that:
 - the dominant warm verification cost is browser and visual work, not the
   native page tests.
 
-### 2.2 What the existing pilot did not prove
+### 2.2 What production implementation must now deliver
 
 The current production `/no-hires` route is still part of the monolithic
 `office-perf-web` bundle. The test capsule:
@@ -61,25 +66,32 @@ The current production `/no-hires` route is still part of the monolithic
 - is not served by the production route;
 - does not use the production child-session lifecycle;
 - is not independently released or rolled back;
-- does not prove that a core release can remain byte-for-byte unchanged;
+- does not demonstrate that a core release can remain byte-for-byte
+  unchanged;
 - does not provide an apples-to-apples production startup comparison.
 
-The existing measurements therefore prove test isolation and page behavior.
-They do not yet prove production delivery isolation.
+The baseline measurements demonstrate test isolation and page behavior.
+Full-scale implementation now supplies the production delivery, session,
+independent release, rollback, and matched before/after evidence.
 
-### 2.3 Corrected architectural verdict
+### 2.3 Adopted implementation directive
 
-Implement No-Hires as the first production satellite. Measure it against the
-current production route. Do not generalize the result to every page until
-that comparison is complete.
+Implement No-Hires as the first production satellite and reference conversion.
+Measure it against the current production route, apply the operational
+lessons, and continue the scheduled conversion of every eligible page. An
+objective security, correctness, data-integrity, or operational failure blocks
+the affected implementation until corrected; it does not return the program
+to architecture-selection mode.
 
-The target portfolio is:
+The required portfolio is:
 
 - a small core for master authentication, session ownership, navigation, and
   truly shared in-process workflows;
 - many independently compiled satellite pages for bounded workflows;
-- server-owned manifests and generic launch routing so adding a satellite
-  does not rebuild the core;
+- explicitly coded, searchable core navigation, launch actions, and server
+  routes;
+- CI/CD release descriptors that validate independent artifacts without
+  driving runtime navigation or routing;
 - a shared opinionated UI framework and page contracts;
 - page-level verification throughout a migration wave;
 - one full rebuild and cross-page end-to-end gate after all isolated page
@@ -99,7 +111,7 @@ The target portfolio is:
 - Allow several satellite pages, or several tabs of one satellite, to remain
   open side by side.
 - Build, verify, package, deploy, and roll back one satellite independently.
-- Prove with artifact hashes that unrelated surfaces did not change.
+- Verify with artifact hashes that unrelated surfaces did not change.
 - Run expensive tests only when their declared inputs or behaviors can change.
 - Keep the final full release gate authoritative without paying its cost after
   every isolated page edit.
@@ -107,6 +119,8 @@ The target portfolio is:
 ### 3.2 Non-goals
 
 - A generic low-code page builder or runtime JSON UI renderer.
+- Runtime component/page registries or contract/descriptor-driven navigation,
+  launch behavior, or server routing.
 - One macro that generates an entire business application.
 - Cross-page shared mutable browser memory.
 - Treating a public tab identifier as an authentication credential.
@@ -127,7 +141,7 @@ The target portfolio is:
 | **Satellite** | A same-origin, independently compiled and deployed Wasm page opened in its own tab. It does not import the core or another satellite. |
 | **Surface** | Any independently versioned browser artifact: the core or one satellite. |
 | **Page contract** | Typed declaration of a page's archetype, dataset selector, local controls, persisted settings, states, capabilities, and test obligations. |
-| **Surface manifest** | Server-readable metadata mapping a stable route to an immutable artifact and declaring compatibility and launch policy. |
+| **Surface release descriptor** | CI/CD metadata binding an explicitly coded surface ID to immutable artifacts, compatibility versions, and verification evidence. It does not create routes or navigation. |
 | **Shared foundation** | Versioned tokens, primitives, opinionated patterns, page archetypes, audit rules, and contract schema consumed by surfaces. |
 | **Page receipt** | Machine-verifiable evidence binding page inputs and foundation version to artifact hashes and selected test results. |
 | **Page-level gate** | Tests and packaging for one page plus only its real dependencies. |
@@ -152,10 +166,10 @@ versioned shared foundation
         ├────────► inventory-aging surface
         └────────► other satellite surfaces
 
-server launch/session/static-asset layer
-        ├────────► reads surface manifests
-        ├────────► launches core
-        └────────► launches each satellite
+explicit server launch/session/static-asset code
+        ├────────► serves the core
+        ├────────► serves each coded satellite route
+        └────────► validates every child-session request
 ```
 
 The following dependencies are forbidden:
@@ -168,22 +182,38 @@ satellite A ──X──► satellite B
 
 A satellite MAY depend on a small versioned shared crate. It MUST NOT depend
 on the core application's page modules, router, global app state, or compiled
-artifact. The core MUST NOT contain a compile-time registry of satellite
-pages.
+artifact. Explicit core navigation MAY name a satellite's stable route, but it
+MUST NOT import or link that satellite's package.
 
-### 5.2 Server-provided page directory
+### 5.2 Explicit navigation, launch, and routes
 
-The core's page launcher reads a server-provided list of authorized surfaces.
-The list contains labels, icons, launch URLs, and authorization metadata. It
-is data, not Rust source linked into the core.
+Core navigation and launch actions are ordinary, explicit Rust source. Server
+launch, boot-document, API, and event endpoints are ordinary, explicit router
+code. Page labels, icons, stable URLs, launch behavior, and permission checks
+must be code-searchable and code-reviewed.
 
 Therefore:
 
-- registering a new satellite does not rebuild core Wasm;
-- changing a satellite label or artifact does not rebuild core Wasm;
+- adding, removing, or renaming a satellite intentionally changes the core
+  navigation and relevant server route code and may rebuild those surfaces;
+- the integration coordinator owns those shared registration changes so
+  parallel page agents do not contend on them;
+- changing an existing satellite's UI, domain logic, or artifact does not
+  rebuild core Wasm, the server, or unrelated satellites;
+- changing only a promoted immutable artifact does not change navigation or
+  route code;
 - removing authorization from a user does not require a browser artifact
   rebuild;
-- the server remains authoritative about which launch links a user receives.
+- the server remains authoritative for authorization, but authorization data
+  cannot create a page, route, or launch action.
+
+Page contracts and CI/CD tools MAY scan or index the explicit source to
+validate uniqueness, ownership, and test selection. That generated validation
+data is never a runtime navigation or routing input.
+
+The page-only independence guarantee applies after a satellite's explicit
+navigation and server routes exist. Adding, removing, or renaming that
+registration is intentionally a broader core/server integration change.
 
 ### 5.3 Stable routes and immutable assets
 
@@ -206,8 +236,9 @@ MUST remain.
 
 HTML boot documents are stable route responses with short or no-cache
 semantics. Wasm, JavaScript glue, CSS, and other static assets are immutable
-and content-addressed. A surface manifest atomically points the stable route
-to one compatible artifact set.
+and content-addressed. Explicit server code owns the stable route. CI/CD
+promotion changes only the page-specific immutable build reference used by
+that coded route.
 
 ### 5.4 Independent production artifacts
 
@@ -218,18 +249,19 @@ Each surface produces its own:
 - CSS needed by that surface;
 - immutable asset directory;
 - source map and symbol archive, where policy permits;
-- surface manifest;
+- surface release descriptor;
 - software bill of materials or dependency record;
 - page receipt.
 
 Publishing No-Hires MUST NOT rewrite the core or another satellite's asset
-directory. Promotion changes only the No-Hires manifest pointer. Rollback
-restores only that pointer.
+directory. Promotion changes only the No-Hires artifact reference. Rollback
+restores only that reference.
 
-The server's generic static and manifest layer MUST discover surface
-manifests without compiling a central Rust match statement. Suitable
-implementations include a manifest directory or immutable object-store
-prefix assembled during release.
+The surface release descriptor is consumed by CI/CD for hashing,
+compatibility, verification, publishing, promotion, and rollback. It cannot
+register a route, add a navigation item, generate a page, or make a surface
+available at runtime. A route must already exist in explicit reviewed server
+code.
 
 ### 5.5 Browser-tab model
 
@@ -258,7 +290,7 @@ Every surface is a real Cargo/Trunk build root, not a feature flag or second
 
 ```text
 app/
-  server/                         # generic launch/API/static-manifest layer
+  server/                         # explicit launch/API/static-route code
   surfaces/
     core/
       Cargo.toml
@@ -269,30 +301,31 @@ app/
       Cargo.toml
       Cargo.lock
       Trunk.toml
-      surface.toml
       src/
       tests/
     inventory-aging/
       Cargo.toml
       Cargo.lock
       Trunk.toml
-      surface.toml
       src/
       tests/
-  receipts/                       # generated release inputs
+  release-descriptors/            # generated CI/CD evidence
+  receipts/                       # generated CI/CD evidence
 ```
 
 The exact directories may differ, but these properties are mandatory:
 
 - a page build names its own `--manifest-path` and Trunk target;
 - a satellite's dependency graph has no core or sibling page package;
-- adding a page does not require editing a central Rust module or enumerated
-  Cargo workspace member list;
+- the page package itself does not require an enumerated Cargo workspace
+  member list;
+- adding a page still requires explicit coordinator-owned navigation and
+  server-route integration;
 - each independently released surface has a reproducible dependency lock
   boundary, or an equivalently isolated generated lock artifact;
-- package discovery reads per-page manifests;
+- CI/CD validation indexes per-page contracts and release descriptors;
 - page output and cache directories are page-specific;
-- the final integration task enumerates discovered surfaces and invokes their
+- the final integration task enumerates that CI-only index and invokes the
   independent builds.
 
 A shared root workspace MAY be used for development utilities only if adding
@@ -538,9 +571,9 @@ Rust implementation of domain behavior.
 
 | Repository | Owns |
 |---|---|
-| `leptos-daisyui-rs` | Tokens, primitives, opinionated patterns, archetypes, contract/registry schemas, browser audit rules, reference states, and framework verification. |
-| `4iiz-Office` | Office core, Office satellite domain code, snapshot/mutation/event APIs, child sessions, Office preferences, production surface manifests/receipts, and Office delivery orchestration. |
-| `4iiz-Inventory` | Inventory core/satellites, Inventory domain APIs and adapters, Inventory manifests/receipts, and Inventory delivery orchestration. |
+| `leptos-daisyui-rs` | Tokens, primitives, opinionated patterns, archetypes, page-contract schemas, browser audit rules, reference states, and framework verification. |
+| `4iiz-Office` | Explicit Office navigation/routes, Office core, satellite domain code, snapshot/mutation/event APIs, child sessions, Office preferences, release descriptors/receipts, and Office delivery orchestration. |
+| `4iiz-Inventory` | Explicit Inventory navigation/routes, Inventory core/satellites, domain APIs and adapters, release descriptors/receipts, and Inventory delivery orchestration. |
 
 A consumer needing a generally reusable component opens or claims one central
 framework change. It does not copy the component into Office and Inventory.
@@ -551,7 +584,8 @@ consumer.
 
 Every new or converted page MUST declare a contract next to the page. The
 exact macro syntax may evolve, but it must express the following information
-without relying on prose.
+without relying on prose. The contract validates explicit Rust implementation;
+it is not interpreted to render, register, navigate to, or launch the page.
 
 ```rust
 page_contract! {
@@ -645,26 +679,35 @@ The macro or validator MUST reject contradictory declarations, including:
 - a real-time page without disconnect and resynchronization behavior;
 - a visual page with no named baselines.
 
-### 9.1 Per-page surface manifest
+### 9.1 Generated CI/CD surface release descriptor
 
-Each satellite owns a manifest in its own directory. Agents do not add entries
-to a central source file.
+Packaging generates a surface release descriptor for each satellite from its
+page contract, explicit build inputs, and produced artifacts. Agents do not
+use this descriptor to implement the page and do not add entries to a runtime
+registry.
 
 ```toml
 id = "no-hires"
 contract_version = 1
 delivery = "satellite"
-route = "/no-hires/"
+expected_route = "/no-hires/"
 artifact = "dist/no-hires/<build-id>/"
 api_compat = "office-page-v1"
 foundation_compat = "ldui-page-v1"
 preference_schema = 1
-launch_policy = "office.no-hires.read"
+expected_launch_policy = "office.no-hires.read"
 ```
 
-Packaging fills immutable hashes and sizes into generated release metadata.
-The server discovers manifests. Duplicate IDs/routes, incompatible versions,
-missing artifacts, or mutable asset names fail assembly.
+Packaging fills immutable hashes, sizes, and test-receipt identity into the
+generated release metadata. The page-level gate compares the descriptor with
+the page contract and package code. During coordinator integration, CI/CD also
+compares it with the explicit navigation, server-route, and authorization
+code. Duplicate IDs/routes, mismatches, incompatible versions, missing
+artifacts, or mutable asset names fail validation.
+
+The descriptor is build and deployment evidence only. Reading it at runtime
+MUST NOT create a route, navigation item, launch action, page component, or
+permission.
 
 ## 10. `SnapshotTablePage` contract
 
@@ -743,49 +786,55 @@ The server signals clients that currently hold the affected dataset. It may
 send a row-level event or request a full resnapshot. Full resnapshot should be
 rare.
 
-## 11. Registry and mechanical enforcement
+## 11. Page-contract validation and CI/CD enforcement
 
-The framework publishes machine-readable metadata for components, patterns,
-archetypes, tokens, and audit rules. For each approved item, the registry
-records:
+There is no runtime page registry, component registry, data-driven UI
+definition, or manifest-driven navigation system.
 
-- stable name and version;
-- import path;
-- intended use and prohibited use;
-- typed properties and variants;
-- accessibility contract;
-- responsive behavior;
-- named states;
-- compatible archetypes;
-- examples;
-- test selectors;
-- deprecation/replacement metadata.
+Normal Rust source is authoritative:
+
+- components, patterns, and archetypes are typed Rust APIs with Rust
+  documentation and code-searchable imports;
+- each page is ordinary explicit Rust code;
+- each page contract is a compile-time declaration co-located with that code;
+- core navigation and launch actions are explicit Rust code;
+- server routes and authorization checks are explicit server code.
+
+CI/CD MAY parse page contracts and explicit source, or emit a temporary
+machine-readable index, to select tests and validate the assembled release.
+That index is generated evidence, not application input, and is not shipped as
+a runtime page catalog.
 
 CI enforces:
 
 - no raw hex/rgb colors in consumer page code;
 - no unapproved DaisyUI component classes in domain pages;
 - no arbitrary breakpoint/spacing values outside the foundation;
-- no duplicate local reimplementation of registered patterns;
-- every page has a valid contract and manifest;
+- no duplicate local reimplementation of approved framework patterns;
+- every page has a valid compile-time contract;
+- each generated release descriptor agrees with the explicit page package,
+  navigation, server route, and authorization code;
+- page IDs and routes are unique;
 - every contract state has a fixture/story or a documented nonvisual test;
 - every visual baseline has review metadata;
 - a satellite has no forbidden dependency edge;
-- the core has no compile-time satellite registry;
+- the core may explicitly navigate to a satellite route but cannot import or
+  link the satellite package;
 - persisted state is allowlisted;
 - source ownership is unambiguous.
 
 Enforcement should produce a direct diagnostic and approved replacement, not
-merely fail on a style string.
+merely fail on a style string. Validation output MUST NOT generate page
+implementation, navigation, launch behavior, or server routing.
 
 ## 12. CI/CD architecture
 
 ### 12.1 Governing principle
 
 Keep orchestration in the existing `cargo-make`/CI runner. Put
-project-specific build, manifest, hashing, compatibility, packaging, and
-verification logic in the Rust `xtask`. Steps are idempotent and inspect their
-required outputs.
+project-specific build, release-descriptor, hashing, compatibility, packaging,
+and verification logic in the Rust `xtask`. Steps are idempotent and inspect
+their required outputs.
 
 Do not create a general Rust task runner, custom DAG, or checkpoint engine.
 Use the CI platform's rerun-failed-job support. Cache validated compilation and
@@ -805,7 +854,7 @@ cargo xtask verify-page no-hires --all
 cargo xtask package-page no-hires
 cargo xtask write-page-receipt no-hires
 cargo xtask verify-page-receipt no-hires <receipt>
-cargo xtask assemble-surface-manifest <receipt-directory>
+cargo xtask assemble-release-manifest <receipt-directory>
 cargo make ui-final-integration
 cargo make ship-page -- no-hires
 ```
@@ -814,7 +863,8 @@ cargo make ship-page -- no-hires
 lane, and records timings. `package-page` builds the exact production
 satellite, not a test-only substitute. `ship-page` packages, verifies,
 publishes immutable assets, performs compatibility checks, and atomically
-promotes only that page's manifest.
+promotes only that page's artifact reference. None of these commands changes
+navigation or server routes.
 
 ### 12.3 Semantic affected-test selection
 
@@ -829,16 +879,16 @@ During a parallel migration wave:
 | That page's browser harness | Run that page's browser and dependent visual lanes. |
 | Reviewed visual baseline only | Validate review metadata and run that page's visual lane. |
 | Documentation with no executable contract input | Markdown/document checks only. |
-| Frozen shared foundation, root workspace, central CI, generic server routing, or unknown ownership | Fail with an ownership/foundation error. Do **not** silently run the full gate. |
+| Frozen shared foundation, root workspace, central CI, shared explicit server routing, or unknown ownership | Fail with an ownership/foundation error. Do **not** silently run the full gate. |
 
 The last row is deliberate. Page agents are not allowed to change shared
 inputs during the fan-out. Escalating to a full gate would hide an ownership
 violation and recreate the month-long feedback loop.
 
 In steady state, an approved shared-foundation change selects the reverse
-dependency set declared by surface manifests. It can select many surfaces if
-the shared behavior genuinely affects many surfaces. Unknown ownership still
-fails closed.
+dependency set declared by compile-time page contracts and generated release
+descriptors. It can select many surfaces if the shared behavior genuinely
+affects many surfaces. Unknown ownership still fails closed.
 
 ### 12.4 Build caching
 
@@ -899,7 +949,7 @@ The pipeline has three distinct scopes:
 | Stage | What runs | What does not run |
 |---|---|---|
 | Page implementation | Page contract/native tests, exact satellite build, page browser/accessibility/visual tests, package checks, receipt generation | Core rebuild, unrelated satellite builds/tests, portfolio E2E |
-| Integration of one completed page | Receipt/input verification, manifest collision/compatibility checks, cheap repository checks | Full workspace rebuild and cross-page E2E |
+| Integration of one completed page | Receipt/input verification, explicit route/ID and release-descriptor compatibility checks, cheap repository checks | Full workspace rebuild and cross-page E2E |
 | Wave completion | One final integration gate over the fully assembled tree | Nothing is deferred beyond release |
 
 The final full rebuild and end-to-end suite is held until all planned
@@ -914,19 +964,20 @@ and it does not permit release from page receipts alone.
 `cargo make ui-final-integration` must:
 
 1. verify the tree contains only approved integrated work;
-2. validate every page contract and unique route/surface ID;
+2. validate every page contract against explicit navigation and server routes,
+   including unique route/surface IDs;
 3. recompute and validate every page receipt;
 4. validate dependency direction;
 5. rebuild the shared foundation from clean declared inputs;
 6. rebuild core and every migrated satellite;
 7. confirm rebuilt artifact hashes match receipt expectations where inputs
    are identical;
-8. prove unrelated surface boundaries and immutable asset names;
+8. verify unrelated surface boundaries and immutable asset names;
 9. run full native/workspace checks;
 10. run all browser, accessibility, and reviewed visual suites against the
     assembled production artifacts;
-11. run cross-page launch, auth, revocation, manifest, compatibility, and
-    rollback journeys;
+11. run cross-page launch, auth, revocation, release-descriptor compatibility,
+    and rollback journeys;
 12. generate one signed release manifest and measurement report.
 
 Failure is fixed at the narrowest owning layer. A failed final gate does not
@@ -944,21 +995,22 @@ is established, an isolated satellite release may use:
 4. compatibility and security launch tests;
 5. immutable publish;
 6. page-only canary/health check;
-7. atomic manifest promotion.
+7. atomic artifact-reference promotion.
 
 The job MUST verify that core and unrelated surface artifact hashes and
-manifest pointers did not change. Core, server, shared-foundation, schema, or
-cross-surface protocol changes use their broader declared release gates.
+promoted artifact references did not change. Core, server, shared-foundation,
+schema, explicit route, or cross-surface protocol changes use their broader
+declared release gates.
 
 ### 12.9 Deployment and rollback
 
-- Publish immutable assets before changing a manifest pointer.
+- Publish immutable assets before changing a promoted artifact reference.
 - Verify assets by downloading/hashing or another independent read-back, not
   by trusting an upload success echo.
-- Retain the previous compatible manifest and assets for rollback.
+- Retain the previous compatible release descriptor and assets for rollback.
 - Promote one surface atomically.
 - Do not garbage-collect artifacts still referenced by active/recent
-  manifests or boot documents.
+  promotions or boot documents.
 - Record page ID, build ID, hashes, compatibility versions, and promoter.
 - A failed satellite promotion does not roll back an unchanged core.
 
@@ -970,12 +1022,13 @@ The coordinator completes and freezes:
 
 - shared semantic tokens and opinionated patterns required by the wave;
 - archetype and page-contract schema;
-- manifest schema and generic server discovery;
+- release-descriptor schema and the explicit server launch/route pattern;
 - child-session and preference APIs;
 - page-level CI/CD commands and receipt validation;
 - ownership map and protected shared paths;
 - named test fixtures and visual-review process;
-- the production No-Hires pilot and its measured acceptance decision.
+- the No-Hires first-conversion requirements, baseline measurements, and
+  implementation guardrails.
 
 If a required shared component is missing, add it centrally before assigning
 dependent pages. Do not ask every page agent to invent a local version.
@@ -1026,17 +1079,18 @@ persistence, or test scope.
 - Use a page-specific `CARGO_TARGET_DIR`.
 - Edit only declared page-owned paths.
 - Do not edit root lockfiles, root workspace membership, shared tokens,
-  shared patterns, central translations, core router, generic launch/session
-  code, global CI, or release-manifest assembly.
-- Do not add the page to a hand-maintained central registry.
+  shared patterns, central translations, core router, shared explicit
+  launch/session code, global CI, or release-manifest assembly.
+- Do not edit shared explicit navigation or server-route registration; the
+  integration coordinator owns those code changes.
 - Do not weaken a test, audit ceiling, or budget to make the page pass.
-- Do not commit generated/cache output except approved manifests, receipts, or
-  reviewed baselines.
+- Do not commit generated/cache output except approved release descriptors,
+  receipts, or reviewed baselines.
 - Preserve unrelated work and verify the worktree is not behind `main` before
   asserting that a capability is missing.
 
-The coordinator preallocates workspace/package hooks or uses discovery so
-page branches do not contend on shared files.
+The coordinator preallocates workspace/package hooks and batches explicit
+navigation/server-route edits so page branches do not contend on shared files.
 
 ### 13.5 Agent implementation workflow
 
@@ -1046,7 +1100,7 @@ page branches do not contend on shared files.
 3. Capture the current page's matched baseline where one exists.
 4. Add or refine the page contract and named fixtures.
 5. Write failing contract/behavior tests for the assigned acceptance criteria.
-6. Implement using the selected archetype and registered patterns.
+6. Implement using the selected archetype and approved framework patterns.
 7. Run the smallest inner lane while iterating.
 8. Run the page browser/accessibility lane when behavior is ready.
 9. Run the visual lane for every changed named state and review diffs.
@@ -1065,7 +1119,8 @@ An agent stops and reports the blocker when:
 - the archetype cannot express a real product requirement;
 - a shared schema/API change is required;
 - owned paths overlap another page;
-- a manifest route/ID collides;
+- the page contract or generated release descriptor conflicts with an
+  explicitly coded route/ID;
 - the dataset exceeds the page's client-snapshot budget;
 - auth, accessibility, data integrity, or measurement evidence fails;
 - page isolation requires editing core or another satellite.
@@ -1078,9 +1133,9 @@ For each page:
 
 1. verify branch/worktree base and changed-file ownership;
 2. verify the receipt against merged inputs;
-3. check route, package, and manifest uniqueness;
+3. check route, package, and release-descriptor uniqueness;
 4. integrate without broadening that page's scope;
-5. rerun only cheap receipt/manifest checks;
+5. rerun only cheap receipt, explicit-route, and release-descriptor checks;
 6. record the integrated surface as pending final gate.
 
 If the shared foundation must change mid-wave:
@@ -1121,13 +1176,13 @@ targeted failure mode is not proven.
 
 | Lane | Purpose | Typical trigger |
 |---|---|---|
-| Contract/static | Page-contract validity, ownership, forbidden dependencies/classes, manifest schema | Every page change |
+| Contract/static | Page-contract validity, ownership, forbidden dependencies/classes, release-descriptor schema, and agreement with explicit routes | Every page change |
 | Native inner | Pure reducer/model/filter/sort/pagination/preferences/event logic | Relevant Rust/model changes |
 | Production build | Exact satellite compilation, artifact/size/hash checks | Every shippable page change |
 | Browser behavior | Launch, loading, controls, table interaction, claims, events, recovery | Behavior or browser harness changes |
 | Accessibility | Keyboard, focus, names, roles, contrast/axe rules | Relevant UI changes; final page gate |
 | Visual | Reviewed named-state screenshots and visual audit | Any presentation-affecting change |
-| Security/session | Launch, cookie scope, renewal, revocation, office authorization | Auth/session/API changes; required pilot gate |
+| Security/session | Launch, cookie scope, renewal, revocation, office authorization | Auth/session/API changes; required first-conversion gate |
 | Final integration | Core/satellite launch matrix, all artifacts, cross-page compatibility | Once after the migration wave |
 
 Visual comparison uses stable rendering and reviewed similarity thresholds,
@@ -1136,7 +1191,7 @@ they are not the subject under test.
 
 ### 14.4 No-Hires named journeys
 
-The production pilot must cover at least:
+The No-Hires production implementation must cover at least:
 
 1. launch from an authenticated core;
 2. direct URL without a valid child secret is rejected;
@@ -1163,9 +1218,9 @@ The production pilot must cover at least:
 
 ## 15. Measurements and budgets
 
-### 15.1 Existing pilot evidence
+### 15.1 Existing prototype baseline
 
-The existing controlled pilot recorded:
+The completed controlled prototype recorded:
 
 | Measure | Result |
 |---|---:|
@@ -1232,14 +1287,16 @@ Record at minimum:
 Store the report next to the page receipt and retain the raw machine-readable
 measurements.
 
-### 15.3 No-Hires production-satellite acceptance budgets
+### 15.3 Initial No-Hires implementation guardrails
 
-These are initial budgets for proving the architecture. Tighten them after
-the matched run; do not silently relax them.
+These are enforced implementation and operating guardrails, not an
+architecture-adoption vote. Use the matched production run to tighten them and
+to optimize the implementation. Any relaxation requires an explicit owner
+decision and recorded evidence.
 
 | Measure | Initial budget |
 |---|---:|
-| Core Brotli Wasm after extraction | No more than 1% above the pre-pilot 3,305,899 B baseline, with the difference explained |
+| Core Brotli Wasm after extraction | No more than 1% above the recorded monolithic 3,305,899 B baseline, with the difference explained |
 | No-Hires satellite Brotli Wasm | At most 500 KiB |
 | Local search/filter/sort/page p95 on 2,000 rows | At most 100 ms |
 | Warm native page lane | At most 20 s |
@@ -1284,20 +1341,25 @@ region/network class, particularly Mexico and India:
 Do not collect row content, search text, filter values, or public tab IDs in
 analytics.
 
-## 16. Migration sequence
+## 16. Full-scale implementation program
 
-### Phase 0 — Shared foundation and CI/CD
+All phases below are approved implementation work. Phase boundaries coordinate
+dependencies and keep feedback local; they are not architecture-selection or
+authorization gates.
 
-- finalize the page-contract and manifest schemas;
+### Phase 0 — Implement shared foundation and CI/CD
+
+- implement the page-contract and release-descriptor schemas;
 - implement/finalize the required opinionated patterns;
-- add generic manifest discovery and satellite launch/session support;
+- implement explicit navigation/server-route conventions and satellite
+  launch/session support;
 - add separate `user-state.sqlite` preference storage and APIs;
 - implement page-level build/test/package/receipt commands;
 - protect shared paths and validate ownership;
 - implement final integration assembly and gate;
 - freeze versioned inputs for the wave.
 
-### Phase 1 — Real No-Hires production satellite
+### Phase 1 — First production conversion: No-Hires
 
 - move the shipping No-Hires route to an independent production artifact;
 - remove its code from core linkage;
@@ -1306,13 +1368,15 @@ analytics.
 - capture the matched before/after report;
 - verify core and unrelated artifacts remain unchanged on a page-only edit;
 - canary, roll back, and promote the page independently;
-- review results before authorizing broad fan-out.
+- apply the measured lessons to budgets, tooling, and subsequent conversions.
 
-### Phase 2 — Freeze and fan out
+### Phase 2 — Portfolio conversion wave
 
-- incorporate only lessons proven by the No-Hires production pilot;
+- incorporate the No-Hires production lessons without reopening the adopted
+  architecture;
 - version and freeze the shared foundation;
-- select bounded pages that fit approved archetypes;
+- classify every remaining page and convert every satellite-eligible page
+  using an approved archetype;
 - give each agent one complete assignment packet and worktree;
 - generate page receipts from isolated page gates;
 - resolve shared gaps centrally, not inside page branches.
@@ -1320,7 +1384,8 @@ analytics.
 ### Phase 3 — Integrate without portfolio rebuilds
 
 - merge completed page branches one at a time;
-- validate ownership, receipts, compatibility, and manifest uniqueness;
+- validate ownership, receipts, compatibility, explicit route/ID agreement,
+  and release-descriptor uniqueness;
 - do not rebuild core, unrelated pages, or run cross-page E2E after each
   integration;
 - freeze the final assembled candidate only after all page work is integrated.
@@ -1335,7 +1400,7 @@ analytics.
 
 ### Phase 5 — Rollout and steady state
 
-- canary satellite manifests independently;
+- canary satellite artifacts independently;
 - monitor launch, RUM, auth/session, and event health;
 - use page-only delivery for isolated satellite changes;
 - use dependency-selected broader gates for shared/protocol changes;
@@ -1345,6 +1410,8 @@ analytics.
 
 Unless the owner explicitly changes this document:
 
+- Full-scale implementation is approved and in progress; No-Hires is the first
+  production conversion, not an experiment or adoption gate.
 - No-Hires is a production satellite, not only a test capsule.
 - Satellites open in their own tabs.
 - User-facing routes do not contain `/satellites/`.
@@ -1364,19 +1431,27 @@ Unless the owner explicitly changes this document:
 - Satellites do not import core or each other.
 - Page contracts and macros validate and document; they are not a generic page
   generator.
-- Page agents do not modify frozen shared foundation or central registries.
+- Page implementation, navigation, launch actions, and server routes are
+  explicit searchable Rust code; there is no runtime page registry or
+  data-driven UI/navigation system.
+- Release descriptors, receipts, and generated indexes exist only for CI/CD
+  validation, packaging, promotion, and rollback.
+- Page agents do not modify frozen shared foundation or coordinator-owned
+  navigation/server-route integration files.
 - Page-level gates run during fan-out.
 - The complete rebuild and cross-page end-to-end gate is held until the end of
   the integrated migration wave.
-- Exact production artifacts, not test-only capsules, determine bundle and
-  launch acceptance.
+- Exact production artifacts, not test-only capsules, determine compliance
+  with bundle, launch, and operating guardrails.
 
-## 18. Success measures
+## 18. Implementation and operating success measures
 
-The architecture succeeds when:
+The implementation is complete and operating successfully when:
 
-- No-Hires ships as a real independent surface and meets its accepted
-  production budgets;
+- No-Hires ships as the first real independent surface and meets its
+  production guardrails;
+- every scheduled satellite-eligible page has been converted or has an
+  explicit documented reason to remain in core;
 - a No-Hires-only change leaves core and unrelated artifact hashes unchanged;
 - a second tab reuses immutable page assets while maintaining independent
   local state;
@@ -1386,7 +1461,7 @@ The architecture succeeds when:
 - at least 99% of routine composition requires no page-local control or layout
   invention;
 - page contracts make persistence, state, data mode, and tests mechanically
-  discoverable;
+  verifiable by CI;
 - isolated page feedback completes in minutes rather than requiring the full
   portfolio gate;
 - multiple page agents integrate without shared-file conflicts;
