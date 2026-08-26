@@ -1,5 +1,14 @@
 use super::*;
 
+#[test]
+fn badge_does_not_replace_visible_content_with_a_generic_aria_label() {
+    let component = include_str!("component.rs");
+    assert!(
+        !component.contains("aria-label=\"badge\""),
+        "a role-less div with a generic aria-label is unsupported and hides the badge's useful visible text from some assistive technology"
+    );
+}
+
 // BadgeStyle tests
 #[test]
 fn test_badge_style_default() {

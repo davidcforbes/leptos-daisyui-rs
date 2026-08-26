@@ -61,7 +61,6 @@ pub fn Badge(
 ) -> impl IntoView {
     view! {
         <div
-            aria-label="badge"
             node_ref=node_ref
             class=move || {
                 merge_classes!(
