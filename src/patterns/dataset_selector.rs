@@ -87,7 +87,7 @@ pub fn DatasetSelector(
             aria-busy=move || loading.get().then_some("true")
         >
             <label class="flex flex-wrap items-center gap-2">
-                <span class="text-xs font-semibold uppercase tracking-wide text-base-content/60">
+                <span class="text-xs font-semibold uppercase tracking-wide text-base-content/75">
                     {move || label.get()}
                 </span>
                 <Select

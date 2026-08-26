@@ -43,7 +43,7 @@ pub fn PageHeader(
                         </h1>
                         {freshness.map(|freshness| freshness())}
                     </div>
-                    <p class="max-w-3xl text-sm text-base-content/70 sm:text-base">
+                    <p class="max-w-3xl text-sm text-base-content/75 sm:text-base">
                         {move || subtitle.get()}
                     </p>
                 </div>

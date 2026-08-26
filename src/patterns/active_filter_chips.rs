@@ -55,7 +55,7 @@ pub fn ActiveFilterChips(
             data-active-filters="true"
             data-resets-dataset="false"
         >
-            <span class="text-xs text-base-content/60">
+            <span class="text-xs text-base-content/75">
                 {move || active_filter_summary(chips.with(|chips| chips.len()))}
             </span>
             {move || chips.get().into_iter().map(|chip| {
