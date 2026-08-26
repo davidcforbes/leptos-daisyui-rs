@@ -1,8 +1,8 @@
 # Future Architecture for leptos-daisyui-rs
 
-**Status:** Proposed
+**Status:** Validated direction after the No-Hires pilot; broader rollout conditional
 
-**Date:** 2026-08-25
+**Date:** 2026-08-26
 
 **Scope:** `leptos-daisyui-rs`, `4iiz-office`, and `4iiz-inventory`
 
@@ -39,9 +39,11 @@ component registry
       +--> state, accessibility, and visual tests
 ```
 
-The first vertical slice should make the existing full DataTable canonical and build a `ListPage` template from `PageHeader`, `KpiStrip`, `FilterBar`, `AsyncDataSection`, and `EntityTable<T>`. Inventory Explorer and Office Queue should be its first two consumers.
+The first vertical slice is now implemented on the production Office No-Hires route. It uses `PageHeader`, `DatasetSelector`, `FilterBar`, `ActiveFilterChips`, `AsyncDataSection`, `ListPage`, and `EntityTable<T>`, with typed `page_contract!`, `filter_schema!`, and `entity_columns!` declarations. `KpiStrip` was deliberately omitted because that page has no KPI job; templates should constrain decisions without forcing irrelevant chrome.
 
-For build performance, the project should combine semantic affected-test selection with independently linked Wasm test capsules. Leptos lazy-route splitting helps with browser delivery size but occurs after the Wasm link is complete, so it does not solve the current link-time bottleneck by itself.
+The pilot also implements semantic affected-test selection and an independently linked, non-shipping No-Hires Wasm capsule. A warmed native inner lane ran 49 tests in 10.746 seconds; browser and visual lanes ran only when selected. The capsule was 313,289 Brotli bytes versus the legacy full application's 3,305,899 bytes. This validates capsules for test isolation, not a production micro-frontend per page. Office continues to ship one Wasm application until production measurements justify a different delivery architecture.
+
+The decision is therefore a conditional go. Keep the contract, patterns, local-snapshot model, and page-aware verification. Do not yet claim 99% page coverage or lower total implementation cost: the first consumer paid for 1,882 reusable framework source lines plus substantial Office snapshot, live-update, and verification infrastructure. The next list/queue consumer must demonstrate amortized reuse and a much smaller page-specific composition surface.
 
 ## Goals
 
@@ -132,6 +134,29 @@ See `C:\dev\4iiz-inventory\docs\operations\future-architecture-baseline.md`
 and
 `C:\dev\4iiz-inventory\docs\operations\architecture-compliance-baseline.md`.
 
+## No-Hires pilot evidence
+
+The Office evidence is recorded in
+`C:\dev\4iiz-office\docs\testing\no-hires-pilot\comparison.md`, with machine-readable before/after JSON beside it. Both controlled runs use the same serialized 2,000-row fixture hash, browser family, 800x600 viewport, five warmups, and 30 DOM-confirmed iterations.
+
+| Measure | Legacy baseline | Opinionated No-Hires page |
+|---|---:|---:|
+| Brotli snapshot | 9,533 B | 9,801 B |
+| Time to rows in controlled harness | 1,656.5 ms | 149.6 ms |
+| Search p50 | 35.4 ms with Apply | 27.5 ms immediate |
+| Filter p50 | 125.5 ms | 33.3 ms |
+| Sort p50 | unsupported | 33.2 ms |
+| Pagination p50 | 156.7 ms for 5 rows | 33.2 ms for 25 rows |
+| JavaScript heap | 6,639,949 B | 2,783,932 B |
+| Authoritative claim to local removal | not isolated | 32.9 ms, no snapshot GET |
+| SSE delta to local removal | unsupported | 33.3 ms, no snapshot GET |
+| Warm native affected lane | not available | 49 tests in 10.746 s |
+| Exact page-test Wasm, Brotli | not available | 313,289 B |
+
+The baseline runs inside the full legacy application while the after browser measurement uses the exact-page capsule, so time-to-rows, heap, Wasm, and startup differences are directional isolation evidence rather than production real-user A/B results. Snapshot bytes and DOM-confirmed local operations use the same data/workflow and are directly comparable. Production telemetry on representative Mexico and India connections remains required.
+
+The first migration also increased maintained source. It added approximately 1,882 reusable framework lines and 3,323 Office production lines for the shared No-Hires UI/model, shipping controller, snapshot DTO/API, and live-event infrastructure, plus isolated test code. The legacy 210-line page lacked most of the resulting behavior, so this is not a functionality-equivalent line comparison. More importantly, it means the first page cannot prove amortization. A second consumer must reuse these layers without repeating them before broad adoption.
+
 ## Root-cause model
 
 The month-long UI effort and repeated agent errors are a system-design problem, not merely a model-quality problem.
@@ -185,9 +210,10 @@ The initial pattern catalog should include:
 | Pattern | Owned decisions |
 |---|---|
 | `PageHeader` | Breadcrumbs, title, subtitle, primary/secondary actions, responsive wrapping |
+| `DatasetSelector` | Dataset identity, loading trigger, disabled/loading state, accessible label, and separation from local filters |
 | `Section` | Heading hierarchy, spacing, optional actions, surface treatment |
 | `KpiStrip` | Metric order, density, value formatting, context, trend, drill-down, loading |
-| `FilterBar` | Filter layout, apply/reset, URL persistence, active count, narrow-screen collapse |
+| `FilterBar` | Horizontal filter layout, immediate-local or submitted execution mode, reset scope, persistence, active count, narrow-screen behavior |
 | `ActiveFilterChips` | Active-state summary, individual removal, clear-all behavior |
 | `EntityTable<T>` | Typed columns, sorting, resizing, pagination, query ownership, actions, selection |
 | `AsyncDataSection` | Never-loaded, loading, loaded, empty, partial, stale, error, and denied states |
@@ -221,12 +247,15 @@ The pattern decides geometry, density, wrapping, typography, and responsive beha
 The pattern should own:
 
 - supported filter control types;
-- apply and reset semantics;
+- an explicit `ImmediateLocal` or `SubmitServer` execution mode;
+- reset semantics and which state is outside reset scope;
 - active-filter count and chips;
-- URL/query persistence;
+- versioned local, URL/query, or application-owned persistence;
 - keyboard order;
 - responsive collapse into a drawer or disclosure;
 - distinction between no data, no matching results, and unavailable data.
+
+Dataset selection is not a filter. A `DatasetSelector` changes the downloaded population and may trigger a network request. Local filters, sorting, page size, column visibility, and column widths operate within that population. A dataset change resets only transient pagination; persistent local table settings remain until the user explicitly resets them unless a page contract declares otherwise.
 
 #### EntityTable contract
 
@@ -243,6 +272,10 @@ The canonical wrapper should provide:
 - narrow, reviewed styling extension points.
 
 The simple widget DataTable should be migrated or deprecated.
+
+The pilot `EntityTable<T>` reuses paging primitives from the full DataTable but currently owns a separate client-snapshot renderer and preference model. That was a bounded way to prove the required behavior, not the desired long-term duplication boundary. Before broad rollout, converge the two implementations behind shared column/rendering mechanics or make their modes explicitly non-overlapping: `EntityTable<T>` for complete client snapshots and the server-driven DataTable for remote queries. Agents must not face two apparently equivalent choices. This follow-up is tracked as `ldui-aqo`.
+
+The No-Hires pilot implements this subset. The full snapshot is usually one office and rarely All Offices; search, status, case type, sorting, pagination, column widths, and column visibility are immediate client state. An authoritative claim or an ordinary dataset-scoped server event removes a row locally without a second snapshot request. Revision gaps, reconnect uncertainty, and explicit invalidation remain rare refresh paths.
 
 ### Layer 3: page archetypes
 
@@ -283,29 +316,36 @@ They should not recreate page chrome, state containers, filters, tables, pagers,
 
 ## Page contracts
 
-Every page should have a small, versioned, machine-readable contract. For example:
+Every page should have a small, versioned, machine-readable contract. The No-Hires pilot demonstrated that this can remain Rust-first rather than requiring a separate page-generator program:
 
-```toml
-id = "inventory.explorer"
-archetype = "list"
-density = "compact"
-reference = "design/inventory-explorer-1440x900.png"
+```rust
+page_contract! {
+    pub NO_HIRES_PAGE_CONTRACT {
+        id: "no-hires",
+        route: "/no-hires",
+        pattern: PagePattern::ClientSnapshotList,
+        dataset: DatasetBehavior::SelectorTriggersLoad { key: "office" },
+        local_state: [
+            "filters", "sort", "page_size", "hidden_columns", "column_widths",
+        ],
+        required_states: [
+            InitialLoading, Ready, Revalidating, InitialError, RefreshError,
+            NeverLoaded, Empty, FilteredEmpty, Stale, Claiming,
+            ClaimSucceeded, ClaimConflict, ClaimFailed, LiveInterrupted,
+        ],
+        breakpoints: [Compact, Wide],
+    }
+}
 
-states = [
-  "never-loaded",
-  "loading",
-  "loaded",
-  "empty",
-  "partial",
-  "stale",
-  "error",
-  "permission-denied",
-  "overflow",
-]
-
-viewports = ["1440x900", "1024x768", "390x844"]
-roles = ["manager", "analyst"]
+filter_schema! {
+    pub NO_HIRES_FILTER_SCHEMA: NoHireFilterState {
+        dataset_selector: "office",
+        filters: [search, status, case_type],
+    }
+}
 ```
+
+`entity_columns!` provides the corresponding compile-time column declaration. The macros give the compiler typed filter fields, row accessors, and state enums; the contracts' `validate()` methods and focused tests reject duplicate names, dataset/filter overlap, missing states/breakpoints, and incorrect reset behavior. They are a constrained declaration layer, not a second programming language and not a substitute for the code-generating agent.
 
 The complete contract should also declare:
 
@@ -321,7 +361,7 @@ The complete contract should also declare:
 - named design reference and reviewer;
 - acceptance thresholds.
 
-Runtime page implementations should remain typed Rust. The manifest contains data and policy, not arbitrary markup or classes. It may generate typed Rust or be validated against Rust-owned archetype schemas.
+Runtime page implementations remain typed Rust. A future registry may project these declarations into JSON/TOML documentation and impact graphs, but Rust is the canonical source unless a measured consumer need justifies otherwise. Contracts contain data and policy, not arbitrary markup or classes.
 
 ## Component and pattern registry
 
@@ -383,9 +423,9 @@ The skill workflow should require an agent to:
 1. Read the page contract.
 2. Select the declared archetype.
 3. Use registry-approved patterns.
-4. Scaffold rather than hand-create the page shell.
+4. Compose the page shell from the typed template and contract macros; no separate generator is required.
 5. Avoid primitives, raw controls, and arbitrary classes unless an exception is declared.
-6. Run `verify-changed --explain`.
+6. Run the selected page lane or `verify-affected --base <merge-base>` and inspect its explanation.
 7. Inspect the rendered page against its named design reference.
 8. Exercise the required state, accessibility, interaction, and effect oracles.
 
@@ -406,15 +446,14 @@ Inventory's sibling path dependency and Office's vendored dependency should both
 Recommended commands:
 
 ```text
-cargo xtask ui new-page --template list --name inventory.explorer
 cargo xtask ui doctor
 cargo xtask ui explain-page inventory.explorer
-cargo xtask verify-changed --base origin/main --explain
+cargo xtask verify-affected --base origin/main
 ```
 
-`ui new-page` should generate the screen composition, page contract, story fixtures, route entry, state catalog, and test stubs.
-
 `ui doctor` should identify raw controls, unsupported imports, arbitrary values, duplicate local patterns, undocumented exceptions, and stale generated files.
+
+An optional scaffold command may be added only if repeated migrations demonstrate that it saves time. It is not part of the validated architecture: Codex or Claude Code can author the small macro declarations and typed composition directly.
 
 ## Testing architecture
 
@@ -464,9 +503,11 @@ Retain the repository's visual-quality methodology:
 
 New test rules should include a break-and-revert negative control to prove that the test catches the defect it claims to guard against.
 
+The No-Hires pilot exercises all four layers. Its contract and fixture catalog agree on 16 named states; 13 reviewed image baselines cover the visually distinct states at wide and compact sizes. The browser suite verifies the complete local table workflow, dataset switching without preference loss, claim/SSE removal without a snapshot GET, focus recovery, correlation IDs, and zero axe violations. Semantic and visual inject/catch/revert controls corrupt the real dataset-reset, accessible-name, theme-token, and layout paths, fail for the intended reason, restore the exact source, and then pass. The existing Office rows-affected completion barrier supplies Layer D2; browser state alone is not treated as proof of a write.
+
 ## Affected-test selection
 
-Implement:
+The general target remains:
 
 ```text
 cargo xtask verify-changed --base <merge-base> --explain
@@ -504,6 +545,17 @@ Use distinct feedback lanes:
 
 Periodic full gates are necessary to detect errors in the selector itself.
 
+The pilot implements the first consumer-specific form in Office:
+
+```text
+cargo xtask verify-page no-hires --inner
+cargo xtask verify-page no-hires --browser
+cargo xtask verify-page no-hires --visual
+cargo xtask verify-affected --base main
+```
+
+The warmed inner lane ran 49 tests in 10.746 seconds without building Wasm. The browser lane ran four tests in 22.089 seconds and the visual lane ran two tests in 99.466 seconds, both against the exact same content-addressed capsule build. Cache entries contain only validated build artifacts; no passing test result is cached, so every selected test still executes. Documentation-only changes avoid Rust/Wasm work, known page paths select their declared lanes, and shared or unknown paths escalate to the full gate.
+
 ## Build-time findings
 
 A live `cargo xtask test-style` run on 2026-08-25 took approximately 14.5 minutes. The seven browser tests executed in 19.66 seconds. More than 95% of the elapsed time was spent on Wasm compilation and linking rather than on assertion execution.
@@ -538,6 +590,8 @@ Immediate optimizations should include:
 9. Terminate before browser startup when the Wasm build or link fails.
 
 Test-name filtering alone is insufficient because Cargo may still compile and link the entire test executable. Test selection must be paired with smaller build targets.
+
+The No-Hires result confirms the distinction. Its first inner run spent 171.6 seconds compiling a fresh native test binary; the unchanged second run spent 10.746 seconds executing 49 selected tests. The exact-page browser build is independently linked and validated by a fingerprint covering Rust/Cargo inputs, tool versions, vendor provenance, the build command, and required outputs. Browser and visual tests reuse that build but never reuse a prior verdict. The visual lane remains the slowest selected lane at 99.466 seconds, so agents should run it only for changes that can alter presentation.
 
 ## Wasm bundle architecture
 
@@ -590,6 +644,8 @@ Costs:
 
 Conclusion: this is the recommended architecture for story, component, pattern, and page-level visual-test capsules. It is not the default recommendation for 1,000 production application bundles.
 
+The No-Hires capsule validates this conclusion with real code. It links the exact UI/model contract shared by the shipping route while excluding unrelated Office pages. Its release Wasm measured 1,298,905 raw bytes and 313,289 Brotli bytes, compared with 14,502,870 and 3,305,899 bytes for the recorded legacy full application. Startup in the controlled harness fell from 989.7 to 32.5 milliseconds. These are capsule-versus-full-app measurements, not an equivalent production delivery A/B, so they justify test isolation only.
+
 ### Option C: bounded framework crates and domain bundles
 
 Split the framework into a small number of stable dependency families:
@@ -641,11 +697,13 @@ Use a hybrid:
 
 1. Data-only page specifications for standard pages.
 2. Six typed, compiled page templates.
-3. Independently linked Trunk capsules for component, pattern, and page tests.
+3. Independently linked Trunk capsules for component, pattern, and page tests; this is validated by the No-Hires pilot.
 4. Five to eight bounded framework dependency crates.
 5. Build-on-demand locally and a parallel all-capsule CI matrix.
 6. A measured `cargo-leptos --split` spike for production route delivery.
 7. Coarse domain bundles if applications remain on Trunk CSR and the monolithic production link remains unacceptable.
+
+Retain one shipping Office application for now. Do not extrapolate the capsule result into hundreds or thousands of independent production applications: duplicated runtime code, cross-bundle state, navigation, cache invalidation, deployment atomicity, and 1,000 linker jobs remain unresolved. Collect final full-bundle and representative Mexico/India real-user measurements first. If production splitting becomes necessary, test lazy routes and a small number of domain bundles before page-level micro-frontends.
 
 ## Proposed repository shape
 
@@ -680,28 +738,27 @@ The existing root package can remain as a compatibility facade while consumers m
 
 ## Migration sequence
 
-### Phase 0: control the decision surface
+### Phase 0: No-Hires golden vertical slice - implemented
 
-- Create the machine-readable component and pattern registry.
-- Generate component counts and documentation from the registry.
-- Choose canonical public names and deprecate duplicates.
-- Make the full DataTable canonical.
-- Add framework/registry/agent-pack version manifests.
-- Add build-step timing and `verify-changed --explain` infrastructure.
-- Fix the current Trunk environment normalization and failure propagation.
+- Added typed page/filter/column contracts and the client-snapshot page pattern.
+- Implemented `PageHeader`, `DatasetSelector`, `FilterBar`, `ActiveFilterChips`, `AsyncDataSection`, `EntityTable<T>`, and `ListPage`.
+- Migrated the production Office No-Hires route to a complete office-selected snapshot with immediate local filtering, sorting, pagination, column preferences, authoritative claims, and dataset-scoped live deltas.
+- Created one exact-page, non-shipping Wasm capsule shared with the shipping UI implementation.
+- Added page-aware native/browser/visual lanes, content-addressed build reuse, fail-closed affected selection, and candidate-bound reports.
+- Approved the 16-state contract, 13 visual baselines, accessibility/keyboard behavior, and inject/catch/revert controls.
+- Synchronized Office's vendored framework with exact commit provenance.
 
-### Phase 1: one golden vertical slice
+The remaining acceptance items for this phase are the final Office release gate, the final shipping-bundle measurement, and rollout telemetry. Those do not change the architectural source decision.
 
-- Implement `PageHeader`.
-- Implement `KpiStrip`.
-- Implement `FilterBar` and active chips.
-- Implement `AsyncDataSection`.
-- Implement `EntityTable<T>` over the full DataTable.
-- Compose them into `ListPage`.
-- Migrate Inventory Explorer.
-- Migrate Office Queue.
-- Create independent Wasm story and page capsules.
-- Approve references and state matrices for both consumers.
+### Phase 1: prove amortization on a second consumer
+
+- Select one existing Inventory Explorer or Office queue/list page whose behavior fits the same archetype.
+- Reuse the current contracts and patterns without adding another generic table, filter row, pager, page-state container, or capsule runner.
+- Converge `EntityTable<T>` and the full DataTable's shared mechanics, or document and enforce their non-overlapping client-snapshot versus server-query roles.
+- Add `KpiStrip` only if the selected page has a real KPI decision job.
+- Measure implementation elapsed time, page-specific executable lines, agent correction count, affected-lane time, state coverage, and defects against No-Hires.
+- Accept broad list-page rollout only if the second page is materially smaller and faster to implement while retaining equivalent quality evidence.
+- Complete the machine-readable component/pattern registry and generated Codex/Claude reference pack from the two proven consumers rather than speculative APIs.
 
 ### Phase 2: Broaden the template system
 
@@ -744,6 +801,8 @@ Track outcomes rather than component count:
 - Visual test capsules link only their declared dependency family.
 - Full release and nightly gates remain green and periodically validate the affected-test selector.
 - Agent retries, review corrections, UI defect escape rate, and implementation time decline measurably after each template migration.
+
+The No-Hires pilot already satisfies the canonical typed table path, explicit dataset/filter separation, complete declared-state coverage, reviewed responsive/accessibility evidence, sub-60-second warmed inner feedback, and independently linked page-test capsule measures. It does not yet satisfy the small-composition-file, cross-page reuse, registry/agent-pack, or declining implementation-time measures. Those are acceptance criteria for the second consumer, not conclusions that can be inferred from this first infrastructure-bearing migration.
 
 ## External references
 
