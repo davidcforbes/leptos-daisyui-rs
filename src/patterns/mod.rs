@@ -9,7 +9,7 @@ mod list_page;
 mod macros;
 mod page_header;
 
-pub use crate::{filter_schema, page_contract};
+pub use crate::{entity_columns, filter_schema, page_contract};
 pub use active_filter_chips::{ActiveFilterChip, ActiveFilterChips, active_filter_summary};
 pub use async_data_section::{AsyncDataSection, AsyncDataTexts, state_shows_content};
 pub use contracts::{

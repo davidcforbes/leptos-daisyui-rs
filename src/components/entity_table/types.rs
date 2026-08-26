@@ -273,6 +273,10 @@ pub struct EntityTableTexts {
     pub rows_per_page: String,
     /// Accessible label for the column chooser.
     pub choose_columns: String,
+    /// Action label that restores server-supplied ordering.
+    pub reset_sort: String,
+    /// Action label that restores default column visibility and widths.
+    pub reset_columns: String,
     /// Previous-page action label.
     pub previous: String,
     /// Next-page action label.
@@ -288,6 +292,8 @@ impl Default for EntityTableTexts {
         Self {
             rows_per_page: "Rows per page".to_owned(),
             choose_columns: "Choose columns".to_owned(),
+            reset_sort: "Reset sort".to_owned(),
+            reset_columns: "Reset columns".to_owned(),
             previous: "Previous".to_owned(),
             next: "Next".to_owned(),
             row_range: "Showing {start}-{end} of {total}".to_owned(),

@@ -2,7 +2,8 @@
 
 use super::model::{
     ENTITY_PAGE_SIZE_CHOICES, SortedIndexCache, clamp_page, next_sort, page_after_dataset_change,
-    page_after_row_delta, page_bounds, page_count, set_preferred_width, toggle_hidden_column,
+    page_after_row_delta, page_bounds, page_count, reset_columns, reset_sort, set_preferred_width,
+    toggle_hidden_column,
 };
 use super::storage::{load_preferences, save_preferences};
 use super::types::{
@@ -49,6 +50,11 @@ pub fn EntityTable<T>(
     /// Identity of the selected dataset. Changing it resets pagination only.
     #[prop(into)]
     dataset_identity: Signal<String>,
+    /// Optional view-state identity. Changing it resets pagination while
+    /// preserving dataset-independent filters, sort, page size, and columns.
+    /// Use this for immediate local-filter changes.
+    #[prop(optional, into)]
+    page_reset_key: Option<Signal<String>>,
     /// Optional renderer for the single-cell compact row layout.
     #[prop(optional)]
     compact_row: Option<EntityRowRenderer<T>>,
@@ -64,6 +70,9 @@ pub fn EntityTable<T>(
     /// Localizable labels for table controls.
     #[prop(into, default = Signal::stored(EntityTableTexts::default()))]
     texts: Signal<EntityTableTexts>,
+    /// Shows separate reset-sort and reset-columns actions.
+    #[prop(optional, default = false)]
+    show_reset_actions: bool,
     /// Additional outer-container classes.
     #[prop(optional, into)]
     class: &'static str,
@@ -72,12 +81,7 @@ where
     T: Clone + 'static,
 {
     let initial_preferences = load_preferences(storage_key, preference_version, &columns);
-    let mut initial_widths = initial_preferences.column_widths.clone();
-    for column in &columns {
-        if let Some(width) = column.initial_width {
-            initial_widths.entry(column.id.to_owned()).or_insert(width);
-        }
-    }
+    let initial_widths = rendered_column_widths(&initial_preferences, &columns);
 
     let column_store = StoredValue::new_local(columns);
     let row_key = StoredValue::new_local(row_key);
@@ -97,6 +101,18 @@ where
         current_page.set(next_page);
         previous_dataset.set_value(next_dataset);
     });
+
+    if let Some(page_reset_key) = page_reset_key {
+        let previous_page_reset = StoredValue::new(page_reset_key.get_untracked());
+        Effect::new(move |_| {
+            let next_key = page_reset_key.get();
+            let previous = previous_page_reset.get_value();
+            let next_page =
+                page_after_dataset_change(current_page.get_untracked(), previous, next_key.clone());
+            current_page.set(next_page);
+            previous_page_reset.set_value(next_key);
+        });
+    }
 
     Effect::new(move |_| {
         let total_rows = data.get().len();
@@ -212,6 +228,45 @@ where
                         </Menu>
                     </DropdownContent>
                 </Dropdown>
+
+                {show_reset_actions.then(|| view! {
+                    <Button
+                        class="btn-ghost btn-sm"
+                        attr:data-entity-reset-sort="true"
+                        disabled=Signal::derive(move || {
+                            preferences.with(|preferences| preferences.sort == EntitySort::System)
+                        })
+                        on_click=Callback::new(move |_| {
+                            preferences.update(|preferences| {
+                                reset_sort(preferences);
+                            });
+                            current_page.set(0);
+                        })
+                    >
+                        {move || texts.with(|texts| texts.reset_sort.clone())}
+                    </Button>
+                    <Button
+                        class="btn-ghost btn-sm"
+                        attr:data-entity-reset-columns="true"
+                        disabled=Signal::derive(move || preferences.with(|preferences| {
+                            preferences.hidden_columns.is_empty()
+                                && preferences.column_widths.is_empty()
+                        }))
+                        on_click=Callback::new(move |_| {
+                            preferences.update(|preferences| {
+                                reset_columns(preferences);
+                            });
+                            column_store.with_value(|columns| {
+                                column_widths.set(rendered_column_widths(
+                                    &EntityTablePreferences::new(preference_version),
+                                    columns,
+                                ));
+                            });
+                        })
+                    >
+                        {move || texts.with(|texts| texts.reset_columns.clone())}
+                    </Button>
+                })}
             </div>
 
             <div class="w-full overflow-x-auto rounded-box border border-base-300 bg-base-100">
@@ -557,6 +612,19 @@ fn render_row<T: Clone + 'static>(
         </tr>
     }
     .into_any()
+}
+
+fn rendered_column_widths<T>(
+    preferences: &EntityTablePreferences,
+    columns: &[EntityColumn<T>],
+) -> BTreeMap<String, u32> {
+    let mut widths = preferences.column_widths.clone();
+    for column in columns {
+        if let Some(width) = column.initial_width {
+            widths.entry(column.id.to_owned()).or_insert(width);
+        }
+    }
+    widths
 }
 
 fn render_default_compact_row<T: 'static>(row: &T, columns: &[EntityColumn<T>]) -> AnyView {

@@ -27,6 +27,25 @@ pub fn next_sort(current: &EntitySort, column_id: &str, sortable: bool) -> Entit
     }
 }
 
+/// Restores server-supplied system order without changing other preferences.
+pub fn reset_sort(preferences: &mut EntityTablePreferences) -> bool {
+    if preferences.sort == EntitySort::System {
+        return false;
+    }
+    preferences.sort = EntitySort::System;
+    true
+}
+
+/// Restores default visibility and widths without changing sort or page size.
+pub fn reset_columns(preferences: &mut EntityTablePreferences) -> bool {
+    if preferences.hidden_columns.is_empty() && preferences.column_widths.is_empty() {
+        return false;
+    }
+    preferences.hidden_columns.clear();
+    preferences.column_widths.clear();
+    true
+}
+
 /// Builds a stable index permutation without cloning or reordering source rows.
 pub fn sorted_indices<T>(rows: &[T], columns: &[EntityColumn<T>], sort: &EntitySort) -> Vec<usize> {
     let mut indices: Vec<usize> = (0..rows.len()).collect();

@@ -30,6 +30,36 @@ filter_schema! {
     }
 }
 
+#[derive(Clone)]
+struct DeclaredRow {
+    id: &'static str,
+    name: &'static str,
+}
+
+entity_columns! {
+    fn declared_columns(prefix: &'static str) -> DeclaredRow => [
+        crate::components::EntityColumn::text(
+            "client",
+            format!("{prefix} Client"),
+            |row: &DeclaredRow| row.name.to_owned(),
+        ).required(),
+        crate::components::EntityColumn::action(
+            "actions",
+            "Actions",
+            |row: &DeclaredRow| row.id.to_owned(),
+        ).required(),
+    ]
+}
+
+#[test]
+fn entity_column_declaration_keeps_the_row_type_explicit() {
+    let columns = declared_columns("Pilot");
+    assert_eq!(columns.len(), 2);
+    assert_eq!(columns[0].header, "Pilot Client");
+    assert!(columns[0].required);
+    assert!(columns[1].is_action);
+}
+
 #[test]
 fn a_complete_client_snapshot_contract_is_valid() {
     assert_eq!(PILOT_PAGE.validate(), Ok(()));

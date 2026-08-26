@@ -179,6 +179,29 @@ fn required_columns_cannot_be_hidden() {
 }
 
 #[test]
+fn explicit_resets_are_independent_and_preserve_page_size() {
+    let mut preferences = EntityTablePreferences::new(7);
+    preferences.page_size = 100;
+    preferences.sort = EntitySort::descending("rank");
+    preferences.hidden_columns.insert("office".to_owned());
+    preferences.column_widths.insert("office".to_owned(), 320);
+
+    assert!(reset_sort(&mut preferences));
+    assert_eq!(preferences.sort, EntitySort::System);
+    assert_eq!(preferences.page_size, 100);
+    assert!(preferences.hidden_columns.contains("office"));
+    assert_eq!(preferences.column_widths["office"], 320);
+    assert!(!reset_sort(&mut preferences));
+
+    assert!(reset_columns(&mut preferences));
+    assert!(preferences.hidden_columns.is_empty());
+    assert!(preferences.column_widths.is_empty());
+    assert_eq!(preferences.page_size, 100);
+    assert_eq!(preferences.sort, EntitySort::System);
+    assert!(!reset_columns(&mut preferences));
+}
+
+#[test]
 fn stored_preferences_are_versioned_and_normalized() {
     let columns = columns();
     let mut preferences = EntityTablePreferences::new(4);

@@ -84,3 +84,40 @@ macro_rules! filter_schema {
         };
     };
 }
+
+/// Defines a function that returns typed [`EntityColumn`](crate::components::EntityColumn)
+/// declarations for one row type.
+///
+/// The macro deliberately generates only an ordinary Rust function. It keeps
+/// the row type adjacent to the column expressions and lets the compiler reject
+/// an accessor or renderer for a different entity without generating views or
+/// business logic.
+///
+/// ```compile_fail
+/// use leptos_daisyui_rs::{components::EntityColumn, entity_columns};
+///
+/// struct Client { name: String }
+/// struct Matter { title: String }
+///
+/// entity_columns! {
+///     fn client_columns() -> Client => [
+///         EntityColumn::text("name", "Name", |matter: &Matter| matter.title.clone()),
+///     ]
+/// }
+/// ```
+#[macro_export]
+macro_rules! entity_columns {
+    (
+        $visibility:vis fn $name:ident(
+            $($argument:ident : $argument_type:ty),* $(,)?
+        ) -> $row:ty => [
+            $($column:expr),* $(,)?
+        ]
+    ) => {
+        $visibility fn $name(
+            $($argument: $argument_type),*
+        ) -> ::std::vec::Vec<$crate::components::EntityColumn<$row>> {
+            ::std::vec![$($column),*]
+        }
+    };
+}
