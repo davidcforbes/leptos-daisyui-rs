@@ -34,7 +34,7 @@ pub fn PageHeader(
             )
             data-page-header="true"
         >
-            <div class="flex min-w-0 items-start gap-3">
+            <div class="flex min-w-0 flex-col items-start gap-3 sm:flex-row">
                 {back.map(|back| view! { <div class="shrink-0 pt-1">{back()}</div> })}
                 <div class="min-w-0 space-y-1">
                     <div class="flex flex-wrap items-center gap-2">
