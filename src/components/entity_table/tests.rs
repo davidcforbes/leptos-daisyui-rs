@@ -1,4 +1,6 @@
 use super::*;
+use std::cell::Cell;
+use std::rc::Rc;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Row {
@@ -52,6 +54,63 @@ fn system_order_and_stable_ties_are_preserved() {
     assert_eq!(
         sorted_indices(&rows, &columns, &EntitySort::descending("rank")),
         [0, 1, 2]
+    );
+}
+
+#[test]
+fn default_text_sort_extracts_one_normalized_key_per_row() {
+    let calls = Rc::new(Cell::new(0));
+    let calls_for_column = Rc::clone(&calls);
+    let rows = rows();
+    let columns = vec![EntityColumn::text("client", "Client", move |row: &Row| {
+        calls_for_column.set(calls_for_column.get() + 1);
+        row.name.to_owned()
+    })];
+
+    assert_eq!(
+        sorted_indices(&rows, &columns, &EntitySort::ascending("client")),
+        [1, 2, 0]
+    );
+    assert_eq!(
+        calls.get(),
+        rows.len(),
+        "text sort keys must be normalized once per row, not once per comparison"
+    );
+}
+
+#[test]
+fn sorted_index_cache_ignores_unrelated_preference_changes() {
+    let calls = Rc::new(Cell::new(0));
+    let calls_for_column = Rc::clone(&calls);
+    let rows = Rc::new(rows());
+    let columns = vec![EntityColumn::text("client", "Client", move |row: &Row| {
+        calls_for_column.set(calls_for_column.get() + 1);
+        row.name.to_owned()
+    })];
+    let sort = EntitySort::ascending("client");
+    let mut cache = SortedIndexCache::new();
+
+    let first = cache.indices(Rc::clone(&rows), &columns, &sort);
+    let first_call_count = calls.get();
+    let mut unrelated_preferences = EntityTablePreferences::new(1);
+    unrelated_preferences.page_size = 50;
+    unrelated_preferences
+        .hidden_columns
+        .insert("status".to_owned());
+    let second = cache.indices(Rc::clone(&rows), &columns, &sort);
+
+    assert_eq!(first.as_slice(), second.as_slice());
+    assert_eq!(calls.get(), first_call_count);
+    assert_eq!(unrelated_preferences.page_size, 50);
+
+    cache.indices(
+        Rc::clone(&rows),
+        &columns,
+        &EntitySort::descending("client"),
+    );
+    assert!(
+        calls.get() > first_call_count,
+        "a real sort change must recompute"
     );
 }
 

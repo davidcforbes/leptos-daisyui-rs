@@ -1,9 +1,8 @@
 //! Reactive renderer for the typed client-side table model.
 
 use super::model::{
-    ENTITY_PAGE_SIZE_CHOICES, clamp_page, next_sort, page_after_dataset_change,
-    page_after_row_delta, page_bounds, page_count, set_preferred_width, sorted_indices,
-    toggle_hidden_column,
+    ENTITY_PAGE_SIZE_CHOICES, SortedIndexCache, clamp_page, next_sort, page_after_dataset_change,
+    page_after_row_delta, page_bounds, page_count, set_preferred_width, toggle_hidden_column,
 };
 use super::storage::{load_preferences, save_preferences};
 use super::types::{
@@ -83,6 +82,7 @@ where
     let column_store = StoredValue::new_local(columns);
     let row_key = StoredValue::new_local(row_key);
     let compact_row = StoredValue::new_local(compact_row);
+    let sorted_index_cache = StoredValue::new_local(SortedIndexCache::new());
     let preferences = RwSignal::new(initial_preferences);
     let column_widths = RwSignal::new(initial_widths);
     let current_page = RwSignal::new(0_usize);
@@ -166,6 +166,7 @@ where
                     <div
                         tabindex="0"
                         role="button"
+                        data-entity-column-chooser="true"
                         aria-label=move || texts.with(|texts| texts.choose_columns.clone())
                         class="btn btn-ghost btn-sm"
                     >
@@ -197,7 +198,11 @@ where
                                             });
                                         });
                                         view! {
-                                            <MenuCheckItem checked=checked on_toggle=on_toggle>
+                                            <MenuCheckItem
+                                                checked=checked
+                                                on_toggle=on_toggle
+                                                attr:data-entity-column=column_id
+                                            >
                                                 {column.header}
                                             </MenuCheckItem>
                                         }
@@ -358,11 +363,15 @@ where
                             let rows = data.get();
                             let columns_for_sort = column_store.get_value();
                             let preferences_value = preferences.get();
-                            let indices = sorted_indices(
-                                rows.as_slice(),
-                                &columns_for_sort,
-                                &preferences_value.sort,
-                            );
+                            let indices = sorted_index_cache
+                                .try_update_value(|cache| {
+                                    cache.indices(
+                                        Rc::clone(&rows),
+                                        &columns_for_sort,
+                                        &preferences_value.sort,
+                                    )
+                                })
+                                .expect("entity-table sort cache is still mounted");
                             let bounds = page_bounds(
                                 current_page.get(),
                                 preferences_value.page_size,
@@ -428,6 +437,7 @@ where
                 <Pagination class="flex items-center gap-1">
                     <Button
                         class="join-item btn-sm"
+                        attr:data-entity-page="previous"
                         disabled=Signal::derive(move || current_page.get() == 0)
                         on_click=Callback::new(move |_| {
                             current_page.update(|page| *page = page.saturating_sub(1));
@@ -441,6 +451,7 @@ where
                             PageSlot::Page(page) => view! {
                                 <Button
                                     class="join-item btn-sm"
+                                    attr:data-entity-page=(page + 1).to_string()
                                     active=page == current_page.get()
                                     disabled=page == current_page.get()
                                     on_click=Callback::new(move |_| current_page.set(page))
@@ -455,6 +466,7 @@ where
                         .collect_view()}
                     <Button
                         class="join-item btn-sm"
+                        attr:data-entity-page="next"
                         disabled=Signal::derive(move || {
                             current_page.get() + 1 >= total_pages.get()
                         })

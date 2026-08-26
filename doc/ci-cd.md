@@ -301,8 +301,12 @@ PowerShell script stays the manual/screenshot path):
 5. Kill the `trunk` process tree on drop (`taskkill /T /F` on Windows — Trunk
    spawns cargo/wasm-bindgen children).
 
-Setting `VISUAL_TEST_BASE_URL` yourself skips steps 1-3 and 5 and reuses your
-already-running dev server.
+The xtask browser gates always own this server. They intentionally ignore a
+caller-supplied `VISUAL_TEST_BASE_URL`, because an external server cannot prove
+that it serves the requested page-vs-catalog Wasm target or the stylesheet
+generated for the current source. Direct invocation of an ignored browser test
+may still use that variable for interactive diagnosis; it is not a verification
+gate.
 
 When these catalog suites are adjacent inside `verify-full`, steps 1-3 and 5
 wrap the group once: reactivity, layout, and style all use the same current

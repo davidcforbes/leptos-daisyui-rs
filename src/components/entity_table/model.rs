@@ -3,6 +3,7 @@
 use super::types::{EntityColumn, EntitySort, EntityTablePreferences};
 use crate::components::data_table::{MAX_COLUMN_WIDTH, effective_min_width, resized_width};
 use std::ops::Range;
+use std::rc::Rc;
 
 /// Supported row counts for client-snapshot tables.
 pub const ENTITY_PAGE_SIZE_CHOICES: [usize; 3] = [25, 50, 100];
@@ -38,18 +39,61 @@ pub fn sorted_indices<T>(rows: &[T], columns: &[EntityColumn<T>], sort: &EntityS
     else {
         return indices;
     };
-    let Some(compare) = column.comparator.as_ref() else {
-        return indices;
-    };
-
-    indices.sort_by(|left, right| {
-        let ordering = compare(&rows[*left], &rows[*right]);
-        match sort {
-            EntitySort::Descending { .. } => ordering.reverse(),
-            EntitySort::Ascending { .. } | EntitySort::System => ordering,
-        }
-    });
+    if let Some(sort_key) = column.sort_key.as_ref() {
+        let keys = rows.iter().map(|row| sort_key(row)).collect::<Vec<_>>();
+        indices.sort_by(|left, right| ordered_for_direction(keys[*left].cmp(&keys[*right]), sort));
+    } else if let Some(compare) = column.comparator.as_ref() {
+        indices.sort_by(|left, right| {
+            ordered_for_direction(compare(&rows[*left], &rows[*right]), sort)
+        });
+    }
     indices
+}
+
+fn ordered_for_direction(ordering: std::cmp::Ordering, sort: &EntitySort) -> std::cmp::Ordering {
+    match sort {
+        EntitySort::Descending { .. } => ordering.reverse(),
+        EntitySort::Ascending { .. } | EntitySort::System => ordering,
+    }
+}
+
+/// Memoizes the complete sorted permutation by immutable dataset identity and sort.
+///
+/// Pagination, visibility, and column-width changes may rerender the table, but
+/// they reuse this permutation instead of re-running an `O(n log n)` sort.
+pub(crate) struct SortedIndexCache<T> {
+    rows: Option<Rc<Vec<T>>>,
+    sort: EntitySort,
+    indices: Rc<Vec<usize>>,
+}
+
+impl<T> SortedIndexCache<T> {
+    pub(crate) fn new() -> Self {
+        Self {
+            rows: None,
+            sort: EntitySort::System,
+            indices: Rc::new(Vec::new()),
+        }
+    }
+
+    pub(crate) fn indices(
+        &mut self,
+        rows: Rc<Vec<T>>,
+        columns: &[EntityColumn<T>],
+        sort: &EntitySort,
+    ) -> Rc<Vec<usize>> {
+        let unchanged = self
+            .rows
+            .as_ref()
+            .is_some_and(|cached| Rc::ptr_eq(cached, &rows))
+            && self.sort == *sort;
+        if !unchanged {
+            self.indices = Rc::new(sorted_indices(rows.as_slice(), columns, sort));
+            self.rows = Some(rows);
+            self.sort = sort.clone();
+        }
+        Rc::clone(&self.indices)
+    }
 }
 
 /// Returns the total number of pages, treating a zero page size as one.
@@ -155,9 +199,11 @@ pub(crate) fn normalize_preferences<T>(
     }
 
     if let Some(column_id) = preferences.sort.column()
-        && !columns
-            .iter()
-            .any(|column| column.id == column_id && column.sortable && column.comparator.is_some())
+        && !columns.iter().any(|column| {
+            column.id == column_id
+                && column.sortable
+                && (column.comparator.is_some() || column.sort_key.is_some())
+        })
     {
         preferences.sort = EntitySort::System;
     }

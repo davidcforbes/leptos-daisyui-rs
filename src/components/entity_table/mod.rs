@@ -13,8 +13,11 @@ pub use model::{
 pub use storage::{decode_preferences, encode_preferences};
 pub use types::{
     EntityCellRenderer, EntityColumn, EntityComparator, EntityRowKey, EntityRowRenderer,
-    EntitySort, EntityTablePreferences, EntityTableTexts,
+    EntitySort, EntitySortKey, EntityTablePreferences, EntityTableTexts,
 };
+
+#[cfg(test)]
+use model::SortedIndexCache;
 
 #[cfg(test)]
 mod tests;

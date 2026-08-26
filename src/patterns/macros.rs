@@ -1,6 +1,20 @@
 //! Declarative helpers for defining typed page contracts.
 
 /// Defines a [`PageContract`](crate::patterns::PageContract) constant.
+///
+/// Typed table columns reject a callback for a different row type, so a page
+/// contract cannot drift from the entity model it renders.
+///
+/// ```compile_fail
+/// use leptos_daisyui_rs::components::EntityColumn;
+///
+/// struct Client {
+///     name: String,
+/// }
+///
+/// let _: EntityColumn<Client> =
+///     EntityColumn::text("client", "Client", |wrong: &String| wrong.clone());
+/// ```
 #[macro_export]
 macro_rules! page_contract {
     (
@@ -29,6 +43,24 @@ macro_rules! page_contract {
 }
 
 /// Defines a typed local-filter schema and verifies its named fields at compile time.
+///
+/// A misspelled or undeclared filter field is a compile error, so a page
+/// contract cannot silently promise a control its filter model does not own.
+///
+/// ```compile_fail
+/// use leptos_daisyui_rs::filter_schema;
+///
+/// pub struct Filters {
+///     pub search: String,
+/// }
+///
+/// filter_schema! {
+///     pub FILTERS: Filters {
+///         dataset_selector: "office",
+///         filters: [search, status],
+///     }
+/// }
+/// ```
 #[macro_export]
 macro_rules! filter_schema {
     (

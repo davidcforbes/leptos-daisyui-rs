@@ -84,6 +84,10 @@ const CLIENT_SNAPSHOT_INNER: &[PatternCheck] = &[
             "components::entity_table",
         ],
     },
+    PatternCheck::Cargo {
+        name: "test-client-snapshot-doctests",
+        args: &["test", "-p", "leptos-daisyui-rs", "--doc", "patterns"],
+    },
 ];
 
 const CLIENT_SNAPSHOT_BROWSER: &[PatternCheck] = &[PatternCheck::Browser {
@@ -111,9 +115,16 @@ mod tests {
     fn client_snapshot_inner_selects_only_contract_model_and_pattern_tests() {
         let checks = checks_for("client-snapshot-list", PatternLane::Inner).expect("known pattern");
         let debug = format!("{checks:?}");
-        assert_eq!(checks.len(), 2);
+        assert_eq!(checks.len(), 3);
         assert!(debug.contains("patterns"));
         assert!(debug.contains("components::entity_table"));
+        assert!(checks.iter().any(|check| matches!(
+            check,
+            PatternCheck::Cargo {
+                name: "test-client-snapshot-doctests",
+                args: ["test", "-p", "leptos-daisyui-rs", "--doc", "patterns"],
+            }
+        )));
         assert!(!debug.contains("chart"));
         assert!(!debug.contains("editor"));
     }

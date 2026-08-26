@@ -65,14 +65,13 @@ pub fn ActiveFilterChips(
                     <span class="badge badge-outline gap-1 py-3">
                         <span class="font-medium">{chip.label}</span>
                         <span>{chip.value}</span>
-                        <button
-                            type="button"
-                            class="ld-focus-ring rounded-full px-1"
-                            aria-label=remove_label
-                            on:click=move |_| on_remove.run(id.clone())
+                        <Button
+                            class="btn-ghost btn-xs btn-circle h-5 min-h-5 w-5"
+                            attr:aria-label=remove_label
+                            on_click=Callback::new(move |_| on_remove.run(id.clone()))
                         >
                             "×"
-                        </button>
+                        </Button>
                     </span>
                 }
             }).collect_view()}

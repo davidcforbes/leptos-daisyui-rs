@@ -7,7 +7,7 @@ use common::{
     click, harness_at, wait_for_selector,
 };
 use ldui_audit::{Ceiling, ShadowSpec, family};
-use pixelproof_web::ViewportSize;
+use pixelproof_web::{Key, ViewportSize};
 use serde_json::{Value, json};
 use std::time::Duration;
 
@@ -54,7 +54,11 @@ async fn client_snapshot_list_contract_works_end_to_end() {
         json!(25),
         "only one page belongs in the DOM"
     );
-    assert_eq!(initial["initialSort"], json!("none"));
+    assert_eq!(
+        initial["initialSort"],
+        Value::Null,
+        "inactive headers must omit aria-sort"
+    );
     assert!(
         initial["initialSortLabel"]
             .as_str()
@@ -68,7 +72,19 @@ async fn client_snapshot_list_contract_works_end_to_end() {
     assert_eq!(initial["selectorResettable"], json!("false"));
 
     let sort_button = "[data-entity-table-grid] thead th:first-child button";
-    click(&harness, sort_button).await;
+    harness
+        .page()
+        .find_element(sort_button)
+        .await
+        .expect("find sortable header button")
+        .focus()
+        .await
+        .expect("focus sortable header button");
+    harness
+        .press_key_sequence(&[Key::Enter])
+        .await
+        .expect("keyboard-sort header");
+    tokio::time::sleep(Duration::from_millis(100)).await;
     let ascending = eval_json(
         &harness,
         r#"(() => {
@@ -108,18 +124,6 @@ async fn client_snapshot_list_contract_works_end_to_end() {
     );
     assert_eq!(descending["first"], json!("office-mx-071"));
 
-    click(&harness, sort_button).await;
-    let system = eval_json(
-        &harness,
-        r#"(() => {
-            const table = document.querySelector('[data-entity-table-grid]');
-            const th = table.querySelector('thead th:first-child');
-            return { sort: th.getAttribute('aria-sort'), first: table.querySelector('tbody tr').dataset.rowKey };
-        })()"#,
-    )
-    .await;
-    assert_eq!(system, json!({ "sort": "none", "first": "office-mx-000" }));
-
     let changed = eval_json(
         &harness,
         r#"(() => {
@@ -140,6 +144,7 @@ async fn client_snapshot_list_contract_works_end_to_end() {
         r#"(() => ({
             search: document.querySelector('[data-filter-search] input').value,
             office: document.querySelector('[data-dataset-selector] select').value,
+            sort: document.querySelector('[data-entity-table-grid] thead th:first-child').getAttribute('aria-sort'),
             row: document.querySelector('[data-entity-table-grid] tbody tr')?.dataset.rowKey,
             text: document.querySelector('[data-entity-table-grid] tbody tr')?.textContent,
         }))()"#,
@@ -147,6 +152,7 @@ async fn client_snapshot_list_contract_works_end_to_end() {
     .await;
     assert_eq!(after_dataset_change["search"], json!("Client 010"));
     assert_eq!(after_dataset_change["office"], json!("office-in"));
+    assert_eq!(after_dataset_change["sort"], json!("descending"));
     assert_eq!(after_dataset_change["row"], json!("office-in-009"));
     assert!(
         after_dataset_change["text"]
@@ -155,26 +161,121 @@ async fn client_snapshot_list_contract_works_end_to_end() {
             .contains("Delhi Client 010")
     );
 
+    let active_filter_report = ldui_audit::audit_page(
+        &harness,
+        &ldui_audit::from_ui_tokens(body_font_family(&harness).await),
+        &Default::default(),
+    )
+    .await
+    .expect("audit client snapshot with an active filter chip");
+    assert_eq!(
+        active_filter_report.count(family::COMPONENT_DRIFT),
+        0,
+        "active filter controls must use design-system components:\n{}",
+        active_filter_report.describe("client snapshot active filter")
+    );
+
     click(&harness, "[data-filter-actions] button").await;
     let reset = eval_json(
         &harness,
         r#"(() => ({
             search: document.querySelector('[data-filter-search] input').value,
             office: document.querySelector('[data-dataset-selector] select').value,
+            sort: document.querySelector('[data-entity-table-grid] thead th:first-child').getAttribute('aria-sort'),
             rows: document.querySelectorAll('[data-entity-table-grid] tbody tr').length,
         }))()"#,
     )
     .await;
     assert_eq!(
         reset,
-        json!({ "search": "", "office": "office-in", "rows": 25 })
+        json!({ "search": "", "office": "office-in", "sort": "descending", "rows": 25 })
     );
 
-    click(
+    click(&harness, sort_button).await;
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => ({
+                sort: document.querySelector('[data-entity-table-grid] thead th:first-child').getAttribute('aria-sort'),
+                first: document.querySelector('[data-entity-table-grid] tbody tr').dataset.rowKey,
+            }))()"#,
+        )
+        .await,
+        json!({ "sort": null, "first": "office-in-000" })
+    );
+
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => {
+                const select = document.querySelector('[data-entity-table] label select');
+                select.value = '50';
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+                return true;
+            })()"#,
+        )
+        .await,
+        json!(true)
+    );
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => ({
+                rows: document.querySelectorAll('[data-entity-table-grid] tbody tr').length,
+                range: document.querySelector('[data-entity-table] > div:last-child > span').textContent.trim(),
+            }))()"#,
+        )
+        .await,
+        json!({ "rows": 50, "range": "Showing 1-50 of 72" })
+    );
+    click(&harness, "[data-entity-page='next']").await;
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => ({
+                rows: document.querySelectorAll('[data-entity-table-grid] tbody tr').length,
+                first: document.querySelector('[data-entity-table-grid] tbody tr').dataset.rowKey,
+            }))()"#,
+        )
+        .await,
+        json!({ "rows": 22, "first": "office-in-050" })
+    );
+    click(&harness, "[data-entity-page='previous']").await;
+
+    click(&harness, "[data-entity-column-chooser]").await;
+    click(&harness, "[data-entity-column='status']").await;
+    let hidden_status = eval_json(
         &harness,
-        "[data-entity-table-grid] tbody tr:first-child td[data-entity-action='true'] button",
+        r#"(() => ({
+            statusHeader: Array.from(document.querySelectorAll('[data-entity-table-grid] thead th')).some(th => th.textContent.includes('Status')),
+            stored: localStorage.getItem('ldui-entity-table:client-snapshot-demo'),
+        }))()"#,
     )
     .await;
+    assert_eq!(hidden_status["statusHeader"], json!(false));
+    assert!(
+        hidden_status["stored"]
+            .as_str()
+            .is_some_and(|stored| stored.contains("status")),
+        "hidden column must persist: {hidden_status}"
+    );
+
+    harness
+        .page()
+        .find_element(
+            "[data-entity-table-grid] tbody tr:first-child td[data-entity-action='true'] button",
+        )
+        .await
+        .expect("find row action")
+        .focus()
+        .await
+        .expect("focus row action");
+    harness
+        .press_key_sequence(&[Key::Enter])
+        .await
+        .expect("keyboard-activate row action");
+    tokio::time::sleep(Duration::from_millis(100)).await;
     let action_counts = eval_json(
         &harness,
         r#"(() => ({
@@ -185,11 +286,19 @@ async fn client_snapshot_list_contract_works_end_to_end() {
     .await;
     assert_eq!(action_counts, json!({ "claim": "1", "activate": "0" }));
 
-    click(
-        &harness,
-        "[data-entity-table-grid] tbody tr:first-child td:nth-child(2)",
-    )
-    .await;
+    harness
+        .page()
+        .find_element("[data-entity-table-grid] tbody tr:first-child")
+        .await
+        .expect("find interactive row")
+        .focus()
+        .await
+        .expect("focus interactive row");
+    harness
+        .press_key_sequence(&[Key::Enter])
+        .await
+        .expect("keyboard-activate row");
+    tokio::time::sleep(Duration::from_millis(100)).await;
     assert_eq!(
         eval_json(
             &harness,
@@ -282,6 +391,18 @@ async fn client_snapshot_list_contract_works_end_to_end() {
         (restored_width - resized_width).abs() <= 2.0,
         "width must survive remount: before={resized_width}, after={restored_width}"
     );
+    let restored_preferences = eval_json(
+        &harness,
+        r#"(() => ({
+            pageSize: document.querySelector('[data-entity-table] label select').value,
+            statusHeader: Array.from(document.querySelectorAll('[data-entity-table-grid] thead th')).some(th => th.textContent.includes('Status')),
+        }))()"#,
+    )
+    .await;
+    assert_eq!(
+        restored_preferences,
+        json!({ "pageSize": "50", "statusHeader": false })
+    );
 
     harness
         .set_viewport(ViewportSize::new(390, 844))
@@ -304,7 +425,7 @@ async fn client_snapshot_list_contract_works_end_to_end() {
         })()"#,
     )
     .await;
-    assert_eq!(compact["rows"], json!(25));
+    assert_eq!(compact["rows"], json!(50));
     assert_eq!(compact["headerDisplay"], json!("none"));
     assert_ne!(compact["compactDisplay"], json!("none"));
     assert_eq!(compact["wideDisplay"], json!("none"));

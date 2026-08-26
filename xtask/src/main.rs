@@ -874,31 +874,16 @@ impl Drop for DemoServer {
 /// catalog Wasm; parallel instances starve each other past the mount-wait
 /// budget.
 ///
-/// An externally supplied `VISUAL_TEST_BASE_URL` (a server the caller already
-/// has running) is honoured, and no server is spawned.
 fn run_browser_suite(test: &str, html_target: Option<&str>) -> bool {
-    let reused = std::env::var("VISUAL_TEST_BASE_URL").ok();
-    let _server;
-    let base = match &reused {
-        Some(url) => {
-            eprintln!("xtask: reusing demo server at {url} (VISUAL_TEST_BASE_URL)");
-            url.clone()
+    let server = match DemoServer::start(html_target) {
+        Ok(server) => server,
+        Err(error) => {
+            eprintln!("xtask: {error}");
+            return false;
         }
-        None => match DemoServer::start(html_target) {
-            Ok(s) => {
-                let url = s.base_url();
-                _server = s;
-                url
-            }
-            Err(e) => {
-                eprintln!("xtask: {e}");
-                return false;
-            }
-        },
     };
-
-    run_browser_test(test, &base)
-    // `_server` drops here -> trunk process tree killed.
+    run_browser_test(test, &server.base_url())
+    // `server` drops here -> trunk process tree killed.
 }
 
 fn run_browser_test(test: &str, base: &str) -> bool {
@@ -1657,6 +1642,25 @@ fn browser_server_segment_count(steps: &[Step]) -> usize {
     starts
 }
 
+#[cfg(test)]
+fn html_selects_exactly_one_wasm_binary(html: &str, expected_binary: &str) -> bool {
+    let mut remaining = html;
+    let mut rust_entries = Vec::new();
+    while let Some(start) = remaining.find("<link") {
+        remaining = &remaining[start..];
+        let Some(end) = remaining.find('>') else {
+            return false;
+        };
+        let tag = &remaining[..=end];
+        if tag.contains("data-trunk") && tag.contains("rel=\"rust\"") {
+            rust_entries.push(tag);
+        }
+        remaining = &remaining[end + 1..];
+    }
+
+    rust_entries.len() == 1 && rust_entries[0].contains(&format!("data-bin=\"{expected_binary}\""))
+}
+
 /// Run a set of steps advisory-first: every step runs, then print the summary
 /// and return the failure count as the exit code. Consecutive browser suites
 /// with the same HTML target share one current Trunk server/build.
@@ -1665,7 +1669,6 @@ fn run_steps(steps: &[Step]) -> ExitCode {
         eprintln!("xtask: no steps to run");
         return ExitCode::from(2);
     }
-    let reused = std::env::var("VISUAL_TEST_BASE_URL").ok();
     let mut active_target = None;
     let mut server: Option<DemoServer> = None;
     let mut results = Vec::with_capacity(steps.len());
@@ -1679,37 +1682,32 @@ fn run_steps(steps: &[Step]) -> ExitCode {
             }
             Run::BrowserSuite { test, html_target } => {
                 eprintln!("\n----- {} -----", step.name);
-                if let Some(base) = &reused {
-                    eprintln!("xtask: reusing demo server at {base} (VISUAL_TEST_BASE_URL)");
-                    run_browser_test(test, base)
-                } else {
-                    let requested = BrowserTarget(*html_target);
-                    if active_target != Some(requested) {
-                        server.take();
-                        active_target = Some(requested);
-                        server = match DemoServer::start(*html_target) {
-                            Ok(started) => Some(started),
-                            Err(error) => {
-                                eprintln!("xtask: {error}");
-                                None
-                            }
-                        };
-                    } else if server.is_some() {
+                let requested = BrowserTarget(*html_target);
+                if active_target != Some(requested) {
+                    server.take();
+                    active_target = Some(requested);
+                    server = match DemoServer::start(*html_target) {
+                        Ok(started) => Some(started),
+                        Err(error) => {
+                            eprintln!("xtask: {error}");
+                            None
+                        }
+                    };
+                } else if server.is_some() {
+                    eprintln!(
+                        "xtask: reusing current {} server",
+                        html_target.unwrap_or("index.html")
+                    );
+                }
+
+                match &server {
+                    Some(current) => run_browser_test(test, &current.base_url()),
+                    None => {
                         eprintln!(
-                            "xtask: reusing current {} server",
+                            "xtask: {} server is unavailable; build was not retried",
                             html_target.unwrap_or("index.html")
                         );
-                    }
-
-                    match &server {
-                        Some(current) => run_browser_test(test, &current.base_url()),
-                        None => {
-                            eprintln!(
-                                "xtask: {} server is unavailable; build was not retried",
-                                html_target.unwrap_or("index.html")
-                            );
-                            false
-                        }
+                        false
                     }
                 }
             }
@@ -2075,16 +2073,47 @@ pub fn r() -> f32 { radius::CARD }
     }
 
     #[test]
+    fn browser_gates_do_not_reuse_unverified_external_servers() {
+        let source = include_str!("main.rs");
+        let run_steps = source
+            .split_once("fn run_steps(steps: &[Step]) -> ExitCode")
+            .expect("run_steps function")
+            .1
+            .split_once("\nfn main()")
+            .expect("main follows run_steps")
+            .0;
+        assert!(
+            !run_steps.contains(concat!("VISUAL_TEST_BASE", "_URL")),
+            "verification gates must always launch and validate their own target-specific server"
+        );
+    }
+
+    #[test]
     fn every_demo_html_entry_selects_exactly_one_wasm_binary() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .expect("xtask has a repository parent");
         let catalog = std::fs::read_to_string(repo.join("demo/index.html")).expect("catalog HTML");
-        assert!(catalog.contains("data-bin=\"leptos-daisyui-showcase\""));
+        assert!(html_selects_exactly_one_wasm_binary(
+            &catalog,
+            "leptos-daisyui-showcase"
+        ));
 
         let page_host = std::fs::read_to_string(repo.join("demo/client-snapshot-test-host.html"))
             .expect("page-host HTML");
-        assert!(page_host.contains("data-bin=\"client-snapshot-test-host\""));
+        assert!(html_selects_exactly_one_wasm_binary(
+            &page_host,
+            "client-snapshot-test-host"
+        ));
+
+        let ambiguous = r#"
+            <link data-trunk rel="rust" data-bin="client-snapshot-test-host" />
+            <link data-trunk rel="rust" data-bin="leptos-daisyui-showcase" />
+        "#;
+        assert!(!html_selects_exactly_one_wasm_binary(
+            ambiguous,
+            "client-snapshot-test-host"
+        ));
     }
 
     #[test]

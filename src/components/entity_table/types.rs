@@ -19,6 +19,12 @@ pub type EntityRowKey<T> = Rc<dyn Fn(&T) -> String>;
 /// A callback that compares two borrowed rows for one column.
 pub type EntityComparator<T> = Rc<dyn Fn(&T, &T) -> Ordering>;
 
+/// A callback that extracts one normalized text key for local sorting.
+///
+/// The table evaluates this once per row when the dataset or sort changes,
+/// avoiding string allocation inside the `O(n log n)` comparison loop.
+pub type EntitySortKey<T> = Rc<dyn Fn(&T) -> String>;
+
 /// The table's current client-side ordering.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EntitySort {
@@ -60,12 +66,15 @@ impl EntitySort {
         }
     }
 
-    /// Returns the WAI-ARIA sort value for a header cell.
-    pub fn aria_value_for(&self, column_id: &str) -> &'static str {
+    /// Returns the WAI-ARIA sort value for the actively sorted header cell.
+    ///
+    /// Inactive and non-sortable headers omit `aria-sort`; assistive
+    /// technology only needs the state on the one active sort column.
+    pub fn aria_value_for(&self, column_id: &str) -> Option<&'static str> {
         match self {
-            Self::Ascending { column } if column == column_id => "ascending",
-            Self::Descending { column } if column == column_id => "descending",
-            _ => "none",
+            Self::Ascending { column } if column == column_id => Some("ascending"),
+            Self::Descending { column } if column == column_id => Some("descending"),
+            _ => None,
         }
     }
 
@@ -103,6 +112,8 @@ pub struct EntityColumn<T> {
     pub renderer: Option<EntityCellRenderer<T>>,
     /// Typed comparator invoked with borrowed rows.
     pub comparator: Option<EntityComparator<T>>,
+    /// Normalized text key extracted once per row by the default sorter.
+    pub sort_key: Option<EntitySortKey<T>>,
 }
 
 impl<T> Clone for EntityColumn<T> {
@@ -119,6 +130,7 @@ impl<T> Clone for EntityColumn<T> {
             text: Rc::clone(&self.text),
             renderer: self.renderer.as_ref().map(Rc::clone),
             comparator: self.comparator.as_ref().map(Rc::clone),
+            sort_key: self.sort_key.as_ref().map(Rc::clone),
         }
     }
 }
@@ -159,11 +171,8 @@ impl<T: 'static> EntityColumn<T> {
             initial_width: None,
             text,
             renderer: None,
-            comparator: Some(Rc::new(move |left, right| {
-                comparator_text(left)
-                    .to_lowercase()
-                    .cmp(&comparator_text(right).to_lowercase())
-            })),
+            comparator: None,
+            sort_key: Some(Rc::new(move |row| comparator_text(row).to_lowercase())),
         }
     }
 
@@ -186,6 +195,7 @@ impl<T: 'static> EntityColumn<T> {
         column.sortable = false;
         column.is_action = true;
         column.comparator = None;
+        column.sort_key = None;
         column
     }
 
@@ -199,6 +209,7 @@ impl<T: 'static> EntityColumn<T> {
     pub fn sortable_by(mut self, compare: impl Fn(&T, &T) -> Ordering + 'static) -> Self {
         self.sortable = true;
         self.comparator = Some(Rc::new(compare));
+        self.sort_key = None;
         self
     }
 
