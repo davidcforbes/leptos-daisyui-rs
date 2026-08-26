@@ -112,6 +112,7 @@ fn AppInner() -> impl IntoView {
                     <Route path=path!("/config-provider") view=ConfigProviderDemo />
                     <Route path=path!("/countdown") view=CountdownDemo />
                     <Route path=path!("/data-table") view=DataTableDemo />
+                    <Route path=path!("/client-snapshot-list") view=ClientSnapshotListDemo />
                     <Route path=path!("/day-scheduler") view=DaySchedulerDemo />
                     <Route path=path!("/diff") view=DiffDemo />
                     <Route path=path!("/divider") view=DividerDemo />

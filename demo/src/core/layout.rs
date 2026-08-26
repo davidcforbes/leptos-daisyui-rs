@@ -334,6 +334,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     value: "data-table",
                 },
                 ComponentItem {
+                    name: "Client Snapshot List",
+                    href: "/components/client-snapshot-list",
+                    value: "client-snapshot-list",
+                },
+                ComponentItem {
                     name: "Day Scheduler (Calendar · Day)",
                     href: "/components/day-scheduler",
                     value: "day-scheduler",

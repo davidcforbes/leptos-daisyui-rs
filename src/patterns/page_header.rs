@@ -38,7 +38,7 @@ pub fn PageHeader(
                 {back.map(|back| view! { <div class="shrink-0 pt-1">{back()}</div> })}
                 <div class="min-w-0 space-y-1">
                     <div class="flex flex-wrap items-center gap-2">
-                        <h1 class="text-2xl font-semibold tracking-tight text-base-content sm:text-3xl">
+                        <h1 class="ld-text-display font-semibold tracking-tight text-base-content">
                             {move || title.get()}
                         </h1>
                         {freshness.map(|freshness| freshness())}

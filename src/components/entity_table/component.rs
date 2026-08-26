@@ -246,11 +246,10 @@ where
                                         {if sortable {
                                             let header = column.header.clone();
                                             Some(view! {
-                                                <button
-                                                    type="button"
-                                                    class="ld-focus-ring inline-flex w-full items-center gap-1 rounded-sm text-left font-semibold"
-                                                    aria-label=sort_label
-                                                    on:click=move |_| {
+                                                <Button
+                                                    class="btn-ghost btn-xs h-auto !min-h-0 w-full justify-start gap-1 rounded-sm px-0 py-1 text-left font-semibold !shadow-none"
+                                                    attr:aria-label=sort_label
+                                                    on_click=Callback::new(move |_| {
                                                         preferences.update(|preferences| {
                                                             preferences.sort = next_sort(
                                                                 &preferences.sort,
@@ -259,7 +258,7 @@ where
                                                             );
                                                         });
                                                         current_page.set(0);
-                                                    }
+                                                    })
                                                 >
                                                     <span>{header}</span>
                                                     <span aria-hidden="true" class="text-xs">
@@ -269,7 +268,7 @@ where
                                                             _ => "↕",
                                                         })}
                                                     </span>
-                                                </button>
+                                                </Button>
                                             })
                                         } else {
                                             None

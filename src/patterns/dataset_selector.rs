@@ -79,7 +79,7 @@ pub fn DatasetSelector(
             data-resettable-filter="false"
             aria-busy=move || loading.get().then_some("true")
         >
-            <div class="flex flex-wrap items-center gap-2">
+            <label class="flex flex-wrap items-center gap-2">
                 <span class="text-xs font-semibold uppercase tracking-wide text-base-content/60">
                     {move || label.get()}
                 </span>
@@ -98,7 +98,7 @@ pub fn DatasetSelector(
                     <span class="loading loading-spinner loading-sm" aria-label="Loading dataset"></span>
                 })}
                 {status.map(|status| status())}
-            </div>
+            </label>
             {move || error.get().map(|message| view! {
                 <p class="mt-1 text-xs text-error" role="alert">{message}</p>
             })}

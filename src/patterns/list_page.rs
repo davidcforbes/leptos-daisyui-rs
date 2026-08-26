@@ -3,7 +3,7 @@
 use leptos::prelude::*;
 
 /// Canonical page-width and vertical-rhythm classes.
-pub const LIST_PAGE_BASE_CLASS: &str = "w-full min-w-0 space-y-4 sm:space-y-5";
+pub const LIST_PAGE_BASE_CLASS: &str = "w-full min-w-0 space-y-4";
 
 /// Merges caller classes with the canonical list-page contract.
 pub fn list_page_class(class: &str) -> String {
