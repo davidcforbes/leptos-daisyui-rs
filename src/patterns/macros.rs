@@ -1,6 +1,11 @@
 //! Declarative helpers for defining typed page contracts.
 
-/// Defines a [`PageContract`](crate::patterns::PageContract) constant.
+/// Defines a typed page-contract constant without generating behavior or I/O.
+///
+/// The explicit `: v2` form expands to
+/// [`PageContractV2`](crate::patterns::PageContractV2). The unversioned form
+/// remains a legacy [`PageContract`](crate::patterns::PageContract) declaration
+/// and does not claim v2 validation or export compatibility.
 ///
 /// Typed table columns reject a callback for a different row type, so a page
 /// contract cannot drift from the entity model it renders.
@@ -17,6 +22,57 @@
 /// ```
 #[macro_export]
 macro_rules! page_contract {
+    (
+        $visibility:vis $name:ident: v2 {
+            contract_version: $contract_version:literal,
+            id: $id:literal,
+            title: $title:literal,
+            owner: $owner:literal,
+            delivery: $delivery:ident,
+            archetype: $archetype:ident,
+            route: $route:literal,
+            source: $source:expr,
+            dataset: $dataset:expr,
+            data: $data:expr,
+            state: $state:expr,
+            mutations: $mutations:expr,
+            realtime: $realtime:expr,
+            capabilities: $capabilities:expr,
+            responsive: $responsive:expr,
+            accessibility: $accessibility:expr,
+            presentation_states: $presentation_states:expr,
+            test_lanes: $test_lanes:expr,
+            budgets: $budgets:expr,
+            compatibility: $compatibility:expr,
+            baselines: $baselines:expr,
+            $(,)?
+        }
+    ) => {
+        $visibility const $name: $crate::patterns::PageContractV2 =
+            $crate::patterns::PageContractV2 {
+                contract_version: $contract_version,
+                id: $id,
+                title: $title,
+                owner: $owner,
+                delivery: $crate::patterns::PageDelivery::$delivery,
+                archetype: $crate::patterns::PageArchetype::$archetype,
+                route: $route,
+                source: $source,
+                dataset: $dataset,
+                data: $data,
+                state: $state,
+                mutations: $mutations,
+                realtime: $realtime,
+                capabilities: $capabilities,
+                responsive: $responsive,
+                accessibility: $accessibility,
+                presentation_states: $presentation_states,
+                test_lanes: $test_lanes,
+                budgets: $budgets,
+                compatibility: $compatibility,
+                baselines: $baselines,
+            };
+    };
     (
         $visibility:vis $name:ident {
             id: $id:literal,
