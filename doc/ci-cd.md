@@ -224,6 +224,28 @@ server. In measured warm runs, Cargo's catalog compile was under one second but
 Trunk's Wasm optimization took roughly two minutes per invocation; sharing the
 catalog server removes two redundant optimization passes from `verify-full`.
 
+### Gate cadence during a live Beads drain
+
+`cargo xtask verify` is the 14-step native gate listed in the table above.
+`cargo xtask verify-full` adds four browser/Wasm checks and reports 18 steps.
+Say which command is running before starting it; "the verification gate" is
+ambiguous because the two commands have materially different cost and coverage.
+
+Use this cadence when working through an issue queue:
+
+1. While an issue is active, run the narrowest test or pattern lane that proves
+   the changed behavior. This keeps the red/green loop short.
+2. When a fresh queue inventory appears empty, run the broad gate required for
+   the final candidate tree: `verify` for native-only work, or `verify-full`
+   when browser/Wasm/CSS behavior changed or release-level evidence is required.
+3. Immediately after any long gate, and again before landing, run
+   `bd ready --json` plus `bd list --status open --json`, `in_progress`, and
+   `blocked`. `bd ready` is only the runnable subset, and every result is a
+   snapshot; audits can add work while the gate is running.
+4. If late-arriving work changes the candidate tree, run its focused checks and
+   then repeat the affected final gate. A previous pass describes the previous
+   tree, not the one being shipped.
+
 ## Testing policy — screenshot vs. no-screenshot
 
 The dividing line for what a gate runs automatically is **screenshot vs. no

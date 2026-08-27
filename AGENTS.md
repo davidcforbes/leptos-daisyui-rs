@@ -26,6 +26,13 @@ Run xtask from the repository root. Do not use `cargo fmt --all` (it reaches
 path dependencies) or `cargo clippy --workspace` (Leptos CSR feature
 unification breaks it); use the scoped xtask commands.
 
+When draining Beads, treat every queue read as a snapshot. Use focused checks
+while an issue is active, reserve the broad required gate for the final
+candidate tree, and announce the exact command before a long run. After every
+long gate and immediately before landing, re-run `bd ready --json` plus the
+open, in-progress, and blocked queries; a consumer audit can file new work while
+tests are running. See `doc/ci-cd.md` for the gate cadence and step breakdown.
+
 ## Coding Style & Testing
 
 Use rustfmt defaults, `snake_case` modules/functions, and `UpperCamelCase`
