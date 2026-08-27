@@ -201,16 +201,19 @@ The crate has two main modules:
   reusable framework hooks (`DebouncedSignal`, `use_swr_resource`)
 - `src/motion/` - Animation primitives (`Lerp`, `Transition`, `Keyframe`/`Track`, easing, spring, `use_animated` hook)
 
-**Two DataTable components exist (`ldui-30p`) — pick by capability, not by habit:**
-`components::DataTable` (`src/components/data_table/`) is the full column-model
-table: `cell_renderers`, `typed_cells`, `row_class_fn`, `Column::action()` action
-cells, `row_key`-based selection identity, the column chooser, per-column filter
-dropdowns, `extra_filter` + `toolbar` composition, `auto_page_size`, and a
-server-driven variant. `widgets::DataTable` (`src/widgets/data_table.rs`) is the
-simple `Vec<Vec<String>>` table; it is the only one with `badge_column_keys`,
-`link_column_keys`, and `bulk_select` (checkbox column keyed by the first cell's
-`String` id). They are not converged — each doc comment names the other and
-lists what only it has, so read those before picking.
+**Choose a table from data ownership before capability (`ldui-aqo`):**
+`EntityTable<T>` is the preferred typed complete-client-snapshot table;
+`ServerDataTable` is the server-query/current-slice table. Their roots expose
+`data-table-data-mode="client-snapshot"` and `"server-query"` respectively.
+`components::DataTable` (`src/components/data_table/`) remains the
+`"compatibility-client"` path for dynamic `HashMap` rows and its advanced
+existing feature surface (`cell_renderers`, `typed_cells`, `row_class_fn`,
+`Column::action()`, selection, filters, toolbar composition, and auto paging).
+`widgets::DataTable` (`src/widgets/data_table.rs`) remains the simple
+`Vec<Vec<String>>` table and the only one with `badge_column_keys`,
+`link_column_keys`, and `bulk_select`. Never feed a server page to either client
+table. See `doc/components/entity_table.md` for migration and preference
+ownership.
 
 ### Recent additions (2026-08-25, merged to main)
 

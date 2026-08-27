@@ -1,6 +1,6 @@
 use crate::components::data_table::TABLE_SCROLL_WRAPPER_CLASS;
 use crate::components::data_table::auto_page::{
-    FALLBACK_HEADER_HEIGHT, FALLBACK_ROW_HEIGHT, rows_per_page_for_height,
+    DEFAULT_AUTO_MIN_ROWS, FALLBACK_HEADER_HEIGHT, FALLBACK_ROW_HEIGHT, auto_page_size_for_height,
 };
 use crate::components::data_table::body::DataTableBody;
 use crate::components::data_table::chooser::{
@@ -12,6 +12,7 @@ use crate::components::data_table::filter::{
     prune_stale_filters, row_matches_filters, row_matches_search,
 };
 use crate::components::data_table::header::DataTableHeader;
+use crate::components::data_table::pagination::page_count;
 use crate::components::data_table::selection::{
     RowClickKind, handle_row_click, index_of_key, remap_selection, row_click_kind,
     row_is_interactive, selection_keys,
@@ -98,7 +99,8 @@ fn local_storage_set(key: &str, value: &str) {
 ///
 /// By default `page_size` is fixed. Pass `auto_page_size=true` *together with*
 /// `max_height` to derive the row count from the rendered height instead, so a
-/// taller window shows more rows:
+/// taller window shows more rows. If fewer than `min_rows` fit, the table keeps
+/// the configured `page_size` (never below the minimum) and scrolls:
 ///
 /// ```rust,no_run
 /// # use leptos::prelude::*;
@@ -110,6 +112,7 @@ fn local_storage_set(key: &str, value: &str) {
 ///         data=data
 ///         auto_page_size=true
 ///         max_height="calc(100vh - 260px)"
+///         min_rows=5
 ///     />
 /// }
 /// # }
@@ -117,6 +120,8 @@ fn local_storage_set(key: &str, value: &str) {
 ///
 /// The table needs a definite height -- `max_height` (promoted to `height`
 /// here) or a parent that fixes it. See the `auto_page_size` prop docs for why.
+/// The complete `<thead>` is measured, so a filter row or wrapped labels count
+/// toward the available height.
 ///
 /// ## Example
 /// ```rust,no_run
@@ -180,8 +185,8 @@ pub fn DataTable(
     #[prop(into)]
     columns: Signal<Vec<Column>>,
 
-    /// Number of rows per page (default: 10). Ignored when `auto_page_size` is
-    /// on, which derives the row count from the table's rendered height.
+    /// Number of rows per page (default: 10). With `auto_page_size`, this is
+    /// also the fallback when fewer than `min_rows` fit in the viewport.
     #[prop(optional, into)]
     page_size: Signal<usize>,
 
@@ -208,6 +213,12 @@ pub fn DataTable(
     /// area, so they are excluded from the measurement automatically.
     #[prop(optional, into)]
     auto_page_size: Signal<bool>,
+
+    /// Usability floor for `auto_page_size` (default: 5). When the measured
+    /// fit is below this threshold, the configured `page_size` is retained
+    /// (never below this floor) and the bounded table viewport scrolls.
+    #[prop(into, default = Signal::derive(|| DEFAULT_AUTO_MIN_ROWS))]
+    min_rows: Signal<usize>,
 
     /// Loading state
     #[prop(optional, into)]
@@ -389,15 +400,18 @@ pub fn DataTable(
     // its children, so they're already excluded).
     let table_wrapper_ref = NodeRef::<Div>::new();
 
-    // Effective rows per page: the measured fit when `auto_page_size` is on and
-    // a measurement exists, else the `page_size` prop (defaulting to 10).
+    let configured_page_size = page_size;
+
+    // Effective rows per page: the measured/fallback result when
+    // `auto_page_size` is on and a measurement exists, else the configured
+    // `page_size` prop (defaulting to 10).
     let page_size = Signal::derive(move || {
         if auto_page_size.get()
             && let Some(rows) = auto_rows.get()
         {
             return rows;
         }
-        let size = page_size.get();
+        let size = configured_page_size.get();
         if size == 0 { 10 } else { size }
     });
 
@@ -620,13 +634,8 @@ pub fn DataTable(
 
     // Total pages calculation with safety guards
     let total_pages = Memo::new(move |_| {
-        let safe_page_size = page_size.get().max(1); // Prevent division by zero
         let total_items = sorted_indices.get().len();
-        if total_items == 0 {
-            1 // Always show at least "Page 1 of 1"
-        } else {
-            ((total_items as f64 / safe_page_size as f64).ceil() as usize).max(1)
-        }
+        page_count(total_items, page_size.get()).max(1)
     });
 
     // Current page rows paired with absolute indices into `data`, with safety guards
@@ -801,7 +810,20 @@ pub fn DataTable(
         let header_height = measure("thead", FALLBACK_HEADER_HEIGHT);
         let row_height = measure("tbody tr", FALLBACK_ROW_HEIGHT);
 
-        let rows = rows_per_page_for_height(viewport, header_height, row_height);
+        let configured_page_size = configured_page_size
+            .try_get_untracked()
+            .filter(|size| *size > 0)
+            .unwrap_or(10);
+        let min_rows = min_rows
+            .try_get_untracked()
+            .unwrap_or(DEFAULT_AUTO_MIN_ROWS);
+        let rows = auto_page_size_for_height(
+            viewport,
+            header_height,
+            row_height,
+            configured_page_size,
+            min_rows,
+        );
         // Write only on a real change. This is what ends the settle pass below:
         // with `viewport` independent of the row count, the second measurement
         // agrees with the first, writes nothing, and nothing re-renders.
@@ -850,14 +872,14 @@ pub fn DataTable(
     });
 
     // Re-measure when anything that moves the arithmetic changes: the opt-in
-    // itself, row height (table size / density), the rows available to measure,
-    // and `page_size` -- the last of which is what drives the settle loop.
-    // Re-measure when anything that moves the arithmetic changes: the opt-in
-    // itself, row height (table size / density), and the rows available to
-    // measure. Reading `page_size` also re-measures once after the count
-    // changes, which corrects a height latched from an unsettled layout.
+    // itself, the usability/configured fallbacks, row height (table size /
+    // density), and the rows available to measure. Reading the effective
+    // `page_size` also re-measures once after the count changes, which corrects
+    // a height latched from an unsettled layout.
     Effect::new(move |_| {
         let _ = auto_page_size.get();
+        let _ = min_rows.get();
+        let _ = configured_page_size.get();
         let _ = table_size.get();
         let _ = data.get();
         let _ = page_size.get();
@@ -947,7 +969,12 @@ pub fn DataTable(
     let controls_style = move || is_flex_column().then_some("flex-shrink: 0; padding: 12px 0");
 
     view! {
-        <div class=container_class node_ref=node_ref style=container_style>
+        <div
+            class=container_class
+            node_ref=node_ref
+            style=container_style
+            data-table-data-mode="compatibility-client"
+        >
             {move || {
                 let show_search = searchable.get();
                 let show_chooser = column_chooser.get();

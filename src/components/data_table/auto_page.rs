@@ -22,6 +22,10 @@ pub const FALLBACK_ROW_HEIGHT: f64 = 40.0;
 /// Matches d2d-ui's `HEADER_HEIGHT`.
 pub const FALLBACK_HEADER_HEIGHT: f64 = 36.0;
 
+/// Default usability threshold for responsive paging. If fewer rows fit, the
+/// configured page size is retained and the table viewport scrolls.
+pub const DEFAULT_AUTO_MIN_ROWS: usize = 5;
+
 /// Number of data rows that fit in a scroll viewport of `viewport_height` px,
 /// after subtracting the sticky header row. Always at least 1 — a viewport too
 /// short for even one row still shows one rather than an empty table.
@@ -67,6 +71,29 @@ pub fn rows_per_page_for_height(
     // `f64 as usize` saturates (never UB / never wraps) since Rust 1.45, so an
     // absurd viewport height clamps to usize::MAX instead of misbehaving.
     ((available / row_height).floor() as usize).max(1)
+}
+
+/// Resolves the effective responsive page size for a measured table viewport.
+///
+/// A measured fit at or above `min_rows` remains fully responsive. Below that
+/// usability threshold, the caller's configured page size takes over (never
+/// below `min_rows`) and the table's existing scroll wrapper absorbs the
+/// overflow. This prevents tall, wrapped rows from collapsing pagination to a
+/// one-row page while preserving exact-fit behavior in normal viewports.
+pub fn auto_page_size_for_height(
+    viewport_height: f64,
+    header_height: f64,
+    row_height: f64,
+    configured_page_size: usize,
+    min_rows: usize,
+) -> usize {
+    let measured = rows_per_page_for_height(viewport_height, header_height, row_height);
+    let min_rows = min_rows.max(1);
+    if measured < min_rows {
+        configured_page_size.max(min_rows)
+    } else {
+        measured
+    }
 }
 
 #[cfg(test)]
@@ -168,5 +195,24 @@ mod tests {
     fn absurd_viewport_saturates_rather_than_wrapping() {
         // `f64 as usize` saturates; assert we get a huge count, not 0 or a panic.
         assert!(rows_per_page_for_height(f64::MAX, 36.0, 40.0) > 0);
+    }
+
+    #[test]
+    fn tall_rows_below_the_minimum_fall_back_to_the_configured_page_size() {
+        // Production reproduction from ldui-495: a 224px wrapper, 77px
+        // two-row header, and 76px badge rows mathematically fit one row. A
+        // one-row pager is unusable, so auto sizing falls back and scrolls.
+        assert_eq!(auto_page_size_for_height(224.0, 77.0, 76.0, 10, 5), 10);
+    }
+
+    #[test]
+    fn configured_fallback_cannot_undercut_the_minimum() {
+        assert_eq!(auto_page_size_for_height(224.0, 77.0, 76.0, 3, 5), 5);
+    }
+
+    #[test]
+    fn a_measured_fit_at_the_minimum_remains_responsive() {
+        // 77px header + five 76px rows.
+        assert_eq!(auto_page_size_for_height(457.0, 77.0, 76.0, 10, 5), 5);
     }
 }

@@ -36,6 +36,7 @@ async fn client_snapshot_list_contract_works_end_to_end() {
             const chooser = root.querySelector('[data-entity-table] [role="menu"]');
             return {
                 contract: root.dataset.pageContract,
+                dataMode: root.querySelector('[data-entity-table]').dataset.tableDataMode,
                 tableTag: table?.tagName.toLowerCase(),
                 rows: table.querySelectorAll('tbody tr').length,
                 initialSort: firstHeader.getAttribute('aria-sort'),
@@ -48,6 +49,7 @@ async fn client_snapshot_list_contract_works_end_to_end() {
     )
     .await;
     assert_eq!(initial["contract"], json!("client-snapshot-demo"));
+    assert_eq!(initial["dataMode"], json!("client-snapshot"));
     assert_eq!(initial["tableTag"], json!("table"));
     assert_eq!(
         initial["rows"],

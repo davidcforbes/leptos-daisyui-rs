@@ -728,7 +728,8 @@ pub fn DataTableDemo() -> impl IntoView {
                     "With " <code>"auto_page_size=true"</code> " the row count is derived from the "
                     "table's rendered height instead of a fixed " <code>"page_size"</code> ", so a "
                     "taller window shows more rows. Drag the resizer below (or resize the window) and "
-                    "watch the row count and \"Showing X\u{2013}Y of Z\" caption follow."
+                    "watch the row count and \"Showing X\u{2013}Y of Z\" caption follow. Below the "
+                    "five-row usability floor it keeps the configured page size and scrolls instead."
                 </p>
                 <div class="alert alert-info mb-4">
                     <span>
@@ -746,6 +747,7 @@ pub fn DataTableDemo() -> impl IntoView {
                         columns=standard_columns
                         auto_page_size=true
                         max_height="100%"
+                        attr:id="auto-page-table"
                     />
                 </div>
             </Section>

@@ -64,8 +64,12 @@ pub mod sort;
 /// Types for DataTable component including Column, SortOrder, and configuration structs
 pub mod types;
 
-pub use auto_page::{FALLBACK_HEADER_HEIGHT, FALLBACK_ROW_HEIGHT, rows_per_page_for_height};
+pub use auto_page::{
+    DEFAULT_AUTO_MIN_ROWS, FALLBACK_HEADER_HEIGHT, FALLBACK_ROW_HEIGHT, auto_page_size_for_height,
+    rows_per_page_for_height,
+};
 pub use chooser::DataTableColumnChooser;
+pub(crate) use chooser::{ColumnVisibilityAction, column_visibility_action};
 pub use clipboard::{cell_text, row_text, row_with_headers_text};
 pub use component::*;
 pub use filter::{
@@ -73,6 +77,7 @@ pub use filter::{
     prune_stale_filters, row_matches_filters, row_matches_search,
 };
 pub(crate) use pagination::{PageSlot, page_window, row_range};
+pub use pagination::{clamp_page, page_bounds, page_count};
 pub(crate) use resize::{MAX_COLUMN_WIDTH, effective_min_width, resized_width};
 pub use selection::{
     RowClickKind, click_swallowed_by_inspect, handle_row_click, key_inspects, row_click_kind,

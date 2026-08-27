@@ -5,6 +5,35 @@
 //!
 //! [`DataTableControls`]: crate::components::data_table::controls::DataTableControls
 
+use std::ops::Range;
+
+/// Returns the total number of pages, treating a zero page size as one.
+pub fn page_count(total_items: usize, page_size: usize) -> usize {
+    if total_items == 0 {
+        0
+    } else {
+        total_items.div_ceil(page_size.max(1))
+    }
+}
+
+/// Clamps a zero-based page index to the last available page.
+pub fn clamp_page(current_page: usize, page_size: usize, total_items: usize) -> usize {
+    page_count(total_items, page_size)
+        .saturating_sub(1)
+        .min(current_page)
+}
+
+/// Returns the zero-based source-index range for the available page.
+pub fn page_bounds(current_page: usize, page_size: usize, total_items: usize) -> Range<usize> {
+    if total_items == 0 {
+        return 0..0;
+    }
+    let page_size = page_size.max(1);
+    let page = clamp_page(current_page, page_size, total_items);
+    let start = page.saturating_mul(page_size);
+    start..(start + page_size).min(total_items)
+}
+
 /// A single slot in a rendered page-number strip: either a clickable page
 /// number, or an ellipsis standing in for a run of skipped pages.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -99,6 +128,14 @@ mod tests {
                 PageSlot::Ellipsis => -1,
             })
             .collect()
+    }
+
+    #[test]
+    fn shared_page_state_clamps_and_slices_the_last_partial_page() {
+        assert_eq!(page_count(74, 25), 3);
+        assert_eq!(clamp_page(8, 25, 74), 2);
+        assert_eq!(page_bounds(8, 25, 74), 50..74);
+        assert_eq!(page_bounds(0, 25, 0), 0..0);
     }
 
     // ── page_window: total <= max_visible (no ellipsis) ──

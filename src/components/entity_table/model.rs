@@ -1,8 +1,10 @@
 //! Pure ordering, pagination, visibility, and resize behavior.
 
 use super::types::{EntityColumn, EntitySort, EntityTablePreferences};
-use crate::components::data_table::{MAX_COLUMN_WIDTH, effective_min_width, resized_width};
-use std::ops::Range;
+use crate::components::data_table::{
+    ColumnVisibilityAction, MAX_COLUMN_WIDTH, clamp_page, column_visibility_action,
+    effective_min_width, resized_width,
+};
 use std::rc::Rc;
 
 /// Supported row counts for client-snapshot tables.
@@ -115,33 +117,6 @@ impl<T> SortedIndexCache<T> {
     }
 }
 
-/// Returns the total number of pages, treating a zero page size as one.
-pub fn page_count(total_rows: usize, page_size: usize) -> usize {
-    if total_rows == 0 {
-        0
-    } else {
-        total_rows.div_ceil(page_size.max(1))
-    }
-}
-
-/// Clamps a zero-based page index to the last available page.
-pub fn clamp_page(current_page: usize, page_size: usize, total_rows: usize) -> usize {
-    page_count(total_rows, page_size)
-        .saturating_sub(1)
-        .min(current_page)
-}
-
-/// Returns the source-index range for a page after clamping it to available rows.
-pub fn page_bounds(current_page: usize, page_size: usize, total_rows: usize) -> Range<usize> {
-    if total_rows == 0 {
-        return 0..0;
-    }
-    let page_size = page_size.max(1);
-    let page = clamp_page(current_page, page_size, total_rows);
-    let start = page.saturating_mul(page_size);
-    start..(start + page_size).min(total_rows)
-}
-
 /// Resets pagination only when a selector loads a different dataset identity.
 pub fn page_after_dataset_change<T: PartialEq>(
     current_page: usize,
@@ -187,24 +162,48 @@ pub fn toggle_hidden_column<T>(
     let Some(column) = columns.iter().find(|column| column.id == column_id) else {
         return false;
     };
-    if preferences.hidden_columns.remove(column_id) {
-        return true;
-    }
-    if column.required {
-        return false;
-    }
     let visible_count = columns
         .iter()
         .filter(|candidate| !preferences.hidden_columns.contains(candidate.id))
         .count();
-    if visible_count <= 1 {
-        return false;
+    let is_hidden = preferences.hidden_columns.contains(column_id);
+    match column_visibility_action(is_hidden, column.required, visible_count) {
+        ColumnVisibilityAction::Show => preferences.hidden_columns.remove(column_id),
+        ColumnVisibilityAction::Hide => preferences.hidden_columns.insert(column_id.to_owned()),
+        ColumnVisibilityAction::Unchanged => false,
     }
-    preferences.hidden_columns.insert(column_id.to_owned());
-    true
 }
 
-pub(crate) fn normalize_preferences<T>(
+/// Returns a normalized clone for the declared schema and column set.
+///
+/// The supplied value is never mutated. Invalid versions reset to defaults;
+/// unknown, required, or unsupported column preferences are removed
+/// deterministically.
+pub fn normalize_preferences<T>(
+    preferences: &EntityTablePreferences,
+    schema_version: u16,
+    columns: &[EntityColumn<T>],
+) -> EntityTablePreferences {
+    let mut normalized = preferences.clone();
+    normalize_preferences_in_place(&mut normalized, schema_version, columns);
+    normalized
+}
+
+pub(crate) fn emit_normalized_preference_change<T>(
+    current: &EntityTablePreferences,
+    schema_version: u16,
+    columns: &[EntityColumn<T>],
+    update: impl FnOnce(&mut EntityTablePreferences),
+    emit: impl FnOnce(EntityTablePreferences),
+) -> EntityTablePreferences {
+    let mut replacement = normalize_preferences(current, schema_version, columns);
+    update(&mut replacement);
+    replacement = normalize_preferences(&replacement, schema_version, columns);
+    emit(replacement.clone());
+    replacement
+}
+
+fn normalize_preferences_in_place<T>(
     preferences: &mut EntityTablePreferences,
     schema_version: u16,
     columns: &[EntityColumn<T>],

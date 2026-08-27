@@ -1,17 +1,19 @@
 //! Reactive renderer for the typed client-side table model.
 
 use super::model::{
-    ENTITY_PAGE_SIZE_CHOICES, SortedIndexCache, clamp_page, next_sort, page_after_dataset_change,
-    page_after_row_delta, page_bounds, page_count, reset_columns, reset_sort, set_preferred_width,
-    toggle_hidden_column,
+    ENTITY_PAGE_SIZE_CHOICES, SortedIndexCache, emit_normalized_preference_change, next_sort,
+    normalize_preferences, page_after_dataset_change, page_after_row_delta, reset_columns,
+    reset_sort, set_preferred_width, toggle_hidden_column,
 };
 use super::storage::{load_preferences, save_preferences};
 use super::types::{
-    EntityColumn, EntityRowKey, EntityRowRenderer, EntitySort, EntityTablePreferences,
-    EntityTableTexts,
+    EntityColumn, EntityRowKey, EntityRowRenderer, EntitySort, EntityTablePreferenceOwnership,
+    EntityTablePreferencePersistence, EntityTablePreferences, EntityTableTexts,
 };
 use crate::components::button::Button;
-use crate::components::data_table::{PageSlot, page_window, row_range};
+use crate::components::data_table::{
+    PageSlot, clamp_page, page_bounds, page_count, page_window, row_range,
+};
 use crate::components::dropdown::{Dropdown, DropdownContent, DropdownPlacement};
 use crate::components::menu::{Menu, MenuCheckItem};
 use crate::components::pagination::Pagination;
@@ -30,6 +32,194 @@ struct ResizeDrag {
     start_x: f64,
     start_width: f64,
     minimum_width: Option<u32>,
+}
+
+#[derive(Clone, Copy)]
+enum PreferenceSource {
+    Controlled {
+        current: Signal<EntityTablePreferences>,
+        on_change: Callback<EntityTablePreferences>,
+    },
+    Uncontrolled {
+        current: RwSignal<EntityTablePreferences>,
+        persistence: EntityTablePreferencePersistence,
+    },
+}
+
+pub(super) struct PreferenceState<T: 'static> {
+    source: PreferenceSource,
+    columns: StoredValue<Vec<EntityColumn<T>>, LocalStorage>,
+    schema_version: u16,
+}
+
+impl<T: 'static> Clone for PreferenceState<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T: 'static> Copy for PreferenceState<T> {}
+
+impl<T: 'static> PreferenceState<T> {
+    pub(super) fn new(
+        ownership: EntityTablePreferenceOwnership,
+        columns: StoredValue<Vec<EntityColumn<T>>, LocalStorage>,
+        schema_version: u16,
+    ) -> Self {
+        let source = match ownership {
+            EntityTablePreferenceOwnership::Controlled { current, on_change } => {
+                PreferenceSource::Controlled { current, on_change }
+            }
+            EntityTablePreferenceOwnership::Uncontrolled { persistence } => {
+                let initial = columns
+                    .with_value(|columns| load_preferences(persistence, schema_version, columns));
+                PreferenceSource::Uncontrolled {
+                    current: RwSignal::new(initial),
+                    persistence,
+                }
+            }
+        };
+        Self {
+            source,
+            columns,
+            schema_version,
+        }
+    }
+
+    pub(super) fn get(self) -> EntityTablePreferences {
+        let current = match self.source {
+            PreferenceSource::Controlled { current, .. } => current.get(),
+            PreferenceSource::Uncontrolled { current, .. } => current.get(),
+        };
+        self.columns
+            .with_value(|columns| normalize_preferences(&current, self.schema_version, columns))
+    }
+
+    fn get_untracked(self) -> EntityTablePreferences {
+        let current = match self.source {
+            PreferenceSource::Controlled { current, .. } => current.get_untracked(),
+            PreferenceSource::Uncontrolled { current, .. } => current.get_untracked(),
+        };
+        self.columns
+            .with_value(|columns| normalize_preferences(&current, self.schema_version, columns))
+    }
+
+    fn with_untracked<R>(self, read: impl FnOnce(&EntityTablePreferences) -> R) -> R {
+        read(&self.get_untracked())
+    }
+
+    fn with<R>(self, read: impl FnOnce(&EntityTablePreferences) -> R) -> R {
+        read(&self.get())
+    }
+
+    fn rendered_widths(self) -> BTreeMap<String, u32> {
+        let current = self.get_untracked();
+        self.columns
+            .with_value(|columns| rendered_column_widths(&current, columns))
+    }
+
+    pub(super) fn update_and_rendered_widths(
+        self,
+        update: impl FnOnce(&mut EntityTablePreferences),
+    ) -> BTreeMap<String, u32> {
+        self.update(update);
+        self.rendered_widths()
+    }
+
+    pub(super) fn update(
+        self,
+        update: impl FnOnce(&mut EntityTablePreferences),
+    ) -> EntityTablePreferences {
+        let current = self.get_untracked();
+        self.columns.with_value(|columns| {
+            emit_normalized_preference_change(
+                &current,
+                self.schema_version,
+                columns,
+                update,
+                |replacement| match self.source {
+                    PreferenceSource::Controlled { on_change, .. } => on_change.run(replacement),
+                    PreferenceSource::Uncontrolled { current, .. } => current.set(replacement),
+                },
+            )
+        })
+    }
+}
+
+pub(super) struct DatasetTransitionController<T: 'static> {
+    current_page: RwSignal<usize>,
+    preferences: PreferenceState<T>,
+}
+
+impl<T: 'static> Clone for DatasetTransitionController<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T: 'static> Copy for DatasetTransitionController<T> {}
+
+impl<T: 'static> DatasetTransitionController<T> {
+    pub(super) const fn new(
+        current_page: RwSignal<usize>,
+        preferences: PreferenceState<T>,
+    ) -> Self {
+        Self {
+            current_page,
+            preferences,
+        }
+    }
+
+    pub(super) fn apply(self, previous_dataset: String, next_dataset: String) {
+        let supplied_preferences = self.preferences.get_untracked();
+        let next_page = page_after_dataset_change(
+            self.current_page.get_untracked(),
+            previous_dataset,
+            next_dataset,
+        );
+        self.current_page.set(next_page);
+        debug_assert_eq!(
+            self.preferences.get_untracked(),
+            supplied_preferences,
+            "dataset changes must preserve supplied EntityTable preferences"
+        );
+    }
+}
+
+pub(super) fn apply_page_size_change<T: 'static>(
+    preferences: PreferenceState<T>,
+    current_page: RwSignal<usize>,
+    requested_value: &str,
+    reassert_live_value: impl FnOnce(String),
+) {
+    if let Ok(page_size) = requested_value.parse::<usize>()
+        && ENTITY_PAGE_SIZE_CHOICES.contains(&page_size)
+    {
+        preferences.update(|preferences| preferences.page_size = page_size);
+        current_page.set(0);
+    }
+
+    let supplied_value =
+        preferences.with_untracked(|preferences| preferences.page_size.to_string());
+    reassert_live_value(supplied_value);
+}
+
+pub(super) fn resolve_preference_ownership(
+    explicit: Option<EntityTablePreferenceOwnership>,
+    legacy_storage_key: Option<&'static str>,
+) -> EntityTablePreferenceOwnership {
+    match (explicit, legacy_storage_key) {
+        (Some(_), Some(_)) => {
+            panic!("EntityTable configuration cannot combine preference_ownership with storage_key")
+        }
+        (Some(ownership), None) => ownership,
+        (None, Some(storage_key)) => EntityTablePreferenceOwnership::Uncontrolled {
+            persistence: EntityTablePreferencePersistence::LegacyLocalStorage { storage_key },
+        },
+        (None, None) => EntityTablePreferenceOwnership::Uncontrolled {
+            persistence: EntityTablePreferencePersistence::Disabled,
+        },
+    }
 }
 
 /// A typed, client-side table for complete dataset snapshots.
@@ -62,8 +252,15 @@ pub fn EntityTable<T>(
     #[prop(optional)]
     on_row_activate: Option<Callback<String>>,
     /// Preference namespace appended to the framework storage prefix.
+    ///
+    /// This compatibility prop selects `LegacyLocalStorage` when
+    /// `preference_ownership` is omitted. Supplying both is a configuration
+    /// error so controlled ownership can never silently perform browser I/O.
     #[prop(optional)]
     storage_key: Option<&'static str>,
+    /// Typed preference ownership. Controlled mode performs no component I/O.
+    #[prop(optional)]
+    preference_ownership: Option<EntityTablePreferenceOwnership>,
     /// Consumer-controlled preference schema version.
     #[prop(default = 1)]
     preference_version: u16,
@@ -80,25 +277,25 @@ pub fn EntityTable<T>(
 where
     T: Clone + 'static,
 {
-    let initial_preferences = load_preferences(storage_key, preference_version, &columns);
-    let initial_widths = rendered_column_widths(&initial_preferences, &columns);
-
     let column_store = StoredValue::new_local(columns);
+    let preference_ownership = resolve_preference_ownership(preference_ownership, storage_key);
+    let preferences = PreferenceState::new(preference_ownership, column_store, preference_version);
+    let initial_widths = column_store
+        .with_value(|columns| rendered_column_widths(&preferences.get_untracked(), columns));
     let row_key = StoredValue::new_local(row_key);
     let compact_row = StoredValue::new_local(compact_row);
     let sorted_index_cache = StoredValue::new_local(SortedIndexCache::new());
-    let preferences = RwSignal::new(initial_preferences);
     let column_widths = RwSignal::new(initial_widths);
     let current_page = RwSignal::new(0_usize);
     let previous_dataset = StoredValue::new(dataset_identity.get_untracked());
     let resize_drag = RwSignal::new(Option::<ResizeDrag>::None);
+    let dataset_transition = DatasetTransitionController::new(current_page, preferences);
+    let page_size_select = NodeRef::<leptos::html::Select>::new();
 
     Effect::new(move |_| {
         let next_dataset = dataset_identity.get();
         let previous = previous_dataset.get_value();
-        let next_page =
-            page_after_dataset_change(current_page.get_untracked(), previous, next_dataset.clone());
-        current_page.set(next_page);
+        dataset_transition.apply(previous, next_dataset.clone());
         previous_dataset.set_value(next_dataset);
     });
 
@@ -123,8 +320,23 @@ where
         }
     });
 
+    if let PreferenceSource::Uncontrolled {
+        current,
+        persistence,
+    } = preferences.source
+    {
+        Effect::new(move |_| {
+            current.with(|preferences| save_preferences(persistence, preferences));
+        });
+    }
+
     Effect::new(move |_| {
-        preferences.with(|preferences| save_preferences(storage_key, preferences));
+        let next_widths = column_store.with_value(|columns| {
+            preferences.with(|preferences| rendered_column_widths(preferences, columns))
+        });
+        if next_widths != column_widths.get_untracked() {
+            column_widths.set(next_widths);
+        }
     });
 
     let visible_columns = move || {
@@ -150,6 +362,7 @@ where
         <section
             class=merge_classes!("w-full min-w-0 space-y-3", class)
             data-entity-table="true"
+            data-table-data-mode="client-snapshot"
         >
             <div class="flex flex-wrap items-center justify-end gap-2">
                 <label class="flex items-center gap-2 text-sm text-base-content/75">
@@ -162,14 +375,18 @@ where
                         value=Signal::derive(move || {
                             preferences.with(|preferences| preferences.page_size.to_string())
                         })
+                        node_ref=page_size_select
                         on_change=Callback::new(move |value: String| {
-                            if let Ok(page_size) = value.parse::<usize>()
-                                && ENTITY_PAGE_SIZE_CHOICES.contains(&page_size)
-                            {
-                                preferences
-                                    .update(|preferences| preferences.page_size = page_size);
-                                current_page.set(0);
-                            }
+                            apply_page_size_change(
+                                preferences,
+                                current_page,
+                                &value,
+                                move |supplied_value| {
+                                    if let Some(select) = page_size_select.get() {
+                                        select.set_value(&supplied_value);
+                                    }
+                                },
+                            );
                         })
                     >
                         {ENTITY_PAGE_SIZE_CHOICES.into_iter().map(|page_size| view! {
@@ -253,15 +470,11 @@ where
                                 && preferences.column_widths.is_empty()
                         }))
                         on_click=Callback::new(move |_| {
-                            preferences.update(|preferences| {
-                                reset_columns(preferences);
-                            });
-                            column_store.with_value(|columns| {
-                                column_widths.set(rendered_column_widths(
-                                    &EntityTablePreferences::new(preference_version),
-                                    columns,
-                                ));
-                            });
+                            column_widths.set(
+                                preferences.update_and_rendered_widths(|preferences| {
+                                    reset_columns(preferences);
+                                }),
+                            );
                         })
                     >
                         {move || texts.with(|texts| texts.reset_columns.clone())}
@@ -671,12 +884,12 @@ fn event_origin_is_action(target: Option<web_sys::EventTarget>) -> bool {
         .is_some()
 }
 
-fn finish_resize(
+fn finish_resize<T: 'static>(
     target: Option<web_sys::EventTarget>,
     pointer_id: i32,
     resize_drag: RwSignal<Option<ResizeDrag>>,
     column_widths: RwSignal<BTreeMap<String, u32>>,
-    preferences: RwSignal<EntityTablePreferences>,
+    preferences: PreferenceState<T>,
 ) {
     if let Some(target) = target
         && let Ok(element) = target.dyn_into::<web_sys::Element>()
@@ -687,9 +900,9 @@ fn finish_resize(
         && let Some(width) =
             column_widths.with_untracked(|widths| widths.get(&drag.column_id).copied())
     {
-        preferences.update(|preferences| {
+        column_widths.set(preferences.update_and_rendered_widths(|preferences| {
             preferences.column_widths.insert(drag.column_id, width);
-        });
+        }));
     }
     resize_drag.set(None);
 }

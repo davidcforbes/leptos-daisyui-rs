@@ -1,7 +1,7 @@
 //! Versioned preference serialization and browser storage access.
 
 use super::model::normalize_preferences;
-use super::types::{EntityColumn, EntityTablePreferences};
+use super::types::{EntityColumn, EntityTablePreferencePersistence, EntityTablePreferences};
 
 const STORAGE_PREFIX: &str = "ldui-entity-table:";
 
@@ -18,41 +18,60 @@ pub fn decode_preferences<T>(
     schema_version: u16,
     columns: &[EntityColumn<T>],
 ) -> EntityTablePreferences {
-    let mut preferences = serde_json::from_str(payload)
+    let preferences = serde_json::from_str(payload)
         .unwrap_or_else(|_| EntityTablePreferences::new(schema_version));
-    normalize_preferences(&mut preferences, schema_version, columns);
-    preferences
+    normalize_preferences(&preferences, schema_version, columns)
 }
 
 pub(crate) fn load_preferences<T>(
-    storage_key: Option<&str>,
+    persistence: EntityTablePreferencePersistence,
     schema_version: u16,
     columns: &[EntityColumn<T>],
 ) -> EntityTablePreferences {
-    let Some(storage_key) = storage_key else {
-        return EntityTablePreferences::new(schema_version);
-    };
-    let Some(storage) = browser_storage() else {
+    load_preferences_with(persistence, schema_version, columns, |key| {
+        browser_storage()?.get_item(key).ok().flatten()
+    })
+}
+
+pub(crate) fn load_preferences_with<T>(
+    persistence: EntityTablePreferencePersistence,
+    schema_version: u16,
+    columns: &[EntityColumn<T>],
+    read: impl FnOnce(&str) -> Option<String>,
+) -> EntityTablePreferences {
+    let EntityTablePreferencePersistence::LegacyLocalStorage { storage_key } = persistence else {
         return EntityTablePreferences::new(schema_version);
     };
     let key = format!("{STORAGE_PREFIX}{storage_key}");
-    storage
-        .get_item(&key)
-        .ok()
-        .flatten()
+    read(&key)
         .map(|payload| decode_preferences(&payload, schema_version, columns))
         .unwrap_or_else(|| EntityTablePreferences::new(schema_version))
 }
 
-pub(crate) fn save_preferences(storage_key: Option<&str>, preferences: &EntityTablePreferences) {
-    let (Some(storage_key), Some(storage)) = (storage_key, browser_storage()) else {
+pub(crate) fn save_preferences(
+    persistence: EntityTablePreferencePersistence,
+    preferences: &EntityTablePreferences,
+) {
+    save_preferences_with(persistence, preferences, |key, payload| {
+        if let Some(storage) = browser_storage() {
+            let _ = storage.set_item(key, payload);
+        }
+    });
+}
+
+pub(crate) fn save_preferences_with(
+    persistence: EntityTablePreferencePersistence,
+    preferences: &EntityTablePreferences,
+    write: impl FnOnce(&str, &str),
+) {
+    let EntityTablePreferencePersistence::LegacyLocalStorage { storage_key } = persistence else {
         return;
     };
     let Ok(payload) = encode_preferences(preferences) else {
         return;
     };
     let key = format!("{STORAGE_PREFIX}{storage_key}");
-    let _ = storage.set_item(&key, &payload);
+    write(&key, &payload);
 }
 
 #[cfg(target_arch = "wasm32")]

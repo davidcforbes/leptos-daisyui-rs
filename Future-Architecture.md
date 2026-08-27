@@ -523,11 +523,14 @@ Patterns own spacing, alignment, responsive collapse, labels, keyboard
 behavior, and state presentation. Page code supplies typed content and domain
 callbacks.
 
-`EntityTable` and the existing server-oriented DataTable MUST converge on
-shared column, cell, resize, reorder, visibility, pagination, and
-accessibility contracts where practical. They MUST remain explicit about
-their data mode. Silently switching between client and server filtering is
-forbidden. Framework tracking issue `ldui-aqo` owns this convergence.
+`EntityTable` and the DataTable family share pagination, resize bounds, and
+column-visibility transitions while retaining typed renderers for their
+different row models. Their data modes are explicit and browser-observable:
+`client-snapshot` for `EntityTable`, `server-query` for `ServerDataTable`, and
+`compatibility-client` for the existing dynamic `components::DataTable` path.
+New contracted snapshots use `EntityTable`; existing dynamic client tables
+remain compatible until their required feature surface has a typed migration.
+Silently switching between client and server filtering is forbidden.
 
 ### 8.4 Layer 3: page archetypes
 

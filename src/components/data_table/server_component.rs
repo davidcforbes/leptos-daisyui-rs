@@ -407,7 +407,12 @@ pub fn ServerDataTable(
     };
 
     view! {
-        <div class=container_class node_ref=node_ref style=container_style>
+        <div
+            class=container_class
+            node_ref=node_ref
+            style=container_style
+            data-table-data-mode="server-query"
+        >
             {move || {
                 if has_search {
                     Some(view! {

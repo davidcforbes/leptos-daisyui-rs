@@ -131,6 +131,51 @@ async fn data_table_sort_toggles_via_oracle() {
     );
 }
 
+/// Responsive paging must not collapse a short viewport to one row. When the
+/// measured fit falls below the usability floor, the configured page size is
+/// retained and the already-bounded table viewport scrolls instead.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn auto_page_size_keeps_a_usable_page_and_scrolls_short_viewports() {
+    let h = harness_at("/components/data-table").await;
+
+    h.page()
+        .evaluate(
+            r#"(() => {
+                const root = document.querySelector('#auto-page-table');
+                root.parentElement.style.height = '128px';
+                return true;
+            })()"#,
+        )
+        .await
+        .expect("shrink responsive table host");
+    tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+
+    let snapshot = eval_json(
+        &h,
+        r#"(() => {
+            const root = document.querySelector('#auto-page-table');
+            const viewport = root.querySelector(':scope > .overflow-x-auto');
+            return {
+                rows: root.querySelectorAll('tbody tr').length,
+                viewportHeight: viewport.clientHeight,
+                scrollHeight: viewport.scrollHeight,
+            };
+        })()"#,
+    )
+    .await;
+
+    assert_eq!(
+        snapshot["rows"],
+        json!(10),
+        "the default configured page size is the short-viewport fallback: {snapshot}"
+    );
+    assert!(
+        snapshot["scrollHeight"].as_u64() > snapshot["viewportHeight"].as_u64(),
+        "the bounded wrapper must scroll rather than collapsing pagination: {snapshot}"
+    );
+}
+
 /// Text content of the element with the given `data-testid`.
 async fn testid_text(h: &pixelproof_web::Harness, testid: &str) -> String {
     let sel = format!("[data-testid=\"{testid}\"]");
@@ -1006,6 +1051,16 @@ async fn extra_filter_composes_with_builtin_toolbar() {
     let h = harness_at("/components/data-table").await;
     let rows = "#custom-filter-table tbody tr";
 
+    assert_eq!(
+        eval_json(
+            &h,
+            "document.querySelector('#custom-filter-table').dataset.tableDataMode",
+        )
+        .await,
+        json!("compatibility-client"),
+        "the dynamic HashMap table is an explicit compatibility client mode",
+    );
+
     assert_eq!(count_of(&h, rows).await, 25, "all rows visible initially");
     // The built-in search box must be present alongside the custom control.
     assert_eq!(
@@ -1179,6 +1234,16 @@ async fn day_scheduler_keyboard_moves_event() {
 #[ignore = "requires demo dev server (cargo make test-visual)"]
 async fn server_table_round_trips_typed_query() {
     let h = harness_at("/components/data-table").await;
+
+    assert_eq!(
+        eval_json(
+            &h,
+            "document.querySelector('#server-table').dataset.tableDataMode",
+        )
+        .await,
+        json!("server-query"),
+        "server-owned rows must never look like a complete client snapshot",
+    );
 
     assert_eq!(
         count_of(&h, "#server-table tbody tr").await,

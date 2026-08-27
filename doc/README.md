@@ -67,6 +67,7 @@ Each component documentation follows a consistent structure:
 - [Checkbox](./components/checkbox.md) - Boolean selection with indeterminate support
 
 ### Data Components
+- [EntityTable](./components/entity_table.md) - Typed complete-client-snapshot table with governed preference ownership
 - [DataTable](./components/data_table.md) - Sorting, pagination, filtering, search, selection, row activation, and column resizing (plus `ServerDataTable` for server-side paging)
 
 ### Layout Components

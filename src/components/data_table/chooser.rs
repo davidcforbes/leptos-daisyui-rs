@@ -20,6 +20,35 @@ use std::collections::HashSet;
 /// `chooser_key` is appended.
 pub(crate) const CHOOSER_STORAGE_PREFIX: &str = "ldui-dt-cols:";
 
+/// The normalized state transition for a column-visibility action.
+///
+/// Both `DataTable` and `EntityTable` use this policy so required columns and
+/// the last visible column cannot diverge between their chooser renderers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ColumnVisibilityAction {
+    /// Reveal a currently hidden column.
+    Show,
+    /// Hide a currently visible optional column.
+    Hide,
+    /// Refuse the action because the column is required or is the last one.
+    Unchanged,
+}
+
+/// Chooses one visibility transition from current state and column policy.
+pub(crate) const fn column_visibility_action(
+    is_hidden: bool,
+    is_required: bool,
+    visible_count: usize,
+) -> ColumnVisibilityAction {
+    if is_hidden {
+        ColumnVisibilityAction::Show
+    } else if is_required || visible_count <= 1 {
+        ColumnVisibilityAction::Unchanged
+    } else {
+        ColumnVisibilityAction::Hide
+    }
+}
+
 /// The columns that remain visible: every column whose id is not in `hidden`,
 /// in their original order.
 pub(crate) fn visible_columns(columns: &[Column], hidden: &HashSet<&'static str>) -> Vec<Column> {
@@ -38,10 +67,40 @@ pub(crate) fn is_only_visible(
     hidden: &HashSet<&'static str>,
     id: &str,
 ) -> bool {
-    let mut visible = columns.iter().filter(|c| !hidden.contains(c.id));
-    match (visible.next(), visible.next()) {
-        (Some(first), None) => first.id == id,
-        _ => false,
+    let Some(column) = columns.iter().find(|column| column.id == id) else {
+        return false;
+    };
+    let is_hidden = hidden.contains(column.id);
+    let visible_count = columns
+        .iter()
+        .filter(|candidate| !hidden.contains(candidate.id))
+        .count();
+    !is_hidden
+        && column_visibility_action(is_hidden, false, visible_count)
+            == ColumnVisibilityAction::Unchanged
+}
+
+/// Applies the shared visibility transition to DataTable's borrowed-id set.
+///
+/// The transition is guarded in state as well as in the disabled menu item,
+/// so a stale or synthetic event cannot hide the last visible column.
+pub(crate) fn toggle_hidden_column(
+    columns: &[Column],
+    hidden: &mut HashSet<&'static str>,
+    id: &'static str,
+) -> bool {
+    let Some(column) = columns.iter().find(|column| column.id == id) else {
+        return false;
+    };
+    let is_hidden = hidden.contains(column.id);
+    let visible_count = columns
+        .iter()
+        .filter(|candidate| !hidden.contains(candidate.id))
+        .count();
+    match column_visibility_action(is_hidden, false, visible_count) {
+        ColumnVisibilityAction::Show => hidden.remove(column.id),
+        ColumnVisibilityAction::Hide => hidden.insert(column.id),
+        ColumnVisibilityAction::Unchanged => false,
     }
 }
 
@@ -103,13 +162,11 @@ pub fn DataTableColumnChooser(
                                         hidden.with(|h| is_only_visible(cols, h, id))
                                     })
                                 });
-                                let on_toggle = Callback::new(move |now_checked: bool| {
-                                    hidden.update(|h| {
-                                        if now_checked {
-                                            h.remove(id);
-                                        } else {
-                                            h.insert(id);
-                                        }
+                                let on_toggle = Callback::new(move |_now_checked: bool| {
+                                    columns.with_untracked(|columns| {
+                                        hidden.update(|hidden| {
+                                            toggle_hidden_column(columns, hidden, id);
+                                        });
                                     });
                                 });
                                 view! {
@@ -141,6 +198,45 @@ mod tests {
             Column::new("name", "Name"),
             Column::new("balance", "Balance"),
         ]
+    }
+
+    #[test]
+    fn shared_visibility_policy_covers_show_hide_and_guarded_noop() {
+        assert_eq!(
+            column_visibility_action(true, false, 1),
+            ColumnVisibilityAction::Show
+        );
+        assert_eq!(
+            column_visibility_action(false, false, 2),
+            ColumnVisibilityAction::Hide
+        );
+        assert_eq!(
+            column_visibility_action(false, false, 1),
+            ColumnVisibilityAction::Unchanged
+        );
+        assert_eq!(
+            column_visibility_action(false, true, 3),
+            ColumnVisibilityAction::Unchanged
+        );
+    }
+
+    #[test]
+    fn data_table_toggle_uses_shared_policy_even_without_the_disabled_ui_guard() {
+        let columns = cols();
+        let mut hidden = HashSet::new();
+
+        assert!(toggle_hidden_column(&columns, &mut hidden, "name"));
+        assert!(hidden.contains("name"));
+        assert!(toggle_hidden_column(&columns, &mut hidden, "name"));
+        assert!(!hidden.contains("name"));
+
+        hidden.extend(["name", "balance"]);
+        assert!(!toggle_hidden_column(&columns, &mut hidden, "id"));
+        assert!(
+            !hidden.contains("id"),
+            "the last visible column stays visible"
+        );
+        assert!(!toggle_hidden_column(&columns, &mut hidden, "missing"));
     }
 
     // ── visible_columns ──

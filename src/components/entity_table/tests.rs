@@ -1,6 +1,10 @@
 use super::*;
-use std::cell::Cell;
+use crate::components::data_table::{clamp_page, page_bounds, page_count};
+use leptos::prelude::{Callback, Get, RwSignal, Set, StoredValue};
+use leptos::reactive::owner::Owner;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Row {
@@ -141,11 +145,329 @@ fn pagination_bounds_and_last_page_are_clamped() {
 }
 
 #[test]
-fn dataset_changes_reset_page_but_row_deltas_preserve_valid_page() {
-    assert_eq!(page_after_dataset_change(3, "office-1", "office-1"), 3);
-    assert_eq!(page_after_dataset_change(3, "office-1", "office-2"), 0);
+fn dataset_transition_resets_only_page_and_preserves_controlled_preferences() {
+    let owner = Owner::new();
+    owner.with(|| {
+        let mut supplied = EntityTablePreferences::new(1);
+        supplied.page_size = 50;
+        supplied.sort = EntitySort::descending("rank");
+        supplied.hidden_columns.insert("office".to_owned());
+        supplied.column_widths.insert("office".to_owned(), 240);
+        let current = RwSignal::new(supplied.clone());
+        let emissions = Arc::new(Mutex::new(Vec::new()));
+        let emissions_for_callback = Arc::clone(&emissions);
+        let preferences = super::component::PreferenceState::new(
+            EntityTablePreferenceOwnership::controlled(
+                current.into(),
+                Callback::new(move |replacement| {
+                    emissions_for_callback
+                        .lock()
+                        .expect("controlled callback lock is available")
+                        .push(replacement);
+                }),
+            ),
+            StoredValue::new_local(columns()),
+            1,
+        );
+        let current_page = RwSignal::new(3);
+        let controller =
+            super::component::DatasetTransitionController::new(current_page, preferences);
+
+        controller.apply("office-1".to_owned(), "office-2".to_owned());
+
+        assert_eq!(current_page.get(), 0, "a new dataset starts on page one");
+        assert_eq!(
+            current.get(),
+            supplied,
+            "dataset selection must preserve every supplied preference"
+        );
+        // Killed mutation: resetting preferences inside the real transition
+        // controller made this callback collection non-empty.
+        assert!(
+            emissions
+                .lock()
+                .expect("controlled callback lock is available")
+                .is_empty(),
+            "dataset selection must not emit a preference replacement"
+        );
+    });
+}
+
+#[test]
+fn row_deltas_preserve_a_valid_page_and_clamp_an_invalid_page() {
     assert_eq!(page_after_row_delta(2, 25, 74), 2);
     assert_eq!(page_after_row_delta(2, 25, 49), 1);
+}
+
+#[test]
+fn controlled_page_size_change_reasserts_a_synchronously_accepted_value() {
+    let owner = Owner::new();
+    owner.with(|| {
+        let current = RwSignal::new(EntityTablePreferences::new(1));
+        let preferences = super::component::PreferenceState::new(
+            EntityTablePreferenceOwnership::controlled(
+                current.into(),
+                Callback::new(move |replacement| current.set(replacement)),
+            ),
+            StoredValue::new_local(columns()),
+            1,
+        );
+        let current_page = RwSignal::new(3);
+        let live_value = RefCell::new(None::<String>);
+
+        super::component::apply_page_size_change(preferences, current_page, "50", |value| {
+            live_value.replace(Some(value));
+        });
+
+        assert_eq!(current.get().page_size, 50);
+        assert_eq!(current_page.get(), 0);
+        assert_eq!(live_value.into_inner().as_deref(), Some("50"));
+    });
+}
+
+#[test]
+fn controlled_page_size_change_restores_a_declined_or_delayed_value() {
+    let owner = Owner::new();
+    owner.with(|| {
+        let current = RwSignal::new(EntityTablePreferences::new(1));
+        let emitted = Arc::new(Mutex::new(Vec::new()));
+        let emitted_for_callback = Arc::clone(&emitted);
+        let preferences = super::component::PreferenceState::new(
+            EntityTablePreferenceOwnership::controlled(
+                current.into(),
+                Callback::new(move |replacement| {
+                    emitted_for_callback
+                        .lock()
+                        .expect("controlled callback lock is available")
+                        .push(replacement);
+                }),
+            ),
+            StoredValue::new_local(columns()),
+            1,
+        );
+        let current_page = RwSignal::new(3);
+        let live_value = RefCell::new(None::<String>);
+
+        super::component::apply_page_size_change(preferences, current_page, "50", |value| {
+            live_value.replace(Some(value));
+        });
+
+        assert_eq!(
+            current.get().page_size,
+            25,
+            "the consumer remains the controlled source of truth"
+        );
+        assert_eq!(current_page.get(), 0);
+        // Killed mutation: reasserting requested `50` instead of rereading the
+        // controlled source changed this value to `Some("50")`.
+        assert_eq!(
+            live_value.into_inner().as_deref(),
+            Some("25"),
+            "the native select must immediately return to the supplied value"
+        );
+        let emitted = emitted
+            .lock()
+            .expect("controlled callback lock is available");
+        assert_eq!(emitted.len(), 1);
+        assert_eq!(emitted[0].page_size, 50);
+    });
+}
+
+#[test]
+fn controlled_change_reads_current_signal_and_emits_one_normalized_replacement() {
+    let owner = Owner::new();
+    owner.with(|| {
+        let mut initial = EntityTablePreferences::new(1);
+        initial.page_size = 999;
+        initial.sort = EntitySort::ascending("missing");
+        initial.hidden_columns.insert("client".to_owned());
+        initial.hidden_columns.insert("missing".to_owned());
+        initial.column_widths.insert("missing".to_owned(), 300);
+        let current = RwSignal::new(initial);
+        let emitted = Arc::new(Mutex::new(Vec::new()));
+        let emitted_for_callback = Arc::clone(&emitted);
+        let ownership = EntityTablePreferenceOwnership::controlled(
+            current.into(),
+            Callback::new(move |replacement| {
+                emitted_for_callback
+                    .lock()
+                    .expect("controlled callback lock is available")
+                    .push(replacement);
+            }),
+        );
+        let state =
+            super::component::PreferenceState::new(ownership, StoredValue::new_local(columns()), 1);
+
+        let normalized_initial = state.get();
+        assert_eq!(normalized_initial.page_size, 25);
+        assert_eq!(normalized_initial.sort, EntitySort::System);
+        assert!(normalized_initial.hidden_columns.is_empty());
+        assert!(normalized_initial.column_widths.is_empty());
+
+        let mut supplied = EntityTablePreferences::new(1);
+        supplied.page_size = 50;
+        supplied.sort = EntitySort::ascending("rank");
+        current.set(supplied.clone());
+        assert_eq!(
+            state.get(),
+            supplied,
+            "controlled rendering follows the consumer signal"
+        );
+
+        state.update(|next| {
+            next.sort = EntitySort::descending("rank");
+            next.hidden_columns.insert("office".to_owned());
+            next.hidden_columns.insert("missing".to_owned());
+        });
+
+        assert_eq!(
+            current.get(),
+            supplied,
+            "controlled ownership never mutates the consumer signal"
+        );
+        assert_eq!(
+            state.get(),
+            supplied,
+            "controlled rendering keeps the consumer value until it accepts a replacement"
+        );
+        let emitted = emitted
+            .lock()
+            .expect("controlled callback lock is available");
+        assert_eq!(emitted.len(), 1, "one UI operation emits one replacement");
+        assert_eq!(emitted[0].schema_version, 1);
+        assert_eq!(emitted[0].page_size, 50);
+        assert_eq!(emitted[0].sort, EntitySort::descending("rank"));
+        assert_eq!(
+            emitted[0]
+                .hidden_columns
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            ["office"]
+        );
+        assert!(emitted[0].column_widths.is_empty());
+    });
+}
+
+#[test]
+fn declined_controlled_width_reset_restores_consumer_rendered_widths() {
+    let owner = Owner::new();
+    owner.with(|| {
+        let mut supplied = EntityTablePreferences::new(1);
+        supplied.column_widths.insert("client".to_owned(), 180);
+        let current = RwSignal::new(supplied.clone());
+        let emitted = Arc::new(Mutex::new(Vec::new()));
+        let emitted_for_callback = Arc::clone(&emitted);
+        let state = super::component::PreferenceState::new(
+            EntityTablePreferenceOwnership::controlled(
+                current.into(),
+                Callback::new(move |replacement| {
+                    emitted_for_callback
+                        .lock()
+                        .expect("controlled callback lock is available")
+                        .push(replacement);
+                }),
+            ),
+            StoredValue::new_local(columns()),
+            1,
+        );
+
+        let rendered = state.update_and_rendered_widths(|preferences| {
+            reset_columns(preferences);
+        });
+
+        assert_eq!(
+            rendered.get("client"),
+            Some(&180),
+            "a declined controlled reset cannot leave an optimistic width mirror"
+        );
+        assert_eq!(current.get(), supplied);
+        let emitted = emitted
+            .lock()
+            .expect("controlled callback lock is available");
+        assert_eq!(emitted.len(), 1);
+        assert!(emitted[0].column_widths.is_empty());
+    });
+}
+
+#[test]
+fn disabled_persistence_never_invokes_storage() {
+    let reads = Cell::new(0);
+    let writes = Cell::new(0);
+    let persistence = EntityTablePreferencePersistence::Disabled;
+
+    let loaded = super::storage::load_preferences_with(persistence, 1, &columns(), |_| {
+        reads.set(reads.get() + 1);
+        Some(String::new())
+    });
+    super::storage::save_preferences_with(persistence, &loaded, |_, _| {
+        writes.set(writes.get() + 1);
+    });
+
+    assert_eq!(loaded, EntityTablePreferences::new(1));
+    assert_eq!(reads.get(), 0, "persistence-off must not read localStorage");
+    assert_eq!(
+        writes.get(),
+        0,
+        "persistence-off must not write localStorage"
+    );
+}
+
+#[test]
+fn legacy_local_storage_keeps_prefixed_read_write_behavior() {
+    let persistence = EntityTablePreferencePersistence::LegacyLocalStorage {
+        storage_key: "compatibility",
+    };
+    let expected = EntityTablePreferences::new(4);
+    let encoded = encode_preferences(&expected).unwrap();
+    let read_key = RefCell::new(None::<String>);
+
+    let loaded = super::storage::load_preferences_with(persistence, 4, &columns(), |key| {
+        read_key.replace(Some(key.to_owned()));
+        Some(encoded.clone())
+    });
+    let written = RefCell::new(None::<(String, String)>);
+    super::storage::save_preferences_with(persistence, &loaded, |key, payload| {
+        written.replace(Some((key.to_owned(), payload.to_owned())));
+    });
+
+    assert_eq!(loaded, expected);
+    assert_eq!(
+        read_key.into_inner().as_deref(),
+        Some("ldui-entity-table:compatibility")
+    );
+    let (key, payload) = written.into_inner().expect("legacy write is retained");
+    assert_eq!(key, "ldui-entity-table:compatibility");
+    assert_eq!(decode_preferences(&payload, 4, &columns()), expected);
+}
+
+#[test]
+fn legacy_storage_key_prop_resolves_to_uncontrolled_compatibility_mode() {
+    let ownership =
+        super::component::resolve_preference_ownership(None, Some("legacy-component-prop"));
+
+    assert!(matches!(
+        ownership,
+        EntityTablePreferenceOwnership::Uncontrolled {
+            persistence: EntityTablePreferencePersistence::LegacyLocalStorage {
+                storage_key: "legacy-component-prop"
+            }
+        }
+    ));
+}
+
+#[test]
+#[should_panic(
+    expected = "EntityTable configuration cannot combine preference_ownership with storage_key"
+)]
+fn explicit_ownership_and_legacy_storage_key_fail_closed() {
+    let ownership = EntityTablePreferenceOwnership::Uncontrolled {
+        persistence: EntityTablePreferencePersistence::Disabled,
+    };
+    let _ = super::component::resolve_preference_ownership(
+        Some(ownership),
+        Some("legacy-must-not-be-ignored"),
+    );
 }
 
 #[test]
@@ -239,4 +561,40 @@ fn unknown_and_required_stored_columns_are_pruned() {
     );
     assert_eq!(decoded.column_widths["office"], 48);
     assert!(!decoded.column_widths.contains_key("missing"));
+}
+
+#[test]
+fn normalization_is_pure_and_deterministic() {
+    let columns = columns();
+    let mut supplied = EntityTablePreferences::new(8);
+    supplied.page_size = 999;
+    supplied.sort = EntitySort::ascending("missing");
+    supplied.hidden_columns.insert("client".to_owned());
+    supplied.hidden_columns.insert("office".to_owned());
+    supplied.hidden_columns.insert("missing".to_owned());
+    supplied.column_widths.insert("office".to_owned(), 1);
+    supplied.column_widths.insert("missing".to_owned(), 2_000);
+    let original = supplied.clone();
+
+    let first = normalize_preferences(&supplied, 8, &columns);
+    let second = normalize_preferences(&supplied, 8, &columns);
+
+    assert_eq!(
+        supplied, original,
+        "normalization must not mutate its input"
+    );
+    assert_eq!(first, second, "normalization must be deterministic");
+    assert_eq!(first.schema_version, 8);
+    assert_eq!(first.page_size, 25);
+    assert_eq!(first.sort, EntitySort::System);
+    assert_eq!(
+        first
+            .hidden_columns
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+        ["office"]
+    );
+    assert_eq!(first.column_widths["office"], 48);
+    assert!(!first.column_widths.contains_key("missing"));
 }

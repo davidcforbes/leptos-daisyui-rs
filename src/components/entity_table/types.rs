@@ -1,6 +1,6 @@
 //! Public types used to configure a typed entity table.
 
-use leptos::prelude::AnyView;
+use leptos::prelude::{AnyView, Callback, Signal};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
@@ -262,6 +262,71 @@ impl EntityTablePreferences {
             sort: EntitySort::System,
             hidden_columns: BTreeSet::new(),
             column_widths: BTreeMap::new(),
+        }
+    }
+}
+
+/// Component-owned persistence used only by uncontrolled tables.
+///
+/// Controlled tables never carry this policy: their consumer owns both the
+/// current value and any persistence performed after a change callback.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum EntityTablePreferencePersistence {
+    /// Keep preferences in memory for this component instance only.
+    #[default]
+    Disabled,
+    /// Preserve the historical automatic `localStorage` behavior.
+    LegacyLocalStorage {
+        /// Namespace appended to the framework's EntityTable storage prefix.
+        storage_key: &'static str,
+    },
+}
+
+/// Declares who owns an [`EntityTablePreferences`] value.
+///
+/// Controlled ownership is persistence-neutral: each UI operation emits one
+/// normalized full replacement and the consumer decides whether or where to
+/// store it. Uncontrolled ownership retains the component's compatibility
+/// behavior and may opt into the legacy browser-storage mechanism.
+#[derive(Clone)]
+pub enum EntityTablePreferenceOwnership {
+    /// The consumer supplies the current value and receives replacements.
+    Controlled {
+        /// Reactive current preferences supplied by the consumer.
+        current: Signal<EntityTablePreferences>,
+        /// Receives one normalized full replacement per UI preference action.
+        on_change: Callback<EntityTablePreferences>,
+    },
+    /// The component owns its in-memory preference signal.
+    Uncontrolled {
+        /// Optional component-managed persistence.
+        persistence: EntityTablePreferencePersistence,
+    },
+}
+
+impl EntityTablePreferenceOwnership {
+    /// Creates consumer-controlled, persistence-neutral ownership.
+    pub fn controlled(
+        current: Signal<EntityTablePreferences>,
+        on_change: Callback<EntityTablePreferences>,
+    ) -> Self {
+        Self::Controlled { current, on_change }
+    }
+
+    /// Creates component-owned preferences with the selected persistence.
+    pub fn uncontrolled(persistence: EntityTablePreferencePersistence) -> Self {
+        Self::Uncontrolled { persistence }
+    }
+}
+
+impl fmt::Debug for EntityTablePreferenceOwnership {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Controlled { .. } => formatter.debug_struct("Controlled").finish_non_exhaustive(),
+            Self::Uncontrolled { persistence } => formatter
+                .debug_struct("Uncontrolled")
+                .field("persistence", persistence)
+                .finish(),
         }
     }
 }

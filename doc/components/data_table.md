@@ -2,11 +2,28 @@
 
 A production-ready data table with sorting, pagination, filtering, search, selection, row activation, and column resizing. Handles large datasets (10,000+ rows) efficiently by operating on index permutations rather than copying data.
 
+## Which table should I use?
+
+Choose from data ownership before choosing features:
+
+| Data ownership | Use | Runtime marker |
+|---|---|---|
+| Complete, typed client snapshot | [`EntityTable<T>`](./entity_table.md) | `data-table-data-mode="client-snapshot"` |
+| Server-owned query and current-page slice | [`ServerDataTable`](#serverdatatable) | `data-table-data-mode="server-query"` |
+| Existing dynamic `HashMap` client rows or DataTable-only features | `components::DataTable` | `data-table-data-mode="compatibility-client"` |
+| Existing `Vec<Vec<String>>` table needing automatic link/badge columns or bulk select | `widgets::DataTable` | n/a |
+
+`components::DataTable` remains supported, but it is the compatibility client
+path rather than the default for new contracted snapshot pages. Do not feed a
+server page to a client table: page-local sort/filter results are not a server
+query. The [EntityTable guide](./entity_table.md) documents the migration and
+preference-ownership path.
+
 ## Description
 
 `DataTable` renders rows of `HashMap<&'static str, String>` against a list of `Column` definitions. Almost every feature is **opt-in**: a table declared with just `data` and `columns` sorts and paginates, and nothing else. Filtering, search, selection, activation and responsive paging each switch on via a single prop or `Column` builder, so adding one never changes the behaviour of a table that doesn't use it.
 
-For server-side pagination (the parent owns the page and fetches each slice), see [ServerDataTable](#serverdatatable) below.
+For server-side pagination (the parent owns the page and fetches each slice), use [ServerDataTable](#serverdatatable) below.
 
 ### Row identity and absolute indices
 
@@ -20,8 +37,9 @@ Selection is cleared automatically when `data`, the sort column, or the sort ord
 |------|------|---------|-------------|
 | `data` | `Signal<Vec<TableRow>>` | *required* | Row data, keyed by column id |
 | `columns` | `Signal<Vec<Column>>` | *required* | Column definitions |
-| `page_size` | `Signal<usize>` | `10` | Rows per page. Ignored when `auto_page_size` is on |
+| `page_size` | `Signal<usize>` | `10` | Fixed rows per page; also the short-viewport fallback for `auto_page_size` |
 | `auto_page_size` | `Signal<bool>` | `false` | Derive rows-per-page from rendered height. **Requires a definite height** — see below |
+| `min_rows` | `Signal<usize>` | `5` | Auto-sizing usability threshold; below it, retain at least `page_size` rows and scroll |
 | `loading` | `Signal<bool>` | `false` | Show the loading row |
 | `paginate` | `Signal<bool>` | `true` | `false` hides the pager and shows all rows |
 | `searchable` | `Signal<bool>` | `false` | Show a global free-text search box (300ms debounce) |
@@ -92,6 +110,13 @@ A leading ASCII `-` or Unicode minus (`−`) also negates. Values that would par
 - `Icon { name, color }` — a Lucide icon by name
 
 ## Sorting
+
+Sorting is built in, not enabled by `on_sort_change`: `Column::new` is
+sortable by default, and clicking its header label cycles the internal sort.
+`on_sort_change` only observes that new state. Use
+`Column::new_non_sortable` for action or display-only columns. The narrow
+right-edge separator resizes the column and deliberately stops the click from
+sorting it.
 
 Cells are strings and compare as **text by default**. A column holding formatted numbers must say so, or it sorts by first digit — `"$1,000"` before `"$900"`:
 
@@ -199,6 +224,7 @@ view! {
         data=data
         auto_page_size=true
         max_height="calc(100vh - 260px)"
+        min_rows=5
     />
 }
 ```
@@ -211,6 +237,13 @@ view! {
 - give the table a parent with a definite height, which it fills.
 
 The pager and search box are flex siblings of the scroll area, so they're excluded from the measurement automatically.
+
+The measured header is the complete `<thead>`. A filter row or wrapped header
+labels therefore consume real viewport height. If the resulting fit is below
+`min_rows`, the table retains the configured `page_size` (never less than
+`min_rows`) and the existing bounded wrapper scrolls. This avoids one-row
+pagination for tall badge/wrapped rows while normal-height tables remain fully
+responsive.
 
 ### Selection and row activation
 
@@ -303,7 +336,10 @@ fn RichTable(data: Signal<Vec<TableRow>>) -> impl IntoView {
 
 ## ServerDataTable
 
-When the server owns pagination, the parent holds the page and fetches each slice. `ServerDataTable` renders only what it's given — it does no client-side sorting, filtering or paging.
+When the server owns pagination, filtering, or sorting, the parent holds the
+query and fetches each slice. `ServerDataTable` renders only what it is given;
+it does no client-side sorting, filtering, or paging. Its root identifies this
+contract as `data-table-data-mode="server-query"` for runtime audits.
 
 | Prop | Type | Description |
 |------|------|-------------|
@@ -314,9 +350,15 @@ When the server owns pagination, the parent holds the page and fetches each slic
 | `page_size` | `Signal<i64>` | Rows per page |
 | `on_page_change` | `Callback<i64>` | Fired when the user pages |
 | `on_search` | `Option<Callback<String>>` | Debounced search box; the parent performs the query |
+| `on_query_change` | `Option<Callback<TableQuery>>` | Reports the complete server query after paging, search, sort, or filter changes |
+| `filter_options` | `Option<Signal<HashMap<&'static str, Vec<String>>>>` | Population-wide choices for filterable columns |
+| `on_row_activate` | `Option<Callback<usize>>` | Plain click or keyboard activation with the current-page row index |
+| `on_row_inspect` | `Option<Callback<usize>>` | Double-click or Shift+Enter inspection with the current-page row index |
 | `loading`, `classes`, `texts`, `class`, `table_size`, `zebra`, `pin_rows`, `pin_cols`, `max_height`, `cell_renderers`, `typed_cells`, `row_class_fn`, `node_ref` | | As `DataTable` |
 
-**Not available**: `selected_rows` / `selection_anchor` / `on_row_activate` (no selection surface), `auto_page_size`, `paginate`, `searchable` (use `on_search`), `on_sort_change`.
+**Not available**: `selected_rows` / `selection_anchor` (the server variant
+has no selection state machine), `auto_page_size`, `paginate`, `searchable`
+(use `on_search`), `on_sort_change` (use `on_query_change`).
 
 ## Helper functions
 
@@ -331,7 +373,9 @@ All pure and independently usable:
 | `row_matches_filters(row, filters)` | Whether a row satisfies active filters (AND) |
 | `prune_stale_filters(filters, options)` | Drop selections whose value vanished |
 | `has_filterable_columns(columns)` | Whether to render a filter row |
-| `rows_per_page_for_height(viewport, header, row)` | The `auto_page_size` arithmetic |
+| `rows_per_page_for_height(viewport, header, row)` | The raw geometric fit used by `auto_page_size` |
+| `auto_page_size_for_height(viewport, header, row, configured, min_rows)` | Responsive fit with the short-viewport fallback policy |
+| `page_count(total, size)` / `clamp_page(...)` / `page_bounds(...)` | Shared zero-based client-pagination state used by both client table implementations |
 | `handle_row_click(...)` / `row_click_kind(ctrl, shift, has_activate)` | Selection/activation state machine |
 | `cell_text` / `row_text` / `row_with_headers_text` | Clipboard export (tab-separated) |
 
@@ -366,11 +410,12 @@ All pure and independently usable:
 
 ## Best Practices
 
-1. **Declare `SortAs::Number` on every money, percentage, duration or count column.** Text order puts `"$1,000"` before `"$900"`, and the bug looks like working software.
-2. **Keep `filterable()` for low-cardinality columns.** Filter by status or owner, search by name or id.
-3. **Pair `auto_page_size` with `max_height`** (or a definite-height parent). Without one it silently settles on the fewest rows and never grows.
-4. **Treat every index as absolute.** Don't add the page offset yourself — it's already applied.
-5. **Re-check selection after mutating `data`.** It's cleared on data and sort changes by design.
-6. **Prefer `typed_cells` over `cell_renderers`** for badges and icons; reach for a full renderer only when you need arbitrary views.
-7. **Use `paginate=false` for small fixed tables**, not `page_size=1000`.
-8. Add the classes above to `input.css` — Tailwind can't see class names built at runtime.
+1. **Choose from data ownership first.** New typed snapshots use `EntityTable`; server slices use `ServerDataTable`; this dynamic client component is the compatibility path.
+2. **Declare `SortAs::Number` on every money, percentage, duration or count column.** Text order puts `"$1,000"` before `"$900"`, and the bug looks like working software.
+3. **Keep `filterable()` for low-cardinality columns.** Filter by status or owner, search by name or id.
+4. **Pair `auto_page_size` with `max_height`** (or a definite-height parent). Tune `min_rows` only when five is inappropriate; `page_size` is the intentional scroll fallback below that threshold.
+5. **Treat every index as absolute.** Don't add the page offset yourself — it's already applied.
+6. **Re-check selection after mutating `data`.** It's cleared on data and sort changes by design.
+7. **Prefer `typed_cells` over `cell_renderers`** for badges and icons; reach for a full renderer only when you need arbitrary views.
+8. **Use `paginate=false` for small fixed tables**, not `page_size=1000`.
+9. Add the classes above to `input.css` — Tailwind can't see class names built at runtime.
