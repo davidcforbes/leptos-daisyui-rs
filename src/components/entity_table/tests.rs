@@ -83,6 +83,45 @@ fn default_text_sort_extracts_one_normalized_key_per_row() {
 }
 
 #[test]
+fn multi_sort_uses_clause_priority_before_dataset_order() {
+    let rows = rows();
+    let sort = EntitySort::multiple([
+        EntitySortColumn::ascending("rank"),
+        EntitySortColumn::descending("client"),
+    ]);
+
+    assert_eq!(sorted_indices(&rows, &columns(), &sort), [2, 1, 0]);
+}
+
+#[test]
+fn multi_sort_extracts_each_text_key_once_per_row() {
+    let client_calls = Rc::new(Cell::new(0));
+    let office_calls = Rc::new(Cell::new(0));
+    let client_calls_for_column = Rc::clone(&client_calls);
+    let office_calls_for_column = Rc::clone(&office_calls);
+    let rows = rows();
+    let columns = vec![
+        EntityColumn::text("client", "Client", move |row: &Row| {
+            client_calls_for_column.set(client_calls_for_column.get() + 1);
+            row.name.to_owned()
+        }),
+        EntityColumn::text("office", "Office", move |row: &Row| {
+            office_calls_for_column.set(office_calls_for_column.get() + 1);
+            row.id.to_owned()
+        }),
+    ];
+    let sort = EntitySort::multiple([
+        EntitySortColumn::ascending("client"),
+        EntitySortColumn::descending("office"),
+    ]);
+
+    let _ = sorted_indices(&rows, &columns, &sort);
+
+    assert_eq!(client_calls.get(), rows.len());
+    assert_eq!(office_calls.get(), rows.len());
+}
+
+#[test]
 fn sorted_index_cache_ignores_unrelated_preference_changes() {
     let calls = Rc::new(Cell::new(0));
     let calls_for_column = Rc::clone(&calls);
@@ -131,6 +170,107 @@ fn sort_clicks_cycle_system_ascending_descending_system() {
         next_sort(&EntitySort::descending("rank"), "client", true),
         EntitySort::ascending("client")
     );
+}
+
+#[test]
+fn legacy_sort_variants_remain_constructible_and_matchable() {
+    let ascending = EntitySort::ascending("rank");
+    assert!(matches!(
+        ascending,
+        EntitySort::Ascending { ref column } if column == "rank"
+    ));
+
+    let descending = EntitySort::descending("client");
+    assert!(matches!(
+        descending,
+        EntitySort::Descending { ref column } if column == "client"
+    ));
+    assert!(matches!(EntitySort::System, EntitySort::System));
+
+    let multiple = EntitySort::multiple([
+        EntitySortColumn::ascending("rank"),
+        EntitySortColumn::descending("client"),
+    ]);
+    assert!(matches!(
+        multiple,
+        EntitySort::Multiple { ref clauses } if clauses.len() == 2
+    ));
+}
+
+#[test]
+fn additive_sort_clicks_append_cycle_and_remove_one_clause() {
+    let rank = EntitySort::ascending("rank");
+    let appended = next_sort_additive(&rank, "client", true);
+    assert_eq!(
+        appended.clauses(),
+        [
+            EntitySortColumn::ascending("rank"),
+            EntitySortColumn::ascending("client"),
+        ]
+    );
+
+    let descending = next_sort_additive(&appended, "client", true);
+    assert_eq!(
+        descending.clauses(),
+        [
+            EntitySortColumn::ascending("rank"),
+            EntitySortColumn::descending("client"),
+        ]
+    );
+    assert_eq!(
+        next_sort_additive(&descending, "client", true),
+        EntitySort::ascending("rank")
+    );
+    assert_eq!(
+        next_sort_additive(&rank, "actions", false),
+        rank,
+        "non-sortable columns must be inert"
+    );
+}
+
+#[test]
+fn column_moves_use_canonical_order_and_stop_at_boundaries() {
+    let columns = columns();
+    let mut preferences = EntityTablePreferences::new(1);
+
+    assert!(move_column(
+        &mut preferences,
+        &columns,
+        "office",
+        EntityColumnMove::Earlier,
+    ));
+    assert_eq!(
+        preferences.column_order,
+        ["client", "office", "rank", "actions"]
+    );
+    assert!(move_column(
+        &mut preferences,
+        &columns,
+        "office",
+        EntityColumnMove::Later,
+    ));
+    assert_eq!(
+        preferences.column_order,
+        ["client", "rank", "office", "actions"]
+    );
+    assert!(!move_column(
+        &mut preferences,
+        &columns,
+        "client",
+        EntityColumnMove::Earlier,
+    ));
+    assert!(!move_column(
+        &mut preferences,
+        &columns,
+        "actions",
+        EntityColumnMove::Later,
+    ));
+    assert!(!move_column(
+        &mut preferences,
+        &columns,
+        "missing",
+        EntityColumnMove::Earlier,
+    ));
 }
 
 #[test]
@@ -307,6 +447,12 @@ fn controlled_change_reads_current_signal_and_emits_one_normalized_replacement()
         let mut supplied = EntityTablePreferences::new(1);
         supplied.page_size = 50;
         supplied.sort = EntitySort::ascending("rank");
+        supplied.column_order = vec![
+            "client".to_owned(),
+            "rank".to_owned(),
+            "office".to_owned(),
+            "actions".to_owned(),
+        ];
         current.set(supplied.clone());
         assert_eq!(
             state.get(),
@@ -418,7 +564,13 @@ fn legacy_local_storage_keeps_prefixed_read_write_behavior() {
     let persistence = EntityTablePreferencePersistence::LegacyLocalStorage {
         storage_key: "compatibility",
     };
-    let expected = EntityTablePreferences::new(4);
+    let mut expected = EntityTablePreferences::new(4);
+    expected.column_order = vec![
+        "client".to_owned(),
+        "rank".to_owned(),
+        "office".to_owned(),
+        "actions".to_owned(),
+    ];
     let encoded = encode_preferences(&expected).unwrap();
     let read_key = RefCell::new(None::<String>);
 
@@ -529,6 +681,12 @@ fn stored_preferences_are_versioned_and_normalized() {
     let mut preferences = EntityTablePreferences::new(4);
     preferences.page_size = 50;
     preferences.sort = EntitySort::descending("rank");
+    preferences.column_order = vec![
+        "client".to_owned(),
+        "rank".to_owned(),
+        "office".to_owned(),
+        "actions".to_owned(),
+    ];
     preferences.hidden_columns.insert("office".to_owned());
     preferences.column_widths.insert("office".to_owned(), 280);
 
@@ -536,11 +694,14 @@ fn stored_preferences_are_versioned_and_normalized() {
     assert_eq!(decode_preferences(&encoded, 4, &columns), preferences);
 
     let stale = decode_preferences(&encoded, 5, &columns);
-    assert_eq!(stale, EntityTablePreferences::new(5));
+    assert_eq!(stale.column_order, ["client", "rank", "office", "actions"]);
+    assert_eq!(stale.schema_version, 5);
+    let invalid = decode_preferences("not-json", 4, &columns);
     assert_eq!(
-        decode_preferences("not-json", 4, &columns),
-        EntityTablePreferences::new(4)
+        invalid.column_order,
+        ["client", "rank", "office", "actions"]
     );
+    assert_eq!(invalid.schema_version, 4);
 }
 
 #[test]
@@ -597,4 +758,85 @@ fn normalization_is_pure_and_deterministic() {
     );
     assert_eq!(first.column_widths["office"], 48);
     assert!(!first.column_widths.contains_key("missing"));
+}
+
+#[test]
+fn normalization_prunes_duplicate_and_unknown_sort_clauses_first_wins() {
+    let mut supplied = EntityTablePreferences::new(1);
+    supplied.sort = EntitySort::multiple([
+        EntitySortColumn::ascending("rank"),
+        EntitySortColumn::descending("rank"),
+        EntitySortColumn::ascending("missing"),
+        EntitySortColumn::descending("actions"),
+        EntitySortColumn::descending("client"),
+    ]);
+    supplied.column_order = vec![
+        "office".to_owned(),
+        "office".to_owned(),
+        "missing".to_owned(),
+    ];
+    supplied.hidden_columns.insert("client".to_owned());
+
+    let normalized = normalize_preferences(&supplied, 1, &columns());
+
+    assert_eq!(
+        normalized.sort.clauses(),
+        [
+            EntitySortColumn::ascending("rank"),
+            EntitySortColumn::descending("client"),
+        ]
+    );
+    assert_eq!(
+        normalized.column_order,
+        ["office", "client", "rank", "actions"]
+    );
+    assert!(
+        !normalized.hidden_columns.contains("client"),
+        "required columns must be restored"
+    );
+}
+
+#[test]
+fn canonical_sort_clause_array_round_trips() {
+    let canonical = serde_json::json!([
+        {"column": "rank", "direction": "ascending"},
+        {"column": "client", "direction": "descending"}
+    ]);
+
+    let decoded: EntitySort = serde_json::from_value(canonical.clone())
+        .expect("canonical multi-column sort must deserialize");
+
+    assert_eq!(serde_json::to_value(decoded).unwrap(), canonical);
+}
+
+#[test]
+fn legacy_single_sort_payload_migrates_to_canonical_clause_array() {
+    let decoded: EntitySort = serde_json::from_value(serde_json::json!({
+        "Descending": {"column": "rank"}
+    }))
+    .expect("legacy single-column sort must remain readable");
+
+    assert_eq!(
+        serde_json::to_value(decoded).unwrap(),
+        serde_json::json!([{"column": "rank", "direction": "descending"}])
+    );
+}
+
+#[test]
+fn legacy_preferences_without_column_order_normalize_to_declared_order() {
+    let payload = r##"{
+        "schema_version":1,
+        "page_size":25,
+        "sort":"System",
+        "hidden_columns":[],
+        "column_widths":{}
+    }"##;
+
+    let decoded = decode_preferences(payload, 1, &columns());
+    let encoded = serde_json::to_value(decoded).unwrap();
+
+    assert_eq!(
+        encoded["column_order"],
+        serde_json::json!(["client", "rank", "office", "actions"])
+    );
 }

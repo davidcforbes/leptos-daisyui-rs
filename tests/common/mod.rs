@@ -295,6 +295,45 @@ pub async fn click(h: &Harness, selector: &str) {
         .unwrap_or_else(|e| panic!("{e}"))
 }
 
+/// Shift-click `selector` with real CDP mouse events and wait the settle delay.
+pub async fn shift_click(h: &Harness, selector: &str) {
+    let b = h
+        .element_box(selector)
+        .await
+        .unwrap_or_else(|e| panic!("element_box {selector}: {e}"));
+    let x = b.x + b.width / 2.0;
+    let y = b.y + b.height / 2.0;
+    let moved = DispatchMouseEventParams::builder()
+        .r#type(DispatchMouseEventType::MouseMoved)
+        .x(x)
+        .y(y)
+        .modifiers(8)
+        .build()
+        .expect("shift mouse move params");
+    dispatch_mouse(h, moved, "Shift+MouseMoved").await;
+    let pressed = DispatchMouseEventParams::builder()
+        .r#type(DispatchMouseEventType::MousePressed)
+        .x(x)
+        .y(y)
+        .button(MouseButton::Left)
+        .click_count(1)
+        .modifiers(8)
+        .build()
+        .expect("shift mouse press params");
+    dispatch_mouse(h, pressed, "Shift+MousePressed").await;
+    let released = DispatchMouseEventParams::builder()
+        .r#type(DispatchMouseEventType::MouseReleased)
+        .x(x)
+        .y(y)
+        .button(MouseButton::Left)
+        .click_count(1)
+        .modifiers(8)
+        .build()
+        .expect("shift mouse release params");
+    dispatch_mouse(h, released, "Shift+MouseReleased").await;
+    tokio::time::sleep(std::time::Duration::from_millis(h.config().settle_ms)).await;
+}
+
 /// Pull the `window.__APP_DEBUG__.state()` snapshot, panicking if the bridge
 /// is absent (it must exist on any page loaded with `?pp-freeze=1`).
 pub async fn oracle(h: &Harness) -> serde_json::Value {
@@ -310,8 +349,64 @@ pub async fn oracle(h: &Harness) -> serde_json::Value {
 // buffered browser-error observer (D1: no browser panic or hidden error).
 
 use chromiumoxide::cdp::browser_protocol::input::{
-    DispatchMouseEventParams, DispatchMouseEventType, MouseButton,
+    DispatchKeyEventParams, DispatchKeyEventType, DispatchMouseEventParams, DispatchMouseEventType,
+    MouseButton,
 };
+
+async fn dispatch_key(h: &Harness, params: DispatchKeyEventParams, what: &str) {
+    h.page()
+        .execute(params)
+        .await
+        .unwrap_or_else(|e| panic!("dispatch {what}: {e}"));
+}
+
+/// Press Shift+Enter with real CDP key events and wait the settle delay.
+pub async fn shift_enter(h: &Harness) {
+    let shift_down = DispatchKeyEventParams::builder()
+        .r#type(DispatchKeyEventType::RawKeyDown)
+        .key("Shift")
+        .code("ShiftLeft")
+        .windows_virtual_key_code(16)
+        .native_virtual_key_code(16)
+        .modifiers(8)
+        .build()
+        .expect("Shift key-down params");
+    dispatch_key(h, shift_down, "Shift key-down").await;
+
+    let enter_down = DispatchKeyEventParams::builder()
+        .r#type(DispatchKeyEventType::RawKeyDown)
+        .key("Enter")
+        .code("Enter")
+        .windows_virtual_key_code(13)
+        .native_virtual_key_code(13)
+        .modifiers(8)
+        .build()
+        .expect("Shift+Enter key-down params");
+    dispatch_key(h, enter_down, "Shift+Enter key-down").await;
+
+    let enter_up = DispatchKeyEventParams::builder()
+        .r#type(DispatchKeyEventType::KeyUp)
+        .key("Enter")
+        .code("Enter")
+        .windows_virtual_key_code(13)
+        .native_virtual_key_code(13)
+        .modifiers(8)
+        .build()
+        .expect("Shift+Enter key-up params");
+    dispatch_key(h, enter_up, "Shift+Enter key-up").await;
+
+    let shift_up = DispatchKeyEventParams::builder()
+        .r#type(DispatchKeyEventType::KeyUp)
+        .key("Shift")
+        .code("ShiftLeft")
+        .windows_virtual_key_code(16)
+        .native_virtual_key_code(16)
+        .build()
+        .expect("Shift key-up params");
+    dispatch_key(h, shift_up, "Shift key-up").await;
+
+    tokio::time::sleep(std::time::Duration::from_millis(h.config().settle_ms)).await;
+}
 
 async fn fraction_point(
     h: &Harness,

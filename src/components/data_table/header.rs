@@ -1,4 +1,6 @@
-use crate::components::data_table::resize::{effective_min_width, resized_width};
+use crate::components::data_table::resize::{
+    MAX_COLUMN_WIDTH, effective_min_width, keyboard_resized_width, resized_width,
+};
 use crate::components::data_table::types::{Column, SortOrder};
 use crate::merge_classes;
 use leptos::prelude::*;
@@ -93,7 +95,10 @@ pub fn DataTableHeader(
                             column_widths
                                 .with(|m| m.get(col_id).copied())
                                 .map(|w| format!("width: {}px; min-width: {}px; max-width: {}px", w.round(), w.round(), w.round()))
-                                .or_else(|| min_width_opt.map(|w| format!("min-width: {}px", w)))
+                                .or_else(|| {
+                                    min_width_opt
+                                        .map(|_| format!("min-width: {}px", min_w.round()))
+                                })
                         };
 
                         view! {
@@ -124,11 +129,64 @@ pub fn DataTableHeader(
                                 </span>
                                 {is_resizable.then(|| view! {
                                     <span
-                                        class="absolute top-0 right-0 z-10 h-full w-2 cursor-col-resize select-none opacity-0 hover:opacity-100 hover:bg-primary/50 active:opacity-100 active:bg-primary/70"
+                                        class="absolute top-0 right-0 z-10 h-full w-2 cursor-col-resize select-none opacity-0 hover:opacity-100 hover:bg-primary/50 focus:opacity-100 focus:bg-primary/50 focus:outline focus:outline-2 focus:outline-primary active:opacity-100 active:bg-primary/70"
                                         role="separator"
+                                        tabindex="0"
                                         aria-orientation="vertical"
                                         aria-label=format!("Resize {} column", header_label)
+                                        aria-valuemin=min_w.round() as u32
+                                        aria-valuemax=MAX_COLUMN_WIDTH.round() as u32
+                                        aria-valuenow=move || column_widths.with(|widths| {
+                                            widths
+                                                .get(col_id)
+                                                .copied()
+                                                .unwrap_or(min_w)
+                                                .round() as u32
+                                        })
+                                        aria-valuetext=move || column_widths.with(|widths| {
+                                            format!(
+                                                "{} pixels",
+                                                widths
+                                                    .get(col_id)
+                                                    .copied()
+                                                    .unwrap_or(min_w)
+                                                    .round() as u32
+                                            )
+                                        })
                                         on:click=move |ev: web_sys::MouseEvent| ev.stop_propagation()
+                                        on:focus=move |ev: web_sys::FocusEvent| {
+                                            if let Some(rendered_width) = separator_parent_width(ev.target()) {
+                                                column_widths.update(|widths| {
+                                                    widths.insert(
+                                                        col_id,
+                                                        rendered_width
+                                                            .clamp(min_w, MAX_COLUMN_WIDTH)
+                                                            .round(),
+                                                    );
+                                                });
+                                            }
+                                        }
+                                        on:keydown=move |ev: web_sys::KeyboardEvent| {
+                                            let current_width = separator_parent_width(
+                                                ev.current_target().or_else(|| ev.target()),
+                                            )
+                                            .or_else(|| column_widths.with_untracked(|widths| {
+                                                widths.get(col_id).copied()
+                                            }))
+                                            .unwrap_or(min_w);
+                                            let Some(new_width) = keyboard_resized_width(
+                                                current_width,
+                                                &ev.key(),
+                                                min_w,
+                                            ) else {
+                                                return;
+                                            };
+                                            ev.prevent_default();
+                                            ev.stop_propagation();
+                                            column_widths.update(|widths| {
+                                                widths.insert(col_id, new_width.round());
+                                            });
+                                        }
                                         on:pointerdown=move |ev: web_sys::PointerEvent| {
                                             ev.stop_propagation();
                                             // Start from the divider's own <th> rendered width when
@@ -193,4 +251,12 @@ pub fn DataTableHeader(
             {children.map(|c| c())}
         </thead>
     }
+}
+
+fn separator_parent_width(target: Option<web_sys::EventTarget>) -> Option<f64> {
+    target
+        .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
+        .and_then(|element| element.parent_element())
+        .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
+        .map(|element| f64::from(element.offset_width()))
 }

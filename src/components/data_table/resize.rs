@@ -12,12 +12,17 @@ pub const DEFAULT_MIN_COLUMN_WIDTH: f64 = 48.0;
 /// Mirrors d2d-ui's `RESIZE_MAX_W` (scaled down for typical web layouts).
 pub const MAX_COLUMN_WIDTH: f64 = 1200.0;
 
-/// The minimum width to enforce for a column during a resize drag: its own
-/// `min_width` if set, else [`DEFAULT_MIN_COLUMN_WIDTH`].
+/// Width adjustment made by one keyboard arrow press, in CSS pixels.
+pub const KEYBOARD_RESIZE_STEP: f64 = 16.0;
+
+/// The minimum width to enforce for a column during resizing: its own
+/// `min_width` if set, else [`DEFAULT_MIN_COLUMN_WIDTH`], capped at
+/// [`MAX_COLUMN_WIDTH`] so consumers cannot create an inverted range.
 pub fn effective_min_width(column_min_width: Option<u32>) -> f64 {
     column_min_width
         .map(|w| w as f64)
         .unwrap_or(DEFAULT_MIN_COLUMN_WIDTH)
+        .clamp(0.0, MAX_COLUMN_WIDTH)
 }
 
 /// Compute a column's width mid-drag: `start_width` plus the pointer delta
@@ -29,6 +34,26 @@ pub fn effective_min_width(column_min_width: Option<u32>) -> f64 {
 pub fn resized_width(start_width: f64, start_x: f64, current_x: f64, min_width: f64) -> f64 {
     let min_width = min_width.clamp(0.0, MAX_COLUMN_WIDTH);
     (start_width + (current_x - start_x)).clamp(min_width, MAX_COLUMN_WIDTH)
+}
+
+/// Compute the requested width for a keyboard-operated column separator.
+///
+/// Left/right arrows resize by [`KEYBOARD_RESIZE_STEP`], while Home and End
+/// move to the column's minimum and the global maximum. Unrelated keys are
+/// not consumed.
+pub fn keyboard_resized_width(current_width: f64, key: &str, min_width: f64) -> Option<f64> {
+    let min_width = min_width.clamp(0.0, MAX_COLUMN_WIDTH);
+    match key {
+        "ArrowLeft" => {
+            Some((current_width - KEYBOARD_RESIZE_STEP).clamp(min_width, MAX_COLUMN_WIDTH))
+        }
+        "ArrowRight" => {
+            Some((current_width + KEYBOARD_RESIZE_STEP).clamp(min_width, MAX_COLUMN_WIDTH))
+        }
+        "Home" => Some(min_width),
+        "End" => Some(MAX_COLUMN_WIDTH),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -50,6 +75,11 @@ mod tests {
     #[test]
     fn effective_min_width_respects_small_explicit_value() {
         assert_eq!(effective_min_width(Some(10)), 10.0);
+    }
+
+    #[test]
+    fn effective_min_width_caps_values_above_the_global_maximum() {
+        assert_eq!(effective_min_width(Some(u32::MAX)), MAX_COLUMN_WIDTH);
     }
 
     // ── resized_width ──
@@ -90,5 +120,29 @@ mod tests {
         // clamp range (which would panic in `f64::clamp`).
         let result = resized_width(100.0, 0.0, 0.0, MAX_COLUMN_WIDTH + 500.0);
         assert_eq!(result, MAX_COLUMN_WIDTH);
+    }
+
+    #[test]
+    fn keyboard_resize_supports_arrows_and_range_boundaries() {
+        assert_eq!(keyboard_resized_width(100.0, "ArrowLeft", 48.0), Some(84.0));
+        assert_eq!(
+            keyboard_resized_width(100.0, "ArrowRight", 48.0),
+            Some(116.0)
+        );
+        assert_eq!(keyboard_resized_width(100.0, "Home", 48.0), Some(48.0));
+        assert_eq!(
+            keyboard_resized_width(100.0, "End", 48.0),
+            Some(MAX_COLUMN_WIDTH)
+        );
+    }
+
+    #[test]
+    fn keyboard_resize_clamps_and_ignores_unrelated_keys() {
+        assert_eq!(keyboard_resized_width(50.0, "ArrowLeft", 48.0), Some(48.0));
+        assert_eq!(
+            keyboard_resized_width(MAX_COLUMN_WIDTH - 4.0, "ArrowRight", 48.0),
+            Some(MAX_COLUMN_WIDTH)
+        );
+        assert_eq!(keyboard_resized_width(100.0, "Enter", 48.0), None);
     }
 }

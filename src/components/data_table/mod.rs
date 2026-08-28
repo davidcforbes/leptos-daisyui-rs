@@ -78,7 +78,9 @@ pub use filter::{
 };
 pub(crate) use pagination::{PageSlot, page_window, row_range};
 pub use pagination::{clamp_page, page_bounds, page_count};
-pub(crate) use resize::{MAX_COLUMN_WIDTH, effective_min_width, resized_width};
+pub(crate) use resize::{
+    MAX_COLUMN_WIDTH, effective_min_width, keyboard_resized_width, resized_width,
+};
 pub use selection::{
     RowClickKind, click_swallowed_by_inspect, handle_row_click, key_inspects, row_click_kind,
     row_is_interactive,

@@ -3,7 +3,7 @@
 `EntityTable<T>` is the opinionated table for a complete, typed client
 snapshot. The caller downloads the whole selected dataset, supplies stable row
 keys and typed column functions, and the component owns transient paging while
-sorting, resizing, and column visibility stay local. When the snapshot needs
+sorting, resizing, column visibility, and column order stay local. When the snapshot needs
 filtering, the caller supplies the locally filtered snapshot and changes
 `page_reset_key` to return paging to the first page.
 
@@ -42,7 +42,7 @@ erase the compile-time distinction the snapshot component exists to provide.
 | Prop | Purpose |
 |---|---|
 | `data: Signal<Rc<Vec<T>>, LocalStorage>` | The complete selected snapshot. |
-| `columns: Vec<EntityColumn<T>>` | Typed cell, sort-key, visibility, and resize declarations. |
+| `columns: Vec<EntityColumn<T>>` | Typed cell, sort-key, visibility, resize, and system-order declarations. |
 | `row_key: EntityRowKey<T>` | Stable identity used for keyed DOM rows and activation. |
 | `dataset_identity: Signal<String>` | Identifies the downloaded dataset; a change resets only the current page. |
 | `page_reset_key` | Optional identity for local view-state changes that should reset only paging. |
@@ -84,8 +84,52 @@ let ownership = EntityTablePreferenceOwnership::controlled(
 ```
 
 Normalization is pure and deterministic. A schema-version mismatch resets to
-defaults; unknown or required hidden-column ids are removed; unsupported sort
-columns reset to system order; widths use the shared DataTable bounds.
+defaults. Ordered columns keep the first occurrence of each known id and append
+missing declarations in system order. Sort clauses likewise keep the first
+occurrence of each sortable known id while removing duplicates, unknown ids,
+and non-sortable columns. Required ids are removed from `hidden_columns`, and
+widths use the shared DataTable bounds.
+
+## Ordered columns and multi-column sort
+
+`EntityTablePreferences::column_order` is the complete ordered list of stable
+column ids. The table renders wide headers, wide cells, and the default compact
+row in that same order. The chooser exposes an ordered list with named “move
+earlier” and “move later” buttons. Boundary buttons are disabled, and focus is
+restored to the corresponding control after a move.
+
+`EntityTablePreferences::sort` is an `EntitySort`. The historical public
+`System`, `Ascending`, and `Descending` variants remain available for
+single-column source code; `Multiple` carries two or more ordered clauses:
+
+```rust,no_run
+use leptos_daisyui_rs::components::{EntitySort, EntitySortColumn};
+
+let sort = EntitySort::multiple([
+    EntitySortColumn::ascending("status"),
+    EntitySortColumn::descending("client"),
+]);
+```
+
+Clauses are compared lexicographically, with stable dataset order breaking full
+ties. Text keys are extracted once per row for each active text clause rather
+than allocated inside the comparison loop.
+
+A plain header activation keeps the compatibility single-sort cycle: ascending,
+descending, then system order. Shift+activation edits one clause without
+discarding the others: absent becomes ascending, ascending becomes descending,
+and descending is removed. Markers and accessible labels expose every clause's
+direction and one-based priority. Only the primary header carries `aria-sort`,
+as required for a table with one primary ordering; a polite live summary
+announces the complete clause sequence.
+
+Resizable headers expose focusable vertical separators with `aria-valuemin`,
+`aria-valuemax`, and live `aria-valuenow`/`aria-valuetext` semantics. Left and
+Right resize by 16 pixels, while Home and End select the allowed minimum and
+maximum. Keyboard and pointer changes use the same shared bounds; in controlled
+mode each completed keyboard action emits one normalized preference
+replacement and performs no browser storage I/O. The shared `DataTable` header
+uses the same keyboard resize math and separator semantics.
 
 ### Uncontrolled without persistence
 
@@ -120,6 +164,16 @@ It resolves to uncontrolled `LegacyLocalStorage` with the existing
 `preference_ownership` fails closed instead of silently allowing a controlled
 table to perform browser I/O.
 
+Legacy serialized single-sort values (`System`, `Ascending`, and `Descending`)
+remain readable. The next write uses the canonical sort-clause array, and a
+legacy payload without `column_order` normalizes to the declared system order.
+
+This schema addition is an intentional source migration for consumers that use
+an `EntityTablePreferences` struct literal or exhaustively match `EntitySort`.
+Add `column_order: Vec::new()` to legacy literals, and handle
+`EntitySort::Multiple { clauses }` (or consume `sort.clauses()`) in exhaustive
+matches. Vendor the framework and those consumer changes atomically.
+
 ## Migration path
 
 For an existing `EntityTable` using `storage_key`, preserve that prop until the
@@ -143,6 +197,10 @@ cargo xtask verify-pattern client-snapshot-list --inner
 cargo xtask verify-pattern client-snapshot-list --browser
 ```
 
-The browser lane checks real sorting, paging, chooser behavior, legacy
-persistence, resize restoration, compact rendering, row/action activation,
-accessibility/style oracles, and the `client-snapshot` ownership marker.
+The browser lane checks real keyboard reorder with boundary-safe focus
+restoration, real Enter/Shift+Enter and Shift-click multi-sort, real keyboard
+resize with controlled-model readback, paging, chooser behavior, controlled
+preference mount behavior without browser storage reads or writes, compact
+rendering, row/action activation, a vendored axe-core audit with the chooser
+open, style oracles, and the `client-snapshot` ownership marker. Native tests
+retain explicit coverage of the legacy local-storage compatibility path.

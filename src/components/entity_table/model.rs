@@ -1,10 +1,13 @@
 //! Pure ordering, pagination, visibility, and resize behavior.
 
-use super::types::{EntityColumn, EntitySort, EntityTablePreferences};
+use super::types::{
+    EntityColumn, EntityComparator, EntitySort, EntitySortDirection, EntityTablePreferences,
+};
 use crate::components::data_table::{
     ColumnVisibilityAction, MAX_COLUMN_WIDTH, clamp_page, column_visibility_action,
     effective_min_width, resized_width,
 };
+use std::collections::BTreeSet;
 use std::rc::Rc;
 
 /// Supported row counts for client-snapshot tables.
@@ -20,61 +23,191 @@ pub fn next_sort(current: &EntitySort, column_id: &str, sortable: bool) -> Entit
     if !sortable {
         return current.clone();
     }
-    match current {
-        EntitySort::Ascending { column } if column == column_id => {
-            EntitySort::descending(column_id)
-        }
-        EntitySort::Descending { column } if column == column_id => EntitySort::System,
-        _ => EntitySort::ascending(column_id),
+    match current.direction_for(column_id) {
+        Some(EntitySortDirection::Ascending) => EntitySort::descending(column_id),
+        Some(EntitySortDirection::Descending) => EntitySort::System,
+        None => EntitySort::ascending(column_id),
     }
+}
+
+/// Cycles one sortable column without discarding the other active clauses.
+///
+/// An absent clause is appended ascending, ascending becomes descending, and
+/// descending is removed. Existing clauses retain their relative priority.
+pub fn next_sort_additive(current: &EntitySort, column_id: &str, sortable: bool) -> EntitySort {
+    if !sortable {
+        return current.clone();
+    }
+    let mut clauses = current.clauses();
+    match clauses.iter().position(|clause| clause.column == column_id) {
+        Some(index) if clauses[index].direction == EntitySortDirection::Ascending => {
+            clauses[index].direction = EntitySortDirection::Descending;
+        }
+        Some(index) => {
+            clauses.remove(index);
+        }
+        None => clauses.push(super::types::EntitySortColumn::ascending(column_id)),
+    }
+    EntitySort::multiple(clauses)
+}
+
+/// Adjacent direction for an ordered-column preference change.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EntityColumnMove {
+    /// Move the column one position toward the start of the table.
+    Earlier,
+    /// Move the column one position toward the end of the table.
+    Later,
+}
+
+/// Returns cloned column definitions in canonical preference order.
+pub fn ordered_columns<T>(
+    preferences: &EntityTablePreferences,
+    columns: &[EntityColumn<T>],
+) -> Vec<EntityColumn<T>> {
+    canonical_column_ids(preferences, columns)
+        .into_iter()
+        .filter_map(|id| columns.iter().find(|column| column.id == id).cloned())
+        .collect()
+}
+
+/// Moves one column by one position in canonical preference order.
+pub fn move_column<T>(
+    preferences: &mut EntityTablePreferences,
+    columns: &[EntityColumn<T>],
+    column_id: &str,
+    direction: EntityColumnMove,
+) -> bool {
+    let mut order = canonical_column_ids(preferences, columns);
+    let Some(index) = order.iter().position(|id| id == column_id) else {
+        return false;
+    };
+    let target = match direction {
+        EntityColumnMove::Earlier if index > 0 => index - 1,
+        EntityColumnMove::Later if index + 1 < order.len() => index + 1,
+        EntityColumnMove::Earlier | EntityColumnMove::Later => return false,
+    };
+    order.swap(index, target);
+    preferences.column_order = order;
+    true
+}
+
+fn canonical_column_ids<T>(
+    preferences: &EntityTablePreferences,
+    columns: &[EntityColumn<T>],
+) -> Vec<String> {
+    let valid = columns
+        .iter()
+        .map(|column| column.id)
+        .collect::<BTreeSet<_>>();
+    let mut seen = BTreeSet::new();
+    let mut order = preferences
+        .column_order
+        .iter()
+        .filter(|id| valid.contains(id.as_str()) && seen.insert((*id).clone()))
+        .cloned()
+        .collect::<Vec<_>>();
+    order.extend(
+        columns
+            .iter()
+            .filter(|column| seen.insert(column.id.to_owned()))
+            .map(|column| column.id.to_owned()),
+    );
+    order
 }
 
 /// Restores server-supplied system order without changing other preferences.
 pub fn reset_sort(preferences: &mut EntityTablePreferences) -> bool {
-    if preferences.sort == EntitySort::System {
+    if preferences.sort.is_system() {
         return false;
     }
     preferences.sort = EntitySort::System;
     true
 }
 
-/// Restores default visibility and widths without changing sort or page size.
+/// Restores default visibility, widths, and order without changing sort or page size.
 pub fn reset_columns(preferences: &mut EntityTablePreferences) -> bool {
-    if preferences.hidden_columns.is_empty() && preferences.column_widths.is_empty() {
+    if preferences.hidden_columns.is_empty()
+        && preferences.column_widths.is_empty()
+        && preferences.column_order.is_empty()
+    {
         return false;
     }
     preferences.hidden_columns.clear();
     preferences.column_widths.clear();
+    preferences.column_order.clear();
     true
 }
 
 /// Builds a stable index permutation without cloning or reordering source rows.
 pub fn sorted_indices<T>(rows: &[T], columns: &[EntityColumn<T>], sort: &EntitySort) -> Vec<usize> {
     let mut indices: Vec<usize> = (0..rows.len()).collect();
-    let Some(column_id) = sort.column() else {
-        return indices;
-    };
-    let Some(column) = columns
+    let prepared = sort
+        .clauses()
         .iter()
-        .find(|column| column.id == column_id && column.sortable)
-    else {
+        .filter_map(|clause| {
+            let column = columns
+                .iter()
+                .find(|column| column.id == clause.column && column.sortable)?;
+            if let Some(sort_key) = column.sort_key.as_ref() {
+                return Some(PreparedSort::Keys {
+                    direction: clause.direction,
+                    keys: rows.iter().map(|row| sort_key(row)).collect(),
+                });
+            }
+            column
+                .comparator
+                .as_ref()
+                .map(|compare| PreparedSort::Comparator {
+                    direction: clause.direction,
+                    compare: Rc::clone(compare),
+                })
+        })
+        .collect::<Vec<_>>();
+    if prepared.is_empty() {
         return indices;
-    };
-    if let Some(sort_key) = column.sort_key.as_ref() {
-        let keys = rows.iter().map(|row| sort_key(row)).collect::<Vec<_>>();
-        indices.sort_by(|left, right| ordered_for_direction(keys[*left].cmp(&keys[*right]), sort));
-    } else if let Some(compare) = column.comparator.as_ref() {
-        indices.sort_by(|left, right| {
-            ordered_for_direction(compare(&rows[*left], &rows[*right]), sort)
-        });
     }
+    indices.sort_by(|left, right| {
+        prepared
+            .iter()
+            .map(|prepared| prepared.compare(*left, *right, rows))
+            .find(|ordering| !ordering.is_eq())
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     indices
 }
 
-fn ordered_for_direction(ordering: std::cmp::Ordering, sort: &EntitySort) -> std::cmp::Ordering {
-    match sort {
-        EntitySort::Descending { .. } => ordering.reverse(),
-        EntitySort::Ascending { .. } | EntitySort::System => ordering,
+enum PreparedSort<T> {
+    Keys {
+        direction: EntitySortDirection,
+        keys: Vec<String>,
+    },
+    Comparator {
+        direction: EntitySortDirection,
+        compare: EntityComparator<T>,
+    },
+}
+
+impl<T> PreparedSort<T> {
+    fn compare(&self, left: usize, right: usize, rows: &[T]) -> std::cmp::Ordering {
+        match self {
+            Self::Keys { direction, keys } => {
+                ordered_for_direction(keys[left].cmp(&keys[right]), *direction)
+            }
+            Self::Comparator { direction, compare } => {
+                ordered_for_direction(compare(&rows[left], &rows[right]), *direction)
+            }
+        }
+    }
+}
+
+fn ordered_for_direction(
+    ordering: std::cmp::Ordering,
+    direction: EntitySortDirection,
+) -> std::cmp::Ordering {
+    match direction {
+        EntitySortDirection::Descending => ordering.reverse(),
+        EntitySortDirection::Ascending => ordering,
     }
 }
 
@@ -210,20 +343,40 @@ fn normalize_preferences_in_place<T>(
 ) {
     if preferences.schema_version != schema_version {
         *preferences = EntityTablePreferences::new(schema_version);
-        return;
     }
     if !valid_page_size(preferences.page_size) {
         preferences.page_size = ENTITY_PAGE_SIZE_CHOICES[0];
     }
 
-    if let Some(column_id) = preferences.sort.column()
-        && !columns.iter().any(|column| {
-            column.id == column_id
-                && column.sortable
-                && (column.comparator.is_some() || column.sort_key.is_some())
-        })
-    {
-        preferences.sort = EntitySort::System;
+    let mut seen_sort_ids = BTreeSet::new();
+    preferences.sort = EntitySort::multiple(
+        preferences
+            .sort
+            .clauses()
+            .iter()
+            .filter(|clause| {
+                seen_sort_ids.insert(clause.column.clone())
+                    && columns.iter().any(|column| {
+                        column.id == clause.column
+                            && column.sortable
+                            && (column.comparator.is_some() || column.sort_key.is_some())
+                    })
+            })
+            .cloned(),
+    );
+
+    let valid_column_ids = columns
+        .iter()
+        .map(|column| column.id)
+        .collect::<BTreeSet<_>>();
+    let mut seen_column_ids = BTreeSet::new();
+    preferences
+        .column_order
+        .retain(|id| valid_column_ids.contains(id.as_str()) && seen_column_ids.insert(id.clone()));
+    for column in columns {
+        if seen_column_ids.insert(column.id.to_owned()) {
+            preferences.column_order.push(column.id.to_owned());
+        }
     }
 
     preferences.hidden_columns.retain(|id| {

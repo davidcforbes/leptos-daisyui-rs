@@ -4,7 +4,7 @@ mod common;
 
 use common::{
     assert_no_browser_errors, assert_not_truncated, begin_browser_error_capture, body_font_family,
-    click, harness_at, wait_for_selector,
+    click, harness_at, oracle, shift_click, shift_enter, wait_for_selector,
 };
 use ldui_audit::{Ceiling, ShadowSpec, family};
 use pixelproof_web::{Key, ViewportSize};
@@ -19,6 +19,398 @@ async fn eval_json(harness: &pixelproof_web::Harness, expression: &str) -> Value
         .expect("evaluate")
         .into_value()
         .expect("JSON value")
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
+async fn controlled_preferences_reorder_columns_and_compose_sort_clauses() {
+    let harness = harness_at("/components/client-snapshot-list").await;
+    begin_browser_error_capture(&harness).await;
+    let storage_sentinel = eval_json(
+        &harness,
+        r#"(() => {
+            const value = JSON.stringify({
+                schema_version: 1,
+                page_size: 100,
+                sort: [{ column: 'client', direction: 'descending' }],
+                column_order: ['actions', 'received', 'case_type', 'status', 'client'],
+                hidden_columns: ['status'],
+                column_widths: { client: 777 },
+            });
+            localStorage.setItem('ldui-entity-table:client-snapshot-demo', value);
+            return value;
+        })()"#,
+    )
+    .await;
+    harness
+        .navigate("/components/client-snapshot-list?pp-freeze=1")
+        .await
+        .expect("reload controlled EntityTable with a storage sentinel");
+    wait_for_selector(&harness, "[data-entity-table-grid] tbody tr").await;
+    let controlled_mount = eval_json(
+        &harness,
+        r#"(() => ({
+            pageSize: document.querySelector('[data-entity-table] label select').value,
+            headers: Array.from(document.querySelectorAll('[data-entity-table-grid] thead th')).map(th => th.dataset.entityColumn),
+            stored: localStorage.getItem('ldui-entity-table:client-snapshot-demo'),
+        }))()"#,
+    )
+    .await;
+    assert_eq!(controlled_mount["pageSize"], json!("25"));
+    assert_eq!(
+        controlled_mount["headers"],
+        json!(["client", "status", "case_type", "received", "actions"]),
+        "controlled mount must not read the reversed hidden-column sentinel: {controlled_mount}"
+    );
+    assert_eq!(
+        controlled_mount["stored"], storage_sentinel,
+        "controlled mount must not overwrite the storage sentinel"
+    );
+    assert_eq!(
+        eval_json(
+            &harness,
+            "localStorage.removeItem('ldui-entity-table:client-snapshot-demo'); true",
+        )
+        .await,
+        json!(true)
+    );
+
+    click(&harness, "[data-entity-column-chooser]").await;
+    let move_later = "[data-entity-column-order='status'][data-entity-column-move='later']";
+    harness
+        .page()
+        .find_element(move_later)
+        .await
+        .expect("find Status move-later control")
+        .focus()
+        .await
+        .expect("focus Status move-later control");
+    harness
+        .press_key_sequence(&[Key::Enter])
+        .await
+        .expect("keyboard-reorder Status column");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let reordered = eval_json(
+        &harness,
+        r#"(() => ({
+            headers: Array.from(document.querySelectorAll('[data-entity-table-grid] thead th')).map(th => th.dataset.entityColumn),
+            moveControls: document.querySelectorAll('[data-entity-column-move]').length,
+            focusRetained: document.activeElement?.matches("[data-entity-column-order='status'][data-entity-column-move='later']") ?? false,
+            firstEarlierDisabled: document.querySelector("[data-entity-column-order='client'][data-entity-column-move='earlier']").disabled,
+            lastLaterDisabled: document.querySelector("[data-entity-column-order='actions'][data-entity-column-move='later']").disabled,
+        }))()"#,
+    )
+    .await;
+    assert_eq!(
+        reordered,
+        json!({
+            "headers": ["client", "case_type", "status", "received", "actions"],
+            "moveControls": 10,
+            "focusRetained": true,
+            "firstEarlierDisabled": true,
+            "lastLaterDisabled": true,
+        })
+    );
+    let state = oracle(&harness).await;
+    assert_eq!(
+        state["state"]["entity_table.preferences"]["column_order"],
+        json!(["client", "case_type", "status", "received", "actions"]),
+        "controlled preference oracle after reorder: {state}"
+    );
+
+    let received_later = "[data-entity-column-order='received'][data-entity-column-move='later']";
+    harness
+        .page()
+        .find_element(received_later)
+        .await
+        .expect("find Received move-later control")
+        .focus()
+        .await
+        .expect("focus Received move-later control");
+    harness
+        .press_key_sequence(&[Key::Enter])
+        .await
+        .expect("move Received to the final position");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let boundary_focus = eval_json(
+        &harness,
+        r#"(() => ({
+            order: Array.from(document.querySelectorAll('[data-entity-column-order]')).filter(el => el.tagName === 'LI').map(el => el.dataset.entityColumnOrder),
+            focusMovedToEnabledOpposite: document.activeElement?.matches("[data-entity-column-order='received'][data-entity-column-move='earlier']") ?? false,
+            boundaryLaterDisabled: document.querySelector("[data-entity-column-order='received'][data-entity-column-move='later']").disabled,
+        }))()"#,
+    )
+    .await;
+    assert_eq!(
+        boundary_focus,
+        json!({
+            "order": ["client", "case_type", "status", "actions", "received"],
+            "focusMovedToEnabledOpposite": true,
+            "boundaryLaterDisabled": true,
+        }),
+        "boundary move must retain focus on an enabled control: {boundary_focus}"
+    );
+    harness
+        .press_key_sequence(&[Key::Enter])
+        .await
+        .expect("move Received back from the final position");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => ({
+                order: Array.from(document.querySelectorAll('[data-entity-column-order]')).filter(el => el.tagName === 'LI').map(el => el.dataset.entityColumnOrder),
+                focusRetained: document.activeElement?.matches("[data-entity-column-order='received'][data-entity-column-move='earlier']") ?? false,
+                label: document.activeElement?.getAttribute('aria-label'),
+            }))()"#,
+        )
+        .await,
+        json!({
+            "order": ["client", "case_type", "status", "received", "actions"],
+            "focusRetained": true,
+            "label": "Move Received earlier from position 4 of 5",
+        })
+    );
+
+    let client_separator = "th[data-entity-column='client'] [role='separator']";
+    harness
+        .page()
+        .find_element(client_separator)
+        .await
+        .expect("find Client column separator")
+        .focus()
+        .await
+        .expect("focus Client column separator");
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let resize_before = eval_json(
+        &harness,
+        r#"(() => {
+            const handle = document.querySelector("th[data-entity-column='client'] [role='separator']");
+            return {
+                active: document.activeElement === handle,
+                tabindex: handle.getAttribute('tabindex'),
+                min: handle.getAttribute('aria-valuemin'),
+                max: handle.getAttribute('aria-valuemax'),
+                now: Number(handle.getAttribute('aria-valuenow')),
+                width: Math.round(handle.parentElement.getBoundingClientRect().width),
+                opacity: getComputedStyle(handle).opacity,
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(resize_before["active"], json!(true));
+    assert_eq!(resize_before["tabindex"], json!("0"));
+    assert_eq!(resize_before["min"], json!("240"));
+    assert_eq!(resize_before["max"], json!("1200"));
+    assert_eq!(resize_before["now"], resize_before["width"]);
+    assert_eq!(resize_before["opacity"], json!("1"));
+    harness
+        .press_key_sequence(&[Key::ArrowRight])
+        .await
+        .expect("keyboard-resize Client column");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let resize_after = eval_json(
+        &harness,
+        r#"(() => {
+            const handle = document.querySelector("th[data-entity-column='client'] [role='separator']");
+            return {
+                active: document.activeElement === handle,
+                now: Number(handle.getAttribute('aria-valuenow')),
+                width: Math.round(handle.parentElement.getBoundingClientRect().width),
+                stored: localStorage.getItem('ldui-entity-table:client-snapshot-demo'),
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(resize_after["active"], json!(true));
+    assert_eq!(resize_after["now"], resize_after["width"]);
+    assert_eq!(resize_after["stored"], Value::Null);
+    assert_eq!(
+        resize_after["now"].as_u64(),
+        resize_before["now"].as_u64().map(|width| width + 16),
+        "ArrowRight must grow the controlled width by one keyboard step: before={resize_before}, after={resize_after}"
+    );
+    let state = oracle(&harness).await;
+    assert_eq!(
+        state["state"]["entity_table.preferences"]["column_widths"]["client"], resize_after["now"],
+        "keyboard resize must emit the controlled replacement: {state}"
+    );
+
+    harness
+        .page()
+        .find_element("[data-entity-sort-column='status']")
+        .await
+        .expect("find Status sort control")
+        .focus()
+        .await
+        .expect("focus Status sort control");
+    harness
+        .press_key_sequence(&[Key::Enter])
+        .await
+        .expect("keyboard-sort Status ascending");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    shift_click(&harness, "[data-entity-sort-column='client']").await;
+    shift_click(&harness, "[data-entity-sort-column='client']").await;
+    let sorted = eval_json(
+        &harness,
+        r#"(() => {
+            const status = document.querySelector("th[data-entity-column='status']");
+            const client = document.querySelector("th[data-entity-column='client']");
+            return {
+                statusAria: status.getAttribute('aria-sort'),
+                clientAria: client.getAttribute('aria-sort'),
+                statusPriority: status.dataset.entitySortPriority,
+                clientPriority: client.dataset.entitySortPriority,
+                statusLabel: status.querySelector('button').getAttribute('aria-label'),
+                clientLabel: client.querySelector('button').getAttribute('aria-label'),
+                first: document.querySelector('[data-entity-table-grid] tbody tr').dataset.rowKey,
+                stored: localStorage.getItem('ldui-entity-table:client-snapshot-demo'),
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(sorted["statusAria"], json!("ascending"));
+    assert_eq!(sorted["clientAria"], Value::Null);
+    assert_eq!(sorted["statusPriority"], json!("1"));
+    assert_eq!(sorted["clientPriority"], json!("2"));
+    assert!(
+        sorted["statusLabel"]
+            .as_str()
+            .unwrap()
+            .contains("Currently sorted ascending at priority 1 of 2")
+    );
+    assert!(
+        sorted["clientLabel"]
+            .as_str()
+            .unwrap()
+            .contains("Currently sorted descending at priority 2 of 2")
+    );
+    assert!(
+        sorted["statusLabel"]
+            .as_str()
+            .unwrap()
+            .contains("Activate to sort descending as the only sort")
+    );
+    assert!(
+        sorted["statusLabel"]
+            .as_str()
+            .unwrap()
+            .contains("Shift+activate to change priority 1 to descending")
+    );
+    assert!(
+        sorted["clientLabel"]
+            .as_str()
+            .unwrap()
+            .contains("Activate to restore system order")
+    );
+    assert!(
+        sorted["clientLabel"]
+            .as_str()
+            .unwrap()
+            .contains("Shift+activate to remove priority 2")
+    );
+    assert_eq!(sorted["first"], json!("office-mx-071"));
+    assert_eq!(
+        sorted["stored"],
+        Value::Null,
+        "controlled preferences must not write browser storage"
+    );
+
+    let state = oracle(&harness).await;
+    assert_eq!(
+        state["state"]["entity_table.preferences"]["sort"],
+        json!([
+            { "column": "status", "direction": "ascending" },
+            { "column": "client", "direction": "descending" },
+        ]),
+        "controlled preference oracle after multi-sort: {state}"
+    );
+
+    harness
+        .page()
+        .find_element("[data-entity-sort-column='case_type']")
+        .await
+        .expect("find Case type sort control")
+        .focus()
+        .await
+        .expect("focus Case type sort control");
+    shift_enter(&harness).await;
+    let state = oracle(&harness).await;
+    assert_eq!(
+        state["state"]["entity_table.preferences"]["sort"],
+        json!([
+            { "column": "status", "direction": "ascending" },
+            { "column": "client", "direction": "descending" },
+            { "column": "case_type", "direction": "ascending" },
+        ]),
+        "real Shift+Enter must append a sort clause: {state}"
+    );
+    shift_enter(&harness).await;
+    shift_enter(&harness).await;
+    let state = oracle(&harness).await;
+    assert_eq!(
+        state["state"]["entity_table.preferences"]["sort"],
+        json!([
+            { "column": "status", "direction": "ascending" },
+            { "column": "client", "direction": "descending" },
+        ]),
+        "Shift+Enter must cycle and remove only the focused clause: {state}"
+    );
+
+    click(&harness, "[data-entity-column-chooser]").await;
+    assert_eq!(
+        eval_json(
+            &harness,
+            "document.querySelector('[data-entity-column-order]')?.offsetParent !== null",
+        )
+        .await,
+        json!(true),
+        "column chooser must be open for the accessibility audit"
+    );
+    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
+        .expect("load vendored axe-core");
+    let report = axe.run(harness.page()).await.expect("run axe-core");
+    report
+        .assert_no_blocking("controlled-entity-table-multi-sort-chooser")
+        .unwrap_or_else(|error| {
+            panic!(
+                "{error}; {}\nviolations: {:#?}",
+                report.summary(),
+                report.violations
+            )
+        });
+
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => {
+                const office = document.querySelector('[data-dataset-selector] select');
+                office.value = 'office-in';
+                office.dispatchEvent(new Event('change', { bubbles: true }));
+                return true;
+            })()"#,
+        )
+        .await,
+        json!(true)
+    );
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(
+        eval_json(
+            &harness,
+            "document.querySelector('[data-entity-table-grid] tbody tr').dataset.rowKey",
+        )
+        .await,
+        json!("office-in-071"),
+        "dataset replacement must preserve the controlled multi-sort"
+    );
+    let state = oracle(&harness).await;
+    assert_eq!(
+        state["state"]["entity_table.preferences"]["column_order"],
+        json!(["client", "case_type", "status", "received", "actions"]),
+        "dataset replacement must preserve controlled column order: {state}"
+    );
+    assert_no_browser_errors(&harness, "controlled EntityTable preferences").await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -64,7 +456,7 @@ async fn client_snapshot_list_contract_works_end_to_end() {
     assert!(
         initial["initialSortLabel"]
             .as_str()
-            .is_some_and(|label| label.contains("Sort ascending")),
+            .is_some_and(|label| label.contains("Activate to sort ascending as the only sort")),
         "system-order label: {initial}"
     );
     let chooser = initial["chooserText"].as_str().unwrap_or_default();
@@ -100,7 +492,7 @@ async fn client_snapshot_list_contract_works_end_to_end() {
         ascending["label"]
             .as_str()
             .unwrap()
-            .contains("Sort descending")
+            .contains("Activate to sort descending as the only sort")
     );
 
     click(&harness, sort_button).await;
@@ -122,7 +514,7 @@ async fn client_snapshot_list_contract_works_end_to_end() {
         descending["label"]
             .as_str()
             .unwrap()
-            .contains("Restore system order")
+            .contains("Activate to restore system order")
     );
     assert_eq!(descending["first"], json!("office-mx-071"));
 
@@ -256,11 +648,17 @@ async fn client_snapshot_list_contract_works_end_to_end() {
     )
     .await;
     assert_eq!(hidden_status["statusHeader"], json!(false));
+    assert_eq!(
+        hidden_status["stored"],
+        Value::Null,
+        "controlled column changes must not use localStorage: {hidden_status}"
+    );
+    let state = oracle(&harness).await;
     assert!(
-        hidden_status["stored"]
-            .as_str()
-            .is_some_and(|stored| stored.contains("status")),
-        "hidden column must persist: {hidden_status}"
+        state["state"]["entity_table.preferences"]["hidden_columns"]
+            .as_array()
+            .is_some_and(|columns| columns.contains(&json!("status"))),
+        "controlled hidden-column oracle: {state}"
     );
 
     harness
@@ -369,11 +767,17 @@ async fn client_snapshot_list_contract_works_end_to_end() {
         resized["width"].as_f64().unwrap() > 250.0,
         "resized: {resized}"
     );
+    assert_eq!(
+        resized["stored"],
+        Value::Null,
+        "controlled widths must not use localStorage: {resized}"
+    );
+    let state = oracle(&harness).await;
     assert!(
-        resized["stored"]
-            .as_str()
-            .is_some_and(|value| value.contains("client")),
-        "stored preferences: {resized}"
+        state["state"]["entity_table.preferences"]["column_widths"]["client"]
+            .as_u64()
+            .is_some_and(|width| width > 250),
+        "controlled width oracle: {state}"
     );
     let resized_width = resized["width"].as_f64().unwrap();
 
@@ -390,8 +794,8 @@ async fn client_snapshot_list_contract_works_end_to_end() {
     .as_f64()
     .unwrap();
     assert!(
-        (restored_width - resized_width).abs() <= 2.0,
-        "width must survive remount: before={resized_width}, after={restored_width}"
+        restored_width + 40.0 < resized_width,
+        "controlled demo must reset rather than reading browser storage: before={resized_width}, after={restored_width}"
     );
     let restored_preferences = eval_json(
         &harness,
@@ -403,7 +807,13 @@ async fn client_snapshot_list_contract_works_end_to_end() {
     .await;
     assert_eq!(
         restored_preferences,
-        json!({ "pageSize": "50", "statusHeader": false })
+        json!({ "pageSize": "25", "statusHeader": true })
+    );
+    let state = oracle(&harness).await;
+    assert_eq!(
+        state["state"]["entity_table.preferences"]["column_order"],
+        json!(["client", "status", "case_type", "received", "actions"]),
+        "controlled preferences reset to the consumer's mount value: {state}"
     );
 
     harness
@@ -427,7 +837,7 @@ async fn client_snapshot_list_contract_works_end_to_end() {
         })()"#,
     )
     .await;
-    assert_eq!(compact["rows"], json!(50));
+    assert_eq!(compact["rows"], json!(25));
     assert_eq!(compact["headerDisplay"], json!("none"));
     assert_ne!(compact["compactDisplay"], json!("none"));
     assert_eq!(compact["wideDisplay"], json!("none"));

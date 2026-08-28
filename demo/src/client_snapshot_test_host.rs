@@ -6,6 +6,8 @@
 
 #[path = "demos/client_snapshot_list.rs"]
 mod client_snapshot_list;
+mod debug;
+mod debug_state;
 
 use client_snapshot_list::ClientSnapshotListDemo;
 use leptos::mount::mount_to_body;
@@ -19,6 +21,16 @@ fn main() {
 
     if test_mode::is_test_mode() {
         test_mode::install_style_kill_switch();
+        debug::register_signal("route", || {
+            serde_json::Value::String(
+                web_sys::window()
+                    .and_then(|window| window.location().pathname().ok())
+                    .unwrap_or_default(),
+            )
+        });
+        debug::register_signal("theme", || serde_json::Value::String("light".to_owned()));
+        debug::register_signal("state", debug_state::get_all);
+        debug::install_debug_bridge();
     }
 
     mount_to_body(|| {

@@ -1,7 +1,7 @@
 //! Public types used to configure a typed entity table.
 
 use leptos::prelude::{AnyView, Callback, Signal};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -25,22 +25,126 @@ pub type EntityComparator<T> = Rc<dyn Fn(&T, &T) -> Ordering>;
 /// avoiding string allocation inside the `O(n log n)` comparison loop.
 pub type EntitySortKey<T> = Rc<dyn Fn(&T) -> String>;
 
-/// The table's current client-side ordering.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// Direction of one clause in an [`EntitySort`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EntitySortDirection {
+    /// Sort values from low to high.
+    Ascending,
+    /// Sort values from high to low.
+    Descending,
+}
+
+impl EntitySortDirection {
+    pub(crate) const fn aria_value(self) -> &'static str {
+        match self {
+            Self::Ascending => "ascending",
+            Self::Descending => "descending",
+        }
+    }
+}
+
+/// One ordered column-and-direction clause in an [`EntitySort`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EntitySortColumn {
+    /// Stable column identifier.
+    pub column: String,
+    /// Direction applied after all preceding clauses compare equal.
+    pub direction: EntitySortDirection,
+}
+
+impl EntitySortColumn {
+    /// Creates an ascending clause for a column.
+    pub fn ascending(column: impl Into<String>) -> Self {
+        Self {
+            column: column.into(),
+            direction: EntitySortDirection::Ascending,
+        }
+    }
+
+    /// Creates a descending clause for a column.
+    pub fn descending(column: impl Into<String>) -> Self {
+        Self {
+            column: column.into(),
+            direction: EntitySortDirection::Descending,
+        }
+    }
+}
+
+/// The table's ordered client-side sort clauses.
+///
+/// An empty clause list preserves the dataset's server-supplied system order.
+/// Serialization always uses the canonical clause array. Deserialization also
+/// accepts the historical `System`/`Ascending`/`Descending` enum payload so
+/// legacy local-storage values migrate without a separate browser pass.
+/// Historical single-column source patterns also remain available:
+///
+/// ```
+/// use leptos_daisyui_rs::components::EntitySort;
+///
+/// let sort = EntitySort::ascending("status");
+/// assert!(matches!(
+///     sort,
+///     EntitySort::Ascending { ref column } if column == "status"
+/// ));
+/// ```
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum EntitySort {
-    /// Preserve the order supplied by the dataset.
+    /// Preserve the dataset's server-supplied order.
     #[default]
     System,
-    /// Sort the named column from low to high.
+    /// Sort one column from low to high.
     Ascending {
         /// Stable column identifier.
         column: String,
     },
-    /// Sort the named column from high to low.
+    /// Sort one column from high to low.
     Descending {
         /// Stable column identifier.
         column: String,
     },
+    /// Apply two or more ordered sort clauses.
+    Multiple {
+        /// Clauses in primary-to-last priority order.
+        clauses: Vec<EntitySortColumn>,
+    },
+}
+
+impl Serialize for EntitySort {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.clauses().serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for EntitySort {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum WireSort {
+            Canonical(Vec<EntitySortColumn>),
+            Legacy(LegacySort),
+        }
+
+        #[derive(Deserialize)]
+        enum LegacySort {
+            System,
+            Ascending { column: String },
+            Descending { column: String },
+        }
+
+        Ok(match WireSort::deserialize(deserializer)? {
+            WireSort::Canonical(clauses) => Self::multiple(clauses),
+            WireSort::Legacy(LegacySort::System) => Self::System,
+            WireSort::Legacy(LegacySort::Ascending { column }) => Self::ascending(column),
+            WireSort::Legacy(LegacySort::Descending { column }) => Self::descending(column),
+        })
+    }
 }
 
 impl EntitySort {
@@ -58,11 +162,93 @@ impl EntitySort {
         }
     }
 
-    /// Returns the active column, or `None` for system order.
+    /// Creates an ordered multi-column sort.
+    pub fn multiple(clauses: impl IntoIterator<Item = EntitySortColumn>) -> Self {
+        let mut clauses = clauses.into_iter();
+        let Some(first) = clauses.next() else {
+            return Self::System;
+        };
+        let Some(second) = clauses.next() else {
+            return match first.direction {
+                EntitySortDirection::Ascending => Self::ascending(first.column),
+                EntitySortDirection::Descending => Self::descending(first.column),
+            };
+        };
+        let mut multiple = vec![first, second];
+        multiple.extend(clauses);
+        Self::Multiple { clauses: multiple }
+    }
+
+    /// Returns the ordered clauses. An empty value means system order.
+    pub fn clauses(&self) -> Vec<EntitySortColumn> {
+        match self {
+            Self::System => Vec::new(),
+            Self::Ascending { column } => vec![EntitySortColumn::ascending(column.clone())],
+            Self::Descending { column } => vec![EntitySortColumn::descending(column.clone())],
+            Self::Multiple { clauses } => clauses.clone(),
+        }
+    }
+
+    /// Returns whether the dataset remains in system order.
+    pub fn is_system(&self) -> bool {
+        matches!(self, Self::System)
+            || matches!(self, Self::Multiple { clauses } if clauses.is_empty())
+    }
+
+    /// Returns the primary clause, if the table is sorted.
+    pub fn primary(&self) -> Option<EntitySortColumn> {
+        match self {
+            Self::System => None,
+            Self::Ascending { column } => Some(EntitySortColumn::ascending(column.clone())),
+            Self::Descending { column } => Some(EntitySortColumn::descending(column.clone())),
+            Self::Multiple { clauses } => clauses.first().cloned(),
+        }
+    }
+
+    /// Returns the clause for a column, if active.
+    pub fn clause_for(&self, column_id: &str) -> Option<EntitySortColumn> {
+        match self {
+            Self::System => None,
+            Self::Ascending { column } if column == column_id => {
+                Some(EntitySortColumn::ascending(column.clone()))
+            }
+            Self::Descending { column } if column == column_id => {
+                Some(EntitySortColumn::descending(column.clone()))
+            }
+            Self::Multiple { clauses } => clauses
+                .iter()
+                .find(|clause| clause.column == column_id)
+                .cloned(),
+            Self::Ascending { .. } | Self::Descending { .. } => None,
+        }
+    }
+
+    /// Returns a column's one-based sort priority, if active.
+    pub fn priority_for(&self, column_id: &str) -> Option<usize> {
+        match self {
+            Self::System => None,
+            Self::Ascending { column } | Self::Descending { column } if column == column_id => {
+                Some(1)
+            }
+            Self::Multiple { clauses } => clauses
+                .iter()
+                .position(|clause| clause.column == column_id)
+                .map(|index| index + 1),
+            Self::Ascending { .. } | Self::Descending { .. } => None,
+        }
+    }
+
+    /// Returns a column's active direction, if any.
+    pub fn direction_for(&self, column_id: &str) -> Option<EntitySortDirection> {
+        self.clause_for(column_id).map(|clause| clause.direction)
+    }
+
+    /// Returns the primary column, or `None` for system order.
     pub fn column(&self) -> Option<&str> {
         match self {
             Self::System => None,
             Self::Ascending { column } | Self::Descending { column } => Some(column),
+            Self::Multiple { clauses } => clauses.first().map(|clause| clause.column.as_str()),
         }
     }
 
@@ -74,16 +260,57 @@ impl EntitySort {
         match self {
             Self::Ascending { column } if column == column_id => Some("ascending"),
             Self::Descending { column } if column == column_id => Some("descending"),
-            _ => None,
+            Self::Multiple { clauses } => clauses
+                .first()
+                .filter(|clause| clause.column == column_id)
+                .map(|clause| clause.direction.aria_value()),
+            Self::System | Self::Ascending { .. } | Self::Descending { .. } => None,
         }
     }
 
     /// Returns an accessible label describing the next sort state.
     pub fn next_label(&self, column_id: &str) -> &'static str {
-        match self {
-            Self::Ascending { column } if column == column_id => "Sort descending",
-            Self::Descending { column } if column == column_id => "Restore system order",
-            _ => "Sort ascending",
+        match self.direction_for(column_id) {
+            Some(EntitySortDirection::Ascending) => "Sort descending",
+            Some(EntitySortDirection::Descending) => "Restore system order",
+            None => "Sort ascending",
+        }
+    }
+
+    /// Describes the column's current direction and multi-sort priority.
+    pub fn current_label(&self, column_id: &str) -> String {
+        match (self.direction_for(column_id), self.priority_for(column_id)) {
+            (Some(direction), Some(priority)) => format!(
+                "Currently sorted {} at priority {priority} of {}",
+                direction.aria_value(),
+                self.clauses().len()
+            ),
+            _ => "Not currently sorted".to_owned(),
+        }
+    }
+
+    /// Describes the result of activating a sort button without Shift.
+    pub fn plain_action_label(&self, column_id: &str) -> &'static str {
+        match self.direction_for(column_id) {
+            Some(EntitySortDirection::Ascending) => "Activate to sort descending as the only sort",
+            Some(EntitySortDirection::Descending) => "Activate to restore system order",
+            None => "Activate to sort ascending as the only sort",
+        }
+    }
+
+    /// Describes the result of Shift-activating a sort button.
+    pub fn additive_action_label(&self, column_id: &str) -> String {
+        match (self.direction_for(column_id), self.priority_for(column_id)) {
+            (Some(EntitySortDirection::Ascending), Some(priority)) => {
+                format!("Shift+activate to change priority {priority} to descending")
+            }
+            (Some(EntitySortDirection::Descending), Some(priority)) => {
+                format!("Shift+activate to remove priority {priority}")
+            }
+            _ => format!(
+                "Shift+activate to add ascending at priority {}",
+                self.clauses().len() + 1
+            ),
         }
     }
 }
@@ -247,6 +474,9 @@ pub struct EntityTablePreferences {
     pub page_size: usize,
     /// Current local ordering.
     pub sort: EntitySort,
+    /// Explicit display order of stable column identifiers.
+    #[serde(default)]
+    pub column_order: Vec<String>,
     /// Optional columns hidden by the user.
     pub hidden_columns: BTreeSet<String>,
     /// User-adjusted widths keyed by stable column identifier.
@@ -260,6 +490,7 @@ impl EntityTablePreferences {
             schema_version,
             page_size: 25,
             sort: EntitySort::System,
+            column_order: Vec::new(),
             hidden_columns: BTreeSet::new(),
             column_widths: BTreeMap::new(),
         }
@@ -340,7 +571,7 @@ pub struct EntityTableTexts {
     pub choose_columns: String,
     /// Action label that restores server-supplied ordering.
     pub reset_sort: String,
-    /// Action label that restores default column visibility and widths.
+    /// Action label that restores default column visibility, widths, and order.
     pub reset_columns: String,
     /// Previous-page action label.
     pub previous: String,

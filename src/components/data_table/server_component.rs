@@ -86,7 +86,7 @@ pub struct TableQuery {
 /// @source inline("btn btn-sm btn-ghost btn-active animate-pulse join join-item");
 /// // Column-resize divider (header.rs)
 /// @source inline("relative absolute top-0 right-0 z-10 h-full w-2 cursor-col-resize select-none");
-/// @source inline("opacity-0 hover:opacity-100 hover:bg-primary/50 active:opacity-100 active:bg-primary/70");
+/// @source inline("opacity-0 hover:opacity-100 hover:bg-primary/50 focus:opacity-100 focus:bg-primary/50 focus:outline focus:outline-2 focus:outline-primary active:opacity-100 active:bg-primary/70");
 /// // Typed cells (Column::with_typed_cell -> TypedCell::Badge / TypedCell::Icon)
 /// @source inline("badge badge-neutral badge-primary badge-secondary badge-accent badge-info badge-success badge-warning badge-error");
 /// @source inline("inline-block w-4 h-4 w-5 h-5 w-6 h-6 w-8 h-8 w-12 h-12");

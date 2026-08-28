@@ -1,3 +1,4 @@
+use crate::debug_state;
 use leptos::prelude::*;
 use leptos_daisyui_rs::components::*;
 use leptos_daisyui_rs::patterns::*;
@@ -111,6 +112,21 @@ pub fn ClientSnapshotListDemo() -> impl IntoView {
     let claim_count = RwSignal::new(0_usize);
     let activate_count = RwSignal::new(0_usize);
     let last_activated = RwSignal::new(String::new());
+    let mut initial_preferences = EntityTablePreferences::new(1);
+    initial_preferences.column_order = ["client", "status", "case_type", "received", "actions"]
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+    let table_preferences = RwSignal::new(initial_preferences);
+    let preference_ownership = EntityTablePreferenceOwnership::controlled(
+        table_preferences.into(),
+        Callback::new(move |replacement| table_preferences.set(replacement)),
+    );
+
+    Effect::new(move |_| {
+        debug_state::set("entity_table.preferences", table_preferences.get());
+    });
+    on_cleanup(move || debug_state::remove("entity_table.preferences"));
 
     let snapshot = Signal::derive_local(move || Rc::new(demo_rows(&office.get())));
     let filtered = Signal::derive_local(move || {
@@ -279,7 +295,7 @@ pub fn ClientSnapshotListDemo() -> impl IntoView {
                     columns=demo_columns(claim_count)
                     row_key=Rc::new(|row: &DemoRow| row.id.clone())
                     dataset_identity=Signal::derive(move || office.get())
-                    storage_key="client-snapshot-demo"
+                    preference_ownership=preference_ownership
                     preference_version=1
                     on_row_activate=Callback::new(move |key: String| {
                         activate_count.update(|count| *count += 1);
