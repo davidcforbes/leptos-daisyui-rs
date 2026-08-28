@@ -19,7 +19,8 @@ use crate::components::data_table::selection::{
 };
 use crate::components::data_table::sort::{column_sort_as, compare_cells};
 use crate::components::data_table::types::{
-    CellRenderer, Column, DataTableClasses, DataTableTexts, SortOrder, TableRow, TypedCellFn,
+    CellRenderer, Column, DataTableClasses, DataTableSortTexts, DataTableTexts, SortOrder,
+    TableRow, TypedCellFn,
 };
 use crate::components::table::{Table, TableSize};
 use crate::merge_classes;
@@ -253,6 +254,12 @@ pub fn DataTable(
     /// re-renders on a language switch.
     #[prop(into, default = Signal::stored(DataTableTexts::default()))]
     texts: Signal<DataTableTexts>,
+
+    /// Localized accessible-name templates for sortable header controls.
+    /// The signal is read live, so current-state and next-action copy can
+    /// relocalize without remounting or resetting table state.
+    #[prop(into, default = Signal::stored(DataTableSortTexts::default()))]
+    sort_texts: Signal<DataTableSortTexts>,
 
     /// Additional CSS classes for container
     #[prop(optional, into)]
@@ -1015,6 +1022,7 @@ pub fn DataTable(
                         columns=display_columns
                         sort_column=Signal::derive(move || sort_column.get())
                         sort_order=Signal::derive(move || sort_order.get())
+                        sort_texts=sort_texts
                         on_sort=on_sort
                         header_cell_class=classes.header_cell
                         column_widths=column_widths

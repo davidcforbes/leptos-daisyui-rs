@@ -6,7 +6,8 @@ use crate::components::data_table::filter::{
 use crate::components::data_table::header::DataTableHeader;
 use crate::components::data_table::selection::{RowClickKind, row_click_kind, row_is_interactive};
 use crate::components::data_table::types::{
-    CellRenderer, Column, DataTableClasses, DataTableTexts, SortOrder, TableRow, TypedCellFn,
+    CellRenderer, Column, DataTableClasses, DataTableSortTexts, DataTableTexts, SortOrder,
+    TableRow, TypedCellFn,
 };
 use crate::components::table::{Table, TableSize};
 use crate::merge_classes;
@@ -132,6 +133,10 @@ pub fn ServerDataTable(
     /// runtime -- see [`DataTableTexts`].
     #[prop(into, default = Signal::stored(DataTableTexts::default()))]
     texts: Signal<DataTableTexts>,
+
+    /// Localized accessible-name templates for sortable header controls.
+    #[prop(into, default = Signal::stored(DataTableSortTexts::default()))]
+    sort_texts: Signal<DataTableSortTexts>,
 
     /// Additional CSS classes for container
     #[prop(optional, into)]
@@ -443,6 +448,7 @@ pub fn ServerDataTable(
                         columns=columns
                         sort_column=Signal::derive(move || sort_column.get())
                         sort_order=Signal::derive(move || sort_order.get())
+                        sort_texts=sort_texts
                         on_sort=on_sort
                         header_cell_class=classes.header_cell
                         column_widths=column_widths

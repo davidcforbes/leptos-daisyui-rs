@@ -1,7 +1,8 @@
 use crate::components::data_table::resize::{
     MAX_COLUMN_WIDTH, effective_min_width, keyboard_resized_width, resized_width,
 };
-use crate::components::data_table::types::{Column, SortOrder};
+use crate::components::data_table::types::{Column, DataTableSortTexts, SortOrder};
+use crate::components::{Button, ButtonSize, ButtonStyle};
 use crate::merge_classes;
 use leptos::prelude::*;
 use std::collections::HashMap;
@@ -31,6 +32,10 @@ pub fn DataTableHeader(
     /// Current sort order
     #[prop(into)]
     sort_order: Signal<SortOrder>,
+
+    /// Localized current-state and next-action copy for focused sort controls.
+    #[prop(into)]
+    sort_texts: Signal<DataTableSortTexts>,
 
     /// Callback when column header is clicked
     on_sort: Callback<&'static str>,
@@ -75,10 +80,18 @@ pub fn DataTableHeader(
                         let cell_class =
                             merge_classes!(header_cell_class, col.class.unwrap_or(""), "relative");
 
-                        let aria_sort = if is_sorted {
+                        let aria_sort = if !is_sortable {
+                            None
+                        } else if is_sorted {
                             Some(sort_order.get().as_aria_str())
                         } else {
                             Some("none")
+                        };
+                        let sort_header = header_label.clone();
+                        let sort_label = move || {
+                            let current = (sort_column.get() == Some(col_id))
+                                .then(|| sort_order.get());
+                            sort_texts.with(|texts| texts.control_label(&sort_header, current))
                         };
 
                         // Explicit width (set by a prior resize drag) always
@@ -107,26 +120,36 @@ pub fn DataTableHeader(
                                 role="columnheader"
                                 aria-sort=aria_sort
                                 style=width_style
-                                on:click=move |_| {
-                                    if is_sortable {
-                                        on_sort.run(col_id);
-                                    }
-                                }
                             >
-                                <span class="flex items-center gap-1">
-                                    {col.header.clone()}
-                                    {move || {
-                                        if is_sorted {
-                                            Some(view! {
-                                                <span class="text-xs">
-                                                    {sort_order.get().as_symbol()}
-                                                </span>
-                                            })
-                                        } else {
-                                            None
-                                        }
-                                    }}
-                                </span>
+                                {is_sortable.then(|| {
+                                    let header = col.header.clone();
+                                    view! {
+                                        <Button
+                                            style=ButtonStyle::Ghost
+                                            size=ButtonSize::Sm
+                                            class="h-auto !min-h-0 w-full justify-start gap-1 rounded-sm px-0 py-1 text-left font-semibold !shadow-none"
+                                            attr:data-table-sort-column=col_id
+                                            attr:aria-label=sort_label
+                                            on_click=Callback::new(move |_| on_sort.run(col_id))
+                                        >
+                                            <span>{header}</span>
+                                            {move || {
+                                                if is_sorted {
+                                                    Some(view! {
+                                                        <span aria-hidden="true" class="text-xs">
+                                                            {sort_order.get().as_symbol()}
+                                                        </span>
+                                                    })
+                                                } else {
+                                                    None
+                                                }
+                                            }}
+                                        </Button>
+                                    }
+                                })}
+                                {(!is_sortable).then(|| view! {
+                                    <span class="flex items-center gap-1">{col.header.clone()}</span>
+                                })}
                                 {is_resizable.then(|| view! {
                                     <span
                                         class="absolute top-0 right-0 z-10 h-full w-2 cursor-col-resize select-none opacity-0 hover:opacity-100 hover:bg-primary/50 focus:opacity-100 focus:bg-primary/50 focus:outline focus:outline-2 focus:outline-primary active:opacity-100 active:bg-primary/70"

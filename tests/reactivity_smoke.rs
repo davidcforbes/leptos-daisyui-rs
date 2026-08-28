@@ -112,7 +112,7 @@ async fn modal_opens_and_escape_closes() {
 #[ignore = "requires demo dev server (cargo make test-visual)"]
 async fn data_table_sort_toggles_via_oracle() {
     let h = harness_at("/components/data-table").await;
-    let header = "main table thead th:first-child";
+    let header = "#keyboard-sort-table thead th:first-child > button";
 
     click(&h, header).await;
     let s = oracle(&h).await;
@@ -129,6 +129,261 @@ async fn data_table_sort_toggles_via_oracle() {
         json!({ "column": "name", "order": "descending" }),
         "oracle after second click: {s}"
     );
+}
+
+/// Phase 0B keyboard/a11y contract (ldui-w1e): shared client and server table
+/// sorting is one native-button activation path for pointer, Enter, and Space.
+/// Non-sortable headers expose no sort control, while their independent resize
+/// separator remains keyboard reachable and cannot change sort state.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn data_table_sort_is_keyboard_operable_for_client_and_server_tables() {
+    let h = harness_at("/components/data-table").await;
+    begin_browser_error_capture(&h).await;
+
+    let client_sort = "#keyboard-sort-table thead tr:first-child th:first-child > button";
+    let server_sort = "#server-table thead tr:first-child th:first-child > button";
+    let structure = eval_json(
+        &h,
+        r#"(() => {
+            const client = document.querySelector('#keyboard-sort-table');
+            const server = document.querySelector('#server-table');
+            const mixedStatus = document.querySelector(
+                '#mixed-sort-table thead tr:first-child th:nth-child(4)'
+            );
+            const clientButton = client?.querySelector(
+                'thead tr:first-child th:first-child > button'
+            );
+            const serverButton = server?.querySelector(
+                'thead tr:first-child th:first-child > button'
+            );
+            return {
+                clientButtons: client?.querySelectorAll(
+                    'thead tr:first-child th:first-child > button'
+                ).length ?? 0,
+                serverButtons: server?.querySelectorAll(
+                    'thead tr:first-child th:first-child > button'
+                ).length ?? 0,
+                clientName: clientButton?.textContent.trim() ?? '',
+                serverName: serverButton?.textContent.trim() ?? '',
+                clientAccessibleName: clientButton?.getAttribute('aria-label') ?? null,
+                serverAccessibleName: serverButton?.getAttribute('aria-label') ?? null,
+                clientAriaSort: clientButton?.parentElement?.getAttribute('aria-sort') ?? null,
+                serverAriaSort: serverButton?.parentElement?.getAttribute('aria-sort') ?? null,
+                nonSortableButtons: mixedStatus?.querySelectorAll('button').length ?? 0,
+                nonSortableSeparators: mixedStatus?.querySelectorAll(
+                    '[role="separator"][tabindex="0"]'
+                ).length ?? 0,
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(
+        structure["clientButtons"],
+        json!(1),
+        "client sort control: {structure}"
+    );
+    assert_eq!(
+        structure["serverButtons"],
+        json!(1),
+        "server sort control: {structure}"
+    );
+    assert_eq!(
+        structure["clientName"],
+        json!("Name"),
+        "client name: {structure}"
+    );
+    assert_eq!(
+        structure["serverName"],
+        json!("Name"),
+        "server name: {structure}"
+    );
+    assert_eq!(
+        structure["clientAccessibleName"],
+        json!("Name, not sorted. Activate to sort ascending."),
+        "focused client control names current state and next action: {structure}"
+    );
+    assert_eq!(
+        structure["serverAccessibleName"],
+        json!("Name, not sorted. Activate to sort ascending."),
+        "focused server control names current state and next action: {structure}"
+    );
+    assert_eq!(
+        structure["clientAriaSort"],
+        json!("none"),
+        "client state: {structure}"
+    );
+    assert_eq!(
+        structure["serverAriaSort"],
+        json!("none"),
+        "server state: {structure}"
+    );
+    assert_eq!(
+        structure["nonSortableButtons"],
+        json!(0),
+        "non-sortable Status must not gain a sort tab stop: {structure}"
+    );
+    assert_eq!(
+        structure["nonSortableSeparators"],
+        json!(1),
+        "resizing stays independently keyboard operable: {structure}"
+    );
+
+    // Pointer activation and both native keyboard activations each advance the
+    // controlled oracle exactly one state. A handwritten key handler plus the
+    // native click would advance twice and fail these alternating assertions.
+    click(&h, client_sort).await;
+    let state = oracle(&h).await;
+    assert_eq!(
+        state["state"]["datatable.sort"],
+        json!({ "column": "name", "order": "ascending" }),
+        "one pointer activation: {state}"
+    );
+    let semantics = eval_json(
+        &h,
+        r#"(() => {
+            const button = document.querySelector('#keyboard-sort-table thead th:first-child > button');
+            return { name: button.getAttribute('aria-label'), sort: button.parentElement.getAttribute('aria-sort') };
+        })()"#,
+    )
+    .await;
+    assert_eq!(
+        semantics,
+        json!({
+            "name": "Name, sorted ascending. Activate to sort descending.",
+            "sort": "ascending",
+        }),
+        "client ascending semantics: {semantics}"
+    );
+    h.page()
+        .find_element(client_sort)
+        .await
+        .expect("find client sort control")
+        .focus()
+        .await
+        .expect("focus client sort control");
+    h.press_key_sequence(&[Key::Enter])
+        .await
+        .expect("client Enter");
+    settle(&h).await;
+    let state = oracle(&h).await;
+    assert_eq!(
+        state["state"]["datatable.sort"],
+        json!({ "column": "name", "order": "descending" }),
+        "one Enter activation: {state}"
+    );
+    let semantics = eval_json(
+        &h,
+        r#"(() => {
+            const button = document.querySelector('#keyboard-sort-table thead th:first-child > button');
+            return { name: button.getAttribute('aria-label'), sort: button.parentElement.getAttribute('aria-sort') };
+        })()"#,
+    )
+    .await;
+    assert_eq!(
+        semantics,
+        json!({
+            "name": "Name, sorted descending. Activate to sort ascending.",
+            "sort": "descending",
+        }),
+        "client descending semantics: {semantics}"
+    );
+    h.press_key_sequence(&[Key::Space])
+        .await
+        .expect("client Space");
+    settle(&h).await;
+    let state = oracle(&h).await;
+    assert_eq!(
+        state["state"]["datatable.sort"],
+        json!({ "column": "name", "order": "ascending" }),
+        "one Space activation: {state}"
+    );
+
+    click(
+        &h,
+        "#keyboard-sort-table thead tr:first-child th:first-child [role=\"separator\"]",
+    )
+    .await;
+    let state = oracle(&h).await;
+    assert_eq!(
+        state["state"]["datatable.sort"],
+        json!({ "column": "name", "order": "ascending" }),
+        "resize separator click must not sort: {state}"
+    );
+
+    h.page()
+        .find_element(server_sort)
+        .await
+        .expect("find server sort control")
+        .focus()
+        .await
+        .expect("focus server sort control");
+    h.press_key_sequence(&[Key::Enter])
+        .await
+        .expect("server Enter");
+    settle(&h).await;
+    let state = oracle(&h).await;
+    assert_eq!(
+        state["state"]["server_datatable.query"]["sort"],
+        json!({ "column": "name", "order": "ascending" }),
+        "one server Enter activation: {state}"
+    );
+    let semantics = eval_json(
+        &h,
+        r#"(() => {
+            const button = document.querySelector('#server-table thead th:first-child > button');
+            return { name: button.getAttribute('aria-label'), sort: button.parentElement.getAttribute('aria-sort') };
+        })()"#,
+    )
+    .await;
+    assert_eq!(
+        semantics,
+        json!({
+            "name": "Name, sorted ascending. Activate to sort descending.",
+            "sort": "ascending",
+        }),
+        "server ascending semantics: {semantics}"
+    );
+    h.press_key_sequence(&[Key::Space])
+        .await
+        .expect("server Space");
+    settle(&h).await;
+    let state = oracle(&h).await;
+    assert_eq!(
+        state["state"]["server_datatable.query"]["sort"],
+        json!({ "column": "name", "order": "descending" }),
+        "one server Space activation: {state}"
+    );
+    let semantics = eval_json(
+        &h,
+        r#"(() => {
+            const button = document.querySelector('#server-table thead th:first-child > button');
+            return { name: button.getAttribute('aria-label'), sort: button.parentElement.getAttribute('aria-sort') };
+        })()"#,
+    )
+    .await;
+    assert_eq!(
+        semantics,
+        json!({
+            "name": "Name, sorted descending. Activate to sort ascending.",
+            "sort": "descending",
+        }),
+        "server descending semantics: {semantics}"
+    );
+
+    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
+        .expect("load vendored axe-core");
+    let report = axe.run(h.page()).await.expect("run axe-core");
+    report
+        .assert_no_blocking("shared-data-table-sort")
+        .unwrap_or_else(|error| {
+            panic!(
+                "{error}; {}; violations: {:#?}",
+                report.summary(),
+                report.violations
+            )
+        });
+    assert_no_browser_errors(&h, "shared DataTable sort keyboard journey").await;
 }
 
 /// Responsive paging must not collapse a short viewport to one row. When the
@@ -1395,6 +1650,17 @@ async fn data_table_headers_relocalize_via_dom() {
     assert!(
         dom.contains("Nombre") && dom.contains("Correo"),
         "headers must re-render to Spanish after the locale switch"
+    );
+    let sort_name = eval_json(
+        &h,
+        r#"document.querySelector('#localized-table thead th:first-child > button')
+            ?.getAttribute('aria-label') ?? null"#,
+    )
+    .await;
+    assert_eq!(
+        sort_name,
+        json!("Nombre, sin ordenar. Activar para ordenar ascendente."),
+        "the mounted sort control's state/action copy must relocalize"
     );
 }
 

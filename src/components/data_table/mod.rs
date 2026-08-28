@@ -4,7 +4,7 @@
 //! and efficient handling of large datasets.
 //!
 //! ## Features
-//! - Column-based sorting (click headers to toggle Asc/Desc)
+//! - Column-based sorting through native pointer/Enter/Space header controls
 //! - Pagination with customizable page size
 //! - Loading and empty states
 //! - Fully themed with daisyUI

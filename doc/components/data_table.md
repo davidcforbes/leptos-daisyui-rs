@@ -45,6 +45,7 @@ Selection is cleared automatically when `data`, the sort column, or the sort ord
 | `searchable` | `Signal<bool>` | `false` | Show a global free-text search box (300ms debounce) |
 | `classes` | `DataTableClasses` | `Default` | Per-element class overrides |
 | `texts` | `DataTableTexts` | `Default` | User-facing strings (i18n) |
+| `sort_texts` | `DataTableSortTexts` | `Default` | Reactive current-state and next-action names for sortable header controls |
 | `class` | `&'static str` | `""` | Additional container classes |
 | `table_size` | `Signal<TableSize>` | `Md` | daisyUI table density |
 | `zebra` | `Signal<bool>` | `false` | Zebra striping |
@@ -112,11 +113,19 @@ A leading ASCII `-` or Unicode minus (`−`) also negates. Values that would par
 ## Sorting
 
 Sorting is built in, not enabled by `on_sort_change`: `Column::new` is
-sortable by default, and clicking its header label cycles the internal sort.
-`on_sort_change` only observes that new state. Use
-`Column::new_non_sortable` for action or display-only columns. The narrow
-right-edge separator resizes the column and deliberately stops the click from
-sorting it.
+sortable by default, and its header contains a native framework `Button`.
+Pointer click, Enter, and Space share the same activation path and cycle the
+internal sort exactly once. `on_sort_change` only observes that new state. Use
+`Column::new_non_sortable` for action or display-only columns; it renders no
+sort control or sort tab stop. The narrow right-edge separator remains a
+separate focusable resize control and deliberately stops its events from
+sorting.
+
+The parent `th` exposes canonical `aria-sort`. The focused Button also names
+the localized column, current state, and next action directly. Override the
+reactive `sort_texts` signal with `DataTableSortTexts` templates when locale
+changes; each template uses `{column}`. This contract is shared by
+`DataTable` and `ServerDataTable`.
 
 Cells are strings and compare as **text by default**. A column holding formatted numbers must say so, or it sorts by first digit — `"$1,000"` before `"$900"`:
 
@@ -323,6 +332,8 @@ fn RichTable(data: Signal<Vec<TableRow>>) -> impl IntoView {
 
 ## Custom text (i18n)
 
+`DataTableTexts` supplies visible table chrome:
+
 | Field | Default |
 |-------|---------|
 | `loading` | `"Loading..."` |
@@ -333,6 +344,15 @@ fn RichTable(data: Signal<Vec<TableRow>>) -> impl IntoView {
 | `search_placeholder` | `"Search..."` |
 | `row_range` | `"Showing {start}–{end} of {total}"` |
 | `filter_all` | `"All"` |
+
+`DataTableSortTexts` supplies the focused sort control's complete accessible
+name:
+
+| Field | Default |
+|-------|---------|
+| `unsorted` | `"{column}, not sorted. Activate to sort ascending."` |
+| `ascending` | `"{column}, sorted ascending. Activate to sort descending."` |
+| `descending` | `"{column}, sorted descending. Activate to sort ascending."` |
 
 ## ServerDataTable
 
@@ -354,7 +374,7 @@ contract as `data-table-data-mode="server-query"` for runtime audits.
 | `filter_options` | `Option<Signal<HashMap<&'static str, Vec<String>>>>` | Population-wide choices for filterable columns |
 | `on_row_activate` | `Option<Callback<usize>>` | Plain click or keyboard activation with the current-page row index |
 | `on_row_inspect` | `Option<Callback<usize>>` | Double-click or Shift+Enter inspection with the current-page row index |
-| `loading`, `classes`, `texts`, `class`, `table_size`, `zebra`, `pin_rows`, `pin_cols`, `max_height`, `cell_renderers`, `typed_cells`, `row_class_fn`, `node_ref` | | As `DataTable` |
+| `loading`, `classes`, `texts`, `sort_texts`, `class`, `table_size`, `zebra`, `pin_rows`, `pin_cols`, `max_height`, `cell_renderers`, `typed_cells`, `row_class_fn`, `node_ref` | | As `DataTable` |
 
 **Not available**: `selected_rows` / `selection_anchor` (the server variant
 has no selection state machine), `auto_page_size`, `paginate`, `searchable`

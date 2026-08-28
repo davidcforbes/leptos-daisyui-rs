@@ -35,7 +35,7 @@
 
 - [ ] **Step 1: Add the failing browser oracle**
 
-Add `data_table_sort_is_keyboard_operable_for_client_and_server_tables` to `tests/reactivity_smoke.rs`. Give the client fixture `id="keyboard-sort-table"`, and publish the server query through `debug_state["server_datatable.query"]`. For each table, focus its first sort button, send Enter and Space with `Key::Enter` and `Key::Space`, and assert the debug oracle advances exactly once per key. Also assert the non-sortable header has no focusable descendant and run the vendored axe critical/serious check plus browser-error capture.
+Add `data_table_sort_is_keyboard_operable_for_client_and_server_tables` to `tests/reactivity_smoke.rs`. Give the client fixture `id="keyboard-sort-table"`, and publish the server query through `debug_state["server_datatable.query"]`. For each table, focus its first sort button, send Enter and Space with `Key::Enter` and `Key::Space`, and assert the debug oracle advances exactly once per key. Also assert the non-sortable header has no sort control (its independent resize separator remains focusable) and run the vendored axe critical/serious check plus browser-error capture.
 
 - [ ] **Step 2: Run the browser suite and verify RED**
 

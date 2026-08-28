@@ -405,6 +405,43 @@ impl Default for DataTableTexts {
     }
 }
 
+/// Localizable accessible-name templates for sortable table-header controls.
+///
+/// Each template must contain `{column}`. The focused control uses the
+/// matching template to expose both its current state and the result of its
+/// next plain activation; the parent header retains canonical `aria-sort`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DataTableSortTexts {
+    /// Name for a sortable column that is not currently active.
+    pub unsorted: String,
+    /// Name for the active ascending column.
+    pub ascending: String,
+    /// Name for the active descending column.
+    pub descending: String,
+}
+
+impl DataTableSortTexts {
+    /// Formats the focused sort control's complete accessible name.
+    pub fn control_label(&self, column: &str, current: Option<SortOrder>) -> String {
+        let template = match current {
+            None => &self.unsorted,
+            Some(SortOrder::Asc) => &self.ascending,
+            Some(SortOrder::Desc) => &self.descending,
+        };
+        template.replace("{column}", column)
+    }
+}
+
+impl Default for DataTableSortTexts {
+    fn default() -> Self {
+        Self {
+            unsorted: "{column}, not sorted. Activate to sort ascending.".to_string(),
+            ascending: "{column}, sorted ascending. Activate to sort descending.".to_string(),
+            descending: "{column}, sorted descending. Activate to sort ascending.".to_string(),
+        }
+    }
+}
+
 /// Type alias for table row data
 pub type TableRow = HashMap<&'static str, String>;
 
@@ -677,6 +714,33 @@ mod tests {
         assert_eq!(texts.page_indicator, "Page {current} of {total}");
         assert_eq!(texts.search_placeholder, "Search...");
         assert_eq!(texts.row_range, "Showing {start}\u{2013}{end} of {total}");
+    }
+
+    #[test]
+    fn sort_control_texts_name_current_state_and_next_action() {
+        let texts = DataTableSortTexts::default();
+        assert_eq!(
+            texts.control_label("Name", None),
+            "Name, not sorted. Activate to sort ascending."
+        );
+        assert_eq!(
+            texts.control_label("Name", Some(SortOrder::Asc)),
+            "Name, sorted ascending. Activate to sort descending."
+        );
+        assert_eq!(
+            texts.control_label("Name", Some(SortOrder::Desc)),
+            "Name, sorted descending. Activate to sort ascending."
+        );
+
+        let localized = DataTableSortTexts {
+            unsorted: "{column}, sin ordenar. Activar para ordenar ascendente.".to_string(),
+            ascending: "{column}, orden ascendente. Activar para ordenar descendente.".to_string(),
+            descending: "{column}, orden descendente. Activar para ordenar ascendente.".to_string(),
+        };
+        assert_eq!(
+            localized.control_label("Nombre", Some(SortOrder::Asc)),
+            "Nombre, orden ascendente. Activar para ordenar descendente."
+        );
     }
 
     // ── Column PartialEq ──

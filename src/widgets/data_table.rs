@@ -420,6 +420,7 @@ pub fn DataTable(
                                         <input
                                             type="checkbox"
                                             class="checkbox checkbox-xs"
+                                            aria-label="Select all rows on this page"
                                             prop:checked=move || {
                                                 let n = sel.with(|s| s.len());
                                                 let total = visible_rows.with(|rs| rs.len());
@@ -564,11 +565,13 @@ pub fn DataTable(
                                             {bulk_select.map(|sel| {
                                                 let row_id = row_id_for_check.clone();
                                                 let row_id_change = row_id.clone();
+                                                let row_label = format!("Select row {row_id}");
                                                 view! {
                                                     <td class="px-2">
                                                         <input
                                                             type="checkbox"
                                                             class="checkbox checkbox-xs"
+                                                            aria-label=row_label
                                                             prop:checked=move || sel.with(|s| s.contains(&row_id))
                                                             on:change=move |ev| {
                                                                 let checked = leptos::prelude::event_target_checked(&ev);

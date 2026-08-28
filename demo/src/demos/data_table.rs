@@ -134,6 +134,19 @@ pub fn DataTableDemo() -> impl IntoView {
             DataTableTexts::default()
         }
     });
+    let localized_sort_texts = Signal::derive(move || {
+        if locale_es.get() {
+            DataTableSortTexts {
+                unsorted: "{column}, sin ordenar. Activar para ordenar ascendente.".to_string(),
+                ascending: "{column}, orden ascendente. Activar para ordenar descendente."
+                    .to_string(),
+                descending: "{column}, orden descendente. Activar para ordenar ascendente."
+                    .to_string(),
+            }
+        } else {
+            DataTableSortTexts::default()
+        }
+    });
 
     // Multi-select state for the selection demo
     let selected_rows = RwSignal::new(BTreeSet::<usize>::new());
@@ -228,6 +241,16 @@ pub fn DataTableDemo() -> impl IntoView {
     ]);
 
     let run_server_query = move |q: TableQuery| {
+        let query_debug = serde_json::json!({
+            "page": q.page,
+            "page_size": q.page_size,
+            "search": q.search.clone(),
+            "sort": q.sort.map(|(column, order)| serde_json::json!({
+                "column": column,
+                "order": order.as_aria_str(),
+            })),
+            "filters": q.filters.clone(),
+        });
         let mut items = server_fixture.get_value();
         items.retain(|row| {
             q.filters
@@ -263,6 +286,7 @@ pub fn DataTableDemo() -> impl IntoView {
             "page={} size={} search={:?} sort={:?} filters={:?}",
             q.page, q.page_size, q.search, q.sort, q.filters
         ));
+        crate::debug_state::set("server_datatable.query", query_debug);
     };
     // Initial fetch: page 1, no query shape.
     run_server_query(TableQuery {
@@ -520,6 +544,7 @@ pub fn DataTableDemo() -> impl IntoView {
                             serde_json::json!({ "column": col, "order": order.as_aria_str() }),
                         );
                     })
+                    attr:id="keyboard-sort-table"
                 />
             </Section>
 
@@ -532,6 +557,7 @@ pub fn DataTableDemo() -> impl IntoView {
                     data=small_data
                     columns=mixed_columns
                     page_size=5
+                    attr:id="mixed-sort-table"
                 />
             </Section>
 
@@ -681,10 +707,11 @@ pub fn DataTableDemo() -> impl IntoView {
             // Dynamic Page Size
             <Section title="Dynamic Page Size">
                 <div class="mb-4 flex items-center gap-4">
-                    <label class="label">
+                    <label class="label" r#for="dynamic-page-size">
                         <span class="text-sm">"Rows per page:"</span>
                     </label>
                     <select
+                        id="dynamic-page-size"
                         class="select select-bordered select-sm"
                         on:change=move |ev| {
                             let value = event_target_value(&ev);
@@ -848,6 +875,7 @@ pub fn DataTableDemo() -> impl IntoView {
                     data=Signal::derive(Vec::<HashMap<&'static str, String>>::new)
                     columns=localized_columns
                     texts=localized_texts
+                    sort_texts=localized_sort_texts
                     paginate=false
                     attr:id="localized-table"
                 />
