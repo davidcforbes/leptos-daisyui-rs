@@ -1,7 +1,6 @@
 # Snapshot Table Opinionated Foundation Design
 
-**Status:** Proposed for written-spec review; the architectural direction was
-approved in conversation on 2026-08-28.
+**Status:** Approved by the user on 2026-08-28.
 
 **Scope:** Beads `ldui-w1e`, `ldui-ifj`, and `ldui-ifj.1` through
 `ldui-ifj.4`.
