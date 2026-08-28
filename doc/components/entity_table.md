@@ -131,6 +131,31 @@ mode each completed keyboard action emits one normalized preference
 replacement and performs no browser storage I/O. The shared `DataTable` header
 uses the same keyboard resize math and separator semantics.
 
+### Interaction and accessibility release evidence
+
+A green screenshot, style audit, or layout audit is Layer A evidence; it does
+not prove that an interactive table is keyboard-operable or exposes accurate
+semantics. Before approving a table change, enumerate every supported operation
+and attach browser evidence for each one:
+
+| Operation | Required browser evidence |
+|---|---|
+| Sort | Real Tab plus Enter/Space and Shift-modified activation; one activation per key; accurate current/next-action labels; primary-only `aria-sort`; priorities, live summary, rendered rows, and controlled model agree. |
+| Resize | A visibly focusable, uniquely named vertical `separator`; ordered `aria-valuemin <= aria-valuenow <= aria-valuemax` plus value text; real Left/Right/Home/End input; no scroll or sort activation; rendered width and controlled model agree. |
+| Reorder | Named earlier/later controls include position; boundary state is disabled; focus follows the moved column or its enabled opposite at a boundary; DOM and model order agree. |
+| Visibility | Keyboard-operable chooser state agrees with rendered columns; required-column and last-visible guards remain enforced. |
+| Paging | Current page and boundary-disabled states are exposed; keyboard button activation changes the row range and rendered rows exactly once. |
+| Compact rows | Compact content follows the same normalized column order and preserves names/actions without duplicate hidden focus targets. |
+
+The shared minimum-width helper caps every public `min_width`, including
+`u32::MAX`, at the global maximum. That keeps the ARIA range ordered and every
+direct `f64::clamp` range valid. Prove the extreme input in a pure regression
+test and prove focus plus key operation in the real DOM; either test alone is
+insufficient. An axe run complements these checks but cannot prove keyboard
+operation. Keep an inject/catch/revert negative control for a key behavior or
+focusability assertion so a green journey demonstrates detection, not merely
+execution.
+
 ### Uncontrolled without persistence
 
 This is the default when neither ownership nor `storage_key` is supplied. The
