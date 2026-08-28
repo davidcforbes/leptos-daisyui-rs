@@ -2,13 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Complete the framework-owned client-snapshot table path, including keyboard-operable shared-table sorting, atomic dataset presentation, complete page/filter feedback, reactive EntityTable metadata, deterministic row-action focus recovery, and a rendered Field ID contract.
+**Goal:** Complete the framework-owned client-snapshot table path, including keyboard-operable shared-table sorting, atomic validated dataset presentation, the preferred aligned filter row and semantic visual hierarchy, sort-stable geometry, complete page/filter feedback, reactive EntityTable metadata, deterministic row-action focus recovery, and a rendered Field ID contract.
 
 **Architecture:** Add pure reducers and typed wrappers before rendering components. Keep transport, authorization, routes, persistence, and domain data in consumers. Migrate the client-snapshot showcase to the complete controlled composition, then prove each behavior through native tests and real Chrome/WASM oracles. Existing lower-level APIs remain compatible.
 
 **Tech Stack:** Rust 2024, Leptos 0.8 CSR, serde/serde_json, daisyUI 5, `pixelproof-web`, `ldui-audit`, cargo xtask, Chrome.
 
-**Spec:** `docs/superpowers/specs/2026-08-28-snapshot-table-opinionated-foundation-design.md`; Beads `ldui-w1e`, `ldui-ifj`, and `ldui-ifj.1` through `ldui-ifj.4`.
+**Spec:** `docs/superpowers/specs/2026-08-28-snapshot-table-opinionated-foundation-design.md`; Beads `ldui-w1e`, `ldui-gbs`, `ldui-ifj`, and `ldui-ifj.1` through `ldui-ifj.5`.
 
 ## Global Constraints
 
@@ -17,6 +17,8 @@
 - Use framework `Button`, `Input`, `Select`, alert, pagination, and token APIs; do not add raw page-local controls or arbitrary styling.
 - Keep the new path persistence-neutral and free of network, database, route, session, and local-storage side effects.
 - Preserve source compatibility for existing `DataTable`, `ServerDataTable`, `EntityTable`, `FilterBar`, `ActiveFilterChips`, `DatasetSelector`, `ListPage`, and `AsyncDataSection` call sites.
+- Render one-to-one filters only in the aligned table filter row. Keep only global/non-column controls, state summary, Reset, and Save as Default in the utility `FilterBar`; both regions share one controlled model.
+- Use generated semantic table tokens and stable fixed column tracks. Sorting may change body order and sort state only, never shell geometry.
 - Use focused xtask gates while a Bead is active. Run `cargo xtask verify-full` only on the final candidate tree, then reread every Beads queue before landing.
 - Layer D2 is explicitly inapplicable here: the framework reports callbacks but performs no transport or durable write. Consumer repositories own completion-barrier proof.
 
@@ -31,13 +33,13 @@
 - Modify: `tests/style_smoke.rs`
 - Modify: `src/components/data_table/README.md`
 
-**Contract:** A sortable `th` contains one native framework `Button`; the `th` retains `aria-sort`, the button is named by the localized column heading, and pointer/Enter/Space all reach the existing sort callback once. A non-sortable header has no button or tab stop. The resize separator remains a sibling and cannot trigger sorting.
+**Contract:** A sortable `th` contains one native framework `Button`; the `th` retains `aria-sort`, the button directly names the localized column, current sort state, and next action, and pointer/Enter/Space all reach the existing sort callback once. A non-sortable header has no button or tab stop. The resize separator remains a sibling and cannot trigger sorting.
 
-- [ ] **Step 1: Add the failing browser oracle**
+- [x] **Step 1: Add the failing browser oracle**
 
 Add `data_table_sort_is_keyboard_operable_for_client_and_server_tables` to `tests/reactivity_smoke.rs`. Give the client fixture `id="keyboard-sort-table"`, and publish the server query through `debug_state["server_datatable.query"]`. For each table, focus its first sort button, send Enter and Space with `Key::Enter` and `Key::Space`, and assert the debug oracle advances exactly once per key. Also assert the non-sortable header has no sort control (its independent resize separator remains focusable) and run the vendored axe critical/serious check plus browser-error capture.
 
-- [ ] **Step 2: Run the browser suite and verify RED**
+- [x] **Step 2: Run the browser suite and verify RED**
 
 Run:
 
@@ -47,7 +49,7 @@ cargo xtask test-reactivity
 
 Expected: the new test cannot find a sort button in either shared table; existing pointer sorting remains green.
 
-- [ ] **Step 3: Render the framework Button inside sortable headers**
+- [x] **Step 3: Render the framework Button inside sortable headers**
 
 Replace the sortable `th` click handler with this ownership shape:
 
@@ -68,17 +70,45 @@ Replace the sortable `th` click handler with this ownership shape:
 
 Keep the exact existing separator range/key behavior and propagation guards. Render plain text for non-sortable columns.
 
-- [ ] **Step 4: Verify GREEN and the negative control**
+- [x] **Step 4: Verify GREEN and the negative control**
 
 Rerun `cargo xtask test-reactivity`. Then temporarily remove the button from the client fixture, confirm the new test fails at its focus/name assertion, revert that fault, and rerun green. Run `cargo xtask test-style` to prove the button uses the canonical primitive and no drift ceiling changes.
 
-- [ ] **Step 5: Document, commit, push, and close**
+- [x] **Step 5: Document, commit, push, and close**
 
-Document the keyboard contract and shared client/server coverage. Run `cargo xtask verify`, inspect `bd ready --json` plus open/in-progress/blocked snapshots, close `ldui-w1e`, and commit with `fix(data-table): make shared sorting keyboard accessible (ldui-w1e)`. Push and verify the remote branch points at the new commit.
+Completed in pushed commit `b470ab9`. Focused reactivity passed 27/27, style 7/7, `cargo xtask verify` 14/14, and clean `cargo xtask verify-full` 18/18 before `ldui-w1e` closed.
 
 ---
 
-### Task 2: Add the atomic dataset presentation reducer (`ldui-ifj.1`)
+### Task 2: Freeze reviewed invariants and owner visual decisions (`ldui-ifj.5`)
+
+**Files:**
+- Modify: `Future-Architecture.md`
+- Modify: `docs/superpowers/specs/2026-08-28-snapshot-table-opinionated-foundation-design.md`
+- Modify: `docs/superpowers/plans/2026-08-28-snapshot-table-opinionated-foundation.md`
+- Update: Beads `ldui-ifj`, `ldui-ifj.1`, `ldui-ifj.2`, `ldui-ifj.3`, `ldui-ifj.5`, and `ldui-gbs`
+
+**Contract:** Before implementation, freeze private validated state, framework-issued request handles, typed identity-critical page configs, keyed concurrent actions, schema-projected defaults, semantic column generations, dataset/access-scoped focus, aligned column filters, semantic blue bands/faint grid, and sort-stable geometry.
+
+- [x] **Step 1: Revise the governing documents**
+
+Replace every permissive or contradictory interface in the approved spec and plan. Record the owner's 4iiz-etl filter-row decision and table palette in `Future-Architecture.md`; do not leave the earlier detached one-to-one filter wording as a competing path.
+
+- [x] **Step 2: Update affected Bead acceptance criteria**
+
+Make each child independently enforce the relevant invariants. `ldui-ifj.1` owns private state/request handles/typed critical configs/concurrent actions; `ldui-ifj.2` owns the hybrid filter placement and schema-projected payload; `ldui-ifj.3` owns semantic-generation cache invalidation and focus scope; `ldui-gbs` owns geometry and tokenized visual hierarchy. Re-read each issue after writing it.
+
+- [x] **Step 3: Audit for stale design language**
+
+Search for obsolete caller tokens, public orthogonal state fields, arbitrary `SnapshotViewDefaults<F>`, opaque selector/table slots, one-action state, detached one-to-one controls, content-driven canonical layouts, and unscoped focus recovery. The search result must contain no normative stale path.
+
+- [x] **Step 4: Save and close the design review**
+
+Run `git diff --check`, commit the coherent document/Bead checkpoint, push it, verify the remote, and close `ldui-ifj.5` only after all eight review findings and the two owner decisions are represented in both the spec and implementation steps.
+
+---
+
+### Task 3: Add the atomic dataset presentation reducer (`ldui-ifj.1`)
 
 **Files:**
 - Add: `src/patterns/snapshot_table.rs`
@@ -89,28 +119,21 @@ Document the keyboard contract and shared client/server coverage. Run `cargo xta
 **Interfaces:**
 
 ```rust
-pub struct DatasetRequest<V> { pub token: u64, pub dataset: V }
-pub struct SnapshotData<R, V, M> {
-    pub dataset: V,
-    pub rows: Rc<Vec<R>>,
-    pub revision: String,
-    pub total_rows: usize,
-    pub metadata: Option<M>,
+pub struct SnapshotRequestHandle<V> { /* private sequence + dataset */ }
+pub struct SnapshotData<R, V, M> { /* private atomic snapshot fields */ }
+pub struct SnapshotTableState<R, V, E, M, K> { /* private reducer state */ }
+pub struct SnapshotTableView<'a, R, V, E, M, K> { /* read-only derived view */ }
+pub enum SnapshotResponseDisposition {
+    Applied,
+    IgnoredConsumed,
+    IgnoredStale,
+    IgnoredMismatchedDataset,
 }
-pub enum DatasetPresentation<R, V, E, M> {
-    NeverLoaded,
-    InitialLoading { request: DatasetRequest<V> },
-    InitialError { request: DatasetRequest<V>, error: E },
-    Displaying { snapshot: SnapshotData<R, V, M> },
-    Replacing { displayed: SnapshotData<R, V, M>, request: DatasetRequest<V> },
-    RetainedError { displayed: SnapshotData<R, V, M>, request: DatasetRequest<V>, error: E },
-}
-pub enum DatasetResponseDisposition { Applied, IgnoredStale, IgnoredMismatchedDataset }
 ```
 
 - [ ] **Step 1: Write failing pure transition tests**
 
-Cover initial load, initial failure/retry, displayed-to-replacing, retained failure/retry, successful atomic replacement, duplicate responses, older tokens, and a matching token carrying the wrong dataset identity. Assert ignored responses preserve dataset, rows, revision, count, and metadata byte-for-byte.
+Cover initial load, initial failure/retry, displayed-to-replacing, retained failure/retry, successful atomic replacement, duplicate/consumed handles, older handles, a matching sequence carrying the wrong dataset identity, checked sequence exhaustion, and access replacement. Assert ignored responses preserve dataset, rows, revision, count, metadata, actions, and generation byte-for-byte. Prove no public constructor can mint or decrease a handle.
 
 - [ ] **Step 2: Run the focused tests and verify RED**
 
@@ -124,7 +147,7 @@ Expected: compilation fails because the dataset types and transition methods do 
 
 - [ ] **Step 3: Implement the minimal pure model**
 
-Add `start_request`, `accept_response`, `record_failure`, and read-only helpers for displayed snapshot/identity, requested identity, busy, retained data, and error. Apply a response only when token and dataset both equal the active request. Swap the complete `SnapshotData` in one enum replacement.
+Add `start_request`, `accept_response`, `record_failure`, `replace_access`, and read-only view helpers. `start_request` mints the handle internally. Apply a response only when its still-active opaque handle and dataset match. Swap the complete `SnapshotData` in one reducer operation and consume the handle. Mint `LocalResultSummary` only from the current displayed binding and reject a summary from an older generation/revision.
 
 - [ ] **Step 4: Verify GREEN**
 
@@ -132,7 +155,7 @@ Run the focused command again, followed by `cargo test -p leptos-daisyui-rs --li
 
 ---
 
-### Task 3: Add orthogonal runtime state, PageStatePanel, ActionFeedback, and SnapshotTablePage (`ldui-ifj.1`)
+### Task 4: Add validated runtime state, PageStatePanel, ActionFeedback, and SnapshotTablePage (`ldui-ifj.1`)
 
 **Files:**
 - Modify: `src/patterns/snapshot_table.rs`
@@ -144,13 +167,13 @@ Run the focused command again, followed by `cargo test -p leptos-daisyui-rs --li
 - Modify: `src/lib.rs`
 - Add: `tests/snapshot_table_smoke.rs`
 
-**Interfaces:** Add `SnapshotContentState::{Ready, EmptyDataset, NoFilterResults}`, `SnapshotAccessState::{Allowed, Expired, Forbidden}`, keyed `ActionFeedbackState<K>`, and `SnapshotTablePresentation<R,V,E,M,K> { dataset, content, access, action }`. Add complete reactive `PageStatePanelTexts` and `ActionFeedbackTexts` structs.
+**Interfaces:** Keep phase/content/access private inside `SnapshotTableState`. Add a read-only `SnapshotTableView`, generation-bound `LocalResultSummary`, keyed concurrent `ActionFeedbackModel<K>`, and complete reactive `PageStatePanelTexts` and `ActionFeedbackTexts`. Add `SnapshotDatasetSelectorConfig<V>` and `SnapshotEntityTableConfig<R>` whose public fields cannot supply selected/displayed identity, rows, revision, or generation.
 
 - [ ] **Step 1: Write failing precedence and renderer tests**
 
-Native cases must prove: expired/forbidden suppress mounted content; initial loading/error replace content; empty/no-results replace content; replacing and retained-error keep content mounted; action feedback coexists with retained rows; and preference feedback is not represented by `ActionFeedbackState`.
+Native cases must prove: contradictory phase/content/access combinations have no public constructor; a stale `LocalResultSummary` is rejected; expired/forbidden suppress mounted content; initial loading/error replace content; empty/no-results come only from the matching displayed generation; replacing and retained-error keep content mounted; two distinct action keys may remain pending concurrently; updating/dismissing one preserves the other; only the latest transition is announced; and preference feedback is not represented by the action model.
 
-Add a browser fixture with literal IDs `snapshot-page`, `snapshot-page-dataset`, `snapshot-page-filters`, `snapshot-page-feedback`, and `snapshot-page-table`. Assert the DOM order is header, distinct selector, KPI, filters, feedback, then table, and assert retained transitions leave the same table node mounted.
+Add a browser fixture with literal IDs `snapshot-page`, `snapshot-page-dataset`, `snapshot-page-filters`, `snapshot-page-feedback`, and `snapshot-page-table`. Assert the DOM order is header, distinct selector, KPI, filters, feedback, then table; assert page/selector/table generation markers agree; and assert retained transitions leave the same table node mounted.
 
 - [ ] **Step 2: Run focused native/browser checks and verify RED**
 
@@ -165,7 +188,7 @@ Expected: missing state types and component markers prevent the new assertions f
 
 - [ ] **Step 3: Implement typed render selection and components**
 
-Implement one pure render-decision function and make `SnapshotTablePage` consume it. Use framework alerts, skeletons, and Buttons. Feedback announcements use status/alert semantics without calling focus. The page owns only sizing, vertical rhythm, slot order, retained mounting, and stable `data-*` markers.
+Implement one pure render-decision function and make `SnapshotTablePage` consume it. The page itself renders the selector and table from configs that omit all identity-critical fields. Use framework alerts, skeletons, and Buttons. Concurrent keyed feedback uses one latest live announcement without calling focus. The page owns only typed binding, sizing, vertical rhythm, slot order, retained mounting, and stable `data-*` markers.
 
 - [ ] **Step 4: Verify GREEN and demonstrate the DOM oracle**
 
@@ -173,13 +196,16 @@ Run both focused commands. Temporarily swap the filter and selector slot markers
 
 ---
 
-### Task 4: Complete controlled, localized filters and explicit defaults (`ldui-ifj.2`)
+### Task 5: Complete controlled, localized filters and explicit defaults (`ldui-ifj.2`)
 
 **Files:**
 - Modify: `src/patterns/filter_bar.rs`
 - Modify: `src/patterns/dataset_selector.rs`
 - Modify: `src/patterns/active_filter_chips.rs`
 - Add: `src/patterns/filter_bar/tests.rs`
+- Modify: `src/patterns/contracts.rs`
+- Modify: `src/components/entity_table/types.rs`
+- Modify: `src/components/entity_table/component.rs`
 - Modify: `src/patterns/mod.rs`
 - Modify: `src/lib.rs`
 - Modify: `tests/snapshot_table_smoke.rs`
@@ -188,19 +214,18 @@ Run both focused commands. Temporarily swap the filter and selector slot markers
 
 ```rust
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct SnapshotViewDefaults<F> {
-    pub filters: F,
-    pub table: EntityTablePreferences,
-}
+pub struct LocalFilterDefaults { /* private schema-ordered values */ }
+pub struct SnapshotViewDefaults { /* private filters + table */ }
+pub struct EntityColumnFilter { pub column_id: &'static str, /* renderer */ }
 ```
 
-Add reactive complete `FilterBarTexts`, `DatasetSelectorTexts`, and `ActiveFilterTexts`. Represent the optional typed save binding behind a `SnapshotDefaultSave` wrapper so existing layout-only `FilterBar` calls do not gain an unconstrained generic parameter.
+Add reactive complete `FilterBarTexts`, `DatasetSelectorTexts`, and `ActiveFilterTexts`. Represent the optional save binding behind `SnapshotDefaultSave`; its payload can be created only by `FilterSchema::project_defaults`. Add static/reactive `EntityColumnFilters`, keyed by stable column ID, for the second `thead` row. Existing layout-only `FilterBar` calls retain their current API.
 
 - [ ] **Step 1: Write failing payload and interaction tests**
 
-Native tests serialize `SnapshotViewDefaults` and assert its only top-level keys are `filters` and `table`. Construct it through a validated `FilterSchema` and assert the dataset selector cannot appear among local filter fields.
+Native tests serialize `SnapshotViewDefaults` and assert its only top-level keys are `filters` and `table`. Project a schema-ordered map through a validated `FilterSchema`; reject undeclared keys and the exact dataset selector. Add a negative consumer fixture with an `office_id` dataset member and prove it cannot be passed/serialized as defaults.
 
-Browser tests exercise pointer, Enter, and Space on Reset and Save. Assert exactly one save callback per explicit enabled Save, while filter edits, Reset, dataset selection, locale replacement, and feedback rendering emit zero saves. Assert dirty/clean/pending/disabled reasons, active chip summaries, localized result counts, and live pending/saved/conflict/failure feedback.
+Browser tests exercise pointer, Enter, and Space on Reset and Save. Assert exactly one save callback per explicit enabled Save, while filter edits, Reset, dataset selection, locale replacement, and feedback rendering emit zero saves. Assert one-to-one filters render only beneath their columns, utility-only filters render only above, no clear/reset action is duplicated, filter controls cannot trigger sorting, and reorder/hide operations keep controls on the correct stable column ID. Assert dirty/clean/pending/disabled reasons, active chip summaries, localized result counts, and live pending/saved/conflict/failure feedback.
 
 - [ ] **Step 2: Run focused tests and verify RED**
 
@@ -215,7 +240,7 @@ Expected: the payload type and complete FilterBar actions/texts are absent, and 
 
 - [ ] **Step 3: Implement the complete controlled contracts**
 
-Keep all values/signals consumer-owned. Embed `ActiveFilterChips` once within complete `FilterBar`; render one Reset and one explicit Save as Default. Save invokes the supplied callback with the current filters and table preferences only. No state transition except activation may call it. Every framework-owned visible or accessible string comes from a reactive text signal.
+Keep all values/signals consumer-owned. Embed `ActiveFilterChips` once within the utility `FilterBar`; render one Reset and one explicit Save as Default. Render `EntityColumnFilters` as a second header row with one `th` per visible column and event isolation around each control. Save invokes the supplied callback with schema-projected local defaults and table preferences only. No state transition except activation may call it. Every framework-owned visible or accessible string comes from a reactive text signal.
 
 - [ ] **Step 4: Verify GREEN and negative controls**
 
@@ -223,7 +248,59 @@ Run the native and browser commands. Temporarily call save from Reset, confirm t
 
 ---
 
-### Task 5: Migrate and visually prove the client-snapshot reference page (`ldui-ifj.1`, `ldui-ifj.2`)
+### Task 6: Make opinionated table visuals and geometry stable (`ldui-gbs`)
+
+**Files:**
+- Modify: `xtask/src/gen_tokens.rs`
+- Regenerate: `styles/tokens.css`
+- Modify: `src/components/data_table/header.rs`
+- Modify: `src/components/data_table/filter.rs`
+- Modify: `src/components/data_table/component.rs`
+- Modify: `src/components/data_table/server_component.rs`
+- Modify: `src/components/entity_table/component.rs`
+- Modify: `src/components/entity_table/types.rs`
+- Modify: `tests/reactivity_smoke.rs`
+- Modify: `tests/entity_table_smoke.rs`
+- Modify: `tests/style_audit_smoke.rs`
+- Modify: `tests/layout_audit_smoke.rs`
+
+**Contract:** Canonical snapshot and server-query tables use generated semantic dark-blue/white header, light-blue/dark filter band, faint collapsed row/column grid, opt-in zebra, a stable `colgroup`, and fixed reserved sort-indicator slots. Sorting updates body order/state without replacing header/filter nodes or moving any shell track.
+
+- [ ] **Step 1: Write failing semantic-token and browser geometry tests**
+
+Pin generated table-header/filter/grid tokens to the existing shared `ui_tokens` palette. In desktop and narrow horizontally scrolled fixtures, capture the viewport/table/header/filter bounding boxes, every column x/width, grid-line positions, `scrollLeft`, and header/filter node identities. Sort via pointer, Enter, and Space with a fixture whose first page has radically different content widths after sorting. Assert the complete shell remains within `0.5px`, nodes remain identical, and only body row order plus sort state/announcement change. Repeat for localized longer headings and a filtered/paged table.
+
+- [ ] **Step 2: Run focused tests and verify RED**
+
+Run:
+
+```powershell
+cargo test -p leptos-daisyui-rs --lib --features test-mode table_geometry -- --nocapture
+cargo xtask test-reactivity
+cargo test -p leptos-daisyui-rs --test entity_table_smoke --features browser-tests -- --ignored --nocapture
+```
+
+Expected: content-driven layout and non-keyed header maps move/recreate shell geometry; semantic table tokens are absent.
+
+- [ ] **Step 3: Implement stable tracks and preserved header/filter nodes**
+
+Generate `--color-table-header`, `--color-table-header-content`, `--color-table-filter`, `--color-table-filter-content`, and `--color-table-grid`. Add stable geometry helpers that render a `colgroup` from column definitions plus controlled widths. Use fixed table layout in canonical configs. Convert header/filter maps to keyed `For` nodes so sort-state changes update reactive attributes/indicator content in place. Always render a fixed-width unsorted/sorted indicator slot. Keep low-level compatibility layout selectable and source compatible.
+
+- [ ] **Step 4: Apply the opinionated visual hierarchy**
+
+Use semantic generated classes on the canonical table only: dark-blue header/white content, light-blue filter/dark content, faint collapsed borders on header/filter/body cells, and zebra disabled by default. Verify focus rings and resize handles remain visible against both bands and in forced colors.
+
+- [ ] **Step 5: Prove the negative control and visual result**
+
+Temporarily remove the `colgroup` or reserved indicator width, confirm the bounding-box oracle fails with the moved columns, revert, and rerun green. Run `cargo xtask test-style`, `cargo xtask test-layout`, and the page visual lane; review desktop and narrow captures rather than approving by metric alone.
+
+- [ ] **Step 6: Save the geometry checkpoint**
+
+Update table docs, run `cargo xtask verify`, close `ldui-gbs`, commit with `fix(entity-table): keep sort geometry stable (ldui-gbs)`, push, and verify remote equality.
+
+---
+
+### Task 7: Migrate and visually prove the client-snapshot reference page (`ldui-ifj.1`, `ldui-ifj.2`)
 
 **Files:**
 - Modify: `demo/src/demos/client_snapshot_list.rs`
@@ -235,7 +312,7 @@ Run the native and browser commands. Temporarily call save from Reset, confirm t
 
 - [ ] **Step 1: Add failing page-level race and state oracles**
 
-Expose a serializable demo debug model containing displayed dataset, requested dataset, revision, row count, panel kind, filter summary, save state, current columns, sort, page, and focused row/action. Add browser cases for displaying, replacing, stale response ignored, retained error, no local results, action conflict, and preference failure. In every case compare the DOM to the debug model rather than accepting DOM-only evidence.
+Expose a serializable demo debug model containing displayed dataset, requested dataset, opaque generation label, revision, row count, panel kind, filter summary/placements, save state, current columns/semantic generation, sort, page, and focused row/action scope. Add browser cases for displaying, replacing, stale response ignored, retained error, no local results, concurrent action conflict, and preference failure. In every case compare the DOM to the debug model rather than accepting DOM-only evidence.
 
 - [ ] **Step 2: Run the page-scoped commands and verify RED**
 
@@ -250,11 +327,11 @@ Expected: the legacy composition lacks the complete debug fields and state marke
 
 - [ ] **Step 3: Migrate the demo to the canonical signal flow**
 
-Use one `SnapshotTablePresentation` signal. Derive selector requested/displayed values, KPI data, table rows, table dataset identity, panels, and feedback from that signal. Compose the fixed `SnapshotTablePage` slots and complete `FilterBar`; do not retain alias signals for dataset labels or rows.
+Use one private-field `SnapshotTableState` signal. Supply `SnapshotDatasetSelectorConfig`, `SnapshotFilterConfig`, and `SnapshotEntityTableConfig`; let the page inject requested/displayed values, rows, dataset identity, generation, panels, and feedback. Place column-mapped controls in the aligned table filter row and only global/domain controls in the utility `FilterBar`. Do not retain alias signals for dataset labels or rows.
 
 - [ ] **Step 4: Add reviewed desktop and narrow visual states**
 
-Capture named component-region baselines for displaying, replacing, retained error, no results, action conflict, and preference failure. Review each image for wrapping, overlap, clipping, focus, typography, shapes, shadows, and default-variant intent. Update the visual test plan with its responsive matrix and accepted baseline rationale.
+Capture named component-region baselines for displaying, replacing, retained error, no results, action conflict, preference failure, and a fully populated filter row. Review each image for wrapping, overlap, clipping, focus, semantic header/filter colors, faint grid, stable tracks, typography, shapes, shadows, and default-variant intent. Update the visual test plan with its responsive matrix and accepted baseline rationale.
 
 - [ ] **Step 5: Verify all A/B/C/D1 layers and close child Beads**
 
@@ -272,7 +349,7 @@ For the stale-response oracle, temporarily accept any token, observe the dataset
 
 ---
 
-### Task 6: Make EntityTable columns and compact rendering reactive (`ldui-ifj.3`)
+### Task 8: Make EntityTable columns and compact rendering reactive (`ldui-ifj.3`)
 
 **Files:**
 - Modify: `src/components/entity_table/types.rs`
@@ -297,11 +374,11 @@ pub enum EntityCompactRow<T: 'static> {
 }
 ```
 
-Implement `From<Vec<EntityColumn<T>>>` and `From<Signal<Vec<EntityColumn<T>>, LocalStorage>>`; mirror those conversions for compact rows. Accept both through `#[prop(into)]` so static call sites remain source compatible.
+Implement `From<Vec<EntityColumn<T>>>` and `From<Signal<Vec<EntityColumn<T>>, LocalStorage>>`; mirror those conversions for compact rows. Accept both through `#[prop(into)]` so static call sites remain source compatible. Internally expose an opaque semantic generation that advances on every reactive vector replacement and participates in sort-cache invalidation.
 
 - [ ] **Step 1: Write failing native normalization tests**
 
-Prove a changed declaration removes unknown sort/width/order/visibility IDs, appends newly declared IDs, preserves page size and surviving preferences, and uses the newest comparator/key callbacks. Prove a label-only change leaves page and all preference values unchanged.
+Prove a changed declaration removes unknown/non-sortable sort clauses plus unknown width/order/visibility IDs, appends newly declared IDs, preserves page size and surviving preferences, increments semantic generation, and uses the newest comparator/key callbacks with unchanged row `Rc` and sort. Prove a label-only change leaves page and all preference values unchanged while safely invalidating the sort cache.
 
 - [ ] **Step 2: Add a failing mounted locale test**
 
@@ -320,15 +397,15 @@ Expected: `Vec` is captured in stored values and rendered labels/comparators do 
 
 - [ ] **Step 4: Implement reactive wrappers and normalization**
 
-Read the active column vector at each reactive render/model boundary. Normalize controlled preferences against current stable IDs without emitting spurious preference callbacks for a label-only change. Make the default compact renderer read current columns and make an explicit compact renderer use the reactive wrapper.
+Read the active column vector and semantic generation at each reactive render/model boundary. Include the generation in `SortedIndexCache` reuse. Normalize controlled preferences against current stable/sortable IDs without emitting spurious preference callbacks for a label-only change. Make the default compact renderer read current columns and make an explicit compact renderer use the reactive wrapper.
 
 - [ ] **Step 5: Verify GREEN and the locale negative control**
 
-Run both focused commands. Temporarily retain the initial chooser labels, confirm the mounted locale test fails, revert, and rerun green.
+Run both focused commands. Temporarily omit semantic generation from the cache key while replacing a comparator with unchanged rows/sort, confirm the ordered-index assertion fails, revert, and rerun green. Also temporarily retain initial chooser labels, confirm the mounted locale test fails, revert, and rerun green.
 
 ---
 
-### Task 7: Add deterministic row-action focus recovery (`ldui-ifj.3`)
+### Task 9: Add deterministic row-action focus recovery (`ldui-ifj.3`)
 
 **Files:**
 - Modify: `src/components/entity_table/types.rs`
@@ -339,11 +416,11 @@ Run both focused commands. Temporarily retain the initial chooser labels, confir
 - Modify: `demo/src/demos/client_snapshot_list.rs`
 - Modify: `tests/entity_table_smoke.rs`
 
-**Contract:** Add `EntityRowAction` with a stable action ID and framework-owned `data-entity-row-action` marker. Record row key, action ID, and visible position when focus enters a marked action. When that row disappears, focus the same action at the same clamped position in the actual filtered/sorted/paged visible order, otherwise focus the preceding row, otherwise the named table region. If the row remains after an action failure, do not move focus.
+**Contract:** Add `EntityRowAction` with a stable action ID and framework-owned `data-entity-row-action` marker. Record dataset/access generation, row key, action ID, and visible position when focus enters a marked action. Recover to a neighbor only for source-row removal within the same generation and only when the same action is rendered, enabled, visible, and focusable. Filtering/paging hide falls back to the named table region; dataset/access change clears recovery; a user who already moved focus is never interrupted.
 
 - [ ] **Step 1: Write failing pure focus-target tests**
 
-Add a pure selector that consumes the prior focused row/action/position plus the newly visible row keys. Cover a middle-row deletion, last-row deletion, sorted order, locally filtered order, page collapse, no matching action, an unchanged row, and an external deletion. Assert the returned target is either `RowAction { row_key, action_id }`, `TableRegion`, or `NoChange`.
+Add a pure selector that consumes the prior focus record, prior/current source keys, current visible keys, and current generation. Cover a middle-row deletion, last-row deletion, sorted order, locally filtered order, page collapse, disabled/hidden/missing matching action, an unchanged row, a row hidden by filter/page while still in source, external deletion, dataset replacement, expired/forbidden access, and already-moved focus. Assert the returned target is either `RowAction { row_key, action_id }`, `TableRegion`, `Clear`, or `NoChange`.
 
 - [ ] **Step 2: Run the focused unit tests and verify RED**
 
@@ -357,11 +434,11 @@ Expected: the focus target model and stable action marker do not exist.
 
 - [ ] **Step 3: Implement the marker, tracking, and post-render recovery**
 
-Make the EntityTable region programmatically focusable with `tabindex="-1"` and a stable region node reference. Capture focus only from marked actions inside the table. After the rendered visible rows change, compute the target from the same sorted/filtered/paged indices used by rendering, then resolve the matching marker inside the table subtree. Never query from consumer code and never fall back to `document.body`.
+Make the EntityTable region programmatically focusable with `tabindex="-1"` and a stable region node reference. Capture focus only from marked actions inside the table together with the page-supplied opaque focus scope. After source/visible rows change, compute the target from the same sorted/filtered/paged indices used by rendering, verify generation and removal-vs-hide semantics, then resolve and eligibility-check the marker inside the table subtree. Never query from consumer code, cross a generation, steal focus after it moved elsewhere, or fall back to `document.body`.
 
 - [ ] **Step 4: Add failing browser focus cases**
 
-In both wide and compact modes, focus a Delete action, remove the row, and assert `document.activeElement` identifies the expected row/action. Repeat after sorting, filtering, and moving to the last row of a page that collapses. Reject one action without removing its row and assert focus remains on the initiating element. Simulate an external row removal and assert the same recovery path.
+In both wide and compact modes, focus a Delete action, remove the row, and assert `document.activeElement` identifies the expected eligible row/action. Repeat after sorting and a last-row page collapse. Hide a focused row by filtering/paging without deleting it and assert table-region fallback, not neighbor focus. Disable or hide the candidate action and assert table-region fallback. Replace the dataset and access state and assert no cross-generation neighbor focus. Reject one action without removing its row and assert focus remains on the initiating element. Simulate an external same-generation row removal and assert the same recovery path.
 
 - [ ] **Step 5: Verify browser GREEN and the negative control**
 
@@ -379,7 +456,7 @@ Run the complete EntityTable unit/browser scope, update its rustdoc and pattern 
 
 ---
 
-### Task 8: Prove unique Field associations in a real WASM form (`ldui-ifj.4`)
+### Task 10: Prove unique Field associations in a real WASM form (`ldui-ifj.4`)
 
 **Files:**
 - Modify: `demo/src/demos/field.rs`
@@ -416,7 +493,7 @@ Run the focused Field native tests plus `cargo xtask test-reactivity`, close `ld
 
 ---
 
-### Task 9: Finish documentation, broad verification, epic closure, and landing (`ldui-ifj`)
+### Task 11: Finish documentation, broad verification, epic closure, and landing (`ldui-ifj`)
 
 **Files:**
 - Modify: `doc/patterns/client-snapshot-list.md`
@@ -428,7 +505,7 @@ Run the focused Field native tests plus `cargo xtask test-reactivity`, close `ld
 
 - [ ] **Step 1: Document the one canonical composition**
 
-Show complete typed construction of `DatasetPresentation`, `SnapshotTablePresentation`, reactive columns, complete `FilterBar`, `SnapshotViewDefaults`, `EntityRowAction`, and `SnapshotTablePage`. State which legacy lower-level APIs remain available, that defaults exclude dataset identity, and that D2 transport verification belongs in consumers.
+Show complete typed construction of private-field `SnapshotTableState`, framework-issued `SnapshotRequestHandle`, generation-bound views, typed selector/table configs, keyed concurrent actions, reactive columns, the utility-plus-aligned-filter composition, schema-projected `SnapshotViewDefaults`, stable geometry, `EntityRowAction`, and `SnapshotTablePage`. State which legacy lower-level APIs remain available, that defaults exclude dataset identity, and that D2 transport verification belongs in consumers.
 
 - [ ] **Step 2: Run focused gates from the final candidate tree**
 

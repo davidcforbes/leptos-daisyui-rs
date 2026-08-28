@@ -513,8 +513,8 @@ Patterns encode recurring layout and behavior:
 | `PageHeader` | Title, concise context, primary actions, status/last-updated slot, responsive action wrapping. |
 | `DatasetSelector` | Visually distinct source-snapshot selector with loading, failure, and current-dataset labeling. |
 | `KpiStrip` | Responsive row of consistently sized stat cards with value, label, optional trend/help, and semantic status. |
-| `FilterBar` | Horizontal filter row above content; search, filter controls, active-filter summary, Reset, and Save as Default. |
-| `EntityTable` | Client-snapshot table with local filter/sort/page, resizable/reorderable/hideable columns, stable row identity, empty/loading/error states, and keyboard/accessibility behavior. |
+| `FilterBar` | Slim utility row above the table for global search, non-column/domain controls, active-filter summary, result count, Reset, and Save as Default. One-to-one column filters belong in the table's aligned filter row and share this controlled state. |
+| `EntityTable` | Client-snapshot table with an aligned column-filter row, local filter/sort/page, stable column tracks, resizable/reorderable/hideable columns, stable row identity, empty/loading/error states, and keyboard/accessibility behavior. |
 | `ServerDataTable` | Explicit server-query table for datasets that cannot be safely or efficiently loaded as a snapshot. |
 | `PageStatePanel` | Consistent loading, empty, no-results, error, expired-session, and forbidden presentation. |
 | `ActionFeedback` | Pending, success, recoverable conflict, stale-row, and failure behavior for row actions. |
@@ -721,14 +721,34 @@ From top to bottom:
 1. `PageHeader`
 2. office `DatasetSelector`
 3. optional full-width `KpiStrip`
-4. horizontal `FilterBar`
+4. slim `FilterBar` utility row for global/non-column controls and filter state
 5. active status/error feedback when needed
-6. full-width `EntityTable`
+6. full-width `EntityTable` with a column-aligned filter row beneath its
+   column-header row
 7. table pagination integrated with the table pattern
 
-Office is not placed among the filters. The filter row is horizontal at
-desktop widths and follows the framework's defined responsive wrapping at
-narrow widths. Agents do not invent a sidebar alternative for this archetype.
+Office is not placed among the filters. A local filter that maps one-to-one to
+a visible column is rendered once, in the table's second `thead` row beneath
+that column. The utility `FilterBar` does not duplicate those controls; it
+retains global search, filters that do not correspond to one column, active
+chips/count, Reset, and Save as Default. Header, filter, and body rows share
+one horizontally scrolling column-track model at narrow widths. An optional
+drawer may mirror the same controlled filter state as a narrow-layout
+fallback, but it is not the desktop default and cannot become a second source
+of truth.
+
+The opinionated visual contract is a dark-blue column-header band with white
+content, a light-blue column-filter band with dark content, and faint neutral
+row and column grid lines. These colors are framework semantic tokens, not
+consumer literals. Zebra striping is opt-in because the two hierarchy bands
+and full grid already provide row/column structure.
+
+Sorting is a body-data operation. It may reorder body rows and update the
+sort indicator and announcement, but MUST preserve the outer table bounds,
+column widths and x positions, header/filter positions, grid-line positions,
+and horizontal scroll origin. Sort indicators reserve space in every sortable
+header, and the column-track model never derives from only the currently
+visible page of cells.
 
 ### 10.2 Client-snapshot data flow
 
@@ -1429,7 +1449,10 @@ Unless the owner explicitly changes this document:
 - Office is a dataset selector and may select any canonical office without an
   office-specific restriction; it is not a filter.
 - Filters and sorts are local and survive office changes.
-- The No-Hires layout uses a horizontal filter row above a full-width table.
+- The No-Hires layout uses a slim filter utility row above a full-width table,
+  with one-to-one column controls aligned in the table's second header row.
+- Opinionated tables use the semantic dark-blue header, light-blue filter
+  band, faint full grid, opt-in zebra, and sort-stable column-track contract.
 - Office-sized snapshots use local search/filter/sort/pagination.
 - Satellites do not import core or each other.
 - Page contracts and macros validate and document; they are not a generic page
