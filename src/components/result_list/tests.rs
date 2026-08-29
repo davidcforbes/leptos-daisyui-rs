@@ -143,6 +143,15 @@ fn option_dom_ids_are_collision_free_for_arbitrary_key_bytes() {
     assert!(keyed_option_dom_id(7, "a b").starts_with("ld-result-list-7-option-"));
 }
 
+#[test]
+fn legacy_result_list_remains_an_adapter_with_reset_first_policy() {
+    let source = include_str!("component.rs");
+    assert!(source.contains("pub fn ResultList("));
+    assert!(source.contains("ResultReplacementPolicy::ResetFirst"));
+    assert!(source.contains("Callback<ResultRow>"));
+    assert!(source.contains("Callback<Option<usize>>"));
+}
+
 // ── move_selection ──
 
 #[test]

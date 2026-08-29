@@ -5,6 +5,7 @@
 //! usage and CSS notes.
 
 mod component;
+mod core;
 mod types;
 
 pub use component::*;
