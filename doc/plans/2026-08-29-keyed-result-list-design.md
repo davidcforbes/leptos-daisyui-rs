@@ -38,10 +38,11 @@ props as `ResultList`, plus:
 - `on_select: Option<Callback<ResultListItem<T>>>`
 - `on_selection_change: Option<Callback<Option<String>>>`
 
-`T` must be `Clone + 'static` because Leptos event callbacks return a snapshot
-of the current item. Returning the complete item gives the consumer its stable
-key and exact typed payload without reconstructing either from display text or
-an index.
+`T` must be `Clone + Send + Sync + 'static`: event callbacks return a snapshot
+of the current item, and the standard Leptos `Signal` uses synchronized
+storage. Returning the complete item gives the consumer its stable key and
+exact typed payload without reconstructing either from display text or an
+index.
 
 The existing `ResultList`, `ResultRow`, `on_select(ResultRow)`, and
 `on_selection_change(Option<usize>)` contracts remain available unchanged.
