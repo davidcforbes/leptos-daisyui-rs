@@ -1,4 +1,3 @@
-use crate::components::data_table::TABLE_SCROLL_WRAPPER_CLASS;
 use crate::components::data_table::body::DataTableBody;
 use crate::components::data_table::filter::{
     ColumnFilters, DataTableFilterRow, distinct_values, has_filterable_columns,
@@ -9,9 +8,10 @@ use crate::components::data_table::geometry::{
 use crate::components::data_table::header::DataTableHeader;
 use crate::components::data_table::selection::{RowClickKind, row_click_kind, row_is_interactive};
 use crate::components::data_table::types::{
-    CellRenderer, Column, DataTableClasses, DataTableSortTexts, DataTableTexts, SortOrder,
-    TableRow, TypedCellFn,
+    CellRenderer, Column, DataTableClasses, DataTableSortTexts, DataTableTexts, RowDetailRenderer,
+    SortOrder, TableRow, TypedCellFn,
 };
+use crate::components::data_table::{TABLE_SCROLL_WRAPPER_CLASS, next_data_table_search_id};
 use crate::components::table::{Table, TableSize};
 use crate::merge_classes;
 use leptos::{html::Div, prelude::*};
@@ -209,6 +209,10 @@ pub fn ServerDataTable(
     /// `renderer_index` (when set) always takes precedence.
     #[prop(optional)]
     typed_cells: Vec<TypedCellFn>,
+
+    /// Optional full-width detail content rendered immediately after a row.
+    #[prop(optional)]
+    detail_renderer: Option<RowDetailRenderer>,
 
     /// Optional per-row extra CSS classes (e.g. a background tint) computed
     /// from the row's absolute index and data. Merged with `classes.row`.
@@ -436,6 +440,7 @@ pub fn ServerDataTable(
             })
             .collect::<Vec<_>>()
     });
+    let search_input_id = next_data_table_search_id();
 
     view! {
         <div
@@ -446,13 +451,19 @@ pub fn ServerDataTable(
         >
             {move || {
                 if has_search {
+                    let label_target = search_input_id.clone();
+                    let control_id = search_input_id.clone();
                     Some(view! {
                         <div class="mb-3">
+                            <label class="sr-only" r#for=label_target>
+                                {move || texts.with(|t| t.search_label.clone())}
+                            </label>
                             <input
+                                id=control_id
                                 type="text"
                                 class="input input-bordered input-sm w-full max-w-xs"
                                 placeholder=move || texts.with(|t| t.search_placeholder.clone())
-                                aria-label="Search table"
+                                aria-label=move || texts.with(|t| t.search_label.clone())
                                 prop:value=move || search_query.get()
                                 on:input=on_search_input
                             />
@@ -492,6 +503,9 @@ pub fn ServerDataTable(
                                         all_label=Signal::derive(move || {
                                             texts.with(|t| t.filter_all.clone())
                                         })
+                                        filter_label=Signal::derive(move || {
+                                            texts.with(|t| t.filter_label.clone())
+                                        })
                                     />
                                 })
                             }}
@@ -510,6 +524,7 @@ pub fn ServerDataTable(
                             cell_renderers=cell_renderers
                             column_widths=Signal::derive(move || column_widths.get())
                             typed_cells=typed_cells
+                            detail_renderer=detail_renderer
                             row_class_fn=row_class_fn
                             on_row_click=on_row_click
                             on_row_inspect=on_row_inspect

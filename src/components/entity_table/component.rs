@@ -1,14 +1,16 @@
 //! Reactive renderer for the typed client-side table model.
 
 use super::model::{
-    ENTITY_PAGE_SIZE_CHOICES, EntityColumnMove, SortedIndexCache,
-    emit_normalized_preference_change, move_column, next_sort, next_sort_additive,
-    normalize_preferences, ordered_columns, page_after_dataset_change, page_after_row_delta,
-    reset_columns, reset_sort, set_preferred_width, toggle_hidden_column,
+    ENTITY_PAGE_SIZE_CHOICES, EntityColumnMove, EntityFocusRecord, EntityFocusTarget,
+    SortedIndexCache, emit_normalized_preference_change, focus_target, move_column, next_sort,
+    next_sort_additive, normalize_preferences, ordered_columns, page_after_dataset_change,
+    page_after_row_delta, reset_columns, reset_sort, set_preferred_width, sorted_indices,
+    toggle_hidden_column,
 };
 use super::storage::{load_preferences, save_preferences};
 use super::types::{
-    EntityColumn, EntityRowKey, EntityRowRenderer, EntitySort, EntitySortDirection,
+    EntityColumn, EntityColumnFilter, EntityColumnFilters, EntityColumns, EntityCompactRow,
+    EntityRowKey, EntityRowRenderer, EntitySort, EntitySortDirection,
     EntityTablePreferenceOwnership, EntityTablePreferencePersistence, EntityTablePreferences,
     EntityTableTexts,
 };
@@ -24,11 +26,32 @@ use crate::components::pagination::Pagination;
 use crate::components::select::Select;
 use crate::merge_classes;
 use leptos::prelude::*;
+use leptos::tachys::reactive_graph::OwnedView;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 use web_sys::wasm_bindgen::JsCast;
 
 const MAX_VISIBLE_PAGES: usize = 7;
+
+/// Marks one stable, repeatable row action for framework-owned focus recovery.
+///
+/// Wrap the actual button or link. The table will only recover focus to a
+/// rendered, enabled, visible, focusable descendant carrying the same action
+/// ID on a neighboring row after the focused source row is removed.
+#[component]
+pub fn EntityRowAction(
+    /// Stable identity of this action within one row.
+    #[prop(into)]
+    action_id: String,
+    /// The consumer-owned action control.
+    children: Children,
+) -> impl IntoView {
+    view! {
+        <span class="contents" data-entity-row-action=action_id>
+            {children()}
+        </span>
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 struct ResizeDrag {
@@ -64,9 +87,89 @@ enum PreferenceSource {
     },
 }
 
+pub(super) enum ColumnStore<T: 'static> {
+    Static(StoredValue<Vec<EntityColumn<T>>, LocalStorage>),
+    Reactive(Signal<Vec<EntityColumn<T>>, LocalStorage>),
+}
+
+impl<T: 'static> Clone for ColumnStore<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T: 'static> Copy for ColumnStore<T> {}
+
+impl<T: 'static> From<StoredValue<Vec<EntityColumn<T>>, LocalStorage>> for ColumnStore<T> {
+    fn from(columns: StoredValue<Vec<EntityColumn<T>>, LocalStorage>) -> Self {
+        Self::Static(columns)
+    }
+}
+
+impl<T: 'static> From<Signal<Vec<EntityColumn<T>>, LocalStorage>> for ColumnStore<T> {
+    fn from(columns: Signal<Vec<EntityColumn<T>>, LocalStorage>) -> Self {
+        Self::Reactive(columns)
+    }
+}
+
+impl<T: 'static> ColumnStore<T> {
+    fn with_value<R>(self, read: impl FnOnce(&Vec<EntityColumn<T>>) -> R) -> R {
+        match self {
+            Self::Static(columns) => columns.with_value(read),
+            Self::Reactive(columns) => columns.with(read),
+        }
+    }
+
+    fn get_value(self) -> Vec<EntityColumn<T>> {
+        self.with_value(Clone::clone)
+    }
+}
+
+enum CompactRowStore<T: 'static> {
+    Default,
+    Static(StoredValue<EntityRowRenderer<T>, LocalStorage>),
+    Reactive(Signal<EntityRowRenderer<T>, LocalStorage>),
+}
+
+impl<T: 'static> Clone for CompactRowStore<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T: 'static> Copy for CompactRowStore<T> {}
+
+impl<T: 'static> CompactRowStore<T> {
+    fn new(renderer: EntityCompactRow<T>) -> Self {
+        match renderer {
+            EntityCompactRow::Default => Self::Default,
+            EntityCompactRow::Static(renderer) => Self::Static(StoredValue::new_local(renderer)),
+            EntityCompactRow::Reactive(renderer) => Self::Reactive(renderer),
+        }
+    }
+
+    fn get_value(self) -> Option<EntityRowRenderer<T>> {
+        match self {
+            Self::Default => None,
+            Self::Static(renderer) => Some(renderer.get_value()),
+            Self::Reactive(renderer) => Some(renderer.get()),
+        }
+    }
+}
+
+fn column_filter_signal(
+    filters: EntityColumnFilters,
+) -> Signal<Vec<EntityColumnFilter>, LocalStorage> {
+    match filters {
+        EntityColumnFilters::None => RwSignal::new_local(Vec::new()).into(),
+        EntityColumnFilters::Static(filters) => RwSignal::new_local(filters).into(),
+        EntityColumnFilters::Reactive(filters) => filters,
+    }
+}
+
 pub(super) struct PreferenceState<T: 'static> {
     source: PreferenceSource,
-    columns: StoredValue<Vec<EntityColumn<T>>, LocalStorage>,
+    columns: ColumnStore<T>,
     schema_version: u16,
 }
 
@@ -81,9 +184,10 @@ impl<T: 'static> Copy for PreferenceState<T> {}
 impl<T: 'static> PreferenceState<T> {
     pub(super) fn new(
         ownership: EntityTablePreferenceOwnership,
-        columns: StoredValue<Vec<EntityColumn<T>>, LocalStorage>,
+        columns: impl Into<ColumnStore<T>>,
         schema_version: u16,
     ) -> Self {
+        let columns = columns.into();
         let source = match ownership {
             EntityTablePreferenceOwnership::Controlled { current, on_change } => {
                 PreferenceSource::Controlled { current, on_change }
@@ -101,6 +205,23 @@ impl<T: 'static> PreferenceState<T> {
             source,
             columns,
             schema_version,
+        }
+    }
+
+    fn normalize_after_columns_change(self) {
+        let current = match self.source {
+            PreferenceSource::Controlled { current, .. } => current.get_untracked(),
+            PreferenceSource::Uncontrolled { current, .. } => current.get_untracked(),
+        };
+        let normalized = self
+            .columns
+            .with_value(|columns| normalize_preferences(&current, self.schema_version, columns));
+        if normalized == current {
+            return;
+        }
+        match self.source {
+            PreferenceSource::Controlled { on_change, .. } => on_change.run(normalized),
+            PreferenceSource::Uncontrolled { current, .. } => current.set(normalized),
         }
     }
 
@@ -255,7 +376,8 @@ pub fn EntityTable<T>(
     #[prop(into)]
     data: Signal<Rc<Vec<T>>, LocalStorage>,
     /// Typed column definitions in system order.
-    columns: Vec<EntityColumn<T>>,
+    #[prop(into)]
+    columns: EntityColumns<T>,
     /// Stable key callback used for DOM identity and row activation.
     row_key: EntityRowKey<T>,
     /// Identity of the selected dataset. Changing it resets pagination only.
@@ -267,8 +389,19 @@ pub fn EntityTable<T>(
     #[prop(optional, into)]
     page_reset_key: Option<Signal<String>>,
     /// Optional renderer for the single-cell compact row layout.
+    #[prop(optional, into)]
+    compact_row: EntityCompactRow<T>,
+    /// Controlled filters aligned beneath their stable desktop columns.
+    #[prop(optional, into)]
+    column_filters: EntityColumnFilters,
+    /// Complete authoritative source membership used only for focus recovery.
+    /// When omitted, the rendered `data` snapshot is also the source snapshot.
     #[prop(optional)]
-    compact_row: Option<EntityRowRenderer<T>>,
+    source_data: Option<Signal<Rc<Vec<T>>, LocalStorage>>,
+    /// Opaque dataset/access generation. Focus recovery never crosses a change.
+    /// When omitted, the dataset identity is used as the focus scope.
+    #[prop(optional, into)]
+    focus_scope: Option<Signal<String>>,
     /// Optional callback that makes rows mouse- and keyboard-operable.
     #[prop(optional)]
     on_row_activate: Option<Callback<String>>,
@@ -302,14 +435,23 @@ pub fn EntityTable<T>(
 where
     T: Clone + 'static,
 {
-    let column_store = StoredValue::new_local(columns);
+    let (column_store, reactive_columns) = match columns {
+        EntityColumns::Static(columns) => {
+            (ColumnStore::Static(StoredValue::new_local(columns)), None)
+        }
+        EntityColumns::Reactive(columns) => (ColumnStore::Reactive(columns), Some(columns)),
+    };
     let preference_ownership = resolve_preference_ownership(preference_ownership, storage_key);
     let preferences = PreferenceState::new(preference_ownership, column_store, preference_version);
     let initial_widths = column_store
         .with_value(|columns| rendered_column_widths(&preferences.get_untracked(), columns));
     let row_key = StoredValue::new_local(row_key);
-    let compact_row = StoredValue::new_local(compact_row);
+    let compact_row = CompactRowStore::new(compact_row);
+    let column_filters = column_filter_signal(column_filters);
+    let source_data = source_data.unwrap_or(data);
+    let focus_scope = focus_scope.unwrap_or(dataset_identity);
     let sorted_index_cache = StoredValue::new_local(SortedIndexCache::new());
+    let semantic_generation = RwSignal::new(0_u64);
     let column_widths = RwSignal::new(initial_widths);
     let header_descriptors =
         RwSignal::new(column_store.with_value(|columns| {
@@ -318,8 +460,23 @@ where
     let current_page = RwSignal::new(0_usize);
     let previous_dataset = StoredValue::new(dataset_identity.get_untracked());
     let resize_drag = RwSignal::new(Option::<ResizeDrag>::None);
+    let focus_record = RwSignal::new_local(Option::<EntityFocusRecord>::None);
+    let table_region = NodeRef::<leptos::html::Div>::new();
     let dataset_transition = DatasetTransitionController::new(current_page, preferences);
     let page_size_select = NodeRef::<leptos::html::Select>::new();
+
+    if let Some(reactive_columns) = reactive_columns {
+        let initial_run = StoredValue::new(true);
+        Effect::new(move |_| {
+            let _ = reactive_columns.get();
+            if initial_run.get_value() {
+                initial_run.set_value(false);
+                return;
+            }
+            semantic_generation.update(|generation| *generation = generation.wrapping_add(1));
+            preferences.normalize_after_columns_change();
+        });
+    }
 
     Effect::new(move |_| {
         let next_dataset = dataset_identity.get();
@@ -407,6 +564,91 @@ where
             total_rows.get(),
             preferences.with(|preferences| preferences.page_size),
         )
+    });
+    let page_row_keys = Signal::derive_local(move || {
+        let rows = data.get();
+        let columns = column_store.get_value();
+        let preferences_value = preferences.get();
+        let indices = sorted_index_cache
+            .try_update_value(|cache| {
+                cache.indices(
+                    Rc::clone(&rows),
+                    &columns,
+                    &preferences_value.sort,
+                    semantic_generation.get(),
+                )
+            })
+            .expect("entity-table sort cache is still mounted");
+        let bounds = page_bounds(
+            current_page.get(),
+            preferences_value.page_size,
+            indices.len(),
+        );
+        let row_key = row_key.get_value();
+        indices[bounds]
+            .iter()
+            .map(|index| row_key(&rows[*index]))
+            .collect::<Vec<_>>()
+    });
+
+    Effect::new(move |_| {
+        let Some(record) = focus_record.get() else {
+            return;
+        };
+        let current_scope = focus_scope.get();
+        let source_rows = source_data.get();
+        let rendered_rows = data.get();
+        let preferences_value = preferences.get();
+        let columns = column_store.get_value();
+        let row_key = row_key.get_value();
+        let source_keys = source_rows
+            .iter()
+            .map(|row| row_key(row))
+            .collect::<Vec<_>>();
+        let visible_keys = visible_row_keys(
+            rendered_rows.as_slice(),
+            &columns,
+            &preferences_value,
+            current_page.get(),
+            row_key.as_ref(),
+        );
+        let target = focus_target(
+            &record,
+            &source_keys,
+            &visible_keys,
+            &current_scope,
+            false,
+            true,
+        );
+
+        match target {
+            EntityFocusTarget::NoChange => {}
+            EntityFocusTarget::Clear => focus_record.set(None),
+            EntityFocusTarget::TableRegion => {
+                request_animation_frame(move || {
+                    if focus_record.get_untracked().as_ref() != Some(&record)
+                        || focus_moved_from_record(table_region, &record)
+                    {
+                        focus_record.set(None);
+                        return;
+                    }
+                    focus_table_region(table_region);
+                });
+            }
+            EntityFocusTarget::RowAction { row_key, action_id } => {
+                request_animation_frame(move || {
+                    if focus_record.get_untracked().as_ref() != Some(&record)
+                        || focus_moved_from_record(table_region, &record)
+                    {
+                        focus_record.set(None);
+                        return;
+                    }
+                    if !focus_row_action(table_region, &row_key, &action_id) {
+                        focus_table_region(table_region);
+                    }
+                });
+            }
+        }
     });
 
     view! {
@@ -496,26 +738,29 @@ where
                         </Menu>
                         <div class="border-t border-base-300 p-2">
                             <p class="px-2 pb-1 text-xs font-semibold text-base-content/65">
-                                "Column order"
+                                {move || texts.with(|texts| texts.column_order.clone())}
                             </p>
-                            <ol class="space-y-1" aria-label="Column order">
+                            <ol
+                                class="space-y-1"
+                                aria-label=move || texts.with(|texts| texts.column_order.clone())
+                            >
                                 <For
                                     each=move || column_store.with_value(|columns| {
                                         ordered_columns(&preferences.get(), columns)
                                             .into_iter()
-                                            .map(|column| (column.id, column.header))
+                                            .map(|column| column.id)
                                             .collect::<Vec<_>>()
                                     })
-                                    key=|column| column.0
-                                    children=move |(column_id, header)| {
-                                        let earlier_label = header.clone();
-                                        let later_label = header.clone();
+                                    key=|column_id| *column_id
+                                    children=move |column_id| {
                                         view! {
                                             <li
                                                 class="flex items-center gap-1 rounded-field px-2 py-1"
                                                 data-entity-column-order=column_id
                                             >
-                                                <span class="min-w-0 flex-1 truncate text-sm">{header}</span>
+                                                <span class="min-w-0 flex-1 truncate text-sm">
+                                                    {move || current_column_header(column_store, column_id)}
+                                                </span>
                                                 <Button
                                                     class="btn-ghost btn-xs btn-square"
                                                     attr:data-entity-column-order=column_id
@@ -532,7 +777,14 @@ where
                                                                 preferences.column_order.len(),
                                                             )
                                                         });
-                                                        format!("Move {earlier_label} earlier from position {position} of {total}")
+                                                        texts.with(|texts| {
+                                                            format_move_label(
+                                                                &texts.move_earlier,
+                                                                &current_column_header(column_store, column_id),
+                                                                position,
+                                                                total,
+                                                            )
+                                                        })
                                                     }
                                                     disabled=Signal::derive(move || {
                                                         preferences.with(|preferences| {
@@ -575,7 +827,14 @@ where
                                                                 preferences.column_order.len(),
                                                             )
                                                         });
-                                                        format!("Move {later_label} later from position {position} of {total}")
+                                                        texts.with(|texts| {
+                                                            format_move_label(
+                                                                &texts.move_later,
+                                                                &current_column_header(column_store, column_id),
+                                                                position,
+                                                                total,
+                                                            )
+                                                        })
                                                     }
                                                     disabled=Signal::derive(move || {
                                                         preferences.with(|preferences| {
@@ -656,11 +915,27 @@ where
 
             <p class="sr-only" aria-live="polite" data-entity-sort-summary="true">
                 {move || column_store.with_value(|columns| {
-                    preferences.with(|preferences| sort_summary(&preferences.sort, columns))
+                    preferences.with(|preferences| {
+                        texts.with(|texts| sort_summary(&preferences.sort, columns, texts))
+                    })
                 })}
             </p>
 
-            <div class="w-full overflow-x-auto rounded-box border border-table-grid bg-base-100">
+            <div
+                node_ref=table_region
+                class="w-full overflow-x-auto rounded-box border border-table-grid bg-base-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+                role="region"
+                tabindex="-1"
+                aria-label=move || texts.with(|texts| texts.region_label.clone())
+                data-entity-focus-region="true"
+                data-entity-column-generation=move || semantic_generation.get().to_string()
+                on:focusin=move |event: web_sys::FocusEvent| {
+                    focus_record.set(focus_record_from_event(
+                        &event,
+                        &focus_scope.get_untracked(),
+                    ));
+                }
+            >
                 <div style=move || stable_table_content_style(&stable_tracks.get())>
                 <table
                     class="table table-sm table-fixed w-full border-collapse border border-table-grid"
@@ -675,7 +950,6 @@ where
                                 each=move || header_descriptors.get()
                                 key=|column| (
                                     column.id,
-                                    column.header.clone(),
                                     column.sortable,
                                     column.resizable,
                                     column.min_width,
@@ -683,7 +957,6 @@ where
                                 )
                                 children=move |column| {
                                 let column_id = column.id;
-                                let header = column.header.clone();
                                 let sortable = column.sortable;
                                 let resizable = column.resizable;
                                 let minimum_width = column.min_width;
@@ -706,13 +979,12 @@ where
                                         })
                                 };
                                 let sort_label = move || preferences.with(|preferences| {
-                                    format!(
-                                        "{}: {}. {}. {}.",
-                                        header,
-                                        preferences.sort.current_label(column_id),
-                                        preferences.sort.plain_action_label(column_id),
-                                        preferences.sort.additive_action_label(column_id),
-                                    )
+                                    texts.with(|texts| sort_accessible_label(
+                                        &preferences.sort,
+                                        column_id,
+                                        &current_header(&header_descriptors, column_id),
+                                        texts,
+                                    ))
                                 });
                                 view! {
                                     <th
@@ -733,7 +1005,6 @@ where
                                         style=width_style
                                     >
                                         {if sortable {
-                                            let header = column.header.clone();
                                             Some(view! {
                                                 <Button
                                                     class="btn-ghost btn-xs h-auto !min-h-0 w-full justify-start gap-1 rounded-sm px-0 py-1 text-left font-semibold text-table-header-content !shadow-none hover:bg-white/15 focus-visible:outline-white forced-colors:text-[CanvasText]"
@@ -775,7 +1046,7 @@ where
                                                         current_page.set(0);
                                                     })
                                                 >
-                                                    <span>{header}</span>
+                                                    <span>{move || current_header(&header_descriptors, column_id)}</span>
                                                     <span
                                                         aria-hidden="true"
                                                         data-entity-sort-indicator="true"
@@ -801,7 +1072,7 @@ where
                                             None
                                         }}
                                         {(!sortable).then(|| view! {
-                                            <span>{column.header.clone()}</span>
+                                            <span>{move || current_header(&header_descriptors, column_id)}</span>
                                         })}
                                         {resizable.then(|| view! {
                                             <span
@@ -809,7 +1080,12 @@ where
                                                 role="separator"
                                                 tabindex="0"
                                                 aria-orientation="vertical"
-                                                aria-label=format!("Resize {} column", column.header)
+                                                aria-label=move || texts.with(|texts| {
+                                                    texts.resize_column.replace(
+                                                        "{column}",
+                                                        &current_header(&header_descriptors, column_id),
+                                                    )
+                                                })
                                                 aria-valuemin=minimum_value.round() as u32
                                                 aria-valuemax=MAX_COLUMN_WIDTH.round() as u32
                                                 aria-valuenow=move || column_widths.with(|widths| {
@@ -821,15 +1097,16 @@ where
                                                         })
                                                 })
                                                 aria-valuetext=move || column_widths.with(|widths| {
-                                                    format!(
-                                                        "{} pixels",
-                                                        widths
-                                                            .get(column_id)
-                                                            .copied()
-                                                            .unwrap_or_else(|| {
-                                                                minimum_value.round() as u32
-                                                            })
-                                                    )
+                                                    let pixels = widths
+                                                        .get(column_id)
+                                                        .copied()
+                                                        .unwrap_or_else(|| minimum_value.round() as u32);
+                                                    texts.with(|texts| {
+                                                        texts.pixel_value.replace(
+                                                            "{pixels}",
+                                                            &pixels.to_string(),
+                                                        )
+                                                    })
                                                 })
                                                 on:click=move |event: web_sys::MouseEvent| event.stop_propagation()
                                                 on:focus=move |event: web_sys::FocusEvent| {
@@ -940,65 +1217,79 @@ where
                                 }
                             />
                         </tr>
+                        {move || {
+                            let filters = column_filters.get();
+                            if filters.is_empty() {
+                                return None;
+                            }
+                            Some(view! {
+                                <tr
+                                    class="data-table-filter-row bg-table-filter text-table-filter-content forced-colors:bg-[Canvas] forced-colors:text-[CanvasText]"
+                                    data-entity-column-filter-row="true"
+                                >
+                                    {header_descriptors
+                                        .get()
+                                        .into_iter()
+                                        .map(|column| {
+                                            let filter = filters
+                                                .iter()
+                                                .find(|filter| filter.column_id == column.id)
+                                                .cloned();
+                                            view! {
+                                                <th
+                                                    class="border border-table-grid bg-table-filter p-1 text-table-filter-content forced-colors:border-[CanvasText] forced-colors:bg-[Canvas] forced-colors:text-[CanvasText]"
+                                                    data-entity-column=column.id
+                                                    data-entity-column-filter-cell="true"
+                                                    on:click=move |event| event.stop_propagation()
+                                                    on:keydown=move |event| event.stop_propagation()
+                                                    on:pointerdown=move |event| event.stop_propagation()
+                                                >
+                                                    {filter.map(|filter| filter.render())}
+                                                </th>
+                                            }
+                                        })
+                                        .collect_view()}
+                                </tr>
+                            })
+                        }}
                     </thead>
                     <tbody>
-                        {move || {
-                            let rows = data.get();
-                            let columns_for_sort = column_store.get_value();
-                            let preferences_value = preferences.get();
-                            let indices = sorted_index_cache
-                                .try_update_value(|cache| {
-                                    cache.indices(
-                                        Rc::clone(&rows),
-                                        &columns_for_sort,
-                                        &preferences_value.sort,
-                                    )
-                                })
-                                .expect("entity-table sort cache is still mounted");
-                            let bounds = page_bounds(
-                                current_page.get(),
-                                preferences_value.page_size,
-                                indices.len(),
-                            );
-                            let visible_columns = ordered_columns(
-                                &preferences_value,
-                                &columns_for_sort,
-                            )
-                                .into_iter()
-                                .filter(|column| {
-                                    !preferences_value.hidden_columns.contains(column.id)
-                                })
-                                .collect::<Vec<_>>();
-                            let page_rows = indices[bounds]
-                                .iter()
-                                .map(|index| rows[*index].clone())
-                                .collect::<Vec<_>>();
-
-                            if page_rows.is_empty() {
-                                return view! {
+                        {move || page_row_keys.with(|keys| keys.is_empty()).then(|| {
+                            let colspan = column_store.with_value(|columns| {
+                                let preferences_value = preferences.get();
+                                ordered_columns(&preferences_value, columns)
+                                    .into_iter()
+                                    .filter(|column| {
+                                        !preferences_value.hidden_columns.contains(column.id)
+                                    })
+                                    .count()
+                                    .max(1)
+                            });
+                            view! {
                                     <tr>
                                         <td
-                                            colspan=visible_columns.len().max(1)
+                                            colspan=colspan
                                             class="border border-table-grid py-10 text-center text-base-content/65 forced-colors:border-[CanvasText]"
                                         >
                                             {texts.with(|texts| texts.no_rows.clone())}
                                         </td>
                                     </tr>
-                                }.into_any();
                             }
-
-                            page_rows
-                                .into_iter()
-                                .map(|row| render_row(
-                                    row,
-                                    visible_columns.clone(),
-                                    row_key.get_value(),
-                                    compact_row.get_value(),
-                                    on_row_activate,
-                                ))
-                                .collect_view()
-                                .into_any()
-                        }}
+                        })}
+                        {local_for_enumerate(
+                            move || page_row_keys.get(),
+                            |key| key.clone(),
+                            move |visible_position, key| render_keyed_row(
+                                key,
+                                visible_position,
+                                data,
+                                column_store,
+                                preferences,
+                                row_key,
+                                compact_row,
+                                on_row_activate,
+                            ),
+                        )}
                     </tbody>
                 </table>
                 </div>
@@ -1074,15 +1365,109 @@ where
     }
 }
 
-fn render_row<T: Clone + 'static>(
+fn local_for_enumerate<IF, I, T, EF, N, KF, K>(each: IF, key: KF, children: EF) -> impl IntoView
+where
+    IF: Fn() -> I + 'static,
+    I: IntoIterator<Item = T> + Send + 'static,
+    EF: Fn(ReadSignal<usize, LocalStorage>, T) -> N + Clone + 'static,
+    N: IntoView + 'static,
+    KF: Fn(&T) -> K + Send + Clone + 'static,
+    K: Eq + std::hash::Hash + leptos::tachys::view::keyed::SerializableKey + 'static,
+    T: 'static,
+{
+    // Tachys requires the keyed view factory to be `Send` even for a CSR-only
+    // local view. The factory is still created, called, and dropped on the one
+    // browser thread; these wrappers encode that invariant while allowing the
+    // row renderer itself to retain `Rc` callbacks and `LocalStorage` signals.
+    let parent = send_wrapper::SendWrapper::new(
+        Owner::current().expect("entity-table keyed rows require a reactive owner"),
+    );
+    let each = send_wrapper::SendWrapper::new(each);
+    let child_renderer = send_wrapper::SendWrapper::new(children);
+    let children = move |index, child| {
+        let owner = parent.with(Owner::new);
+        let ((_, set_index), view) = owner.with(|| {
+            let index = RwSignal::new_local(index).split();
+            let view = child_renderer(index.0, child);
+            (index, view)
+        });
+        (
+            move |next_index| set_index.set(next_index),
+            OwnedView::new_with_owner(view, owner),
+        )
+    };
+    move || leptos::tachys::view::keyed::keyed(each(), key.clone(), children.clone())
+}
+
+fn render_keyed_row<T: Clone + 'static>(
+    key: String,
+    visible_position: ReadSignal<usize, LocalStorage>,
+    data: Signal<Rc<Vec<T>>, LocalStorage>,
+    column_store: ColumnStore<T>,
+    preferences: PreferenceState<T>,
+    row_key: StoredValue<EntityRowKey<T>, LocalStorage>,
+    compact_row: CompactRowStore<T>,
+    on_row_activate: Option<Callback<String>>,
+) -> impl IntoView {
+    let interactive = on_row_activate.is_some();
+    let click_key = key.clone();
+    let keydown_key = key.clone();
+    let rendered_key = key.clone();
+
+    view! {
+        <tr
+            data-row-key=key.clone()
+            data-entity-row-key=key
+            data-entity-visible-position=move || visible_position.get()
+            tabindex=interactive.then_some(0)
+            class=interactive.then_some("cursor-pointer ld-focus-ring")
+            on:click=move |event: web_sys::MouseEvent| {
+                if !event_origin_is_action(event.target())
+                    && let Some(callback) = on_row_activate
+                {
+                    callback.run(click_key.clone());
+                }
+            }
+            on:keydown=move |event: web_sys::KeyboardEvent| {
+                if (event.key() == "Enter" || event.key() == " ")
+                    && !event_origin_is_action(event.target())
+                    && let Some(callback) = on_row_activate
+                {
+                    event.prevent_default();
+                    callback.run(keydown_key.clone());
+                }
+            }
+        >
+            {move || {
+                let rows = data.get();
+                let row_key = row_key.get_value();
+                let Some(row) = rows
+                    .iter()
+                    .find(|row| row_key(row) == rendered_key)
+                    .cloned()
+                else {
+                    return ().into_any();
+                };
+                let preferences_value = preferences.get();
+                let columns = column_store.with_value(|columns| {
+                    ordered_columns(&preferences_value, columns)
+                        .into_iter()
+                        .filter(|column| {
+                            !preferences_value.hidden_columns.contains(column.id)
+                        })
+                        .collect::<Vec<_>>()
+                });
+                render_row_cells(row, columns, compact_row.get_value())
+            }}
+        </tr>
+    }
+}
+
+fn render_row_cells<T: Clone + 'static>(
     row: T,
     columns: Vec<EntityColumn<T>>,
-    row_key: EntityRowKey<T>,
     compact_row: Option<EntityRowRenderer<T>>,
-    on_row_activate: Option<Callback<String>>,
 ) -> AnyView {
-    let key = row_key(&row);
-    let interactive = on_row_activate.is_some();
     let compact_view = compact_row
         .map(|renderer| renderer(&row))
         .unwrap_or_else(|| render_default_compact_row(&row, &columns));
@@ -1111,46 +1496,204 @@ fn render_row<T: Clone + 'static>(
             }
         })
         .collect_view();
-    let click_key = key.clone();
-    let keydown_key = key.clone();
 
     view! {
-        <tr
-            data-row-key=key
-            tabindex=interactive.then_some(0)
-            class=interactive.then_some("cursor-pointer ld-focus-ring")
-            on:click=move |event: web_sys::MouseEvent| {
-                if !event_origin_is_action(event.target())
-                    && let Some(callback) = on_row_activate
-                {
-                    callback.run(click_key.clone());
-                }
-            }
-            on:keydown=move |event: web_sys::KeyboardEvent| {
-                if (event.key() == "Enter" || event.key() == " ")
-                    && !event_origin_is_action(event.target())
-                    && let Some(callback) = on_row_activate
-                {
-                    event.prevent_default();
-                    callback.run(keydown_key.clone());
-                }
-            }
+        <td
+            colspan=columns.len().max(1)
+            class="border border-table-grid p-0 forced-colors:border-[CanvasText] lg:hidden"
         >
-            <td
-                colspan=columns.len().max(1)
-                class="border border-table-grid p-0 forced-colors:border-[CanvasText] lg:hidden"
-            >
-                <div class="p-3">{compact_view}</div>
-            </td>
-            {wide_cells}
-        </tr>
+            <div class="p-3">{compact_view}</div>
+        </td>
+        {wide_cells}
     }
     .into_any()
 }
 
-fn sort_summary<T>(sort: &EntitySort, columns: &[EntityColumn<T>]) -> String {
+fn visible_row_keys<T>(
+    rows: &[T],
+    columns: &[EntityColumn<T>],
+    preferences: &EntityTablePreferences,
+    current_page: usize,
+    row_key: &dyn Fn(&T) -> String,
+) -> Vec<String> {
+    let indices = sorted_indices(rows, columns, &preferences.sort);
+    let bounds = page_bounds(current_page, preferences.page_size, indices.len());
+    indices[bounds]
+        .iter()
+        .map(|index| row_key(&rows[*index]))
+        .collect()
+}
+
+fn focus_record_from_event(event: &web_sys::FocusEvent, scope: &str) -> Option<EntityFocusRecord> {
+    let target = event
+        .target()
+        .and_then(|target| target.dyn_into::<web_sys::Element>().ok())?;
+    let action = target.closest("[data-entity-row-action]").ok().flatten()?;
+    let row = target.closest("[data-entity-row-key]").ok().flatten()?;
+    Some(EntityFocusRecord {
+        scope: scope.to_owned(),
+        row_key: row.get_attribute("data-entity-row-key")?,
+        action_id: action.get_attribute("data-entity-row-action")?,
+        visible_position: row
+            .get_attribute("data-entity-visible-position")?
+            .parse()
+            .ok()?,
+    })
+}
+
+fn focus_moved_from_record(region: NodeRef<leptos::html::Div>, record: &EntityFocusRecord) -> bool {
+    let Some(region) = region.get_untracked() else {
+        return false;
+    };
+    let Some(active) = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.active_element())
+    else {
+        return false;
+    };
+    if !active.is_connected() || active.tag_name().eq_ignore_ascii_case("body") {
+        return false;
+    }
+    let Ok(Some(action)) = active.closest("[data-entity-row-action]") else {
+        return true;
+    };
+    let Ok(Some(row)) = active.closest("[data-entity-row-key]") else {
+        return true;
+    };
+    if !region.contains(Some(&active)) {
+        return true;
+    }
+    if action.get_attribute("data-entity-row-action").as_deref() != Some(&record.action_id) {
+        return true;
+    }
+    let same_key = row.get_attribute("data-entity-row-key").as_deref() == Some(&record.row_key);
+    let same_rendered_position = row
+        .get_attribute("data-entity-visible-position")
+        .and_then(|position| position.parse::<usize>().ok())
+        == Some(record.visible_position);
+    !same_key && !same_rendered_position
+}
+
+fn focus_row_action(region: NodeRef<leptos::html::Div>, row_key: &str, action_id: &str) -> bool {
+    let Some(region) = region.get_untracked() else {
+        return false;
+    };
+    let Ok(actions) = region.query_selector_all("[data-entity-row-action]") else {
+        return false;
+    };
+    for index in 0..actions.length() {
+        let Some(action) = actions
+            .item(index)
+            .and_then(|node| node.dyn_into::<web_sys::Element>().ok())
+        else {
+            continue;
+        };
+        if action.get_attribute("data-entity-row-action").as_deref() != Some(action_id) {
+            continue;
+        }
+        let Ok(Some(row)) = action.closest("[data-entity-row-key]") else {
+            continue;
+        };
+        if row.get_attribute("data-entity-row-key").as_deref() != Some(row_key) {
+            continue;
+        }
+        let Ok(Some(candidate)) = action.query_selector(
+            "button:not([disabled]):not([aria-disabled='true']), a[href]:not([aria-disabled='true']), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1']):not([aria-disabled='true'])",
+        ) else {
+            continue;
+        };
+        let rect = candidate.get_bounding_client_rect();
+        if rect.width() <= 0.0 || rect.height() <= 0.0 {
+            continue;
+        }
+        if let Ok(candidate) = candidate.dyn_into::<web_sys::HtmlElement>() {
+            return candidate.focus().is_ok();
+        }
+    }
+    false
+}
+
+fn focus_table_region(region: NodeRef<leptos::html::Div>) {
+    if let Some(region) = region.get_untracked() {
+        let _ = region.focus();
+    }
+}
+
+fn current_header(descriptors: &RwSignal<Vec<EntityHeaderDescriptor>>, column_id: &str) -> String {
+    descriptors.with(|descriptors| {
+        descriptors
+            .iter()
+            .find(|column| column.id == column_id)
+            .map(|column| column.header.clone())
+            .unwrap_or_default()
+    })
+}
+
+fn current_column_header<T: 'static>(columns: ColumnStore<T>, column_id: &str) -> String {
+    columns.with_value(|columns| {
+        columns
+            .iter()
+            .find(|column| column.id == column_id)
+            .map(|column| column.header.clone())
+            .unwrap_or_default()
+    })
+}
+
+fn format_move_label(template: &str, column: &str, position: usize, total: usize) -> String {
+    template
+        .replace("{column}", column)
+        .replace("{position}", &position.to_string())
+        .replace("{total}", &total.to_string())
+}
+
+fn sort_direction_text(direction: EntitySortDirection, texts: &EntityTableTexts) -> &str {
+    match direction {
+        EntitySortDirection::Ascending => &texts.ascending,
+        EntitySortDirection::Descending => &texts.descending,
+    }
+}
+
+fn sort_accessible_label(
+    sort: &EntitySort,
+    column_id: &str,
+    header: &str,
+    texts: &EntityTableTexts,
+) -> String {
+    let current = match (sort.direction_for(column_id), sort.priority_for(column_id)) {
+        (Some(direction), Some(priority)) => texts
+            .sort_current
+            .replace("{direction}", sort_direction_text(direction, texts))
+            .replace("{priority}", &priority.to_string())
+            .replace("{total}", &sort.clauses().len().to_string()),
+        _ => texts.sort_not_sorted.clone(),
+    };
+    let plain = match sort.direction_for(column_id) {
+        Some(EntitySortDirection::Ascending) => texts.sort_plain_descending.clone(),
+        Some(EntitySortDirection::Descending) => texts.sort_plain_system.clone(),
+        None => texts.sort_plain_ascending.clone(),
+    };
+    let additive = match (sort.direction_for(column_id), sort.priority_for(column_id)) {
+        (Some(EntitySortDirection::Ascending), Some(priority)) => texts
+            .sort_change
+            .replace("{priority}", &priority.to_string())
+            .replace("{direction}", &texts.descending),
+        (Some(EntitySortDirection::Descending), Some(priority)) => texts
+            .sort_remove
+            .replace("{priority}", &priority.to_string()),
+        _ => texts
+            .sort_add
+            .replace("{priority}", &(sort.clauses().len() + 1).to_string()),
+    };
+    format!("{header}: {current}. {plain}. {additive}.")
+}
+
+fn sort_summary<T>(
+    sort: &EntitySort,
+    columns: &[EntityColumn<T>],
+    texts: &EntityTableTexts,
+) -> String {
     if sort.is_system() {
-        return "System order".to_owned();
+        return texts.system_order.clone();
     }
     let clauses = sort
         .clauses()
@@ -1158,18 +1701,18 @@ fn sort_summary<T>(sort: &EntitySort, columns: &[EntityColumn<T>]) -> String {
         .enumerate()
         .filter_map(|(index, clause)| {
             let column = columns.iter().find(|column| column.id == clause.column)?;
-            let direction = match clause.direction {
-                EntitySortDirection::Ascending => "ascending",
-                EntitySortDirection::Descending => "descending",
-            };
-            Some(format!(
-                "priority {}: {} {direction}",
-                index + 1,
-                column.header
-            ))
+            Some(
+                texts
+                    .sort_clause
+                    .replace("{priority}", &(index + 1).to_string())
+                    .replace("{column}", &column.header)
+                    .replace("{direction}", sort_direction_text(clause.direction, texts)),
+            )
         })
         .collect::<Vec<_>>();
-    format!("Sorted by {}", clauses.join(", then "))
+    texts
+        .sort_summary
+        .replace("{clauses}", &clauses.join(", then "))
 }
 
 fn entity_header_descriptors<T>(

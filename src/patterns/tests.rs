@@ -1604,6 +1604,102 @@ fn dataset_selector_cannot_be_a_resettable_local_filter() {
 }
 
 #[test]
+fn snapshot_view_defaults_serialize_only_schema_projected_filters_and_table() {
+    use crate::components::EntityTablePreferences;
+    use serde_json::{Value, json};
+
+    let schema = FilterSchema::<PilotFilters>::new("office", &["status", "case_type"]);
+    let mut table = EntityTablePreferences::new(4);
+    table.page_size = 50;
+    let defaults = schema
+        .project_defaults(
+            [("case_type", json!("family")), ("status", json!("ready"))],
+            table.clone(),
+        )
+        .expect("declared local filters project");
+
+    assert_eq!(defaults.filters().get("status"), Some(&json!("ready")));
+    assert_eq!(defaults.table(), &table);
+
+    let encoded = serde_json::to_string(&defaults).expect("serialize defaults");
+    let value: Value = serde_json::from_str(&encoded).expect("valid JSON");
+    assert_eq!(
+        value
+            .as_object()
+            .map(|object| object.keys().cloned().collect::<Vec<_>>()),
+        Some(vec!["filters".to_owned(), "table".to_owned()]),
+        "the payload has no dataset, rows, revision, page, search, or session field: {encoded}"
+    );
+    assert!(
+        encoded.find("status").expect("status key")
+            < encoded.find("case_type").expect("case type key"),
+        "filter serialization follows schema order rather than caller/map order: {encoded}"
+    );
+    assert!(!encoded.contains("office"));
+    assert!(!encoded.contains("search"));
+}
+
+#[test]
+fn snapshot_view_defaults_reject_dataset_undeclared_and_duplicate_keys() {
+    use crate::components::EntityTablePreferences;
+    use serde_json::json;
+
+    let schema = FilterSchema::<PilotFilters>::new("office", &["status", "case_type"]);
+    let table = EntityTablePreferences::new(1);
+
+    assert_eq!(
+        schema.project_defaults([("office", json!("office-mx"))], table.clone()),
+        Err(FilterProjectionError::DatasetSelector("office".to_owned()))
+    );
+    assert_eq!(
+        schema.project_defaults([("office_id", json!(42))], table.clone()),
+        Err(FilterProjectionError::Undeclared("office_id".to_owned()))
+    );
+    assert_eq!(
+        schema.project_defaults(
+            [("status", json!("ready")), ("status", json!("urgent"))],
+            table,
+        ),
+        Err(FilterProjectionError::Duplicate("status".to_owned()))
+    );
+}
+
+#[test]
+fn consumer_dataset_members_cannot_enter_snapshot_view_defaults() {
+    use crate::components::EntityTablePreferences;
+    use serde::Serialize;
+    use serde_json::json;
+
+    #[derive(Serialize)]
+    struct ConsumerFilters {
+        office_id: String,
+        status: String,
+    }
+
+    let consumer = ConsumerFilters {
+        office_id: "office-mx".to_owned(),
+        status: "ready".to_owned(),
+    };
+    let consumer_json = serde_json::to_value(&consumer).expect("consumer fixture serializes");
+    assert_eq!(consumer_json["office_id"], json!("office-mx"));
+
+    let schema = FilterSchema::<PilotFilters>::new("office", &["status"]);
+    let rejected = schema.project_defaults(
+        consumer_json
+            .as_object()
+            .expect("object")
+            .iter()
+            .map(|(key, value)| (key.as_str(), value.clone())),
+        EntityTablePreferences::new(1),
+    );
+    assert_eq!(
+        rejected,
+        Err(FilterProjectionError::Undeclared("office_id".to_owned())),
+        "SnapshotViewDefaults is non-generic and cannot serialize an arbitrary consumer struct"
+    );
+}
+
+#[test]
 fn client_snapshot_pages_require_the_full_state_contract() {
     const TOO_FEW: &[PageState] = &[PageState::Ready, PageState::Empty];
     let contract = PageContract {

@@ -218,6 +218,7 @@ fn ordered_for_direction(
 pub(crate) struct SortedIndexCache<T> {
     rows: Option<Rc<Vec<T>>>,
     sort: EntitySort,
+    semantic_generation: u64,
     indices: Rc<Vec<usize>>,
 }
 
@@ -226,6 +227,7 @@ impl<T> SortedIndexCache<T> {
         Self {
             rows: None,
             sort: EntitySort::System,
+            semantic_generation: 0,
             indices: Rc::new(Vec::new()),
         }
     }
@@ -235,18 +237,90 @@ impl<T> SortedIndexCache<T> {
         rows: Rc<Vec<T>>,
         columns: &[EntityColumn<T>],
         sort: &EntitySort,
+        semantic_generation: u64,
     ) -> Rc<Vec<usize>> {
         let unchanged = self
             .rows
             .as_ref()
             .is_some_and(|cached| Rc::ptr_eq(cached, &rows))
-            && self.sort == *sort;
+            && self.sort == *sort
+            && self.semantic_generation == semantic_generation;
         if !unchanged {
             self.indices = Rc::new(sorted_indices(rows.as_slice(), columns, sort));
             self.rows = Some(rows);
             self.sort = sort.clone();
+            self.semantic_generation = semantic_generation;
         }
         Rc::clone(&self.indices)
+    }
+}
+
+/// Focus identity captured when a marked row action receives focus.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EntityFocusRecord {
+    /// Opaque dataset/access generation supplied by the page.
+    pub scope: String,
+    /// Stable source-row identity.
+    pub row_key: String,
+    /// Stable action identity within that row.
+    pub action_id: String,
+    /// Zero-based position in the actual rendered page at focus time.
+    pub visible_position: usize,
+}
+
+/// Framework-owned focus decision after source or rendered rows change.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EntityFocusTarget {
+    /// The focused row/action still exists and native focus should remain.
+    NoChange,
+    /// Focus the same action on the selected neighboring rendered row.
+    RowAction {
+        /// Stable neighboring row identity.
+        row_key: String,
+        /// Stable action identity copied from the prior record.
+        action_id: String,
+    },
+    /// Focus the named table region instead of an unrelated row.
+    TableRegion,
+    /// Drop recovery state because scope changed or the user moved focus.
+    Clear,
+}
+
+/// Selects a deterministic post-change focus target from authoritative source
+/// membership and the table's actual filtered/sorted/paged order.
+pub fn focus_target(
+    record: &EntityFocusRecord,
+    current_source_keys: &[String],
+    current_visible_keys: &[String],
+    current_scope: &str,
+    user_moved_focus: bool,
+    candidate_action_eligible: bool,
+) -> EntityFocusTarget {
+    if user_moved_focus || record.scope != current_scope {
+        return EntityFocusTarget::Clear;
+    }
+
+    if current_source_keys.contains(&record.row_key) {
+        return if current_visible_keys.contains(&record.row_key) {
+            EntityFocusTarget::NoChange
+        } else {
+            EntityFocusTarget::TableRegion
+        };
+    }
+
+    let Some(row_key) = current_visible_keys.get(
+        record
+            .visible_position
+            .min(current_visible_keys.len().saturating_sub(1)),
+    ) else {
+        return EntityFocusTarget::TableRegion;
+    };
+    if !candidate_action_eligible {
+        return EntityFocusTarget::TableRegion;
+    }
+    EntityFocusTarget::RowAction {
+        row_key: row_key.clone(),
+        action_id: record.action_id.clone(),
     }
 }
 

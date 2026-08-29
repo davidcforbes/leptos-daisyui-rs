@@ -133,14 +133,14 @@ fn sorted_index_cache_ignores_unrelated_preference_changes() {
     let sort = EntitySort::ascending("client");
     let mut cache = SortedIndexCache::new();
 
-    let first = cache.indices(Rc::clone(&rows), &columns, &sort);
+    let first = cache.indices(Rc::clone(&rows), &columns, &sort, 0);
     let first_call_count = calls.get();
     let mut unrelated_preferences = EntityTablePreferences::new(1);
     unrelated_preferences.page_size = 50;
     unrelated_preferences
         .hidden_columns
         .insert("status".to_owned());
-    let second = cache.indices(Rc::clone(&rows), &columns, &sort);
+    let second = cache.indices(Rc::clone(&rows), &columns, &sort, 0);
 
     assert_eq!(first.as_slice(), second.as_slice());
     assert_eq!(calls.get(), first_call_count);
@@ -150,10 +150,147 @@ fn sorted_index_cache_ignores_unrelated_preference_changes() {
         Rc::clone(&rows),
         &columns,
         &EntitySort::descending("client"),
+        0,
     );
     assert!(
         calls.get() > first_call_count,
         "a real sort change must recompute"
+    );
+}
+
+#[test]
+fn sorted_index_cache_invalidates_when_column_semantics_are_replaced() {
+    let rows = Rc::new(rows());
+    let ascending = vec![
+        EntityColumn::new("rank", "Rank", |row: &Row| row.rank.to_string())
+            .sortable_by(|left, right| left.rank.cmp(&right.rank)),
+    ];
+    let reversed = vec![
+        EntityColumn::new("rank", "Rango", |row: &Row| row.rank.to_string())
+            .sortable_by(|left, right| right.rank.cmp(&left.rank)),
+    ];
+    let sort = EntitySort::ascending("rank");
+    let mut cache = SortedIndexCache::new();
+
+    assert_eq!(
+        cache
+            .indices(Rc::clone(&rows), &ascending, &sort, 1)
+            .as_slice(),
+        [1, 2, 0]
+    );
+    assert_eq!(
+        cache
+            .indices(Rc::clone(&rows), &reversed, &sort, 2)
+            .as_slice(),
+        [0, 1, 2],
+        "unchanged row Rc/sort must use the newest comparator generation"
+    );
+}
+
+#[test]
+fn focus_target_uses_visible_order_and_never_crosses_scope_or_hidden_rows() {
+    let record = EntityFocusRecord {
+        scope: "dataset-1/access-1".to_owned(),
+        row_key: "r2".to_owned(),
+        action_id: "delete".to_owned(),
+        visible_position: 1,
+    };
+    let source = |keys: &[&str]| keys.iter().map(|key| (*key).to_owned()).collect::<Vec<_>>();
+
+    assert_eq!(
+        focus_target(
+            &record,
+            &source(&["r1", "r2", "r3"]),
+            &source(&["r3", "r2", "r1"]),
+            &record.scope,
+            false,
+            true,
+        ),
+        EntityFocusTarget::NoChange,
+        "an unchanged visible row keeps native action focus"
+    );
+    assert_eq!(
+        focus_target(
+            &record,
+            &source(&["r1", "r3"]),
+            &source(&["r3", "r1"]),
+            &record.scope,
+            false,
+            true,
+        ),
+        EntityFocusTarget::RowAction {
+            row_key: "r1".to_owned(),
+            action_id: "delete".to_owned(),
+        },
+        "the same visible position in sorted order wins after deletion"
+    );
+    assert_eq!(
+        focus_target(
+            &record,
+            &source(&["r1", "r2", "r3"]),
+            &source(&["r1", "r3"]),
+            &record.scope,
+            false,
+            true,
+        ),
+        EntityFocusTarget::TableRegion,
+        "filter/page hiding while the source row remains cannot choose a neighbor"
+    );
+    assert_eq!(
+        focus_target(
+            &record,
+            &source(&["r1"]),
+            &source(&["r1"]),
+            &record.scope,
+            false,
+            false,
+        ),
+        EntityFocusTarget::TableRegion,
+        "a missing, hidden, disabled, or unfocusable matching action falls back"
+    );
+    assert_eq!(
+        focus_target(
+            &record,
+            &source(&["n1", "n2"]),
+            &source(&["n1", "n2"]),
+            "dataset-2/access-1",
+            false,
+            true,
+        ),
+        EntityFocusTarget::Clear,
+        "dataset/access replacement cannot cross-focus"
+    );
+    assert_eq!(
+        focus_target(
+            &record,
+            &source(&["r1", "r3"]),
+            &source(&["r1", "r3"]),
+            &record.scope,
+            true,
+            true,
+        ),
+        EntityFocusTarget::Clear,
+        "a user who already moved focus is never interrupted"
+    );
+
+    let last = EntityFocusRecord {
+        visible_position: 4,
+        ..record
+    };
+    assert_eq!(
+        focus_target(
+            &last,
+            &source(&["r1"]),
+            &source(&["r1"]),
+            &last.scope,
+            false,
+            true,
+        ),
+        EntityFocusTarget::RowAction {
+            row_key: "r1".to_owned(),
+            action_id: "delete".to_owned(),
+        },
+        "last-row/page collapse clamps to the preceding rendered row"
     );
 }
 

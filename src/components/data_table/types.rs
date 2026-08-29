@@ -11,6 +11,14 @@ use std::collections::HashMap;
 /// Falls back to plain text rendering when the index is `None` or out of bounds.
 pub type CellRenderer = Callback<(usize, TableRow), AnyView>;
 
+/// Optional full-width detail content rendered immediately after one row.
+///
+/// Returning `None` keeps the row single-height. Returning a view adds a
+/// sibling detail `<tr>` spanning the currently rendered columns; the pair
+/// moves together through sorting, filtering, and paging because both are
+/// derived from the same absolute row identity.
+pub type RowDetailRenderer = Callback<(usize, TableRow), Option<AnyView>>;
+
 /// Lightweight built-in cell content, rendered via the crate's own `Badge`/
 /// `Icon` components without requiring a full custom [`CellRenderer`].
 ///
@@ -384,10 +392,14 @@ pub struct DataTableTexts {
     pub page_indicator: String,
     /// Search input placeholder text
     pub search_placeholder: String,
+    /// Accessible and associated label for the search input.
+    pub search_label: String,
     /// Row-range caption format (use {start}, {end}, and {total} placeholders)
     pub row_range: String,
     /// Label for the "no filter" option in every filter-row dropdown
     pub filter_all: String,
+    /// Associated label template for a column filter; `{column}` is replaced.
+    pub filter_label: String,
 }
 
 impl Default for DataTableTexts {
@@ -399,8 +411,10 @@ impl Default for DataTableTexts {
             next: "Next".to_string(),
             page_indicator: "Page {current} of {total}".to_string(),
             search_placeholder: "Search...".to_string(),
+            search_label: "Search table".to_string(),
             row_range: "Showing {start}\u{2013}{end} of {total}".to_string(),
             filter_all: "All".to_string(),
+            filter_label: "Filter by {column}".to_string(),
         }
     }
 }
@@ -713,7 +727,9 @@ mod tests {
         assert_eq!(texts.next, "Next");
         assert_eq!(texts.page_indicator, "Page {current} of {total}");
         assert_eq!(texts.search_placeholder, "Search...");
+        assert_eq!(texts.search_label, "Search table");
         assert_eq!(texts.row_range, "Showing {start}\u{2013}{end} of {total}");
+        assert_eq!(texts.filter_label, "Filter by {column}");
     }
 
     #[test]

@@ -25,12 +25,44 @@ impl ActiveFilterChip {
     }
 }
 
+/// Reactive framework-owned copy for active-filter summaries and actions.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ActiveFilterTexts {
+    /// Summary shown when no filters are active.
+    pub none: String,
+    /// Summary shown when exactly one filter is active.
+    pub one: String,
+    /// Summary template for multiple filters; `{count}` is replaced.
+    pub many: String,
+    /// Accessible-name template for a chip removal; `{label}` is replaced.
+    pub remove: String,
+    /// Compatibility clear-all action label.
+    pub clear: String,
+}
+
+impl Default for ActiveFilterTexts {
+    fn default() -> Self {
+        Self {
+            none: "No active filters".to_owned(),
+            one: "1 active filter".to_owned(),
+            many: "{count} active filters".to_owned(),
+            remove: "Remove {label} filter".to_owned(),
+            clear: "Clear filters".to_owned(),
+        }
+    }
+}
+
 /// Produces the canonical active-filter count label.
 pub fn active_filter_summary(count: usize) -> String {
+    active_filter_summary_with(count, &ActiveFilterTexts::default())
+}
+
+/// Produces a localized active-filter summary.
+pub fn active_filter_summary_with(count: usize, texts: &ActiveFilterTexts) -> String {
     match count {
-        0 => "No active filters".to_owned(),
-        1 => "1 active filter".to_owned(),
-        count => format!("{count} active filters"),
+        0 => texts.none.clone(),
+        1 => texts.one.clone(),
+        count => texts.many.replace("{count}", &count.to_string()),
     }
 }
 
@@ -45,8 +77,14 @@ pub fn ActiveFilterChips(
     /// Optional clear-all callback. It never affects the dataset selector.
     #[prop(optional)]
     on_clear: Option<Callback<()>>,
+    /// Reactive framework-owned summary, removal, and compatibility copy.
+    #[prop(into, default = Signal::stored(ActiveFilterTexts::default()))]
+    texts: Signal<ActiveFilterTexts>,
     /// Clear-all action label.
-    #[prop(into, default = Signal::stored("Clear filters".to_owned()))]
+    ///
+    /// An empty value selects `texts.clear`; a nonempty value preserves the
+    /// historical per-call override.
+    #[prop(into, default = Signal::stored(String::new()))]
     clear_label: Signal<String>,
 ) -> impl IntoView {
     view! {
@@ -56,11 +94,16 @@ pub fn ActiveFilterChips(
             data-resets-dataset="false"
         >
             <span class="text-xs text-base-content/75">
-                {move || active_filter_summary(chips.with(|chips| chips.len()))}
+                {move || texts.with(|texts| {
+                    active_filter_summary_with(chips.with(|chips| chips.len()), texts)
+                })}
             </span>
             {move || chips.get().into_iter().map(|chip| {
                 let id = chip.id.clone();
-                let remove_label = format!("Remove {} filter", chip.label);
+                let chip_label = chip.label.clone();
+                let remove_label = move || texts.with(|texts| {
+                    texts.remove.replace("{label}", &chip_label)
+                });
                 view! {
                     <span class="badge badge-outline gap-1 py-3">
                         <span class="font-medium">{chip.label}</span>
@@ -86,7 +129,14 @@ pub fn ActiveFilterChips(
                             }
                         })
                     >
-                        {move || clear_label.get()}
+                        {move || {
+                            let override_label = clear_label.get();
+                            if override_label.is_empty() {
+                                texts.with(|texts| texts.clear.clone())
+                            } else {
+                                override_label
+                            }
+                        }}
                     </Button>
                 })
             }}

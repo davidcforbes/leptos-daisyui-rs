@@ -1,4 +1,3 @@
-use crate::components::data_table::TABLE_SCROLL_WRAPPER_CLASS;
 use crate::components::data_table::auto_page::{
     DEFAULT_AUTO_MIN_ROWS, FALLBACK_HEADER_HEIGHT, FALLBACK_ROW_HEIGHT, auto_page_size_for_height,
 };
@@ -22,9 +21,10 @@ use crate::components::data_table::selection::{
 };
 use crate::components::data_table::sort::{column_sort_as, compare_cells};
 use crate::components::data_table::types::{
-    CellRenderer, Column, DataTableClasses, DataTableSortTexts, DataTableTexts, SortOrder,
-    TableRow, TypedCellFn,
+    CellRenderer, Column, DataTableClasses, DataTableSortTexts, DataTableTexts, RowDetailRenderer,
+    SortOrder, TableRow, TypedCellFn,
 };
+use crate::components::data_table::{TABLE_SCROLL_WRAPPER_CLASS, next_data_table_search_id};
 use crate::components::table::{Table, TableSize};
 use crate::merge_classes;
 use leptos::{html::Div, prelude::*};
@@ -364,6 +364,10 @@ pub fn DataTable(
     /// `renderer_index` (when set) always takes precedence.
     #[prop(optional)]
     typed_cells: Vec<TypedCellFn>,
+
+    /// Optional full-width detail content rendered immediately after a row.
+    #[prop(optional)]
+    detail_renderer: Option<RowDetailRenderer>,
 
     /// Optional per-row extra CSS classes (e.g. a background tint) computed
     /// from the row's absolute index and data. Merged with `classes.row` /
@@ -1000,6 +1004,7 @@ pub fn DataTable(
     let table_wrapper_style =
         move || is_flex_column().then_some("flex: 1; overflow-y: auto; min-height: 0");
     let controls_style = move || is_flex_column().then_some("flex-shrink: 0; padding: 12px 0");
+    let search_input_id = next_data_table_search_id();
 
     view! {
         <div
@@ -1012,17 +1017,26 @@ pub fn DataTable(
                 let show_search = searchable.get();
                 let show_chooser = column_chooser.get();
                 let extra_toolbar = toolbar.clone();
+                let search_input_id = search_input_id.clone();
                 (show_search || show_chooser || extra_toolbar.is_some()).then(|| view! {
                     <div class="mb-3 flex items-center gap-2">
-                        {show_search.then(|| view! {
+                        {show_search.then(|| {
+                            let label_target = search_input_id.clone();
+                            let control_id = search_input_id.clone();
+                            view! {
+                            <label class="sr-only" r#for=label_target>
+                                {move || texts.with(|t| t.search_label.clone())}
+                            </label>
                             <input
+                                id=control_id
                                 type="text"
                                 class="input input-bordered input-sm w-full max-w-xs"
                                 placeholder=move || texts.with(|t| t.search_placeholder.clone())
-                                aria-label="Search table"
+                                aria-label=move || texts.with(|t| t.search_label.clone())
                                 prop:value=move || search_query.get()
                                 on:input=on_search_input
                             />
+                            }
                         })}
                         {extra_toolbar.map(|t| t.run())}
                         <div class="flex-1"></div>
@@ -1064,6 +1078,9 @@ pub fn DataTable(
                                         options=Signal::derive(move || filter_options.get())
                                         filters=column_filters
                                         all_label=filter_all_label
+                                        filter_label=Signal::derive(move || {
+                                            texts.with(|texts| texts.filter_label.clone())
+                                        })
                                     />
                                 })
                             }}
@@ -1085,6 +1102,7 @@ pub fn DataTable(
                             cell_renderers=cell_renderers
                             column_widths=Signal::derive(move || column_widths.get())
                             typed_cells=typed_cells
+                            detail_renderer=detail_renderer
                             row_class_fn=row_class_fn
                         />
                     </Table>

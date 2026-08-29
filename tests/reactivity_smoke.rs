@@ -1595,6 +1595,159 @@ async fn extra_filter_composes_with_builtin_toolbar() {
     assert_eq!(count_of(&h, rows).await, 25, "toggle off restores all rows");
 }
 
+/// DataTable search/filter naming (ldui-86h): both variants expose a stable
+/// localized accessible name and a real associated `<label>`, so neither the
+/// browser nor the structural drift audit has to infer a name from placeholder
+/// text or column position.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn data_table_search_and_filter_controls_have_associated_names() {
+    let h = harness_at("/components/data-table").await;
+    begin_browser_error_capture(&h).await;
+
+    let names = eval_json(
+        &h,
+        r#"(() => {
+            const describe = element => ({
+                aria: element.getAttribute('aria-label'),
+                labels: element.labels?.length ?? 0,
+                labelText: Array.from(element.labels || []).map(label =>
+                    (label.matches('.sr-only') ? label : label.querySelector('.sr-only'))
+                        ?.textContent.trim() ?? ''
+                ),
+            });
+            return {
+                clientSearch: describe(document.querySelector('#filter-row-table input')),
+                serverSearch: describe(document.querySelector('#server-table input')),
+                clientFilters: Array.from(document.querySelectorAll('#filter-row-table tr.data-table-filter-row select')).map(describe),
+                serverFilters: Array.from(document.querySelectorAll('#server-table tr.data-table-filter-row select')).map(describe),
+            };
+        })()"#,
+    )
+    .await;
+    for search in [&names["clientSearch"], &names["serverSearch"]] {
+        assert_eq!(search["aria"], json!("Search table"));
+        assert_eq!(search["labels"], json!(1));
+        assert_eq!(search["labelText"], json!(["Search table"]));
+    }
+    for filter in names["clientFilters"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .chain(names["serverFilters"].as_array().unwrap())
+    {
+        assert_eq!(filter["labels"], json!(1));
+        assert!(filter["aria"].as_str().unwrap().starts_with("Filter by "));
+        assert_eq!(filter["labelText"][0], filter["aria"]);
+    }
+
+    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
+        .expect("load vendored axe-core");
+    let report = axe.run(h.page()).await.expect("run axe-core");
+    report
+        .assert_no_blocking("associated DataTable search/filter names")
+        .unwrap_or_else(|error| panic!("{error}; {}", report.summary()));
+    assert_no_browser_errors(&h, "DataTable associated search/filter names").await;
+}
+
+/// DataTable detail rows (ldui-5tv): optional row-specific content is a full
+/// sibling row, stays paired with its source through sort, preserves stable
+/// header geometry, and cannot activate the source row.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn data_table_detail_subrows_stay_paired_and_isolated() {
+    let h = harness_at("/components/data-table").await;
+    begin_browser_error_capture(&h).await;
+    let initial = eval_json(
+        &h,
+        r#"(() => {
+            const root = document.querySelector('#detail-row-table');
+            const table = root.querySelector('table');
+            const headers = Array.from(table.querySelectorAll('thead tr:first-child th'));
+            headers.forEach((header, index) => header.__detailHeader = index);
+            const details = Array.from(table.querySelectorAll('tbody tr[data-table-detail-row]'));
+            return {
+                mainRows: table.querySelectorAll('tbody tr:not([data-table-detail-row])').length,
+                detailRows: details.length,
+                colspans: details.map(row => Number(row.cells[0].getAttribute('colspan'))),
+                columns: headers.length,
+                paired: details.every(row => row.previousElementSibling && !row.previousElementSibling.matches('[data-table-detail-row]')),
+                tableBox: [table.getBoundingClientRect().x, table.getBoundingClientRect().width],
+                headerBoxes: headers.map(header => [header.getBoundingClientRect().x, header.getBoundingClientRect().width]),
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(initial["mainRows"], json!(3));
+    assert_eq!(initial["detailRows"], json!(2));
+    assert_eq!(initial["paired"], json!(true));
+    assert!(
+        initial["colspans"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|span| span == &initial["columns"])
+    );
+
+    assert_eq!(
+        eval_json(
+            &h,
+            "document.querySelector('#detail-row-table [data-testid=\"data-table-detail-action\"]').click(); true",
+        )
+        .await,
+        json!(true),
+    );
+    settle(&h).await;
+    assert_eq!(
+        eval_json(
+            &h,
+            "document.querySelector('[data-testid=\"detail-row-activation-count\"]').textContent",
+        )
+        .await,
+        json!("0"),
+        "detail-row interaction bubbled into the source-row activation"
+    );
+
+    click(
+        &h,
+        "#detail-row-table thead tr:first-child th:first-child > button",
+    )
+    .await;
+    settle(&h).await;
+    click(
+        &h,
+        "#detail-row-table thead tr:first-child th:first-child > button",
+    )
+    .await;
+    settle(&h).await;
+    let sorted = eval_json(
+        &h,
+        r#"(() => {
+            const root = document.querySelector('#detail-row-table');
+            const table = root.querySelector('table');
+            const headers = Array.from(table.querySelectorAll('thead tr:first-child th'));
+            const details = Array.from(table.querySelectorAll('tbody tr[data-table-detail-row]'));
+            const tableBox = [table.getBoundingClientRect().x, table.getBoundingClientRect().width];
+            const headerBoxes = headers.map(header => [header.getBoundingClientRect().x, header.getBoundingClientRect().width]);
+            return {
+                paired: details.every(row => {
+                    const detailName = row.textContent.match(/User \d+/)?.[0];
+                    return detailName && row.previousElementSibling.textContent.includes(detailName);
+                }),
+                sameHeaders: headers.every((header, index) => header.__detailHeader === index),
+                tableBox,
+                headerBoxes,
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(sorted["paired"], json!(true));
+    assert_eq!(sorted["sameHeaders"], json!(true));
+    assert_eq!(sorted["tableBox"], initial["tableBox"]);
+    assert_eq!(sorted["headerBoxes"], initial["headerBoxes"]);
+    assert_no_browser_errors(&h, "DataTable detail subrows").await;
+}
+
 /// Evaluate a JS expression returning a JSON-serializable value.
 async fn eval_json(h: &pixelproof_web::Harness, expr: &str) -> serde_json::Value {
     h.page()
@@ -1670,6 +1823,126 @@ async fn field_wires_label_help_and_error_to_the_input() {
             .is_some_and(|t| t.contains("required")),
         "aria-errormessage must resolve to the rendered error line: {snapshot}"
     );
+}
+
+/// Field's native monotonic-counter test is necessary but insufficient: this
+/// fixture proves that one real WASM form receives six distinct control IDs,
+/// six exact label targets, and resolvable help/error references.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn field_ids_and_associations_are_unique_in_real_wasm() {
+    let h = harness_at("/components/fieldset").await;
+    begin_browser_error_capture(&h).await;
+    common::wait_for_selector(&h, "#field-unique-associations").await;
+
+    let snapshot = eval_json(
+        &h,
+        r#"(() => {
+            const form = document.querySelector('#field-unique-associations');
+            const cases = [...form.querySelectorAll('[data-field-case]')];
+            const controls = cases.map(root => root.querySelector('input, select'));
+            const labels = cases.map(root => root.querySelector('label[for]'));
+            const ids = controls.map(control => control?.id ?? '');
+            const describedTokens = controls.flatMap(control =>
+                (control?.getAttribute('aria-describedby') ?? '')
+                    .split(/\s+/)
+                    .filter(Boolean)
+            );
+            const errorTokens = controls.flatMap(control =>
+                (control?.getAttribute('aria-errormessage') ?? '')
+                    .split(/\s+/)
+                    .filter(Boolean)
+            );
+            const allIds = [...document.querySelectorAll('[id]')].map(node => node.id);
+            const duplicates = [...new Set(allIds.filter(
+                (id, index) => id && allIds.indexOf(id) !== index
+            ))];
+            return {
+                caseCount: cases.length,
+                controlCount: controls.filter(Boolean).length,
+                labelCount: labels.filter(Boolean).length,
+                ids,
+                uniqueControlIds: new Set(ids).size,
+                emptyControlIds: ids.filter(id => !id).length,
+                labelTargets: labels.map(label => label?.getAttribute('for') ?? ''),
+                exactLabelTargets: labels.every((label, index) => {
+                    const target = label?.getAttribute('for') ?? '';
+                    return target === ids[index]
+                        && form.querySelectorAll(`[id="${CSS.escape(target)}"]`).length === 1;
+                }),
+                describedTokens,
+                describedTargetsResolveOnce: describedTokens.every(
+                    id => document.querySelectorAll(`[id="${CSS.escape(id)}"]`).length === 1
+                ),
+                errorTokens,
+                errorTargetsResolveOnce: errorTokens.every(
+                    id => document.querySelectorAll(`[id="${CSS.escape(id)}"]`).length === 1
+                ),
+                duplicateIds: duplicates,
+            };
+        })()"#,
+    )
+    .await;
+
+    assert_eq!(snapshot["caseCount"], json!(6), "fixture shape: {snapshot}");
+    assert_eq!(snapshot["controlCount"], json!(6), "controls: {snapshot}");
+    assert_eq!(snapshot["labelCount"], json!(6), "labels: {snapshot}");
+    assert_eq!(snapshot["emptyControlIds"], json!(0), "ids: {snapshot}");
+    assert_eq!(
+        snapshot["uniqueControlIds"],
+        json!(6),
+        "every WASM control id must be unique: {snapshot}"
+    );
+    assert_eq!(
+        snapshot["exactLabelTargets"],
+        json!(true),
+        "each visible label must target its own control exactly once: {snapshot}"
+    );
+    assert_eq!(
+        snapshot["describedTargetsResolveOnce"],
+        json!(true),
+        "every aria-describedby token must resolve once: {snapshot}"
+    );
+    assert_eq!(
+        snapshot["errorTargetsResolveOnce"],
+        json!(true),
+        "every aria-errormessage token must resolve once: {snapshot}"
+    );
+    assert_eq!(
+        snapshot["duplicateIds"],
+        json!([]),
+        "Chrome must not see a duplicate form-field id: {snapshot}"
+    );
+
+    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
+        .expect("load vendored axe-core");
+    // Inject axe through PixelProof, then scope the release assertion to this
+    // fixture. The component-catalog page intentionally contains older raw
+    // form examples outside this form; those cannot be allowed to obscure the
+    // six-control Field contract being proven here.
+    let _page_report = axe.run(h.page()).await.expect("inject and run axe-core");
+    let scoped_axe = eval_json(
+        &h,
+        r#"(async () => {
+            const report = await axe.run(document.querySelector('#field-unique-associations'), {
+                runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa'] },
+                resultTypes: ['violations'],
+            });
+            return report.violations
+                .filter(violation => violation.impact === 'serious' || violation.impact === 'critical')
+                .map(violation => ({
+                    id: violation.id,
+                    nodes: violation.nodes.map(node => ({ target: node.target, html: node.html })),
+                }));
+        })()"#,
+    )
+    .await;
+    assert_eq!(
+        scoped_axe,
+        json!([]),
+        "the six-control Field fixture has blocking axe findings: {scoped_axe}"
+    );
+    assert_no_browser_errors(&h, "Field unique-association fixture").await;
 }
 
 /// Modal accessible naming (ldui-nui): the demo's basic modal names itself

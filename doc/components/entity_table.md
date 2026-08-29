@@ -42,16 +42,71 @@ erase the compile-time distinction the snapshot component exists to provide.
 | Prop | Purpose |
 |---|---|
 | `data: Signal<Rc<Vec<T>>, LocalStorage>` | The complete selected snapshot. |
-| `columns: Vec<EntityColumn<T>>` | Typed cell, sort-key, visibility, resize, and system-order declarations. |
+| `columns: EntityColumns<T>` | Static `Vec` compatibility or local reactive typed declarations; stable IDs own preference identity. |
 | `row_key: EntityRowKey<T>` | Stable identity used for keyed DOM rows and activation. |
 | `dataset_identity: Signal<String>` | Identifies the downloaded dataset; a change resets only the current page. |
 | `page_reset_key` | Optional identity for local view-state changes that should reset only paging. |
-| `compact_row` | Optional single-cell renderer used at compact breakpoints without duplicating rows. |
+| `compact_row: EntityCompactRow<T>` | Default, static, or reactive single-cell renderer used at compact breakpoints without duplicating rows. |
+| `column_filters: EntityColumnFilters` | Controlled one-to-one filter controls aligned beneath stable desktop columns. |
+| `source_data` | Optional authoritative source membership used only for safe post-removal focus recovery. |
+| `focus_scope` | Optional opaque dataset/access generation; recovery never crosses a change. |
 | `preference_ownership` | Controlled or uncontrolled preference policy. |
 | `storage_key` | Legacy local-storage compatibility prop; mutually exclusive with `preference_ownership`. |
 
 Page number, free-text search, selected dataset, row data, and snapshot revision
 are transient state and do not belong in `EntityTablePreferences`.
+
+## Reactive column semantics
+
+Existing `columns=vec![...]` calls remain source-compatible. A localized or
+otherwise runtime-defined table can instead pass
+`Signal<Vec<EntityColumn<T>>, LocalStorage>`. Each replacement advances an
+internal semantic generation: headers, chooser copy, default compact labels,
+sort/accessibility names, and comparator or sort-key behavior all switch to
+the new declarations. The sorted-index cache includes that generation, so an
+unchanged row `Rc` and sort value can never reuse indices from an obsolete
+comparator.
+
+Preferences normalize by stable column ID after replacement. Surviving order,
+visibility, widths, sort clauses, and page size remain intact; removed IDs and
+newly non-sortable sort clauses disappear, and new IDs append in system order.
+A label-only locale update therefore updates mounted header nodes without
+resetting consumer state.
+
+`EntityTableTexts` is a live signal and covers every framework-owned visible
+or accessible string, including column-order actions, resize names/value text,
+sort state/action/summary copy, region name, pagination, and empty state.
+
+## Hybrid aligned filters
+
+Use `EntityColumnFilter::new("stable_column_id", renderer)` for a controlled
+filter that maps one-to-one to a column. `EntityColumnFilters` renders one
+second-header cell for every visible column and places the control only in its
+target cell. Reorder and visibility use the same ordered descriptor list as
+the header and body, so tracks cannot drift. Filter cells stop pointer,
+keyboard, and pointer-down propagation; selecting a value cannot sort, resize,
+or activate a row.
+
+Keep global search and controls that do not map to one column in the utility
+`FilterBar`. The complete pattern has exactly one Reset and one Save as Default
+there; it does not duplicate column controls above the table. See
+[`client-snapshot-list.md`](../patterns/client-snapshot-list.md).
+
+## Row-action focus recovery
+
+Wrap repeatable action controls in `EntityRowAction action_id="..."`. When a
+focused source row is actually removed within the same `focus_scope`, the
+table uses its real filtered/sorted/paged order and visible position to focus
+the same enabled, visible action on the row that moved into that position. A
+last-row removal clamps to the preceding visible row.
+
+If filtering or paging merely hides a row that remains in `source_data`, if
+the matching action is absent/disabled/hidden, or if no neighbor remains,
+focus goes to the named programmatically focusable table region. Dataset or
+access-generation changes clear recovery without cross-focusing. A declined
+or failed action that leaves the row present retains native focus, and focus
+already moved by the user is never stolen. Consumers must not reproduce this
+with DOM queries or source-order guesses.
 
 ## Preference ownership
 

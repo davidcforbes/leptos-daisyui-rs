@@ -140,6 +140,10 @@ pub fn DataTableFilterRow(
     /// Label for the "no filter" option in every dropdown.
     #[prop(into)]
     all_label: Signal<String>,
+
+    /// Associated-label template; `{column}` is replaced with the live header.
+    #[prop(into, default = Signal::stored("Filter by {column}".to_owned()))]
+    filter_label: Signal<String>,
 ) -> impl IntoView {
     view! {
         <tr class="data-table-filter-row bg-table-filter text-table-filter-content forced-colors:bg-[Canvas] forced-colors:text-[CanvasText]">
@@ -150,6 +154,9 @@ pub fn DataTableFilterRow(
                     let col_id = col.id;
                     let header_label = col.header.clone();
                     let is_filterable = col.filterable;
+                    let accessible_label = Signal::derive(move || {
+                        filter_label.get().replace("{column}", &header_label)
+                    });
 
                     view! {
                         <th
@@ -165,9 +172,11 @@ pub fn DataTableFilterRow(
                                     options.with(|o| o.get(col_id).cloned().unwrap_or_default())
                                 };
                                 view! {
+                                    <label class="block w-full">
+                                    <span class="sr-only">{move || accessible_label.get()}</span>
                                     <select
                                         class="select select-bordered select-xs w-full bg-table-filter font-normal text-table-filter-content forced-colors:bg-[Canvas] forced-colors:text-[CanvasText]"
-                                        aria-label=format!("Filter by {}", header_label)
+                                        aria-label=move || accessible_label.get()
                                         // Bind the rendered selection to the
                                         // signal, so an external reset (or a
                                         // stale-filter prune) is reflected in
@@ -210,6 +219,7 @@ pub fn DataTableFilterRow(
                                             }
                                         </For>
                                     </select>
+                                    </label>
                                 }
                             })}
                         </th>

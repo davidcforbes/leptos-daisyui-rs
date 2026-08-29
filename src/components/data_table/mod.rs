@@ -66,6 +66,19 @@ mod resize;
 mod selection;
 mod server_component;
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Process-wide sequence for the real `<label for>` / search-control wiring
+/// shared by client and server table variants.
+static DATA_TABLE_SEARCH_ID: AtomicU64 = AtomicU64::new(0);
+
+pub(super) fn next_data_table_search_id() -> String {
+    format!(
+        "ldui-data-table-search-{}",
+        DATA_TABLE_SEARCH_ID.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
 /// Every DataTable variant keeps wide columns reachable instead of clipping
 /// the right-hand side of the table at constrained viewport widths.
 pub(super) const TABLE_SCROLL_WRAPPER_CLASS: &str = crate::components::table::TABLE_VIEWPORT_CLASS;

@@ -108,6 +108,25 @@ pub fn DataTableDemo() -> impl IntoView {
     // States
     let (loading, set_loading) = signal(false);
     let (page_size, set_page_size) = signal(10_usize);
+    let detail_row_activation = RwSignal::new(0_usize);
+    let detail_renderer: RowDetailRenderer = Callback::new(
+        move |(absolute_index, row): (usize, TableRow)| {
+            (absolute_index % 2 == 0).then(|| {
+                let name = row.get("name").cloned().unwrap_or_default();
+                let role = row.get("role").cloned().unwrap_or_default();
+                view! {
+                    <p data-testid="data-table-row-detail">
+                        <strong>{name}</strong>
+                        {format!(" has a row-specific {role} review note ({absolute_index}).")}
+                        <Button class="btn-ghost btn-xs" attr:data-testid="data-table-detail-action">
+                            "Review note"
+                        </Button>
+                    </p>
+                }
+                .into_any()
+            })
+        },
+    );
 
     // Runtime localization: columns and texts derived from a locale signal,
     // the pattern a `t()`-based app uses. Toggling the locale must re-render
@@ -750,6 +769,26 @@ pub fn DataTableDemo() -> impl IntoView {
                 />
             </Section>
 
+            <Section title="Per-Row Full-Width Detail">
+                <p class="text-sm opacity-70 mb-4">
+                    "Only rows with genuinely row-specific explanatory text receive a full-width detail row. The detail stays paired through sorting and paging."
+                </p>
+                <p class="text-xs opacity-60 mb-2">
+                    "Row activations: "
+                    <strong data-testid="detail-row-activation-count">{move || detail_row_activation.get()}</strong>
+                </p>
+                <DataTable
+                    data=small_data
+                    columns=standard_columns
+                    page_size=3
+                    detail_renderer=detail_renderer
+                    on_row_activate=Callback::new(move |_| {
+                        detail_row_activation.update(|count| *count += 1);
+                    })
+                    attr:id="detail-row-table"
+                />
+            </Section>
+
             // Responsive / auto-growing page size
             <Section title="Responsive Page Size (auto_page_size)">
                 <p class="text-sm opacity-70 mb-4">
@@ -855,8 +894,10 @@ pub fn DataTableDemo() -> impl IntoView {
                         previous: "Anterior".to_string(),
                         next: "Siguiente".to_string(),
                         search_placeholder: "Buscar...".to_string(),
+                        search_label: "Buscar en la tabla".to_string(),
                         row_range: "Mostrando {start}\u{2013}{end} de {total}".to_string(),
                         filter_all: "Todos".to_string(),
+                        filter_label: "Filtrar por {column}".to_string(),
                     }
                 />
             </Section>

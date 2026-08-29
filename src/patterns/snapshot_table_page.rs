@@ -2,12 +2,12 @@
 
 use super::{
     ActionFeedback, ActionFeedbackModel, ActionFeedbackTexts, DatasetOption, DatasetSelector,
-    LocalResultSummary, PageStatePanel, PageStatePanelTexts, SnapshotTablePhase,
-    SnapshotTableState,
+    DatasetSelectorTexts, LocalResultSummary, PageStatePanel, PageStatePanelTexts,
+    SnapshotTablePhase, SnapshotTableState,
 };
 use crate::components::{
-    EntityColumn, EntityRowKey, EntityRowRenderer, EntityTable, EntityTablePreferenceOwnership,
-    EntityTableTexts,
+    EntityColumnFilters, EntityColumns, EntityCompactRow, EntityRowKey, EntityTable,
+    EntityTablePreferenceOwnership, EntityTableTexts,
 };
 use leptos::prelude::*;
 use std::rc::Rc;
@@ -92,11 +92,12 @@ impl<V: Send + Sync + 'static> SnapshotDatasetSelectorConfig<V> {
 /// revision, authoritative count, and generation. The page injects all of
 /// those identity-critical bindings from the same state view as the selector.
 pub struct SnapshotEntityTableConfig<R: 'static> {
-    columns: Vec<EntityColumn<R>>,
+    columns: EntityColumns<R>,
     row_key: EntityRowKey<R>,
     preference_ownership: EntityTablePreferenceOwnership,
     preference_version: u16,
-    compact_row: Option<EntityRowRenderer<R>>,
+    compact_row: EntityCompactRow<R>,
+    column_filters: EntityColumnFilters,
     on_row_activate: Option<Callback<String>>,
     texts: Signal<EntityTableTexts>,
     show_reset_actions: bool,
@@ -107,16 +108,17 @@ pub struct SnapshotEntityTableConfig<R: 'static> {
 impl<R: 'static> SnapshotEntityTableConfig<R> {
     /// Creates a persistence-neutral canonical table config.
     pub fn new(
-        columns: Vec<EntityColumn<R>>,
+        columns: impl Into<EntityColumns<R>>,
         row_key: EntityRowKey<R>,
         preference_ownership: EntityTablePreferenceOwnership,
     ) -> Self {
         Self {
-            columns,
+            columns: columns.into(),
             row_key,
             preference_ownership,
             preference_version: 1,
-            compact_row: None,
+            compact_row: EntityCompactRow::Default,
+            column_filters: EntityColumnFilters::None,
             on_row_activate: None,
             texts: Signal::stored(EntityTableTexts::default()),
             show_reset_actions: false,
@@ -132,8 +134,14 @@ impl<R: 'static> SnapshotEntityTableConfig<R> {
     }
 
     /// Supplies a compact-row renderer without changing row identity.
-    pub fn with_compact_row(mut self, renderer: EntityRowRenderer<R>) -> Self {
-        self.compact_row = Some(renderer);
+    pub fn with_compact_row(mut self, renderer: impl Into<EntityCompactRow<R>>) -> Self {
+        self.compact_row = renderer.into();
+        self
+    }
+
+    /// Supplies controlled filters aligned beneath stable table columns.
+    pub fn with_column_filters(mut self, filters: impl Into<EntityColumnFilters>) -> Self {
+        self.column_filters = filters.into();
         self
     }
 
@@ -191,6 +199,9 @@ pub fn SnapshotTablePage<R, V, E, M, K>(
     kpis: Option<Children>,
     /// Controlled local-filter utility content.
     filters: Children,
+    /// Reactive dataset loading/display/error/retry copy.
+    #[prop(into, default = Signal::stored(DatasetSelectorTexts::default()))]
+    dataset_texts: Signal<DatasetSelectorTexts>,
     /// Typed table mechanics with no rows/dataset/revision/generation field.
     entity_table: SnapshotEntityTableConfig<R>,
     /// Reactive page-state copy.
@@ -331,6 +342,8 @@ where
                     loading=loading
                     disabled=disabled
                     error=load_error
+                    texts=dataset_texts
+                    nostrip:on_retry=on_retry
                 />
             </div>
             {kpis.map(|kpis| view! {
@@ -397,7 +410,9 @@ where
                             columns=config.columns.clone()
                             row_key=Rc::clone(&config.row_key)
                             dataset_identity=generation_marker
-                            nostrip:compact_row=config.compact_row.clone()
+                            focus_scope=generation_marker
+                            compact_row=config.compact_row.clone()
+                            column_filters=config.column_filters.clone()
                             nostrip:on_row_activate=config.on_row_activate
                             preference_ownership=config.preference_ownership.clone()
                             preference_version=config.preference_version

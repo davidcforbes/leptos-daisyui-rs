@@ -2,6 +2,8 @@ use crate::debug_state;
 use leptos::prelude::*;
 use leptos_daisyui_rs::components::*;
 use leptos_daisyui_rs::patterns::*;
+use serde_json::json;
+use std::collections::BTreeSet;
 use std::rc::Rc;
 
 #[derive(Clone, Default, PartialEq)]
@@ -30,7 +32,7 @@ page_contract! {
 filter_schema! {
     pub(crate) CLIENT_SNAPSHOT_DEMO_FILTERS: DemoFilters {
         dataset_selector: "office",
-        filters: [search, status, case_type],
+        filters: [status, case_type],
     }
 }
 
@@ -65,34 +67,66 @@ fn demo_rows(office: &str) -> Vec<DemoRow> {
         .collect()
 }
 
-fn demo_columns(claim_count: RwSignal<usize>) -> Vec<EntityColumn<DemoRow>> {
+fn demo_columns(
+    claim_count: RwSignal<usize>,
+    retained_action_count: RwSignal<usize>,
+    removed_rows: RwSignal<BTreeSet<String>>,
+    spanish: bool,
+) -> Vec<EntityColumn<DemoRow>> {
+    let client = if spanish { "Cliente" } else { "Client" };
+    let status = if spanish { "Estado" } else { "Status" };
+    let case_type = if spanish { "Tipo de caso" } else { "Case type" };
+    let received = if spanish { "Recibido" } else { "Received" };
+    let actions = if spanish { "Acciones" } else { "Actions" };
+    let claim = if spanish { "Reclamar" } else { "Claim" };
+    let retain = if spanish { "Conservar" } else { "Keep" };
     vec![
-        EntityColumn::text("client", "Client", |row: &DemoRow| row.client.clone())
+        EntityColumn::text("client", client, |row: &DemoRow| row.client.clone())
             .required()
             .with_min_width(240),
-        EntityColumn::text("status", "Status", |row: &DemoRow| row.status.clone())
+        EntityColumn::text("status", status, |row: &DemoRow| row.status.clone())
             .with_min_width(110),
-        EntityColumn::text("case_type", "Case type", |row: &DemoRow| {
+        EntityColumn::text("case_type", case_type, |row: &DemoRow| {
             row.case_type.clone()
         })
         .with_min_width(150),
-        EntityColumn::text("received", "Received", |row: &DemoRow| row.received.clone())
+        EntityColumn::text("received", received, |row: &DemoRow| row.received.clone())
             .with_min_width(125),
-        EntityColumn::action("actions", "Actions", |_: &DemoRow| "Claim".to_owned())
+        EntityColumn::action("actions", actions, move |_: &DemoRow| claim.to_owned())
             .required()
             .non_resizable()
             .render_with(move |row| {
-                let row_id = row.id.clone();
+                let claim_row_id = row.id.clone();
+                let retain_row_id = row.id.clone();
+                let remove_id = row.id.clone();
                 view! {
-                    <Button
-                        class="btn-primary btn-xs"
-                        on_click=Callback::new(move |_| {
-                            let _ = &row_id;
-                            claim_count.update(|count| *count += 1);
-                        })
-                    >
-                        "Claim"
-                    </Button>
+                    <div class="flex flex-wrap gap-1">
+                        <EntityRowAction action_id="claim">
+                            <Button
+                                class="btn-primary btn-xs"
+                                attr:data-claim-row=claim_row_id
+                                on_click=Callback::new(move |_| {
+                                    removed_rows.update(|rows| {
+                                        rows.insert(remove_id.clone());
+                                    });
+                                    claim_count.update(|count| *count += 1);
+                                })
+                            >
+                                {claim}
+                            </Button>
+                        </EntityRowAction>
+                        <EntityRowAction action_id="retain">
+                            <Button
+                                class="btn-ghost btn-xs"
+                                attr:data-retain-row=retain_row_id
+                                on_click=Callback::new(move |_| {
+                                    retained_action_count.update(|count| *count += 1);
+                                })
+                            >
+                                {retain}
+                            </Button>
+                        </EntityRowAction>
+                    </div>
                 }
                 .into_any()
             }),
@@ -110,8 +144,14 @@ pub fn ClientSnapshotListDemo() -> impl IntoView {
     let case_type = RwSignal::new(String::new());
     let retained_state = RwSignal::new(PageState::Ready);
     let claim_count = RwSignal::new(0_usize);
+    let retained_action_count = RwSignal::new(0_usize);
+    let removed_rows = RwSignal::new(BTreeSet::<String>::new());
     let activate_count = RwSignal::new(0_usize);
     let last_activated = RwSignal::new(String::new());
+    let spanish = RwSignal::new(false);
+    let access_generation = RwSignal::new(0_u64);
+    let save_count = RwSignal::new(0_usize);
+    let save_state = RwSignal::new(SnapshotDefaultSaveState::Clean);
     let mut initial_preferences = EntityTablePreferences::new(1);
     initial_preferences.column_order = ["client", "status", "case_type", "received", "actions"]
         .into_iter()
@@ -128,7 +168,15 @@ pub fn ClientSnapshotListDemo() -> impl IntoView {
     });
     on_cleanup(move || debug_state::remove("entity_table.preferences"));
 
-    let snapshot = Signal::derive_local(move || Rc::new(demo_rows(&office.get())));
+    let snapshot = Signal::derive_local(move || {
+        let removed = removed_rows.get();
+        Rc::new(
+            demo_rows(&office.get())
+                .into_iter()
+                .filter(|row| !removed.contains(&row.id))
+                .collect::<Vec<_>>(),
+        )
+    });
     let filtered = Signal::derive_local(move || {
         let query = search.get().trim().to_lowercase();
         let status_filter = status.get();
@@ -150,17 +198,22 @@ pub fn ClientSnapshotListDemo() -> impl IntoView {
     });
 
     let active_chips = Signal::derive(move || {
+        let (search_label, status_label, case_label) = if spanish.get() {
+            ("Buscar", "Estado", "Tipo de caso")
+        } else {
+            ("Search", "Status", "Case type")
+        };
         let mut chips = Vec::new();
         if !search.get().is_empty() {
-            chips.push(ActiveFilterChip::new("search", "Search", search.get()));
+            chips.push(ActiveFilterChip::new("search", search_label, search.get()));
         }
         if !status.get().is_empty() {
-            chips.push(ActiveFilterChip::new("status", "Status", status.get()));
+            chips.push(ActiveFilterChip::new("status", status_label, status.get()));
         }
         if !case_type.get().is_empty() {
             chips.push(ActiveFilterChip::new(
                 "case_type",
-                "Case type",
+                case_label,
                 case_type.get(),
             ));
         }
@@ -179,6 +232,181 @@ pub fn ClientSnapshotListDemo() -> impl IntoView {
         case_type.set(String::new());
     });
 
+    let columns = Signal::derive_local(move || {
+        demo_columns(
+            claim_count,
+            retained_action_count,
+            removed_rows,
+            spanish.get(),
+        )
+    });
+    let column_filters = Signal::derive_local(move || {
+        let (status_label, status_all, case_label, case_all) = if spanish.get() {
+            (
+                "Estado",
+                "Todos los estados",
+                "Tipo de caso",
+                "Todos los tipos",
+            )
+        } else {
+            ("Status", "All statuses", "Case type", "All case types")
+        };
+        vec![
+            EntityColumnFilter::new("status", move || {
+                view! {
+                    <label class="block w-full">
+                        <span class="sr-only">{status_label}</span>
+                        <select
+                            class="select select-bordered select-xs w-full bg-table-filter text-table-filter-content"
+                            aria-label=status_label
+                            data-testid="entity-status-filter"
+                            prop:value=move || status.get()
+                            on:change=move |event| status.set(event_target_value(&event))
+                        >
+                            <option value="">{status_all}</option>
+                            <option value="Ready">"Ready"</option>
+                            <option value="Urgent">"Urgent"</option>
+                        </select>
+                    </label>
+                }
+                .into_any()
+            }),
+            EntityColumnFilter::new("case_type", move || {
+                view! {
+                    <label class="block w-full">
+                        <span class="sr-only">{case_label}</span>
+                        <select
+                            class="select select-bordered select-xs w-full bg-table-filter text-table-filter-content"
+                            aria-label=case_label
+                            data-testid="entity-case-filter"
+                            prop:value=move || case_type.get()
+                            on:change=move |event| case_type.set(event_target_value(&event))
+                        >
+                            <option value="">{case_all}</option>
+                            <option value="Family">"Family"</option>
+                            <option value="Humanitarian">"Humanitarian"</option>
+                        </select>
+                    </label>
+                }
+                .into_any()
+            }),
+        ]
+    });
+    let filter_result = Signal::derive(move || {
+        FilterResultSummary::new(filtered.get().len(), snapshot.get().len())
+    });
+    let filter_texts = Signal::derive(move || {
+        if spanish.get() {
+            FilterBarTexts {
+                region_label: "Filtros".to_owned(),
+                active_none: "Sin filtros activos".to_owned(),
+                active_one: "1 filtro activo".to_owned(),
+                active_many: "{count} filtros activos".to_owned(),
+                remove_filter: "Quitar el filtro {label}".to_owned(),
+                result_count: "{visible} de {total} resultados".to_owned(),
+                reset: "Restablecer".to_owned(),
+                save_default: "Guardar como predeterminado".to_owned(),
+                clean_reason: "Los valores predeterminados ya están guardados".to_owned(),
+                pending_reason: "Se está guardando la vista predeterminada".to_owned(),
+                pending_feedback: "Guardando la vista predeterminada".to_owned(),
+                saved_feedback: "Vista predeterminada guardada".to_owned(),
+                conflict_feedback: "Conflicto de vista predeterminada: {message}".to_owned(),
+                failure_feedback: "No se pudo guardar la vista: {message}".to_owned(),
+            }
+        } else {
+            FilterBarTexts::default()
+        }
+    });
+    let entity_texts = Signal::derive(move || {
+        if spanish.get() {
+            EntityTableTexts {
+                region_label: "Tabla de clientes".to_owned(),
+                rows_per_page: "Filas por página".to_owned(),
+                choose_columns: "Elegir columnas".to_owned(),
+                column_order: "Orden de columnas".to_owned(),
+                move_earlier: "Mover {column} antes desde la posición {position} de {total}"
+                    .to_owned(),
+                move_later: "Mover {column} después desde la posición {position} de {total}"
+                    .to_owned(),
+                resize_column: "Cambiar el ancho de la columna {column}".to_owned(),
+                pixel_value: "{pixels} píxeles".to_owned(),
+                sort_not_sorted: "Sin orden activo".to_owned(),
+                sort_current: "Orden {direction}, prioridad {priority} de {total}".to_owned(),
+                sort_plain_ascending: "Activar para ordenar ascendente solamente".to_owned(),
+                sort_plain_descending: "Activar para ordenar descendente solamente".to_owned(),
+                sort_plain_system: "Activar para restaurar el orden del sistema".to_owned(),
+                sort_add: "Mayús+activar para añadir como prioridad {priority} ascendente"
+                    .to_owned(),
+                sort_change: "Mayús+activar para cambiar la prioridad {priority} a {direction}"
+                    .to_owned(),
+                sort_remove: "Mayús+activar para quitar la prioridad {priority}".to_owned(),
+                ascending: "ascendente".to_owned(),
+                descending: "descendente".to_owned(),
+                system_order: "Orden del sistema".to_owned(),
+                sort_summary: "Ordenado por {clauses}".to_owned(),
+                sort_clause: "prioridad {priority}: {column} {direction}".to_owned(),
+                reset_sort: "Restablecer orden".to_owned(),
+                reset_columns: "Restablecer columnas".to_owned(),
+                previous: "Anterior".to_owned(),
+                next: "Siguiente".to_owned(),
+                row_range: "Mostrando {start}-{end} de {total}".to_owned(),
+                no_rows: "Sin filas".to_owned(),
+            }
+        } else {
+            EntityTableTexts {
+                region_label: "Client records".to_owned(),
+                ..Default::default()
+            }
+        }
+    });
+    let dataset_texts = Signal::derive(move || {
+        if spanish.get() {
+            DatasetSelectorTexts {
+                loading: "Cargando conjunto de datos".to_owned(),
+                displayed: "Mostrando {dataset}".to_owned(),
+                requested: "Cargando {dataset}".to_owned(),
+                retained_error: "No se pudo reemplazar el conjunto de datos".to_owned(),
+                retry: "Reintentar".to_owned(),
+            }
+        } else {
+            DatasetSelectorTexts::default()
+        }
+    });
+    let projected_defaults = Signal::derive(move || {
+        CLIENT_SNAPSHOT_DEMO_FILTERS
+            .project_defaults(
+                [
+                    ("status", json!(status.get())),
+                    ("case_type", json!(case_type.get())),
+                ],
+                table_preferences.get(),
+            )
+            .expect("the demo projects only schema-declared defaults")
+    });
+    let default_save = SnapshotDefaultSave::new(
+        projected_defaults,
+        save_state,
+        Callback::new(move |defaults: SnapshotViewDefaults| {
+            save_count.update(|count| *count += 1);
+            debug_state::set("snapshot_table.saved_defaults", defaults);
+            save_state.set(SnapshotDefaultSaveState::Saved);
+        }),
+    );
+    let first_dirty_check = StoredValue::new(true);
+    Effect::new(move |_| {
+        let _ = status.get();
+        let _ = case_type.get();
+        let _ = table_preferences.get();
+        if first_dirty_check.get_value() {
+            first_dirty_check.set_value(false);
+        } else if !matches!(
+            save_state.get_untracked(),
+            SnapshotDefaultSaveState::Pending
+        ) {
+            save_state.set(SnapshotDefaultSaveState::Dirty);
+        }
+    });
+
     view! {
         <ListPage contract_id=CLIENT_SNAPSHOT_DEMO_PAGE.id>
             <PageHeader
@@ -190,19 +418,40 @@ pub fn ClientSnapshotListDemo() -> impl IntoView {
                 }.into_any())
                 dataset=Box::new(move || view! {
                     <DatasetSelector
-                        label="Office"
+                        label=Signal::derive(move || {
+                            if spanish.get() { "Oficina".to_owned() } else { "Office".to_owned() }
+                        })
                         selected=office
-                        options=Signal::stored(vec![
-                            DatasetOption::new("office-mx", "Mexico City"),
-                            DatasetOption::new("office-in", "New Delhi"),
+                        options=Signal::derive(move || vec![
+                            DatasetOption::new(
+                                "office-mx",
+                                if spanish.get() { "Ciudad de México" } else { "Mexico City" },
+                            ),
+                            DatasetOption::new(
+                                "office-in",
+                                if spanish.get() { "Nueva Delhi" } else { "New Delhi" },
+                            ),
                         ])
                         on_change=Callback::new(move |next| office.set(next))
-                        status=Box::new(move || view! {
-                            <span class="text-xs text-success">"Connected"</span>
-                        }.into_any())
+                        loading=Signal::derive(move || retained_state.get() == PageState::Revalidating)
+                        texts=dataset_texts
                     />
                 }.into_any())
                 actions=Box::new(move || view! {
+                    <Button
+                        class="btn-outline btn-sm"
+                        attr:data-testid="toggle-client-locale"
+                        on_click=Callback::new(move |_| spanish.update(|spanish| *spanish = !*spanish))
+                    >
+                        {move || if spanish.get() { "English" } else { "Español" }}
+                    </Button>
+                    <Button
+                        class="btn-outline btn-sm"
+                        attr:data-testid="change-access-generation"
+                        on_click=Callback::new(move |_| access_generation.update(|value| *value += 1))
+                    >
+                        "Change access"
+                    </Button>
                     <Button
                         class="btn-outline btn-sm"
                         attr:data-testid="toggle-revalidating"
@@ -224,66 +473,44 @@ pub fn ClientSnapshotListDemo() -> impl IntoView {
             <FilterBar
                 search=Box::new(move || view! {
                     <label class="flex w-full flex-col gap-1">
-                        <span class="text-xs font-medium">"Search"
+                        <span class="text-xs font-medium">
+                            {move || if spanish.get() { "Buscar" } else { "Search" }}
                         </span>
                         <Input
                             input_type=InputType::Search
                             class="input-sm w-full"
-                            placeholder="Client or record id"
+                            placeholder=Signal::derive(move || {
+                                if spanish.get() {
+                                    "Cliente o id de registro".to_owned()
+                                } else {
+                                    "Client or record id".to_owned()
+                                }
+                            })
                             value=search
                             on_input=Callback::new(move |value| search.set(value))
                         />
                     </label>
                 }.into_any())
-                actions=Box::new(move || view! {
-                    <Button
-                        class="btn-ghost btn-sm"
-                        on_click=Callback::new(move |_| clear_filters.run(()))
-                    >
-                        "Reset filters"
-                    </Button>
-                }.into_any())
-            >
-                <label class="flex min-w-40 flex-col gap-1">
-                    <span class="text-xs font-medium">"Status"
-                    </span>
-                    <Select
-                        class="select-sm"
-                        label=Signal::stored(Some("Status".to_owned()))
-                        value=status
-                        on_change=Callback::new(move |value| status.set(value))
-                    >
-                        <option value="">"All statuses"</option>
-                        <option value="Ready">"Ready"</option>
-                        <option value="Urgent">"Urgent"</option>
-                    </Select>
-                </label>
-                <label class="flex min-w-44 flex-col gap-1">
-                    <span class="text-xs font-medium">"Case type"
-                    </span>
-                    <Select
-                        class="select-sm"
-                        label=Signal::stored(Some("Case type".to_owned()))
-                        value=case_type
-                        on_change=Callback::new(move |value| case_type.set(value))
-                    >
-                        <option value="">"All case types"</option>
-                        <option value="Family">"Family"</option>
-                        <option value="Humanitarian">"Humanitarian"</option>
-                    </Select>
-                </label>
-            </FilterBar>
-
-            <ActiveFilterChips
-                chips=active_chips
+                active_filters=active_chips
                 on_remove=remove_filter
-                on_clear=clear_filters
+                on_reset=clear_filters
+                result=filter_result
+                default_save=default_save
+                texts=filter_texts
             />
 
             <div class="flex flex-wrap gap-4 text-xs text-base-content/60" aria-live="polite">
                 <span>"Claims: " <strong data-testid="entity-claim-count">{move || claim_count.get()}</strong></span>
+                <span>"Kept actions: " <strong data-testid="entity-retain-count">{move || retained_action_count.get()}</strong></span>
+                <span>"Default saves: " <strong data-testid="entity-save-count">{move || save_count.get()}</strong></span>
                 <span>"Row activations: " <strong data-testid="entity-activate-count">{move || activate_count.get()}</strong></span>
                 <span>"Last row: " <strong data-testid="entity-last-row">{move || last_activated.get()}</strong></span>
+            </div>
+            <div class="flex flex-wrap gap-1" aria-label="Default save state fixture">
+                <Button class="btn-ghost btn-xs" attr:data-testid="save-state-dirty" on_click=Callback::new(move |_| save_state.set(SnapshotDefaultSaveState::Dirty))>"Dirty"</Button>
+                <Button class="btn-ghost btn-xs" attr:data-testid="save-state-pending" on_click=Callback::new(move |_| save_state.set(SnapshotDefaultSaveState::Pending))>"Pending"</Button>
+                <Button class="btn-ghost btn-xs" attr:data-testid="save-state-conflict" on_click=Callback::new(move |_| save_state.set(SnapshotDefaultSaveState::Conflict("revision changed".to_owned())))>"Conflict"</Button>
+                <Button class="btn-ghost btn-xs" attr:data-testid="save-state-failure" on_click=Callback::new(move |_| save_state.set(SnapshotDefaultSaveState::Failure("network unavailable".to_owned())))>"Failure"</Button>
             </div>
 
             <AsyncDataSection
@@ -292,11 +519,16 @@ pub fn ClientSnapshotListDemo() -> impl IntoView {
             >
                 <EntityTable
                     data=filtered
-                    columns=demo_columns(claim_count)
+                    source_data=snapshot
+                    columns=columns
+                    column_filters=column_filters
                     row_key=Rc::new(|row: &DemoRow| row.id.clone())
                     dataset_identity=Signal::derive(move || office.get())
+                    focus_scope=Signal::derive(move || format!("{}:{}", office.get(), access_generation.get()))
                     preference_ownership=preference_ownership
                     preference_version=1
+                    texts=entity_texts
+                    show_reset_actions=true
                     on_row_activate=Callback::new(move |key: String| {
                         activate_count.update(|count| *count += 1);
                         last_activated.set(key);

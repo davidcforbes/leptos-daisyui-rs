@@ -1,6 +1,6 @@
 //! Public types used to configure a typed entity table.
 
-use leptos::prelude::{AnyView, Callback, Signal};
+use leptos::prelude::{AnyView, Callback, LocalStorage, Signal};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
@@ -13,6 +13,9 @@ pub type EntityCellRenderer<T> = Rc<dyn Fn(&T) -> AnyView>;
 /// A callback that renders the compact representation of a borrowed row.
 pub type EntityRowRenderer<T> = Rc<dyn Fn(&T) -> AnyView>;
 
+/// A callback that renders one controlled filter beneath its stable column.
+pub type EntityColumnFilterRenderer = Rc<dyn Fn() -> AnyView>;
+
 /// A callback that returns the stable identity of a borrowed row.
 pub type EntityRowKey<T> = Rc<dyn Fn(&T) -> String>;
 
@@ -24,6 +27,132 @@ pub type EntityComparator<T> = Rc<dyn Fn(&T, &T) -> Ordering>;
 /// The table evaluates this once per row when the dataset or sort changes,
 /// avoiding string allocation inside the `O(n log n)` comparison loop.
 pub type EntitySortKey<T> = Rc<dyn Fn(&T) -> String>;
+
+/// Static or reactive typed column declarations for [`EntityTable`](super::EntityTable).
+///
+/// `From<Vec<_>>` preserves historical call sites. The local reactive variant
+/// supports `Rc` render/comparison callbacks that intentionally are not
+/// `Send` while still updating mounted headers and compact copy.
+pub enum EntityColumns<T: 'static> {
+    /// Column declarations fixed for this component instance.
+    Static(Vec<EntityColumn<T>>),
+    /// Column declarations replaced reactively, typically on locale changes.
+    Reactive(Signal<Vec<EntityColumn<T>>, LocalStorage>),
+}
+
+impl<T> Clone for EntityColumns<T> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Static(columns) => Self::Static(columns.clone()),
+            Self::Reactive(columns) => Self::Reactive(*columns),
+        }
+    }
+}
+
+impl<T: 'static> From<Vec<EntityColumn<T>>> for EntityColumns<T> {
+    fn from(columns: Vec<EntityColumn<T>>) -> Self {
+        Self::Static(columns)
+    }
+}
+
+impl<T: 'static> From<Signal<Vec<EntityColumn<T>>, LocalStorage>> for EntityColumns<T> {
+    fn from(columns: Signal<Vec<EntityColumn<T>>, LocalStorage>) -> Self {
+        Self::Reactive(columns)
+    }
+}
+
+/// Static, reactive, or default compact-row rendering.
+pub enum EntityCompactRow<T: 'static> {
+    /// Use the framework's current-column compact renderer.
+    Default,
+    /// Use one renderer fixed for this component instance.
+    Static(EntityRowRenderer<T>),
+    /// Replace the renderer reactively, typically on locale changes.
+    Reactive(Signal<EntityRowRenderer<T>, LocalStorage>),
+}
+
+impl<T: 'static> Default for EntityCompactRow<T> {
+    fn default() -> Self {
+        Self::Default
+    }
+}
+
+impl<T: 'static> Clone for EntityCompactRow<T> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Default => Self::Default,
+            Self::Static(renderer) => Self::Static(Rc::clone(renderer)),
+            Self::Reactive(renderer) => Self::Reactive(*renderer),
+        }
+    }
+}
+
+impl<T: 'static> From<EntityRowRenderer<T>> for EntityCompactRow<T> {
+    fn from(renderer: EntityRowRenderer<T>) -> Self {
+        Self::Static(renderer)
+    }
+}
+
+impl<T: 'static> From<Signal<EntityRowRenderer<T>, LocalStorage>> for EntityCompactRow<T> {
+    fn from(renderer: Signal<EntityRowRenderer<T>, LocalStorage>) -> Self {
+        Self::Reactive(renderer)
+    }
+}
+
+/// One controlled filter rendered in the second header row.
+#[derive(Clone)]
+pub struct EntityColumnFilter {
+    /// Stable target column identifier.
+    pub column_id: &'static str,
+    renderer: EntityColumnFilterRenderer,
+}
+
+impl EntityColumnFilter {
+    /// Creates a filter renderer for one stable column.
+    pub fn new(column_id: &'static str, render: impl Fn() -> AnyView + 'static) -> Self {
+        Self {
+            column_id,
+            renderer: Rc::new(render),
+        }
+    }
+
+    pub(crate) fn render(&self) -> AnyView {
+        (self.renderer)()
+    }
+}
+
+impl fmt::Debug for EntityColumnFilter {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("EntityColumnFilter")
+            .field("column_id", &self.column_id)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Static, reactive, or absent aligned column filters.
+#[derive(Clone, Default)]
+pub enum EntityColumnFilters {
+    /// No second header row.
+    #[default]
+    None,
+    /// Filter declarations fixed for this component instance.
+    Static(Vec<EntityColumnFilter>),
+    /// Filter declarations replaced reactively without owning their values.
+    Reactive(Signal<Vec<EntityColumnFilter>, LocalStorage>),
+}
+
+impl From<Vec<EntityColumnFilter>> for EntityColumnFilters {
+    fn from(filters: Vec<EntityColumnFilter>) -> Self {
+        Self::Static(filters)
+    }
+}
+
+impl From<Signal<Vec<EntityColumnFilter>, LocalStorage>> for EntityColumnFilters {
+    fn from(filters: Signal<Vec<EntityColumnFilter>, LocalStorage>) -> Self {
+        Self::Reactive(filters)
+    }
+}
 
 /// Direction of one clause in an [`EntitySort`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -565,10 +694,48 @@ impl fmt::Debug for EntityTablePreferenceOwnership {
 /// Localizable labels used by [`EntityTable`](super::EntityTable).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EntityTableTexts {
+    /// Accessible name for the programmatically focusable table region.
+    pub region_label: String,
     /// Label for the page-size control.
     pub rows_per_page: String,
     /// Accessible label for the column chooser.
     pub choose_columns: String,
+    /// Visible and accessible label for the column-order list.
+    pub column_order: String,
+    /// Move-earlier template with `{column}`, `{position}`, and `{total}`.
+    pub move_earlier: String,
+    /// Move-later template with `{column}`, `{position}`, and `{total}`.
+    pub move_later: String,
+    /// Resize-handle name template with `{column}`.
+    pub resize_column: String,
+    /// Resize value text template with `{pixels}`.
+    pub pixel_value: String,
+    /// Current-sort copy for an inactive column.
+    pub sort_not_sorted: String,
+    /// Current-sort template with `{direction}`, `{priority}`, and `{total}`.
+    pub sort_current: String,
+    /// Plain activation for an inactive column.
+    pub sort_plain_ascending: String,
+    /// Plain activation for an ascending column.
+    pub sort_plain_descending: String,
+    /// Plain activation for a descending column.
+    pub sort_plain_system: String,
+    /// Additive activation template for a new clause with `{priority}`.
+    pub sort_add: String,
+    /// Additive direction-change template with `{priority}` and `{direction}`.
+    pub sort_change: String,
+    /// Additive removal template with `{priority}`.
+    pub sort_remove: String,
+    /// Localized ascending direction word.
+    pub ascending: String,
+    /// Localized descending direction word.
+    pub descending: String,
+    /// Live-region text for server/system order.
+    pub system_order: String,
+    /// Live sort-summary template with `{clauses}`.
+    pub sort_summary: String,
+    /// One summary clause with `{priority}`, `{column}`, and `{direction}`.
+    pub sort_clause: String,
     /// Action label that restores server-supplied ordering.
     pub reset_sort: String,
     /// Action label that restores default column visibility, widths, and order.
@@ -586,8 +753,28 @@ pub struct EntityTableTexts {
 impl Default for EntityTableTexts {
     fn default() -> Self {
         Self {
+            region_label: "Data table".to_owned(),
             rows_per_page: "Rows per page".to_owned(),
             choose_columns: "Choose columns".to_owned(),
+            column_order: "Column order".to_owned(),
+            move_earlier: "Move {column} earlier from position {position} of {total}".to_owned(),
+            move_later: "Move {column} later from position {position} of {total}".to_owned(),
+            resize_column: "Resize {column} column".to_owned(),
+            pixel_value: "{pixels} pixels".to_owned(),
+            sort_not_sorted: "Not currently sorted".to_owned(),
+            sort_current: "Currently sorted {direction} at priority {priority} of {total}"
+                .to_owned(),
+            sort_plain_ascending: "Activate to sort ascending as the only sort".to_owned(),
+            sort_plain_descending: "Activate to sort descending as the only sort".to_owned(),
+            sort_plain_system: "Activate to restore system order".to_owned(),
+            sort_add: "Shift+activate to add ascending at priority {priority}".to_owned(),
+            sort_change: "Shift+activate to change priority {priority} to {direction}".to_owned(),
+            sort_remove: "Shift+activate to remove priority {priority}".to_owned(),
+            ascending: "ascending".to_owned(),
+            descending: "descending".to_owned(),
+            system_order: "System order".to_owned(),
+            sort_summary: "Sorted by {clauses}".to_owned(),
+            sort_clause: "priority {priority}: {column} {direction}".to_owned(),
             reset_sort: "Reset sort".to_owned(),
             reset_columns: "Reset columns".to_owned(),
             previous: "Previous".to_owned(),

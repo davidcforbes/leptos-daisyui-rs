@@ -58,6 +58,7 @@ Selection is cleared automatically when `data`, the sort column, or the sort ord
 | `on_sort_change` | `Option<Callback<(&'static str, SortOrder)>>` | `None` | Fired after a header click changes sort state |
 | `cell_renderers` | `Vec<CellRenderer>` | `[]` | Custom cell views, indexed by `Column::renderer_index` |
 | `typed_cells` | `Vec<TypedCellFn>` | `[]` | Lightweight Badge/Icon cells, indexed by `Column::typed_cell_index` |
+| `detail_renderer` | `Option<RowDetailRenderer>` | `None` | Optional row-specific full-width detail content immediately after its source row |
 | `row_class_fn` | `Option<Callback<(usize, TableRow), String>>` | `None` | Per-row extra classes from `(abs_idx, row)` |
 | `node_ref` | `NodeRef<Div>` | — | Reference to the container `<div>` |
 
@@ -143,6 +144,34 @@ let columns = vec![
 ```
 
 </details>
+
+### Full-width per-row detail
+
+Use `RowDetailRenderer` only when explanatory content genuinely varies by
+row. The callback receives the same `(absolute_index, TableRow)` identity as a
+cell renderer and returns `None` for a normal one-row record or `Some(view)`
+for a sibling detail `<tr>`. Its single cell spans the currently rendered
+columns and carries the same faint grid border. Because the source row and
+detail are emitted from one sorted/filtered/paged item, they move together and
+do not participate in column sizing.
+
+```rust,no_run
+let details: RowDetailRenderer = Callback::new(|(index, row): (usize, TableRow)| {
+    row.get("explanation").filter(|text| !text.is_empty()).map(|text| {
+        view! { <p>{format!("{} ({index})", text)}</p> }.into_any()
+    })
+});
+
+view! {
+    <DataTable data=data columns=columns detail_renderer=details />
+}
+```
+
+Interactive content in the detail row is isolated from source-row activation.
+If a sentence comes from a small enum and repeats across many rows, prefer a
+legend above the table; repeating it as a detail row doubles height without
+adding row-specific information. `ServerDataTable` supports the same renderer,
+with its usual page-local index contract.
 
 Cells that don't parse (an em dash for "not measured", say) sort **last in both directions**, the way a spreadsheet puts blanks at the bottom — so a descending sort opens on the largest real value rather than a wall of dashes. A missing value is not a zero.
 
@@ -342,8 +371,10 @@ fn RichTable(data: Signal<Vec<TableRow>>) -> impl IntoView {
 | `next` | `"Next"` |
 | `page_indicator` | `"Page {current} of {total}"` |
 | `search_placeholder` | `"Search..."` |
+| `search_label` | `"Search table"` |
 | `row_range` | `"Showing {start}–{end} of {total}"` |
 | `filter_all` | `"All"` |
+| `filter_label` | `"Filter by {column}"` |
 
 `DataTableSortTexts` supplies the focused sort control's complete accessible
 name:
@@ -374,7 +405,7 @@ contract as `data-table-data-mode="server-query"` for runtime audits.
 | `filter_options` | `Option<Signal<HashMap<&'static str, Vec<String>>>>` | Population-wide choices for filterable columns |
 | `on_row_activate` | `Option<Callback<usize>>` | Plain click or keyboard activation with the current-page row index |
 | `on_row_inspect` | `Option<Callback<usize>>` | Double-click or Shift+Enter inspection with the current-page row index |
-| `loading`, `classes`, `texts`, `sort_texts`, `class`, `table_size`, `zebra`, `pin_rows`, `pin_cols`, `max_height`, `cell_renderers`, `typed_cells`, `row_class_fn`, `node_ref` | | As `DataTable` |
+| `loading`, `classes`, `texts`, `sort_texts`, `class`, `table_size`, `zebra`, `pin_rows`, `pin_cols`, `max_height`, `cell_renderers`, `typed_cells`, `detail_renderer`, `row_class_fn`, `node_ref` | | As `DataTable` |
 
 **Not available**: `selected_rows` / `selection_anchor` (the server variant
 has no selection state machine), `auto_page_size`, `paginate`, `searchable`
@@ -422,7 +453,7 @@ All pure and independently usable:
 
 - Headers are `role="columnheader"` with `aria-sort` reflecting the current state (`ascending` / `descending` / `none`).
 - Resize handles are `role="separator"` with `aria-orientation="vertical"` and an `aria-label` naming their column.
-- The search box carries `aria-label="Search table"`; each filter dropdown is labelled `Filter by <column>`.
+- The search box and every filter dropdown have both a localized accessible name and a real associated visually-hidden `<label>`. Placeholder text and physical column position are never the naming mechanism.
 - Sort state changes are conveyed through `aria-sort` rather than the `▲`/`▼` glyph alone.
 - **Keyboard operation.** When the table is interactive — `selected_rows` or `on_row_activate` supplied — each row is focusable (`tabindex=0`) and carries `aria-selected`. **Enter** and **Space** do exactly what a plain click does (activate, or select); **Ctrl/Cmd** and **Shift** with Enter/Space toggle and range-extend selection, mirroring the mouse. Space suppresses its default page-scroll. A plain display table (neither prop) adds no tab stops.
 

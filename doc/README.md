@@ -14,6 +14,9 @@ Welcome to the comprehensive documentation for leptos-daisyui-rs - a type-safe, 
 - **[Spacing & vertical-rhythm audit](./plans/2026-07-26-spacing-audit.md)** -
   the canonical spacing scale, the stroke family, and what the rendered-DOM
   layout audit does and does not prove
+- **[Client snapshot list pattern](./patterns/client-snapshot-list.md)** - the
+  controlled hybrid-filter, default-view, reactive-column, and focus-recovery
+  path used by `SnapshotTablePage`
 
 ## Component Documentation
 

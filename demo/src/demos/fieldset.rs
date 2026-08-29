@@ -366,6 +366,7 @@ pub fn FieldsetDemo() -> impl IntoView {
                     <code>"aria-invalid"</code> ". Toggle the state to watch the wiring follow."
                 </p>
                 <FieldAssociationDemo />
+                <FieldAssociationMatrix />
             </Section>
         </ContentLayout>
     }
@@ -396,5 +397,67 @@ fn FieldAssociationDemo() -> impl IntoView {
                 <Input placeholder="24-01371" />
             </Field>
         </div>
+    }
+}
+
+/// Real-WASM regression fixture for the `Field` association contract.
+///
+/// Keep these controls in one form: the consumer failure that prompted this
+/// fixture was six otherwise-valid controls sharing `ld-field-0` in the same
+/// form, something the native allocator unit test could not observe.
+#[component]
+fn FieldAssociationMatrix() -> impl IntoView {
+    view! {
+        <form
+            id="field-unique-associations"
+            class="mt-6 grid max-w-2xl grid-cols-1 gap-4 md:grid-cols-2"
+        >
+            <div data-field-case="input-help">
+                <Field label="Client name" help_text="Use the legal name" required=true>
+                    <Input name=Some("client_name".to_owned()) />
+                </Field>
+            </div>
+            <div data-field-case="input-error">
+                <Field
+                    label="Matter number"
+                    error="A matter number is required"
+                    state=FieldState::Error
+                >
+                    <Input name=Some("matter_number".to_owned()) />
+                </Field>
+            </div>
+            <div data-field-case="input-disabled">
+                <Field label="Archived reference" help_text="Read-only archive value">
+                    <Input name=Some("archive_reference".to_owned()) disabled=true />
+                </Field>
+            </div>
+            <div data-field-case="select-help">
+                <Field label="Office" help_text="Select the working office" required=true>
+                    <Select name=Some("office".to_owned())>
+                        <option value="mx">"Mexico City"</option>
+                        <option value="in">"New Delhi"</option>
+                    </Select>
+                </Field>
+            </div>
+            <div data-field-case="select-error">
+                <Field
+                    label="Status"
+                    error="A status is required"
+                    state=FieldState::Error
+                >
+                    <Select name=Some("status".to_owned())>
+                        <option value="">"Choose status"</option>
+                        <option value="ready">"Ready"</option>
+                    </Select>
+                </Field>
+            </div>
+            <div data-field-case="select-disabled">
+                <Field label="Legacy queue" help_text="Unavailable for this account">
+                    <Select name=Some("legacy_queue".to_owned()) disabled=true>
+                        <option value="legacy">"Legacy"</option>
+                    </Select>
+                </Field>
+            </div>
+        </form>
     }
 }

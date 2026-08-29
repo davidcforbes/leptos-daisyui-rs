@@ -1,7 +1,7 @@
 use crate::components::badge::Badge;
 use crate::components::data_table::selection::{click_swallowed_by_inspect, key_inspects};
 use crate::components::data_table::types::{
-    CellRenderer, Column, DataTableTexts, TableRow, TypedCell, TypedCellFn,
+    CellRenderer, Column, DataTableTexts, RowDetailRenderer, TableRow, TypedCell, TypedCellFn,
 };
 use crate::components::icon::Icon;
 use crate::merge_classes;
@@ -99,6 +99,10 @@ pub fn DataTableBody(
     #[prop(optional)]
     typed_cells: Vec<TypedCellFn>,
 
+    /// Optional per-row content in a full-width sibling detail row.
+    #[prop(optional_no_strip)]
+    detail_renderer: Option<RowDetailRenderer>,
+
     /// Optional per-row extra CSS classes computed from the row's absolute
     /// index and data (e.g. a background tint). Merged after `row_class` /
     /// `selected_row_class`. `optional_no_strip` (rather than plain
@@ -165,8 +169,11 @@ pub fn DataTableBody(
                                 }
                             })
                         };
+                        let detail = detail_renderer
+                            .and_then(|renderer| renderer.run((abs_idx, row.clone())));
 
                         view! {
+                            <>
                             <tr
                                 class=move || row_class_dyn.get()
                                 tabindex=tabindex
@@ -304,6 +311,24 @@ pub fn DataTableBody(
                                     }
                                 }).collect_view()}
                             </tr>
+                            {detail.map(|detail| view! {
+                                <tr
+                                    class="data-table-detail-row bg-base-100"
+                                    data-table-detail-row="true"
+                                    data-table-detail-for=abs_idx
+                                    on:click=move |event| event.stop_propagation()
+                                    on:dblclick=move |event| event.stop_propagation()
+                                    on:keydown=move |event| event.stop_propagation()
+                                >
+                                    <td
+                                        colspan=cols.len().max(1)
+                                        class="border border-table-grid px-3 py-2 text-sm text-base-content/80 forced-colors:border-[CanvasText]"
+                                    >
+                                        {detail}
+                                    </td>
+                                </tr>
+                            })}
+                            </>
                         }
                     }).collect_view().into_any()
                 }

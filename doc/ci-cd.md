@@ -127,10 +127,12 @@ artifacts; a changed input delegates safe incremental invalidation to those
 tools. The fingerprint is evidence and selection metadata, not a replacement
 build cache or a bespoke pipeline runner.
 
-The page-scoped journeys cover the semantic/responsive table contract, local
-filter/sort/page/column behavior, dataset-selector isolation, refresh DOM
-retention, action isolation, and engine-driven style/layout checks at wide and
-compact widths. They also prove the typed `SnapshotTablePage` slot order,
+The page-scoped journeys cover the semantic/responsive table contract, the
+utility-plus-aligned controlled filter model, schema-projected explicit default
+saves, reactive localized column semantics, generation-scoped row-action focus
+recovery, local sort/page/column behavior, dataset-selector isolation, refresh
+DOM retention, action isolation, and engine-driven style/layout checks at wide
+and compact widths. They also prove the typed `SnapshotTablePage` slot order,
 generation coherence, atomic replacement, and retained table-node identity;
 the injected selector/filter marker swap is the ordering negative control.
 The visual ratchet is zero for overlap, typography, shape,

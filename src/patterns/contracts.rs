@@ -1,8 +1,13 @@
 //! Typed contracts shared by opinionated page patterns.
 
-use std::{fmt, marker::PhantomData};
+use std::{collections::BTreeMap, fmt, marker::PhantomData};
 
-use serde::{Serialize, ser::SerializeStruct};
+use crate::components::EntityTablePreferences;
+use serde::{
+    Serialize,
+    ser::{SerializeMap, SerializeStruct},
+};
+use serde_json::Value;
 
 /// A reusable page structure whose required behavior can be validated.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1749,6 +1754,79 @@ pub struct FilterSchema<T> {
     filter_state: PhantomData<fn() -> T>,
 }
 
+/// A rejected attempt to project consumer filter state into persisted defaults.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FilterProjectionError {
+    /// The schema itself is invalid and cannot authorize any payload.
+    InvalidSchema(Vec<ContractError>),
+    /// The dataset selector is transient and never belongs in view defaults.
+    DatasetSelector(String),
+    /// The consumer supplied a key absent from the schema allowlist.
+    Undeclared(String),
+    /// The consumer supplied the same key more than once.
+    Duplicate(String),
+}
+
+/// Schema-ordered local values approved for default-view persistence.
+///
+/// The fields are private and this type has no public constructor. A consumer
+/// obtains it only as part of [`SnapshotViewDefaults`] returned by
+/// [`FilterSchema::project_defaults`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct LocalFilterDefaults {
+    values: Vec<(String, Value)>,
+}
+
+impl LocalFilterDefaults {
+    /// Returns one projected value by stable filter key.
+    pub fn get(&self, key: &str) -> Option<&Value> {
+        self.values
+            .iter()
+            .find_map(|(candidate, value)| (candidate == key).then_some(value))
+    }
+
+    /// Iterates projected values in schema declaration order.
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = (&str, &Value)> {
+        self.values.iter().map(|(key, value)| (key.as_str(), value))
+    }
+}
+
+impl Serialize for LocalFilterDefaults {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(self.values.len()))?;
+        for (key, value) in &self.values {
+            map.serialize_entry(key, value)?;
+        }
+        map.end()
+    }
+}
+
+/// Persistence-neutral default-view payload for a snapshot table.
+///
+/// Serialization intentionally contains only `filters` and `table`. Dataset
+/// identity, free-text search, the current page, rows/revision, sessions, and
+/// action state have no representation in this type.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct SnapshotViewDefaults {
+    filters: LocalFilterDefaults,
+    table: EntityTablePreferences,
+}
+
+impl SnapshotViewDefaults {
+    /// Returns the schema-projected local filter defaults.
+    pub const fn filters(&self) -> &LocalFilterDefaults {
+        &self.filters
+    }
+
+    /// Returns the complete versioned table preferences.
+    pub const fn table(&self) -> &EntityTablePreferences {
+        &self.table
+    }
+}
+
 impl<T> FilterSchema<T> {
     /// Creates a schema for a dataset selector and its independent local filters.
     pub const fn new(dataset_selector: &'static str, fields: &'static [&'static str]) -> Self {
@@ -1792,6 +1870,53 @@ impl<T> FilterSchema<T> {
         } else {
             Err(errors)
         }
+    }
+
+    /// Projects consumer values through this schema's persistence allowlist.
+    ///
+    /// Input order is irrelevant: the serialized result always follows the
+    /// schema's field order. Any dataset selector, undeclared key, duplicate,
+    /// or invalid schema rejects the whole payload rather than silently
+    /// dropping authority-bearing state.
+    pub fn project_defaults<I, K>(
+        &self,
+        values: I,
+        table: EntityTablePreferences,
+    ) -> Result<SnapshotViewDefaults, FilterProjectionError>
+    where
+        I: IntoIterator<Item = (K, Value)>,
+        K: AsRef<str>,
+    {
+        self.validate()
+            .map_err(FilterProjectionError::InvalidSchema)?;
+
+        let mut supplied = BTreeMap::<String, Value>::new();
+        for (key, value) in values {
+            let key = key.as_ref().to_owned();
+            if key == self.dataset_selector {
+                return Err(FilterProjectionError::DatasetSelector(key));
+            }
+            if !self.fields.contains(&key.as_str()) {
+                return Err(FilterProjectionError::Undeclared(key));
+            }
+            if supplied.insert(key.clone(), value).is_some() {
+                return Err(FilterProjectionError::Duplicate(key));
+            }
+        }
+
+        let values = self
+            .fields
+            .iter()
+            .filter_map(|field| {
+                supplied
+                    .remove(*field)
+                    .map(|value| ((*field).to_owned(), value))
+            })
+            .collect();
+        Ok(SnapshotViewDefaults {
+            filters: LocalFilterDefaults { values },
+            table,
+        })
     }
 }
 
