@@ -19,6 +19,20 @@
 - Do not add to or run the 32-test reactivity inventory; use one separate, selectively run `result_list_smoke` target.
 - Use `apply_patch` for edits, scoped rustfmt, focused native checks while implementing, and defer the selected real-browser run until the repository is committed and pushed as required by the session landing policy.
 
+## Pause checkpoint (2026-08-29)
+
+Tasks 1 and 2 are complete and committed on `main`:
+
+- `d90ca43` adds the stable typed item model, key validation, reconciliation,
+  current-payload lookup, and collision-free option IDs.
+- `7ac1640` moves the legacy component onto the private generic listbox core
+  with the explicit `ResetFirst` compatibility policy.
+- `$env:CARGO_BUILD_JOBS='2'; cargo test --lib components::result_list
+  --no-default-features` passes all 28 focused tests with no warnings.
+
+Resume at Task 3. `KeyedResultList<T>`, the showcase fixture, focused browser
+contract, consumer guide, and Bead closure have not yet been implemented.
+
 ---
 
 ### Task 1: Stable result identity model and pure state transitions
@@ -31,7 +45,7 @@
 - Consumes: existing `ResultRow`, `move_selection`, `select_first`, and `select_last`.
 - Produces: `ResultListItem<T>`, `ResultListKeyError`, `validate_result_list_items`, `reconcile_result_key`, `move_result_key`, `current_result_item`, and `keyed_option_dom_id`.
 
-- [ ] **Step 1: Add failing model and reconciliation tests**
+- [x] **Step 1: Add failing model and reconciliation tests**
 
 Append focused tests with concrete duplicate-looking rows and distinct payloads:
 
@@ -118,7 +132,7 @@ fn option_dom_ids_are_collision_free_for_arbitrary_key_bytes() {
 }
 ```
 
-- [ ] **Step 2: Run the focused test and verify the red state**
+- [x] **Step 2: Run the focused test and verify the red state**
 
 Run:
 
@@ -128,7 +142,7 @@ $env:CARGO_BUILD_JOBS='2'; cargo test --lib components::result_list --no-default
 
 Expected: compilation fails because `ResultListItem` and the keyed helper functions do not exist.
 
-- [ ] **Step 3: Implement the public model and validation**
+- [x] **Step 3: Implement the public model and validation**
 
 Add these definitions to `types.rs`:
 
@@ -185,7 +199,7 @@ pub(crate) fn keyed_option_dom_id(instance: u64, key: &str) -> String;
 
 `reconcile_result_key` retains `current` if present, otherwise clones the first key. `move_result_key` finds the current key's latest position, delegates clamping to `move_selection`, and returns the key at the resulting current-order index. `keyed_option_dom_id` encodes every UTF-8 byte as two lowercase hexadecimal digits after the instance prefix, so it needs neither CSS escaping nor a collision-prone hash.
 
-- [ ] **Step 4: Format and rerun the focused native tests**
+- [x] **Step 4: Format and rerun the focused native tests**
 
 Run:
 
@@ -196,7 +210,7 @@ $env:CARGO_BUILD_JOBS='2'; cargo test --lib components::result_list --no-default
 
 Expected: every ResultList unit test passes.
 
-- [ ] **Step 5: Commit the identity model**
+- [x] **Step 5: Commit the identity model**
 
 ```powershell
 git add -- src/components/result_list/types.rs src/components/result_list/tests.rs
@@ -215,7 +229,7 @@ git commit -m "feat(result-list): add stable typed result identity (ldui-r1z)"
 - Consumes: all Task 1 result-item and identity helpers.
 - Produces: private `ResultListCore<T>` and `ResultReplacementPolicy::{ResetFirst, PreserveKey}`; keeps public `ResultList` behavior unchanged.
 
-- [ ] **Step 1: Add a source-contract test before the refactor**
+- [x] **Step 1: Add a source-contract test before the refactor**
 
 Add a test that locks the public wrapper and private policy names into the source:
 
@@ -230,11 +244,11 @@ fn legacy_result_list_remains_an_adapter_with_reset_first_policy() {
 }
 ```
 
-- [ ] **Step 2: Run the test and verify it fails on the missing policy**
+- [x] **Step 2: Run the test and verify it fails on the missing policy**
 
 Run the Task 1 focused command. Expected: the new source-contract assertion fails because the wrapper does not yet use `ResetFirst`.
 
-- [ ] **Step 3: Create the generic core state and replacement effect**
+- [x] **Step 3: Create the generic core state and replacement effect**
 
 In `core.rs`, define:
 
@@ -285,7 +299,7 @@ if changed || replacement_policy == ResultReplacementPolicy::ResetFirst {
 
 Enter and click must call `current_result_item(&items.get_untracked(), &key)` immediately before invoking `on_select`. The `<For>` iterates current keys, keys each child by the stable key, and each child reads title/secondary/payload through a live signal that looks up that key in the latest `items`. Render `data-result-key=key` on every option. Invalid keys render a single `role="alert"` row with `data-result-list-key-error`, no `role="option"` children, and no active descendant.
 
-- [ ] **Step 4: Convert existing ResultList into a compatibility adapter**
+- [x] **Step 4: Convert existing ResultList into a compatibility adapter**
 
 In `component.rs`, map each current display row into a core item whose payload carries its legacy index and row:
 
@@ -306,11 +320,11 @@ Adapt core activation to `Callback<ResultRow>` by returning `item.payload.1`. Ad
 
 Declare `mod core;` in `mod.rs`; keep the core private.
 
-- [ ] **Step 5: Run legacy and keyed pure tests**
+- [x] **Step 5: Run legacy and keyed pure tests**
 
 Run the focused ResultList command. Expected: all existing legacy navigation/key tests plus the new source contract pass.
 
-- [ ] **Step 6: Commit the shared core refactor**
+- [x] **Step 6: Commit the shared core refactor**
 
 ```powershell
 git add -- src/components/result_list/core.rs src/components/result_list/component.rs src/components/result_list/mod.rs src/components/result_list/tests.rs
