@@ -108,6 +108,50 @@ async fn data_table_sorted_matches_baseline() {
     assert!(r.passed, "{}", r.summary());
 }
 
+/// The opinionated semantic header/filter bands and faint grid, captured as a
+/// focused component region so the full table hierarchy remains reviewable.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn data_table_filter_row_matches_baseline() {
+    let h = harness_at("/components/data-table").await;
+    common::scroll_region_into_view(&h, "#filter-row-table", common::VIEWPORT).await;
+    let r = h
+        .capture_and_compare_region(
+            "data_table",
+            "filter-row",
+            &state("semantic-bands"),
+            "#filter-row-table",
+        )
+        .await
+        .expect("capture data_table/filter-row/semantic-bands");
+    assert!(r.passed, "{}", r.summary());
+}
+
+/// At a narrow viewport the aligned filter row stays attached to the same
+/// stable tracks and the table exposes horizontal scrolling rather than
+/// squeezing or clipping columns.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn data_table_filter_row_narrow_matches_baseline() {
+    let h = harness_at("/components/data-table").await;
+    let viewport = pixelproof_web::ViewportSize::new(420, 900);
+    h.set_viewport(viewport)
+        .await
+        .expect("narrow table viewport");
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    common::scroll_region_into_view(&h, "#filter-row-table", viewport).await;
+    let r = h
+        .capture_and_compare_region(
+            "data_table",
+            "filter-row",
+            &common::state_at("semantic-bands-narrow", 420),
+            "#filter-row-table",
+        )
+        .await
+        .expect("capture data_table/filter-row/semantic-bands-narrow");
+    assert!(r.passed, "{}", r.summary());
+}
+
 /// Modal demo, open state: click "Open Modal" (the page's first primary
 /// button), assert the native <dialog> is actually visible, then capture.
 #[tokio::test(flavor = "multi_thread")]

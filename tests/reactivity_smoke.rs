@@ -386,6 +386,266 @@ async fn data_table_sort_is_keyboard_operable_for_client_and_server_tables() {
     assert_no_browser_errors(&h, "shared DataTable sort keyboard journey").await;
 }
 
+/// Opinionated table geometry (ldui-gbs): sorting is a body-data operation.
+/// It must not replace header/filter nodes or move the table shell, column
+/// tracks, grid lines, or horizontal scroll origin.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn data_table_sort_preserves_shell_geometry_and_semantic_bands() {
+    let h = harness_at("/components/data-table").await;
+    begin_browser_error_capture(&h).await;
+
+    // Exercise the 10,000-row client table in a narrow, horizontally scrolled
+    // viewport. Sorting Email replaces a page of mostly one/two-digit values
+    // with lexicographically adjacent four-digit values, exposing any track
+    // sizing derived from only the current page's cell contents.
+    let prepared = eval_json(
+        &h,
+        r#"(() => {
+            const root = document.querySelector('#geometry-sort-table');
+            root.style.width = '420px';
+            root.scrollIntoView({ block: 'center' });
+            root.querySelector('thead tr:first-child th:nth-child(3)')
+                .scrollIntoView({ block: 'nearest', inline: 'center' });
+            return !!root;
+        })()"#,
+    )
+    .await;
+    assert_eq!(prepared, json!(true));
+    settle(&h).await;
+
+    let client_baseline = mark_table_geometry(&h, "#geometry-sort-table").await;
+    assert!(
+        client_baseline["scrollWidth"].as_f64() > client_baseline["clientWidth"].as_f64(),
+        "narrow fixture must genuinely overflow: {client_baseline}"
+    );
+
+    let client_sort = "#geometry-sort-table thead tr:first-child th:nth-child(3) > button";
+    for activation in ["pointer", "Enter", "Space"] {
+        if activation == "pointer" {
+            click(&h, client_sort).await;
+        } else {
+            h.page()
+                .find_element(client_sort)
+                .await
+                .expect("find client geometry sort control")
+                .focus()
+                .await
+                .expect("focus client geometry sort control");
+            h.press_key_sequence(&[if activation == "Enter" {
+                Key::Enter
+            } else {
+                Key::Space
+            }])
+            .await
+            .expect("activate client geometry sort control");
+        }
+        settle(&h).await;
+        assert_table_geometry_unchanged(
+            &compare_table_geometry(&h, "#geometry-sort-table").await,
+            &format!("client {activation}"),
+        );
+        mark_table_geometry(&h, "#geometry-sort-table").await;
+    }
+
+    // The server-query path owns different state and replaces its page rows,
+    // but it shares exactly the same stable shell contract.
+    eval_json(
+        &h,
+        "document.querySelector('#server-table').scrollIntoView({ block: 'center' }); true",
+    )
+    .await;
+    settle(&h).await;
+    let server_baseline = mark_table_geometry(&h, "#server-table").await;
+    assert_eq!(
+        server_baseline["filterCells"], server_baseline["headerCells"],
+        "server filter/header tracks must be one-to-one: {server_baseline}"
+    );
+    let server_sort = "#server-table thead tr:first-child th:first-child > button";
+    for activation in ["pointer", "Enter", "Space"] {
+        if activation == "pointer" {
+            click(&h, server_sort).await;
+        } else {
+            h.page()
+                .find_element(server_sort)
+                .await
+                .expect("find server geometry sort control")
+                .focus()
+                .await
+                .expect("focus server geometry sort control");
+            h.press_key_sequence(&[if activation == "Enter" {
+                Key::Enter
+            } else {
+                Key::Space
+            }])
+            .await
+            .expect("activate server geometry sort control");
+        }
+        settle(&h).await;
+        assert_table_geometry_unchanged(
+            &compare_table_geometry(&h, "#server-table").await,
+            &format!("server {activation}"),
+        );
+        mark_table_geometry(&h, "#server-table").await;
+    }
+
+    let palette = eval_json(
+        &h,
+        r#"(() => {
+            const root = document.querySelector('#filter-row-table');
+            const header = root.querySelector('thead tr:first-child th');
+            const filter = root.querySelector('thead tr.data-table-filter-row th');
+            const cell = root.querySelector('tbody td');
+            const indicatorWidths = Array.from(
+                root.querySelectorAll('thead tr:first-child th button')
+            ).map(button => button.querySelector('[data-table-sort-indicator]')?.getBoundingClientRect().width ?? 0);
+            return {
+                headerBackground: getComputedStyle(header).backgroundColor,
+                headerContent: getComputedStyle(header).color,
+                filterBackground: getComputedStyle(filter).backgroundColor,
+                filterContent: getComputedStyle(filter).color,
+                grid: getComputedStyle(cell).borderRightColor,
+                indicatorWidths,
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(palette["headerBackground"], json!("rgb(0, 69, 120)"));
+    assert_eq!(palette["headerContent"], json!("rgb(255, 255, 255)"));
+    assert_eq!(palette["filterBackground"], json!("rgb(229, 241, 251)"));
+    assert_eq!(palette["filterContent"], json!("rgb(26, 26, 26)"));
+    assert_eq!(palette["grid"], json!("rgb(224, 224, 224)"));
+    assert!(
+        palette["indicatorWidths"]
+            .as_array()
+            .is_some_and(|widths| widths
+                .iter()
+                .all(|width| width.as_f64().is_some_and(|width| width > 0.0))),
+        "every sortable header reserves an indicator slot: {palette}"
+    );
+
+    assert_no_browser_errors(&h, "sort-stable shared DataTable geometry").await;
+}
+
+/// Store a browser-measured shell snapshot on the table root and tag every
+/// header/filter node. The tags disappear if a reactive map replaces a node.
+async fn mark_table_geometry(h: &pixelproof_web::Harness, selector: &str) -> serde_json::Value {
+    eval_json(
+        h,
+        &format!(
+            r#"(() => {{
+                const root = document.querySelector({selector:?});
+                const table = root.querySelector('table');
+                const viewport = root.querySelector(':scope > .overflow-x-auto');
+                const headers = Array.from(table.querySelectorAll('thead tr:first-child th'));
+                const filters = Array.from(table.querySelectorAll('thead tr.data-table-filter-row th'));
+                const box = element => {{
+                    const rect = element.getBoundingClientRect();
+                    return [rect.x, rect.y, rect.width, rect.height, rect.right, rect.bottom];
+                }};
+                [...headers, ...filters].forEach((cell, index) => {{
+                    cell.dataset.geometryNodeId = `geometry-${{index}}-${{Math.random()}}`;
+                }});
+                if (viewport.scrollWidth > viewport.clientWidth) {{
+                    viewport.scrollLeft = Math.min(73, viewport.scrollWidth - viewport.clientWidth);
+                }}
+                const snapshot = {{
+                    table: box(table),
+                    viewport: box(viewport),
+                    headers: headers.map(box),
+                    filters: filters.map(box),
+                    headerNodes: headers.map(cell => cell.dataset.geometryNodeId),
+                    filterNodes: filters.map(cell => cell.dataset.geometryNodeId),
+                    scrollLeft: viewport.scrollLeft,
+                }};
+                root.__lduiGeometryBaseline = snapshot;
+                return {{
+                    headerCells: headers.length,
+                    filterCells: filters.length,
+                    clientWidth: viewport.clientWidth,
+                    scrollWidth: viewport.scrollWidth,
+                    scrollLeft: viewport.scrollLeft,
+                }};
+            }})()"#
+        ),
+    )
+    .await
+}
+
+async fn compare_table_geometry(h: &pixelproof_web::Harness, selector: &str) -> serde_json::Value {
+    eval_json(
+        h,
+        &format!(
+            r#"(() => {{
+                const root = document.querySelector({selector:?});
+                const before = root.__lduiGeometryBaseline;
+                const table = root.querySelector('table');
+                const viewport = root.querySelector(':scope > .overflow-x-auto');
+                const headers = Array.from(table.querySelectorAll('thead tr:first-child th'));
+                const filters = Array.from(table.querySelectorAll('thead tr.data-table-filter-row th'));
+                const box = element => {{
+                    const rect = element.getBoundingClientRect();
+                    return [rect.x, rect.y, rect.width, rect.height, rect.right, rect.bottom];
+                }};
+                const after = {{
+                    table: box(table),
+                    viewport: box(viewport),
+                    headers: headers.map(box),
+                    filters: filters.map(box),
+                    headerNodes: headers.map(cell => cell.dataset.geometryNodeId ?? null),
+                    filterNodes: filters.map(cell => cell.dataset.geometryNodeId ?? null),
+                    scrollLeft: viewport.scrollLeft,
+                }};
+                const deltas = [];
+                const visit = (left, right) => {{
+                    if (Array.isArray(left)) {{
+                        left.forEach((value, index) => visit(value, right[index]));
+                    }} else {{
+                        deltas.push(Math.abs(left - right));
+                    }}
+                }};
+                visit(before.table, after.table);
+                visit(before.viewport, after.viewport);
+                visit(before.headers, after.headers);
+                visit(before.filters, after.filters);
+                return {{
+                    maxDelta: Math.max(0, ...deltas),
+                    sameHeaderNodes: JSON.stringify(before.headerNodes) === JSON.stringify(after.headerNodes),
+                    sameFilterNodes: JSON.stringify(before.filterNodes) === JSON.stringify(after.filterNodes),
+                    beforeScrollLeft: before.scrollLeft,
+                    afterScrollLeft: after.scrollLeft,
+                    before,
+                    after,
+                }};
+            }})()"#
+        ),
+    )
+    .await
+}
+
+fn assert_table_geometry_unchanged(result: &serde_json::Value, journey: &str) {
+    assert_eq!(
+        result["sameHeaderNodes"],
+        json!(true),
+        "{journey} replaced header nodes: {result}"
+    );
+    assert_eq!(
+        result["sameFilterNodes"],
+        json!(true),
+        "{journey} replaced filter nodes: {result}"
+    );
+    assert_eq!(
+        result["beforeScrollLeft"], result["afterScrollLeft"],
+        "{journey} changed the horizontal scroll origin: {result}"
+    );
+    assert!(
+        result["maxDelta"]
+            .as_f64()
+            .is_some_and(|delta| delta <= 0.5),
+        "{journey} moved table shell geometry by more than 0.5px: {result}"
+    );
+}
+
 /// Responsive paging must not collapse a short viewport to one row. When the
 /// measured fit falls below the usability floor, the configured page size is
 /// retained and the already-bounded table viewport scrolls instead.

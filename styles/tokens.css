@@ -33,6 +33,14 @@
   --border-width-accent: 3px;
   --border-width-emphasis: 4px;
 
+  /* Opinionated table hierarchy. Semantic aliases keep
+     consumers on the shared Fluent palette without literals. */
+  --color-table-header: #004578;
+  --color-table-header-content: #ffffff;
+  --color-table-filter: #e5f1fb;
+  --color-table-filter-content: #1a1a1a;
+  --color-table-grid: #e0e0e0;
+
   /* Corner radii. */
   --radius-control: 0.25rem;
   --radius-card: 0.5rem;

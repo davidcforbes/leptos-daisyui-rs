@@ -1124,7 +1124,7 @@ fn trim(v: f32) -> String {
 /// every font size and gap against the user's browser font-size preference —
 /// a WCAG 1.4.4 regression traded for nothing.
 fn tokens_css() -> String {
-    use ui_tokens::{radius, spacing, stroke, typography as ty};
+    use ui_tokens::{color, radius, spacing, stroke, typography as ty};
 
     let mut css = String::with_capacity(2048);
     css.push_str(concat!(
@@ -1166,6 +1166,21 @@ fn tokens_css() -> String {
         ("emphasis", stroke::EMPHASIS),
     ] {
         css.push_str(&format!("  --border-width-{}: {};\n", name, px(dips)));
+    }
+
+    css.push_str("\n  /* Opinionated table hierarchy. Semantic aliases keep\n");
+    css.push_str("     consumers on the shared Fluent palette without literals. */\n");
+    for (name, value) in [
+        ("table-header", color::STATUS_BLUE_FG),
+        ("table-header-content", color::ACCENT_TEXT),
+        ("table-filter", color::STATUS_BLUE_BG),
+        ("table-filter-content", color::TEXT_PRIMARY),
+        ("table-grid", color::CONTROL_BORDER),
+    ] {
+        css.push_str(&format!(
+            "  --color-{name}: {};\n",
+            color::to_css_hex(value)
+        ));
     }
 
     css.push_str("\n  /* Corner radii. */\n");
@@ -2064,6 +2079,31 @@ pub fn r() -> f32 { radius::CARD }
     }
 
     #[test]
+    fn powershell_visual_runner_sanitizes_no_color_for_trunk() {
+        let source = include_str!("../../scripts/test-visual.ps1");
+        assert!(
+            source.contains("Remove-Item Env:NO_COLOR"),
+            "Trunk 0.21 rejects the conventional NO_COLOR=1 value"
+        );
+        assert!(
+            source.contains("$env:NO_COLOR = $savedNoColor"),
+            "the wrapper must restore its process environment after launch"
+        );
+        assert!(
+            source.contains("node build-css.mjs"),
+            "the wrapper needs a fresh pre-start stamp that cannot match stale dist assets"
+        );
+        assert!(
+            source.contains("Test-StylesheetCurrent"),
+            "HTTP readiness alone can expose Trunk's previous distribution"
+        );
+        assert!(
+            source.contains("--release=true"),
+            "the visual wrapper must use the Windows-proven release WASM path"
+        );
+    }
+
+    #[test]
     fn client_snapshot_trunk_args_select_the_page_scoped_host() {
         let args = trunk_serve_args(4321, Some("client-snapshot-test-host.html"));
         assert_eq!(
@@ -2345,6 +2385,23 @@ mod gen_tokens_tests {
             css.contains(&want),
             "missing token-derived --spacing:\n{css}"
         );
+    }
+
+    #[test]
+    fn opinionated_table_colors_pin_the_shared_semantic_palette() {
+        let css = tokens_css();
+        for declaration in [
+            "  --color-table-header: #004578;",
+            "  --color-table-header-content: #ffffff;",
+            "  --color-table-filter: #e5f1fb;",
+            "  --color-table-filter-content: #1a1a1a;",
+            "  --color-table-grid: #e0e0e0;",
+        ] {
+            assert!(
+                css.to_ascii_lowercase().contains(declaration),
+                "missing semantic table declaration {declaration}:\n{css}"
+            );
+        }
     }
 
     #[test]

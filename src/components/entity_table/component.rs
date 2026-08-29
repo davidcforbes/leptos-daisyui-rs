@@ -14,8 +14,9 @@ use super::types::{
 };
 use crate::components::button::Button;
 use crate::components::data_table::{
-    MAX_COLUMN_WIDTH, PageSlot, clamp_page, effective_min_width, keyboard_resized_width,
-    page_bounds, page_count, page_window, row_range,
+    MAX_COLUMN_WIDTH, PageSlot, StableColumnTrack, StableTableColGroup, clamp_page,
+    effective_min_width, keyboard_resized_width, page_bounds, page_count, page_window, row_range,
+    stable_column_width, stable_table_content_style,
 };
 use crate::components::dropdown::{Dropdown, DropdownPlacement};
 use crate::components::menu::{Menu, MenuCheckItem};
@@ -35,6 +36,20 @@ struct ResizeDrag {
     start_x: f64,
     start_width: f64,
     minimum_width: Option<u32>,
+}
+
+/// Send-safe header presentation split from an `EntityColumn<T>`'s local
+/// `Rc` render/sort callbacks. Leptos's keyed `For` requires `Send` items;
+/// keeping only header mechanics here lets the behavioral columns remain
+/// deliberately local while sort-only preference changes preserve DOM nodes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct EntityHeaderDescriptor {
+    id: &'static str,
+    header: String,
+    sortable: bool,
+    resizable: bool,
+    min_width: Option<u32>,
+    initial_width: Option<u32>,
 }
 
 #[derive(Clone, Copy)]
@@ -230,7 +245,10 @@ pub(super) fn resolve_preference_ownership(
 /// Ordering is represented as an index permutation, so source data and row
 /// identity are never mutated. Only rows on the current page are cloned for
 /// rendering. Wide and compact layouts share the same `<tr>` nodes, preventing
-/// hidden duplicate pages in the DOM.
+/// hidden duplicate pages in the DOM. Wide tables use stable declared tracks,
+/// a semantic dark-blue header, and a faint full-cell grid. Sorting updates the
+/// body order and sort metadata without replacing header nodes or moving the
+/// table shell; a non-resizable utility column absorbs spare full-width space.
 #[component]
 pub fn EntityTable<T>(
     /// Complete, locally filterable dataset. Use a local signal when `T` is not `Send`.
@@ -273,6 +291,10 @@ pub fn EntityTable<T>(
     /// Shows separate reset-sort and reset-columns actions.
     #[prop(optional, default = false)]
     show_reset_actions: bool,
+    /// Enable alternating body-row striping. The opinionated default is a
+    /// clean faint grid without zebra banding.
+    #[prop(optional, into)]
+    zebra: Signal<bool>,
     /// Additional outer-container classes.
     #[prop(optional, into)]
     class: &'static str,
@@ -289,6 +311,10 @@ where
     let compact_row = StoredValue::new_local(compact_row);
     let sorted_index_cache = StoredValue::new_local(SortedIndexCache::new());
     let column_widths = RwSignal::new(initial_widths);
+    let header_descriptors =
+        RwSignal::new(column_store.with_value(|columns| {
+            entity_header_descriptors(&preferences.get_untracked(), columns)
+        }));
     let current_page = RwSignal::new(0_usize);
     let previous_dataset = StoredValue::new(dataset_identity.get_untracked());
     let resize_drag = RwSignal::new(Option::<ResizeDrag>::None);
@@ -342,15 +368,38 @@ where
         }
     });
 
-    let visible_columns = move || {
-        let preferences = preferences.get();
-        column_store.with_value(|columns| {
-            ordered_columns(&preferences, columns)
-                .into_iter()
-                .filter(|column| !preferences.hidden_columns.contains(column.id))
-                .collect::<Vec<_>>()
-        })
-    };
+    Effect::new(move |_| {
+        let next = column_store.with_value(|columns| {
+            preferences.with(|preferences| entity_header_descriptors(preferences, columns))
+        });
+        if next != header_descriptors.get_untracked() {
+            header_descriptors.set(next);
+        }
+    });
+
+    let flexible_column_id = Signal::derive(move || {
+        header_descriptors.with(|columns| entity_flexible_column_id(columns))
+    });
+    let stable_tracks = Signal::derive(move || {
+        let widths = column_widths.get();
+        header_descriptors
+            .get()
+            .into_iter()
+            .map(|column| {
+                let track = StableColumnTrack::new(
+                    column.id,
+                    widths.get(column.id).copied().unwrap_or_else(|| {
+                        stable_column_width(None, column.initial_width.or(column.min_width))
+                    }),
+                );
+                if flexible_column_id.get() == Some(column.id) {
+                    track.flexible()
+                } else {
+                    track
+                }
+            })
+            .collect::<Vec<_>>()
+    });
 
     let total_rows = Signal::derive_local(move || data.get().len());
     let total_pages = Signal::derive(move || {
@@ -611,11 +660,28 @@ where
                 })}
             </p>
 
-            <div class="w-full overflow-x-auto rounded-box border border-base-300 bg-base-100">
-                <table class="table table-sm table-zebra w-full" data-entity-table-grid="true">
+            <div class="w-full overflow-x-auto rounded-box border border-table-grid bg-base-100">
+                <div style=move || stable_table_content_style(&stable_tracks.get())>
+                <table
+                    class="table table-sm table-fixed w-full border-collapse border border-table-grid"
+                    class:table-zebra=move || zebra.get()
+                    data-entity-table-grid="true"
+                    data-table-layout="stable"
+                >
+                    <StableTableColGroup tracks=stable_tracks />
                     <thead class="hidden lg:table-header-group">
                         <tr>
-                            {move || visible_columns().into_iter().map(|column| {
+                            <For
+                                each=move || header_descriptors.get()
+                                key=|column| (
+                                    column.id,
+                                    column.header.clone(),
+                                    column.sortable,
+                                    column.resizable,
+                                    column.min_width,
+                                    column.initial_width,
+                                )
+                                children=move |column| {
                                 let column_id = column.id;
                                 let header = column.header.clone();
                                 let sortable = column.sortable;
@@ -623,6 +689,11 @@ where
                                 let minimum_width = column.min_width;
                                 let minimum_value = effective_min_width(minimum_width);
                                 let width_style = move || {
+                                    if flexible_column_id.get() == Some(column_id) {
+                                        return minimum_width.map(|_| {
+                                            format!("min-width: {}px", minimum_value.round())
+                                        });
+                                    }
                                     column_widths
                                         .with(|widths| widths.get(column_id).copied())
                                         .map(|width| format!(
@@ -645,7 +716,7 @@ where
                                 });
                                 view! {
                                     <th
-                                        class="relative"
+                                        class="relative border border-table-grid bg-table-header text-table-header-content forced-colors:border-[CanvasText] forced-colors:bg-[Canvas] forced-colors:text-[CanvasText]"
                                         scope="col"
                                         data-entity-column=column_id
                                         aria-sort=move || preferences.with(|preferences| {
@@ -665,7 +736,7 @@ where
                                             let header = column.header.clone();
                                             Some(view! {
                                                 <Button
-                                                    class="btn-ghost btn-xs h-auto !min-h-0 w-full justify-start gap-1 rounded-sm px-0 py-1 text-left font-semibold !shadow-none"
+                                                    class="btn-ghost btn-xs h-auto !min-h-0 w-full justify-start gap-1 rounded-sm px-0 py-1 text-left font-semibold text-table-header-content !shadow-none hover:bg-white/15 focus-visible:outline-white forced-colors:text-[CanvasText]"
                                                     attr:data-entity-sort-column=column_id
                                                     attr:aria-label=sort_label
                                                     on:keydown=move |event: web_sys::KeyboardEvent| {
@@ -705,7 +776,11 @@ where
                                                     })
                                                 >
                                                     <span>{header}</span>
-                                                    <span aria-hidden="true" class="text-xs">
+                                                    <span
+                                                        aria-hidden="true"
+                                                        data-entity-sort-indicator="true"
+                                                        class="inline-flex w-6 shrink-0 justify-center text-xs"
+                                                    >
                                                         {move || preferences.with(|preferences| {
                                                             let Some(direction) = preferences.sort.direction_for(column_id) else {
                                                                 return "↕".to_owned();
@@ -862,7 +937,8 @@ where
                                         })}
                                     </th>
                                 }
-                            }).collect_view()}
+                                }
+                            />
                         </tr>
                     </thead>
                     <tbody>
@@ -903,7 +979,7 @@ where
                                     <tr>
                                         <td
                                             colspan=visible_columns.len().max(1)
-                                            class="py-10 text-center text-base-content/65"
+                                            class="border border-table-grid py-10 text-center text-base-content/65 forced-colors:border-[CanvasText]"
                                         >
                                             {texts.with(|texts| texts.no_rows.clone())}
                                         </td>
@@ -925,6 +1001,7 @@ where
                         }}
                     </tbody>
                 </table>
+                </div>
             </div>
 
             <div class="flex flex-wrap items-center justify-between gap-3">
@@ -1016,7 +1093,7 @@ fn render_row<T: Clone + 'static>(
             let cell = render_cell(&row, &column);
             view! {
                 <td
-                    class="hidden lg:table-cell"
+                    class="hidden border border-table-grid forced-colors:border-[CanvasText] lg:table-cell"
                     data-entity-action=column.is_action.then_some("true")
                     on:click=move |event| {
                         if column.is_action {
@@ -1059,7 +1136,10 @@ fn render_row<T: Clone + 'static>(
                 }
             }
         >
-            <td colspan=columns.len().max(1) class="p-0 lg:hidden">
+            <td
+                colspan=columns.len().max(1)
+                class="border border-table-grid p-0 forced-colors:border-[CanvasText] lg:hidden"
+            >
                 <div class="p-3">{compact_view}</div>
             </td>
             {wide_cells}
@@ -1090,6 +1170,32 @@ fn sort_summary<T>(sort: &EntitySort, columns: &[EntityColumn<T>]) -> String {
         })
         .collect::<Vec<_>>();
     format!("Sorted by {}", clauses.join(", then "))
+}
+
+fn entity_header_descriptors<T>(
+    preferences: &EntityTablePreferences,
+    columns: &[EntityColumn<T>],
+) -> Vec<EntityHeaderDescriptor> {
+    ordered_columns(preferences, columns)
+        .into_iter()
+        .filter(|column| !preferences.hidden_columns.contains(column.id))
+        .map(|column| EntityHeaderDescriptor {
+            id: column.id,
+            header: column.header,
+            sortable: column.sortable,
+            resizable: column.resizable,
+            min_width: column.min_width,
+            initial_width: column.initial_width,
+        })
+        .collect()
+}
+
+fn entity_flexible_column_id(columns: &[EntityHeaderDescriptor]) -> Option<&'static str> {
+    columns
+        .iter()
+        .rev()
+        .find(|column| !column.resizable)
+        .map(|column| column.id)
 }
 
 fn rendered_column_widths<T>(

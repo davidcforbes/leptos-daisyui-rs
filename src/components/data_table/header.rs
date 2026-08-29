@@ -67,25 +67,38 @@ pub fn DataTableHeader(
     view! {
         <thead>
             <tr>
-                {move || {
-                    columns.get().iter().map(|col| {
+                <For
+                    each=move || columns.get()
+                    key=|col| (
+                        col.id,
+                        col.header.clone(),
+                        col.sortable,
+                        col.resizable,
+                        col.min_width,
+                    )
+                    children=move |col| {
                         let col_id = col.id;
                         let header_label = col.header.clone();
-                        let is_sorted = sort_column.get() == Some(col_id);
                         let is_sortable = col.sortable;
                         let is_resizable = col.resizable;
                         let min_width_opt = col.min_width;
                         let min_w = effective_min_width(min_width_opt);
 
                         let cell_class =
-                            merge_classes!(header_cell_class, col.class.unwrap_or(""), "relative");
+                            merge_classes!(
+                                header_cell_class,
+                                col.class.unwrap_or(""),
+                                "relative border border-table-grid bg-table-header text-table-header-content forced-colors:border-[CanvasText] forced-colors:bg-[Canvas] forced-colors:text-[CanvasText]"
+                            );
 
-                        let aria_sort = if !is_sortable {
-                            None
-                        } else if is_sorted {
-                            Some(sort_order.get().as_aria_str())
-                        } else {
-                            Some("none")
+                        let aria_sort = move || {
+                            if !is_sortable {
+                                None
+                            } else if sort_column.get() == Some(col_id) {
+                                Some(sort_order.get().as_aria_str())
+                            } else {
+                                Some("none")
+                            }
                         };
                         let sort_header = header_label.clone();
                         let sort_label = move || {
@@ -127,23 +140,25 @@ pub fn DataTableHeader(
                                         <Button
                                             style=ButtonStyle::Ghost
                                             size=ButtonSize::Sm
-                                            class="h-auto !min-h-0 w-full justify-start gap-1 rounded-sm px-0 py-1 text-left font-semibold !shadow-none"
+                                            class="h-auto !min-h-0 w-full justify-start gap-1 rounded-sm px-0 py-1 text-left font-semibold text-table-header-content !shadow-none hover:bg-white/15 focus-visible:outline-white forced-colors:text-[CanvasText]"
                                             attr:data-table-sort-column=col_id
                                             attr:aria-label=sort_label
                                             on_click=Callback::new(move |_| on_sort.run(col_id))
                                         >
                                             <span>{header}</span>
-                                            {move || {
-                                                if is_sorted {
-                                                    Some(view! {
-                                                        <span aria-hidden="true" class="text-xs">
-                                                            {sort_order.get().as_symbol()}
-                                                        </span>
-                                                    })
-                                                } else {
-                                                    None
-                                                }
-                                            }}
+                                            <span
+                                                aria-hidden="true"
+                                                data-table-sort-indicator="true"
+                                                class="inline-flex w-4 shrink-0 justify-center text-xs"
+                                            >
+                                                {move || {
+                                                    if sort_column.get() == Some(col_id) {
+                                                        sort_order.get().as_symbol()
+                                                    } else {
+                                                        ""
+                                                    }
+                                                }}
+                                            </span>
                                         </Button>
                                     }
                                 })}
@@ -268,8 +283,8 @@ pub fn DataTableHeader(
                                 })}
                             </th>
                         }
-                    }).collect_view()
-                }}
+                    }
+                />
             </tr>
             {children.map(|c| c())}
         </thead>

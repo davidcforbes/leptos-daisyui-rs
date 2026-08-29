@@ -11,6 +11,9 @@ use crate::components::data_table::filter::{
     ColumnFilters, DataTableFilterRow, distinct_values, has_filterable_columns,
     prune_stale_filters, row_matches_filters, row_matches_search,
 };
+use crate::components::data_table::geometry::{
+    StableColumnTrack, StableTableColGroup, stable_column_width, stable_table_content_style,
+};
 use crate::components::data_table::header::DataTableHeader;
 use crate::components::data_table::pagination::page_count;
 use crate::components::data_table::selection::{
@@ -519,6 +522,29 @@ pub fn DataTable(
             columns.get()
         }
     });
+    let stable_tracks = Signal::derive(move || {
+        let widths = column_widths.get();
+        let columns = display_columns.get();
+        let flexible_column = columns
+            .iter()
+            .rev()
+            .find(|column| !column.resizable)
+            .map(|column| column.id);
+        columns
+            .into_iter()
+            .map(|column| {
+                let track = StableColumnTrack::new(
+                    column.id,
+                    stable_column_width(widths.get(column.id).copied(), column.min_width),
+                );
+                if flexible_column == Some(column.id) {
+                    track.flexible()
+                } else {
+                    track
+                }
+            })
+            .collect::<Vec<_>>()
+    });
 
     // ── Per-column filter row (opt-in via `Column::filterable`) ──
 
@@ -1012,52 +1038,57 @@ pub fn DataTable(
                 style=table_wrapper_style
                 node_ref=table_wrapper_ref
             >
-                <Table
-                    size=table_size
-                    zebra=zebra
-                    pin_rows=pin_rows
-                    pin_cols=pin_cols
-                >
-                    <DataTableHeader
-                        columns=display_columns
-                        sort_column=Signal::derive(move || sort_column.get())
-                        sort_order=Signal::derive(move || sort_order.get())
-                        sort_texts=sort_texts
-                        on_sort=on_sort
-                        header_cell_class=classes.header_cell
-                        column_widths=column_widths
+                <div style=move || stable_table_content_style(&stable_tracks.get())>
+                    <Table
+                        size=table_size
+                        zebra=zebra
+                        pin_rows=pin_rows
+                        pin_cols=pin_cols
+                        class="table-fixed w-full border-collapse border border-table-grid"
+                        attr:data-table-layout="stable"
                     >
-                        {move || {
-                            show_filter_row.get().then(|| view! {
-                                <DataTableFilterRow
-                                    columns=display_columns
-                                    options=Signal::derive(move || filter_options.get())
-                                    filters=column_filters
-                                    all_label=filter_all_label
-                                />
-                            })
-                        }}
-                    </DataTableHeader>
-                    <DataTableBody
-                        columns=display_columns
-                        rows=Signal::derive(move || current_page_rows.get())
-                        loading=loading
-                        texts=texts
-                        body_cell_class=classes.body_cell
-                        row_class=classes.row
-                        selected_row_class=classes.selected_row
-                        selected_rows=Signal::derive(move || selected_rows.get())
-                        loading_row_class=classes.loading_row
-                        empty_row_class=classes.empty_row
-                        on_row_click=on_row_click
-                        on_row_inspect=on_row_inspect
-                        interactive=row_interactive
-                        cell_renderers=cell_renderers
-                        column_widths=Signal::derive(move || column_widths.get())
-                        typed_cells=typed_cells
-                        row_class_fn=row_class_fn
-                    />
-                </Table>
+                        <StableTableColGroup tracks=stable_tracks />
+                        <DataTableHeader
+                            columns=display_columns
+                            sort_column=Signal::derive(move || sort_column.get())
+                            sort_order=Signal::derive(move || sort_order.get())
+                            sort_texts=sort_texts
+                            on_sort=on_sort
+                            header_cell_class=classes.header_cell
+                            column_widths=column_widths
+                        >
+                            {move || {
+                                show_filter_row.get().then(|| view! {
+                                    <DataTableFilterRow
+                                        columns=display_columns
+                                        options=Signal::derive(move || filter_options.get())
+                                        filters=column_filters
+                                        all_label=filter_all_label
+                                    />
+                                })
+                            }}
+                        </DataTableHeader>
+                        <DataTableBody
+                            columns=display_columns
+                            rows=Signal::derive(move || current_page_rows.get())
+                            loading=loading
+                            texts=texts
+                            body_cell_class=classes.body_cell
+                            row_class=classes.row
+                            selected_row_class=classes.selected_row
+                            selected_rows=Signal::derive(move || selected_rows.get())
+                            loading_row_class=classes.loading_row
+                            empty_row_class=classes.empty_row
+                            on_row_click=on_row_click
+                            on_row_inspect=on_row_inspect
+                            interactive=row_interactive
+                            cell_renderers=cell_renderers
+                            column_widths=Signal::derive(move || column_widths.get())
+                            typed_cells=typed_cells
+                            row_class_fn=row_class_fn
+                        />
+                    </Table>
+                </div>
             </div>
 
             {move || {

@@ -124,6 +124,55 @@ pub async fn harness_at(path: &str) -> Harness {
     h
 }
 
+/// Bring a component-region screenshot target into the active viewport and
+/// prove that the resulting CDP clip can contain painted pixels.
+///
+/// PixelProof's component helper clips with viewport-relative
+/// `getBoundingClientRect()` coordinates and does not scroll first. A target
+/// below the fold can therefore produce a valid all-white PNG while capture
+/// mode reports success. Focused visual tests call this before
+/// `capture_and_compare_region` so an off-screen target cannot become an
+/// accepted baseline.
+pub async fn scroll_region_into_view(h: &Harness, selector: &str, viewport: ViewportSize) {
+    let selector_json = serde_json::to_string(selector).expect("serialize region selector");
+    let script = format!(
+        r#"(() => {{
+          const element = document.querySelector({selector_json});
+          if (!element) return false;
+          element.scrollIntoView({{ block: 'center', inline: 'nearest' }});
+          return true;
+        }})()"#
+    );
+    let found: bool = h
+        .page()
+        .evaluate(script)
+        .await
+        .expect("scroll visual region into view")
+        .into_value()
+        .expect("region-scroll result is boolean");
+    assert!(found, "visual region `{selector}` does not exist");
+
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    let bounds = h
+        .element_box(selector)
+        .await
+        .unwrap_or_else(|e| panic!("read visual region `{selector}` bounds: {e}"));
+    assert!(
+        bounds.x < f64::from(viewport.width)
+            && bounds.y < f64::from(viewport.height)
+            && bounds.x + bounds.width > 0.0
+            && bounds.y + bounds.height > 0.0,
+        "visual region `{selector}` remains outside the {}x{} viewport after scrolling: \
+         x={}, y={}, width={}, height={}",
+        viewport.width,
+        viewport.height,
+        bounds.x,
+        bounds.y,
+        bounds.width,
+        bounds.height,
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Stylesheet freshness guard (ldui-hun)
 // ---------------------------------------------------------------------------

@@ -142,22 +142,31 @@ pub fn DataTableFilterRow(
     all_label: Signal<String>,
 ) -> impl IntoView {
     view! {
-        <tr class="data-table-filter-row">
-            {move || {
-                columns.get().iter().map(|col| {
+        <tr class="data-table-filter-row bg-table-filter text-table-filter-content forced-colors:bg-[Canvas] forced-colors:text-[CanvasText]">
+            <For
+                each=move || columns.get()
+                key=|col| (col.id, col.header.clone(), col.filterable)
+                children=move |col| {
                     let col_id = col.id;
                     let header_label = col.header.clone();
                     let is_filterable = col.filterable;
 
                     view! {
-                        <th class="p-1">
+                        <th
+                            class="border border-table-grid bg-table-filter p-1 text-table-filter-content forced-colors:border-[CanvasText] forced-colors:bg-[Canvas] forced-colors:text-[CanvasText]"
+                            scope="col"
+                            data-table-filter-column=col_id
+                            on:pointerdown=move |event| event.stop_propagation()
+                            on:click=move |event| event.stop_propagation()
+                            on:keydown=move |event| event.stop_propagation()
+                        >
                             {is_filterable.then(|| {
                                 let col_options = move || {
                                     options.with(|o| o.get(col_id).cloned().unwrap_or_default())
                                 };
                                 view! {
                                     <select
-                                        class="select select-bordered select-xs w-full font-normal"
+                                        class="select select-bordered select-xs w-full bg-table-filter font-normal text-table-filter-content forced-colors:bg-[Canvas] forced-colors:text-[CanvasText]"
                                         aria-label=format!("Filter by {}", header_label)
                                         // Bind the rendered selection to the
                                         // signal, so an external reset (or a
@@ -205,8 +214,8 @@ pub fn DataTableFilterRow(
                             })}
                         </th>
                     }
-                }).collect_view()
-            }}
+                }
+            />
         </tr>
     }
 }

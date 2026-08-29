@@ -21,6 +21,121 @@ async fn eval_json(harness: &pixelproof_web::Harness, expression: &str) -> Value
         .expect("JSON value")
 }
 
+async fn mark_entity_table_geometry(harness: &pixelproof_web::Harness) -> Value {
+    eval_json(
+        harness,
+        r#"(() => {
+            const root = document.querySelector('[data-entity-table]');
+            const table = root.querySelector('[data-entity-table-grid]');
+            const viewport = table.parentElement.parentElement;
+            const headers = Array.from(table.querySelectorAll('thead tr:first-child th'));
+            const cells = Array.from(table.querySelectorAll('tbody tr:first-child td'))
+                .filter(cell => getComputedStyle(cell).display !== 'none');
+            const box = element => {
+                const rect = element.getBoundingClientRect();
+                return [rect.x, rect.y, rect.width, rect.height, rect.right, rect.bottom];
+            };
+            table.dataset.geometryNodeId = `entity-table-${Math.random()}`;
+            headers.forEach((cell, index) => {
+                cell.dataset.geometryNodeId = `entity-header-${index}-${Math.random()}`;
+            });
+            if (viewport.scrollWidth > viewport.clientWidth) {
+                viewport.scrollLeft = Math.min(73, viewport.scrollWidth - viewport.clientWidth);
+            }
+            root.__lduiEntityGeometryBaseline = {
+                table: box(table),
+                viewport: box(viewport),
+                headers: headers.map(box),
+                cells: cells.map(box),
+                tableNode: table.dataset.geometryNodeId,
+                headerNodes: headers.map(cell => cell.dataset.geometryNodeId),
+                scrollLeft: viewport.scrollLeft,
+            };
+            return {
+                headers: headers.length,
+                cells: cells.length,
+                scrollLeft: viewport.scrollLeft,
+                scrollWidth: viewport.scrollWidth,
+                clientWidth: viewport.clientWidth,
+            };
+        })()"#,
+    )
+    .await
+}
+
+async fn compare_entity_table_geometry(harness: &pixelproof_web::Harness) -> Value {
+    eval_json(
+        harness,
+        r#"(() => {
+            const root = document.querySelector('[data-entity-table]');
+            const before = root.__lduiEntityGeometryBaseline;
+            const table = root.querySelector('[data-entity-table-grid]');
+            const viewport = table.parentElement.parentElement;
+            const headers = Array.from(table.querySelectorAll('thead tr:first-child th'));
+            const cells = Array.from(table.querySelectorAll('tbody tr:first-child td'))
+                .filter(cell => getComputedStyle(cell).display !== 'none');
+            const box = element => {
+                const rect = element.getBoundingClientRect();
+                return [rect.x, rect.y, rect.width, rect.height, rect.right, rect.bottom];
+            };
+            const after = {
+                table: box(table),
+                viewport: box(viewport),
+                headers: headers.map(box),
+                cells: cells.map(box),
+                tableNode: table.dataset.geometryNodeId ?? null,
+                headerNodes: headers.map(cell => cell.dataset.geometryNodeId ?? null),
+                scrollLeft: viewport.scrollLeft,
+            };
+            const deltas = [];
+            const visit = (left, right) => {
+                if (Array.isArray(left)) {
+                    left.forEach((value, index) => visit(value, right[index]));
+                } else {
+                    deltas.push(Math.abs(left - right));
+                }
+            };
+            visit(before.table, after.table);
+            visit(before.viewport, after.viewport);
+            visit(before.headers, after.headers);
+            visit(before.cells, after.cells);
+            return {
+                maxDelta: Math.max(0, ...deltas),
+                sameTableNode: before.tableNode === after.tableNode,
+                sameHeaderNodes: JSON.stringify(before.headerNodes) === JSON.stringify(after.headerNodes),
+                beforeScrollLeft: before.scrollLeft,
+                afterScrollLeft: after.scrollLeft,
+                before,
+                after,
+            };
+        })()"#,
+    )
+    .await
+}
+
+fn assert_entity_table_geometry_unchanged(result: &Value, journey: &str) {
+    assert_eq!(
+        result["sameTableNode"],
+        json!(true),
+        "{journey} replaced the table node: {result}"
+    );
+    assert_eq!(
+        result["sameHeaderNodes"],
+        json!(true),
+        "{journey} replaced header nodes: {result}"
+    );
+    assert_eq!(
+        result["beforeScrollLeft"], result["afterScrollLeft"],
+        "{journey} changed the horizontal scroll origin: {result}"
+    );
+    assert!(
+        result["maxDelta"]
+            .as_f64()
+            .is_some_and(|delta| delta <= 0.5),
+        "{journey} moved table shell geometry by more than 0.5px: {result}"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
 async fn controlled_preferences_reorder_columns_and_compose_sort_clauses() {
@@ -237,6 +352,12 @@ async fn controlled_preferences_reorder_columns_and_compose_sort_clauses() {
         "keyboard resize must emit the controlled replacement: {state}"
     );
 
+    let geometry_baseline = mark_entity_table_geometry(&harness).await;
+    assert_eq!(
+        geometry_baseline["headers"], geometry_baseline["cells"],
+        "EntityTable header/body tracks must be one-to-one: {geometry_baseline}"
+    );
+
     harness
         .page()
         .find_element("[data-entity-sort-column='status']")
@@ -250,8 +371,22 @@ async fn controlled_preferences_reorder_columns_and_compose_sort_clauses() {
         .await
         .expect("keyboard-sort Status ascending");
     tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_entity_table_geometry_unchanged(
+        &compare_entity_table_geometry(&harness).await,
+        "EntityTable Enter sort",
+    );
+    mark_entity_table_geometry(&harness).await;
     shift_click(&harness, "[data-entity-sort-column='client']").await;
+    assert_entity_table_geometry_unchanged(
+        &compare_entity_table_geometry(&harness).await,
+        "EntityTable shift+pointer sort",
+    );
+    mark_entity_table_geometry(&harness).await;
     shift_click(&harness, "[data-entity-sort-column='client']").await;
+    assert_entity_table_geometry_unchanged(
+        &compare_entity_table_geometry(&harness).await,
+        "EntityTable shift+pointer direction change",
+    );
     let sorted = eval_json(
         &harness,
         r#"(() => {

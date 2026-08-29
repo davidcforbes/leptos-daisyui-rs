@@ -9,6 +9,16 @@
 //! - Loading and empty states
 //! - Fully themed with daisyUI
 //! - Efficient index-based operations for 10,000+ rows
+//! - One-to-one column filters in a second, aligned header row
+//! - Stable declared column tracks: sorting never derives geometry from body rows
+//! - Semantic dark-blue headers, light-blue filters, and faint full-cell grids
+//! - Zebra striping as an explicit opt-in rather than the opinionated default
+//!
+//! Sort controls reserve a fixed indicator slot and header/filter nodes are
+//! keyed independently of sort state. A non-resizable column, when present,
+//! absorbs otherwise-unused full-width space so resizable tracks retain their
+//! exact pixel and accessibility values. Narrow tables scroll horizontally
+//! without moving their header/filter alignment or scroll origin during sort.
 //!
 //! ## Example
 //! ```rust,no_run
@@ -49,6 +59,7 @@ mod clipboard;
 mod component;
 mod controls;
 mod filter;
+mod geometry;
 mod header;
 mod pagination;
 mod resize;
@@ -75,6 +86,9 @@ pub use component::*;
 pub use filter::{
     ColumnFilters, DataTableFilterRow, FILTER_ALL, distinct_values, has_filterable_columns,
     prune_stale_filters, row_matches_filters, row_matches_search,
+};
+pub(crate) use geometry::{
+    StableColumnTrack, StableTableColGroup, stable_column_width, stable_table_content_style,
 };
 pub(crate) use pagination::{PageSlot, page_window, row_range};
 pub use pagination::{clamp_page, page_bounds, page_count};

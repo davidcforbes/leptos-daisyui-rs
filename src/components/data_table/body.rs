@@ -115,7 +115,7 @@ pub fn DataTableBody(
                     let col_count = columns.get().len();
                     view! {
                         <tr class=loading_row_class>
-                            <td colspan=col_count class="text-center py-8">
+                            <td colspan=col_count class="border border-table-grid py-8 text-center forced-colors:border-[CanvasText]">
                                 {texts.with(|t| t.loading.clone())}
                             </td>
                         </tr>
@@ -125,7 +125,7 @@ pub fn DataTableBody(
                     let col_count = columns.get().len();
                     view! {
                         <tr class=empty_row_class>
-                            <td colspan=col_count class="text-center py-8">
+                            <td colspan=col_count class="border border-table-grid py-8 text-center forced-colors:border-[CanvasText]">
                                 {texts.with(|t| t.empty.clone())}
                             </td>
                         </tr>
@@ -218,7 +218,11 @@ pub fn DataTableBody(
                             >
                                 {cols.iter().map(|col| {
                                     let cell_value = row.get(col.id).cloned().unwrap_or_default();
-                                    let cell_class = merge_classes!(body_cell_class, col.class.unwrap_or(""));
+                                    let cell_class = merge_classes!(
+                                        "border border-table-grid forced-colors:border-[CanvasText]",
+                                        body_cell_class,
+                                        col.class.unwrap_or("")
+                                    );
                                     let col_id = col.id;
                                     let is_action = col.is_action;
 

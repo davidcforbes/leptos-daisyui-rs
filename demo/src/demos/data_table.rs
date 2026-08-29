@@ -746,6 +746,7 @@ pub fn DataTableDemo() -> impl IntoView {
                     columns=filterable_columns
                     page_size=8
                     searchable=true
+                    attr:id="filter-row-table"
                 />
             </Section>
 
@@ -834,6 +835,7 @@ pub fn DataTableDemo() -> impl IntoView {
                     page_size=50
                     zebra=true
                     table_size=TableSize::Sm
+                    attr:id="geometry-sort-table"
                 />
             </Section>
 
