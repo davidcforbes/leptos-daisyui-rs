@@ -44,10 +44,11 @@ just delegates. Run the gate before committing:
 ```bash
 cargo xtask verify        # 14 native-only checks; no Wasm/Chrome/reactivity lane
 cargo make verify         # same, via cargo-make
-cargo xtask verify-full   # 19 steps: verify + five browser/Wasm lanes (needs npm/trunk/Chrome)
+cargo xtask verify-full   # 20 steps: verify + six browser/Wasm lanes (needs npm/trunk/Chrome)
 cargo xtask test-reactivity          # opt-in 32-check DOM/interaction lane; never implicit in verify
 cargo xtask test-layout              # layout audit: overlap/grid/internal<=external over the real DOM
 cargo xtask test-style               # style audit: typography/shape/depth + daisyUI component-drift, ratcheted per page
+cargo xtask test-keyed-result-list   # focused KeyedResultList browser proof: stable-key selection across duplicate labels/reorders/removals
 cargo xtask gen-tokens [--check]     # regenerate styles/tokens.css from ui-tokens
 cargo xtask check-sibling-tokens     # preamble.rs's ui_tokens refs must exist on the sibling's DEFAULT branch
 cargo xtask bump patch|minor|major   # bump the library version (human-chosen level)

@@ -124,3 +124,121 @@ pub fn ResultList(
         />
     }
 }
+
+/// # KeyedResultList Component
+///
+/// The typed, stable-identity sibling of [`ResultList`]: each result carries
+/// a caller-assigned [`ResultListItem::key`], a display-only
+/// [`ResultRow`](super::ResultRow), and a typed `payload`. Selection and
+/// activation are tracked by key rather than by index or by display text, so
+/// they survive a replacement `items` list that reorders, duplicates a label
+/// across rows, relabels the selected row, or inserts/removes results:
+/// `on_select`/`on_selection_change` always resolve against the *current*
+/// `items` for the current key, never a value captured when the row was
+/// first rendered.
+///
+/// Behaviorally identical to [`ResultList`] otherwise: `ArrowUp`/`ArrowDown`
+/// move one row (clamped, no wraparound), `Home`/`End` jump to the
+/// first/last row, `Enter` activates the highlighted row, hover previews,
+/// click both selects and activates, and the highlighted row scrolls into
+/// view. When `items` carries a blank or duplicate key, the listbox renders
+/// an error banner instead of guessing — see [`validate_result_list_items`].
+///
+/// Reach for [`ResultList`] instead when rows have no independent identity
+/// from their display text (a plain ranked list where the row *is* the
+/// payload); reach for `KeyedResultList` whenever two rows can display the
+/// same text, results arrive asynchronously and may reorder or replace
+/// between renders, or the activation payload is a typed value the display
+/// text does not fully determine (e.g. a database id or case number behind a
+/// person's name).
+///
+/// # Example
+/// ```rust,ignore
+/// use leptos::prelude::*;
+/// use leptos_daisyui_rs::*;
+///
+/// #[derive(Clone)]
+/// struct CaseRef {
+///     case_number: &'static str,
+/// }
+///
+/// #[component]
+/// fn App() -> impl IntoView {
+///     let items = vec![
+///         ResultListItem::new(
+///             "case-a",
+///             ResultRow::new("Alex Morgan"),
+///             CaseRef { case_number: "A-100" },
+///         ),
+///         ResultListItem::new(
+///             "case-b",
+///             ResultRow::new("Alex Morgan"),
+///             CaseRef { case_number: "B-200" },
+///         ),
+///     ];
+///     view! {
+///         <KeyedResultList
+///             items=Signal::derive(move || items.clone())
+///             on_select=Callback::new(|item: ResultListItem<CaseRef>| {
+///                 leptos::logging::log!("activated {}", item.payload.case_number);
+///             })
+///         />
+///     }
+/// }
+/// ```
+///
+/// ### Add to `input.css`
+/// Shares the same classes as [`ResultList`] — see its "Add to `input.css`"
+/// section; nothing further is needed.
+///
+/// ## Node References
+/// - `node_ref` - References the listbox container div ([HTMLDivElement](https://developer.mozilla.org/en-US/docs/Web/API/HTMLDivElement))
+#[component]
+pub fn KeyedResultList<T>(
+    /// Ranked, keyed results to display, top to bottom. Every key must be
+    /// non-blank and unique within the current list; see
+    /// [`validate_result_list_items`].
+    #[prop(into)]
+    items: Signal<Vec<ResultListItem<T>>>,
+
+    /// Message shown in place of the list when `items` is empty.
+    #[prop(optional, into, default = "No results found.".to_string().into())]
+    empty_message: Signal<String>,
+
+    /// Fired when a result is activated (`Enter` key or click) with the
+    /// current [`ResultListItem`] for the activated key, looked up fresh
+    /// from the latest `items` rather than reconstructed from the row that
+    /// was on screen when this handler closed over it.
+    #[prop(optional)]
+    on_select: Option<Callback<ResultListItem<T>>>,
+
+    /// Fired whenever the highlighted key changes: keyboard nav, click, or
+    /// the reconciliation that runs when `items` is replaced (preserving the
+    /// current key when it still exists, else falling back to the first
+    /// result, else `None` for an empty list).
+    #[prop(optional)]
+    on_selection_change: Option<Callback<Option<String>>>,
+
+    /// Additional CSS classes for the listbox container.
+    #[prop(optional, into)]
+    class: &'static str,
+
+    /// Node reference for the listbox container div.
+    #[prop(optional)]
+    node_ref: NodeRef<Div>,
+) -> impl IntoView
+where
+    T: Clone + Send + Sync + 'static,
+{
+    view! {
+        <ResultListCore
+            items=items
+            empty_message=empty_message
+            replacement_policy=ResultReplacementPolicy::PreserveKey
+            on_select=on_select
+            on_selection_change=on_selection_change
+            class=class
+            node_ref=node_ref
+        />
+    }
+}

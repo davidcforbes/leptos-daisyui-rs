@@ -137,6 +137,101 @@ fn removal_falls_back_to_first_and_keyboard_uses_current_order() {
 }
 
 #[test]
+fn duplicate_labels_never_resolve_by_title() {
+    // Two results share an identical display row but are distinct business
+    // identities. Every lookup below is driven by `key`, never by `row`, so
+    // an identical title on two rows must never let one silently stand in
+    // for the other.
+    let items = vec![
+        keyed("case-a", "Alex Morgan", "A-100", 1),
+        keyed("case-b", "Alex Morgan", "B-200", 1),
+    ];
+    let a = current_result_item(&items, "case-a").unwrap();
+    let b = current_result_item(&items, "case-b").unwrap();
+    assert_eq!(a.row, b.row, "titles are identical by construction");
+    assert_ne!(a.payload.case_number, b.payload.case_number);
+
+    // Moving from the duplicate-titled case-b clamps at case-b (last row);
+    // it does not wrap around to case-a just because the labels match.
+    assert_eq!(
+        move_result_key(Some("case-b"), 1, &items),
+        Some("case-b".into())
+    );
+
+    // Removing case-a must not let case-b's identical title back-fill the
+    // old selection under case-a's key: reconciliation falls through to
+    // whichever key is now first, never to a merely similar-looking row.
+    let after_removal = vec![keyed("case-b", "Alex Morgan", "B-200", 1)];
+    assert_eq!(
+        reconcile_result_key(Some("case-a"), &after_removal),
+        Some("case-b".into())
+    );
+    assert_eq!(
+        current_result_item(&after_removal, "case-b")
+            .unwrap()
+            .payload
+            .case_number,
+        "B-200",
+        "the surviving row is case-b's own payload, not a stale case-a lookup"
+    );
+}
+
+#[test]
+fn insertion_preserves_selected_key_despite_index_shift() {
+    // Asynchronous replacement inserting a new row ahead of the selection
+    // must not move the selection by index — only the key matters.
+    let after = vec![
+        keyed("case-c", "New", "C-300", 1),
+        keyed("case-a", "First", "A-100", 1),
+        keyed("case-b", "Second", "B-200", 1),
+    ];
+    assert_eq!(
+        reconcile_result_key(Some("case-b"), &after),
+        Some("case-b".into())
+    );
+    assert_eq!(
+        current_result_item(&after, "case-b")
+            .unwrap()
+            .payload
+            .case_number,
+        "B-200"
+    );
+}
+
+#[test]
+fn reorder_preserves_selected_key_across_a_full_shuffle() {
+    // A reorder is a replacement whose every index changed; the selected
+    // key must still resolve to the same identity and its current payload.
+    let selected = "case-b";
+    let before = [
+        keyed("case-a", "First", "A-100", 1),
+        keyed("case-b", "Second", "B-200", 1),
+        keyed("case-c", "Third", "C-300", 1),
+    ];
+    let shuffled = vec![before[2].clone(), before[0].clone(), before[1].clone()];
+    assert_eq!(
+        reconcile_result_key(Some(selected), &shuffled),
+        Some(selected.into())
+    );
+    assert_eq!(
+        current_result_item(&shuffled, selected)
+            .unwrap()
+            .payload
+            .case_number,
+        "B-200"
+    );
+}
+
+#[test]
+fn keyed_result_list_uses_preserve_key_policy() {
+    let source = include_str!("component.rs");
+    assert!(source.contains("pub fn KeyedResultList<T>("));
+    assert!(source.contains("ResultReplacementPolicy::PreserveKey"));
+    assert!(source.contains("Callback<ResultListItem<T>>"));
+    assert!(source.contains("Callback<Option<String>>"));
+}
+
+#[test]
 fn option_dom_ids_are_collision_free_for_arbitrary_key_bytes() {
     assert_ne!(keyed_option_dom_id(7, "a b"), keyed_option_dom_id(7, "a-b"));
     assert_ne!(keyed_option_dom_id(7, "é"), keyed_option_dom_id(7, "e"));

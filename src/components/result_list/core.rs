@@ -15,8 +15,9 @@ static RESULT_LIST_SEQ: AtomicU64 = AtomicU64::new(0);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ResultReplacementPolicy {
     ResetFirst,
-    // Constructed by the public keyed wrapper in Task 3 of the approved plan.
-    #[allow(dead_code)]
+    /// Used by [`KeyedResultList`](super::KeyedResultList): a replacement
+    /// preserves the current selection when its key still exists in the new
+    /// list, instead of always resetting to the first result.
     PreserveKey,
 }
 

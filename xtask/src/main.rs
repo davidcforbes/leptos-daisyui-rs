@@ -343,6 +343,22 @@ fn style_step() -> Step {
     }
 }
 
+/// Focused browser proof for `KeyedResultList` (ldui-r1z Task 3): stable-key
+/// selection/activation across duplicate labels and asynchronous result
+/// replacement. Lives on the general demo app (`html_target: None`, like
+/// [`reactivity_step`]/[`layout_step`]/[`style_step`]) rather than a
+/// dedicated test-host page, and stays in its own file/step rather than
+/// growing `reactivity_smoke.rs` because that suite's check count is pinned.
+fn result_list_step() -> Step {
+    Step {
+        name: "test-keyed-result-list",
+        run: Run::BrowserSuite {
+            test: "keyed_result_list_smoke",
+            html_target: None,
+        },
+    }
+}
+
 /// The full release gate. The catalog browser suites are deliberately
 /// consecutive: [`run_steps`] reuses one verified release server for adjacent
 /// suites targeting the same HTML entry point.
@@ -353,6 +369,7 @@ fn full_steps() -> Vec<Step> {
     steps.push(reactivity_step());
     steps.push(layout_step());
     steps.push(style_step());
+    steps.push(result_list_step());
     steps
 }
 
@@ -1780,6 +1797,7 @@ fn main() -> ExitCode {
         }
         "test-layout" => run_steps(&[layout_step()]),
         "test-style" => run_steps(&[style_step()]),
+        "test-keyed-result-list" => run_steps(&[result_list_step()]),
         "gen-tokens" => {
             let check = std::env::args().any(|a| a == "--check");
             gen_tokens(check)
@@ -1793,7 +1811,7 @@ fn main() -> ExitCode {
         other => {
             eprintln!("xtask: unknown subcommand {other:?}");
             eprintln!(
-                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|gen-tokens|check-sibling-tokens|bump>"
+                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|gen-tokens|check-sibling-tokens|bump>"
             );
             ExitCode::from(2)
         }
@@ -2124,6 +2142,25 @@ pub fn r() -> f32 { radius::CARD }
             full_steps()
                 .iter()
                 .any(|step| step.name == "test-snapshot-table")
+        );
+    }
+
+    #[test]
+    fn result_list_step_is_in_process_and_full_only() {
+        let step = result_list_step();
+        assert_eq!(step.name, "test-keyed-result-list");
+        assert!(matches!(
+            step.run,
+            Run::BrowserSuite {
+                test: "keyed_result_list_smoke",
+                html_target: None
+            }
+        ));
+        assert!(!gate_steps().iter().any(|s| s.name == "test-keyed-result-list"));
+        assert!(
+            full_steps()
+                .iter()
+                .any(|s| s.name == "test-keyed-result-list")
         );
     }
 

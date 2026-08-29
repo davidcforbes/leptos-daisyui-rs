@@ -216,8 +216,9 @@ different theme values.
 `verify-full` runs `verify`, then the client-snapshot and SnapshotTable
 page-scoped browser lanes, then builds the full catalog once in release mode and
 reuses that same verified server for the 32-check reactivity/DOM-oracle suite
-(`test-reactivity`), layout audit (`test-layout`, below), and style audit
-(`test-style`, below). That catalog server is the real
+(`test-reactivity`), layout audit (`test-layout`, below), style audit
+(`test-style`, below), and the focused `KeyedResultList` browser proof
+(`test-keyed-result-list`, ldui-r1z). That catalog server is the real
 `wasm32-unknown-unknown` release build, so a second standalone
 `trunk build --release` would only repeat the same pipeline and is intentionally
 absent. It is a **separate task**, not part of the default gate, because it needs
@@ -234,7 +235,7 @@ catalog server removes two redundant optimization passes from `verify-full`.
 ### Gate cadence during a live Beads drain
 
 `cargo xtask verify` is the 14-step native gate listed in the table above.
-`cargo xtask verify-full` adds five browser/Wasm checks and reports 19 steps.
+`cargo xtask verify-full` adds six browser/Wasm checks and reports 20 steps.
 Say which command is running before starting it; "the verification gate" is
 ambiguous because the two commands have materially different cost and coverage.
 

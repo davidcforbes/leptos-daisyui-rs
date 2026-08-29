@@ -191,6 +191,13 @@ Needs npm + trunk + Chrome. The screenshot suite stays manual: test-visual."""
 command = "cargo"
 args = ["xtask", "test-reactivity"]
 
+[tasks.test-keyed-result-list]
+description = """Focused browser proof for KeyedResultList (ldui-r1z): stable-key
+selection/activation across duplicate labels and asynchronous result replacement.
+Also a step of verify-full. Needs npm + trunk + Chrome."""
+command = "cargo"
+args = ["xtask", "test-keyed-result-list"]
+
 [tasks.verify-client-snapshot-inner]
 description = "Run only native contract/model tests for the client-snapshot-list pattern"
 command = "cargo"
