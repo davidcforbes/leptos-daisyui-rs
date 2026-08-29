@@ -62,19 +62,15 @@ impl<T: 'static> From<Signal<Vec<EntityColumn<T>>, LocalStorage>> for EntityColu
 }
 
 /// Static, reactive, or default compact-row rendering.
+#[derive(Default)]
 pub enum EntityCompactRow<T: 'static> {
     /// Use the framework's current-column compact renderer.
+    #[default]
     Default,
     /// Use one renderer fixed for this component instance.
     Static(EntityRowRenderer<T>),
     /// Replace the renderer reactively, typically on locale changes.
     Reactive(Signal<EntityRowRenderer<T>, LocalStorage>),
-}
-
-impl<T: 'static> Default for EntityCompactRow<T> {
-    fn default() -> Self {
-        Self::Default
-    }
 }
 
 impl<T: 'static> Clone for EntityCompactRow<T> {

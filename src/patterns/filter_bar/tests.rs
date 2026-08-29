@@ -47,9 +47,11 @@ fn save_presentation_enables_only_explicit_dirty_or_retryable_states() {
 
 #[test]
 fn localized_templates_cover_filter_and_result_counts() {
-    let mut texts = FilterBarTexts::default();
-    texts.active_many = "{count} filtros activos".to_owned();
-    texts.result_count = "{visible} de {total} resultados".to_owned();
+    let texts = FilterBarTexts {
+        active_many: "{count} filtros activos".to_owned(),
+        result_count: "{visible} de {total} resultados".to_owned(),
+        ..FilterBarTexts::default()
+    };
 
     assert_eq!(filter_active_summary(3, &texts), "3 filtros activos");
     assert_eq!(

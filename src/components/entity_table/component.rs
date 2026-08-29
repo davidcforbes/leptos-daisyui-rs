@@ -1282,12 +1282,14 @@ where
                             move |visible_position, key| render_keyed_row(
                                 key,
                                 visible_position,
-                                data,
-                                column_store,
-                                preferences,
-                                row_key,
-                                compact_row,
-                                on_row_activate,
+                                KeyedRowContext {
+                                    data,
+                                    column_store,
+                                    preferences,
+                                    row_key,
+                                    compact_row,
+                                    on_row_activate,
+                                },
                             ),
                         )}
                     </tbody>
@@ -1399,16 +1401,28 @@ where
     move || leptos::tachys::view::keyed::keyed(each(), key.clone(), children.clone())
 }
 
-fn render_keyed_row<T: Clone + 'static>(
-    key: String,
-    visible_position: ReadSignal<usize, LocalStorage>,
+struct KeyedRowContext<T: 'static> {
     data: Signal<Rc<Vec<T>>, LocalStorage>,
     column_store: ColumnStore<T>,
     preferences: PreferenceState<T>,
     row_key: StoredValue<EntityRowKey<T>, LocalStorage>,
     compact_row: CompactRowStore<T>,
     on_row_activate: Option<Callback<String>>,
+}
+
+fn render_keyed_row<T: Clone + 'static>(
+    key: String,
+    visible_position: ReadSignal<usize, LocalStorage>,
+    context: KeyedRowContext<T>,
 ) -> impl IntoView {
+    let KeyedRowContext {
+        data,
+        column_store,
+        preferences,
+        row_key,
+        compact_row,
+        on_row_activate,
+    } = context;
     let interactive = on_row_activate.is_some();
     let click_key = key.clone();
     let keydown_key = key.clone();
