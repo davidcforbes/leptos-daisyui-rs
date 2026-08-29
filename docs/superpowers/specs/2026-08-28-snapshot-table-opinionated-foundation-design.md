@@ -106,7 +106,8 @@ owns:
 - the active opaque `SnapshotRequestHandle<V>`, if any;
 - the complete displayed `SnapshotData<R, V, M>`, if any;
 - the current access replacement state;
-- keyed concurrent action feedback; and
+- generation-bound opaque `SnapshotActionHandle<K>` values plus keyed
+  concurrent action feedback; and
 - an opaque dataset/access generation used by table focus and local-result
   summaries.
 
@@ -115,6 +116,8 @@ displayed dataset identity, `Rc<Vec<R>>`, snapshot revision, authoritative row
 count, and optional typed metadata. Replacing it swaps those values once.
 `SnapshotRequestHandle` also has private fields; it cannot be created,
 decreased, or reused by a caller.
+`SnapshotActionHandle` has the same framework-issued property and binds its key
+to the displayed dataset/access generation in which the action started.
 
 The controller exposes a copyable/read-only `SnapshotTableView` whose phase is
 one of never loaded, initial loading, initial error, displaying, replacing, or
@@ -133,7 +136,7 @@ caller-constructed enum.
 ### Reducer rules
 
 Pure transition methods start a request, accept a response, record a failure,
-replace access, and update one keyed action. `start_request(dataset)` mints and
+replace access, and start/finish one keyed action. `start_request(dataset)` mints and
 returns the next opaque handle; it never accepts a caller token. Completion or
 failure applies only when the supplied handle is still active and its dataset
 matches. Older, duplicated, consumed, or mismatched handles return a
@@ -141,6 +144,13 @@ non-applied disposition and cannot change the displayed snapshot. A successful
 match replaces the complete snapshot once and consumes the handle. A retry
 mints a new handle while preserving the displayed snapshot. Checked sequence
 exhaustion is an explicit error rather than wraparound.
+
+`start_action(key)` requires an allowed displayed snapshot, records Pending,
+and returns an opaque generation-bound handle. `finish_action(handle, outcome)`
+consumes only the still-active matching key/sequence/generation. A retry mints a
+new handle. Access replacement or atomic dataset replacement clears action
+feedback and invalidates old handles, so a late mutation response cannot
+repopulate feedback for an expired session or a different dataset.
 
 Expired or forbidden access increments the access generation, consumes any
 request, clears actionable bindings, and suppresses displayed content. Returning
@@ -208,7 +218,8 @@ dismisses another. Each entry covers:
 The model also stores one monotonically sequenced latest announcement. The
 renderer may show all relevant keyed entries, but only the latest transition
 is sent through the polite/assertive live region, preventing concurrent
-updates from producing competing announcements. Retry and Dismiss callbacks
+updates from producing competing announcements. Visible entries and the live
+announcement include the consumer-supplied human-readable key label. Retry and Dismiss callbacks
 carry the key; retryable terminal entries may be retried, completed outcomes
 may be dismissed, and pending entries cannot be dismissed into a false idle
 state. Pending disables only the corresponding action through

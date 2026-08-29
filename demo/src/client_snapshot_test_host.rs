@@ -8,12 +8,15 @@
 mod client_snapshot_list;
 mod debug;
 mod debug_state;
+#[path = "demos/snapshot_table_page.rs"]
+mod snapshot_table_page;
 
 use client_snapshot_list::ClientSnapshotListDemo;
 use leptos::mount::mount_to_body;
 use leptos::prelude::*;
 use leptos_daisyui_rs::test_mode;
 use leptos_daisyui_rs::tokens::{UiAnimationsPreamble, UiTokensPreamble};
+use snapshot_table_page::SnapshotTablePageFixture;
 
 fn main() {
     console_error_panic_hook::set_once();
@@ -34,11 +37,18 @@ fn main() {
     }
 
     mount_to_body(|| {
+        let snapshot_fixture = web_sys::window()
+            .and_then(|window| window.location().pathname().ok())
+            .is_some_and(|path| path.ends_with("/snapshot-table-page"));
         view! {
             <UiTokensPreamble />
             <UiAnimationsPreamble />
             <main class="min-h-screen bg-base-200 p-4 sm:p-6">
-                <ClientSnapshotListDemo />
+                {if snapshot_fixture {
+                    view! { <SnapshotTablePageFixture /> }.into_any()
+                } else {
+                    view! { <ClientSnapshotListDemo /> }.into_any()
+                }}
             </main>
         }
     });

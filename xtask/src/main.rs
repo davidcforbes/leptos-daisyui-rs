@@ -283,6 +283,17 @@ fn client_snapshot_step() -> Step {
     }
 }
 
+/// Focused browser proof for the typed SnapshotTablePage composition root.
+fn snapshot_table_step() -> Step {
+    Step {
+        name: "test-snapshot-table",
+        run: Run::BrowserSuite {
+            test: "snapshot_table_smoke",
+            html_target: Some("client-snapshot-test-host.html"),
+        },
+    }
+}
+
 fn pattern_steps(pattern: &str, lane: PatternLane) -> Result<Vec<Step>, String> {
     pattern_checks::checks_for(pattern, lane)?
         .iter()
@@ -338,6 +349,7 @@ fn style_step() -> Step {
 fn full_steps() -> Vec<Step> {
     let mut steps = gate_steps();
     steps.push(client_snapshot_step());
+    steps.push(snapshot_table_step());
     steps.push(reactivity_step());
     steps.push(layout_step());
     steps.push(style_step());
@@ -412,6 +424,7 @@ const CLIENT_SNAPSHOT_FINGERPRINT_FILE: &str =
 const CLIENT_SNAPSHOT_SOURCE_INPUTS: &[&str] = &[
     "src",
     "demo/src/demos/client_snapshot_list.rs",
+    "demo/src/demos/snapshot_table_page.rs",
     "demo/src/client_snapshot_test_host.rs",
     "demo/client-snapshot-test-host.html",
     "demo/Cargo.toml",
@@ -1742,7 +1755,7 @@ fn main() -> ExitCode {
         "fmt-check" | "clippy" | "build" | "check-demo" | "test" => run_steps(&steps_for(&sub)),
         "verify-full" => run_steps(&full_steps()),
         "test-reactivity" => run_steps(&[reactivity_step()]),
-        "test-client-snapshot" => run_steps(&[client_snapshot_step()]),
+        "test-client-snapshot" => run_steps(&[client_snapshot_step(), snapshot_table_step()]),
         "verify-pattern" => {
             let pattern = std::env::args().nth(2).unwrap_or_default();
             let lane_flag = std::env::args().nth(3).unwrap_or_default();
@@ -2076,6 +2089,24 @@ pub fn r() -> f32 { radius::CARD }
         let args = trunk_serve_args(4321, None);
         assert!(args.windows(2).any(|pair| pair == ["--color", "never"]));
         assert!(!args.iter().any(|arg| arg.starts_with("--no-color")));
+    }
+
+    #[test]
+    fn snapshot_table_step_reuses_the_page_scoped_host() {
+        let step = snapshot_table_step();
+        assert_eq!(step.name, "test-snapshot-table");
+        assert!(matches!(
+            step.run,
+            Run::BrowserSuite {
+                test: "snapshot_table_smoke",
+                html_target: Some("client-snapshot-test-host.html")
+            }
+        ));
+        assert!(
+            full_steps()
+                .iter()
+                .any(|step| step.name == "test-snapshot-table")
+        );
     }
 
     #[test]

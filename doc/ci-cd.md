@@ -113,8 +113,9 @@ cargo make verify-client-snapshot-browser
 `--inner` runs only the page-contract/pattern unit tests and typed
 `EntityTable` model/storage tests. `--browser` compiles and serves
 `demo/client-snapshot-test-host.html`, whose dedicated binary links the one
-story under test rather than the full component catalog, then runs only
-`tests/entity_table_smoke.rs`. Unknown pattern names and lane flags exit 2;
+pattern family under test rather than the full component catalog, then runs
+`tests/entity_table_smoke.rs` and `tests/snapshot_table_smoke.rs` consecutively
+against the same verified server. Unknown pattern names and lane flags exit 2;
 there is no fallback to a broad suite.
 
 The browser lane records
@@ -126,10 +127,13 @@ artifacts; a changed input delegates safe incremental invalidation to those
 tools. The fingerprint is evidence and selection metadata, not a replacement
 build cache or a bespoke pipeline runner.
 
-The page-scoped journey covers the semantic/responsive table contract, local
+The page-scoped journeys cover the semantic/responsive table contract, local
 filter/sort/page/column behavior, dataset-selector isolation, refresh DOM
 retention, action isolation, and engine-driven style/layout checks at wide and
-compact widths. Its visual ratchet is zero for overlap, typography, shape,
+compact widths. They also prove the typed `SnapshotTablePage` slot order,
+generation coherence, atomic replacement, and retained table-node identity;
+the injected selector/filter marker swap is the ordering negative control.
+The visual ratchet is zero for overlap, typography, shape,
 grid, internal spacing, and component drift. Depth is exactly 5 for daisyUI's
 `oklab()`/`oklch()` form-control shadows, an existing parser limitation; the
 test declares the showcase's authored button shadows instead of spending

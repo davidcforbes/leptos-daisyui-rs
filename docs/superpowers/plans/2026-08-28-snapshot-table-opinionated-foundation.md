@@ -120,6 +120,7 @@ Run `git diff --check`, commit the coherent document/Bead checkpoint, push it, v
 
 ```rust
 pub struct SnapshotRequestHandle<V> { /* private sequence + dataset */ }
+pub struct SnapshotActionHandle<K> { /* private generation + sequence + key */ }
 pub struct SnapshotData<R, V, M> { /* private atomic snapshot fields */ }
 pub struct SnapshotTableState<R, V, E, M, K> { /* private reducer state */ }
 pub struct SnapshotTableView<'a, R, V, E, M, K> { /* read-only derived view */ }
@@ -131,11 +132,11 @@ pub enum SnapshotResponseDisposition {
 }
 ```
 
-- [ ] **Step 1: Write failing pure transition tests**
+- [x] **Step 1: Write failing pure transition tests**
 
 Cover initial load, initial failure/retry, displayed-to-replacing, retained failure/retry, successful atomic replacement, duplicate/consumed handles, older handles, a matching sequence carrying the wrong dataset identity, checked sequence exhaustion, and access replacement. Assert ignored responses preserve dataset, rows, revision, count, metadata, actions, and generation byte-for-byte. Prove no public constructor can mint or decrease a handle.
 
-- [ ] **Step 2: Run the focused tests and verify RED**
+- [x] **Step 2: Run the focused tests and verify RED**
 
 Run:
 
@@ -145,11 +146,11 @@ cargo test -p leptos-daisyui-rs --lib --features test-mode snapshot_table::tests
 
 Expected: compilation fails because the dataset types and transition methods do not exist.
 
-- [ ] **Step 3: Implement the minimal pure model**
+- [x] **Step 3: Implement the minimal pure model**
 
-Add `start_request`, `accept_response`, `record_failure`, `replace_access`, and read-only view helpers. `start_request` mints the handle internally. Apply a response only when its still-active opaque handle and dataset match. Swap the complete `SnapshotData` in one reducer operation and consume the handle. Mint `LocalResultSummary` only from the current displayed binding and reject a summary from an older generation/revision.
+Add `start_request`, `complete`, `fail`, `replace_access`, generation-bound action transitions, and read-only view helpers. `start_request` mints the handle internally. Apply a response only when its still-active opaque handle and dataset match. Swap the complete `SnapshotData` in one reducer operation and consume the handle. Mint `LocalResultSummary` only from the current displayed binding and reject a summary from an older generation/revision.
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run the focused command again, followed by `cargo test -p leptos-daisyui-rs --lib --features test-mode snapshot_table -- --nocapture`.
 
@@ -169,28 +170,28 @@ Run the focused command again, followed by `cargo test -p leptos-daisyui-rs --li
 
 **Interfaces:** Keep phase/content/access private inside `SnapshotTableState`. Add a read-only `SnapshotTableView`, generation-bound `LocalResultSummary`, keyed concurrent `ActionFeedbackModel<K>`, and complete reactive `PageStatePanelTexts` and `ActionFeedbackTexts`. Add `SnapshotDatasetSelectorConfig<V>` and `SnapshotEntityTableConfig<R>` whose public fields cannot supply selected/displayed identity, rows, revision, or generation.
 
-- [ ] **Step 1: Write failing precedence and renderer tests**
+- [x] **Step 1: Write failing precedence and renderer tests**
 
 Native cases must prove: contradictory phase/content/access combinations have no public constructor; a stale `LocalResultSummary` is rejected; expired/forbidden suppress mounted content; initial loading/error replace content; empty/no-results come only from the matching displayed generation; replacing and retained-error keep content mounted; two distinct action keys may remain pending concurrently; updating/dismissing one preserves the other; only the latest transition is announced; and preference feedback is not represented by the action model.
 
 Add a browser fixture with literal IDs `snapshot-page`, `snapshot-page-dataset`, `snapshot-page-filters`, `snapshot-page-feedback`, and `snapshot-page-table`. Assert the DOM order is header, distinct selector, KPI, filters, feedback, then table; assert page/selector/table generation markers agree; and assert retained transitions leave the same table node mounted.
 
-- [ ] **Step 2: Run focused native/browser checks and verify RED**
+- [x] **Step 2: Run focused native/browser checks and verify RED**
 
 Run:
 
 ```powershell
 cargo test -p leptos-daisyui-rs --lib --features test-mode snapshot_table -- --nocapture
-cargo test -p leptos-daisyui-rs --test snapshot_table_smoke --features browser-tests -- --ignored --nocapture
+cargo xtask test-client-snapshot
 ```
 
 Expected: missing state types and component markers prevent the new assertions from compiling or locating the required regions.
 
-- [ ] **Step 3: Implement typed render selection and components**
+- [x] **Step 3: Implement typed render selection and components**
 
 Implement one pure render-decision function and make `SnapshotTablePage` consume it. The page itself renders the selector and table from configs that omit all identity-critical fields. Use framework alerts, skeletons, and Buttons. Concurrent keyed feedback uses one latest live announcement without calling focus. The page owns only typed binding, sizing, vertical rhythm, slot order, retained mounting, and stable `data-*` markers.
 
-- [ ] **Step 4: Verify GREEN and demonstrate the DOM oracle**
+- [x] **Step 4: Verify GREEN and demonstrate the DOM oracle**
 
 Run both focused commands. Temporarily swap the filter and selector slot markers, confirm the browser ordering assertion fails, revert, and rerun green. Capture browser errors and WASM panics in the smoke test.
 

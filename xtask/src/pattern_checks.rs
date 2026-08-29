@@ -31,7 +31,7 @@ pub(crate) enum PatternCheck {
     },
 }
 
-pub(crate) const BROWSER_FINGERPRINT_COMMAND_VERSION: &str = "client-snapshot-browser-command-v2";
+pub(crate) const BROWSER_FINGERPRINT_COMMAND_VERSION: &str = "client-snapshot-browser-command-v3";
 
 /// Inputs recorded beside a reusable page-scoped browser build.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -90,11 +90,18 @@ const CLIENT_SNAPSHOT_INNER: &[PatternCheck] = &[
     },
 ];
 
-const CLIENT_SNAPSHOT_BROWSER: &[PatternCheck] = &[PatternCheck::Browser {
-    name: "test-client-snapshot",
-    test: "entity_table_smoke",
-    html_target: "client-snapshot-test-host.html",
-}];
+const CLIENT_SNAPSHOT_BROWSER: &[PatternCheck] = &[
+    PatternCheck::Browser {
+        name: "test-client-snapshot",
+        test: "entity_table_smoke",
+        html_target: "client-snapshot-test-host.html",
+    },
+    PatternCheck::Browser {
+        name: "test-snapshot-table",
+        test: "snapshot_table_smoke",
+        html_target: "client-snapshot-test-host.html",
+    },
+];
 
 pub(crate) fn checks_for(
     pattern: &str,
@@ -133,11 +140,18 @@ mod tests {
     fn client_snapshot_browser_selects_only_page_scoped_journey() {
         assert_eq!(
             checks_for("client-snapshot-list", PatternLane::Browser).expect("known pattern"),
-            &[PatternCheck::Browser {
-                name: "test-client-snapshot",
-                test: "entity_table_smoke",
-                html_target: "client-snapshot-test-host.html",
-            }]
+            &[
+                PatternCheck::Browser {
+                    name: "test-client-snapshot",
+                    test: "entity_table_smoke",
+                    html_target: "client-snapshot-test-host.html",
+                },
+                PatternCheck::Browser {
+                    name: "test-snapshot-table",
+                    test: "snapshot_table_smoke",
+                    html_target: "client-snapshot-test-host.html",
+                },
+            ]
         );
     }
 

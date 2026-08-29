@@ -788,6 +788,15 @@ Selecting another office starts a new dataset load. During the load:
 
 Filters and sorts are local settings. Office changes do not reset them.
 
+The canonical typed controller mints opaque checked request handles rather
+than accepting caller sequence numbers. A matching response that names the
+wrong office is rejected and consumes that request, preventing a permanent
+loading state. Row-action work likewise starts with a framework-issued opaque
+handle bound to its stable key and the displayed dataset/access generation.
+Atomic office replacement or expired/forbidden access clears the old action
+bindings; late action completions are ignored and cannot repopulate the new
+surface.
+
 ### 10.4 Claims and real-time events
 
 Claim mutations are idempotent or carry an idempotency key. The server remains
