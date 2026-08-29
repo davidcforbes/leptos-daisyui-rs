@@ -133,6 +133,25 @@ pub async fn harness_at(path: &str) -> Harness {
 /// mode reports success. Focused visual tests call this before
 /// `capture_and_compare_region` so an off-screen target cannot become an
 /// accepted baseline.
+pub fn region_intersects_viewport(
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    viewport: ViewportSize,
+) -> bool {
+    x.is_finite()
+        && y.is_finite()
+        && width.is_finite()
+        && height.is_finite()
+        && width > 0.0
+        && height > 0.0
+        && x < f64::from(viewport.width)
+        && y < f64::from(viewport.height)
+        && x + width > 0.0
+        && y + height > 0.0
+}
+
 pub async fn scroll_region_into_view(h: &Harness, selector: &str, viewport: ViewportSize) {
     let selector_json = serde_json::to_string(selector).expect("serialize region selector");
     let script = format!(
@@ -158,10 +177,7 @@ pub async fn scroll_region_into_view(h: &Harness, selector: &str, viewport: View
         .await
         .unwrap_or_else(|e| panic!("read visual region `{selector}` bounds: {e}"));
     assert!(
-        bounds.x < f64::from(viewport.width)
-            && bounds.y < f64::from(viewport.height)
-            && bounds.x + bounds.width > 0.0
-            && bounds.y + bounds.height > 0.0,
+        region_intersects_viewport(bounds.x, bounds.y, bounds.width, bounds.height, viewport,),
         "visual region `{selector}` remains outside the {}x{} viewport after scrolling: \
          x={}, y={}, width={}, height={}",
         viewport.width,

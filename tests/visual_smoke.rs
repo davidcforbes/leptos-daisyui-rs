@@ -31,6 +31,21 @@ mod common;
 
 use common::{harness_at, state};
 
+#[test]
+fn component_capture_region_requires_painted_area_inside_the_viewport() {
+    let viewport = pixelproof_web::ViewportSize::new(1280, 800);
+
+    assert!(common::region_intersects_viewport(
+        100.0, 100.0, 320.0, 180.0, viewport
+    ));
+    assert!(!common::region_intersects_viewport(
+        100.0, 100.0, 0.0, 180.0, viewport
+    ));
+    assert!(!common::region_intersects_viewport(
+        100.0, 100.0, 320.0, 0.0, viewport
+    ));
+}
+
 /// Button demo, default state.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires demo dev server (cargo make test-visual)"]
