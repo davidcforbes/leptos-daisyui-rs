@@ -7,6 +7,121 @@ use crate::components::icon::Icon;
 use crate::merge_classes;
 use leptos::prelude::*;
 use std::collections::{BTreeSet, HashMap};
+use std::fmt;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum StableRowKeyError {
+    Empty {
+        index: usize,
+    },
+    Duplicate {
+        key: String,
+        first_index: usize,
+        duplicate_index: usize,
+    },
+}
+
+impl fmt::Display for StableRowKeyError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty { index } => write!(
+                formatter,
+                "DataTable row_key returned an empty key for page row {index}"
+            ),
+            Self::Duplicate {
+                key,
+                first_index,
+                duplicate_index,
+            } => write!(
+                formatter,
+                "DataTable row_key returned duplicate key {key:?} for page rows {first_index} and {duplicate_index}"
+            ),
+        }
+    }
+}
+
+fn validate_stable_row_keys(
+    rows: &[(usize, TableRow)],
+    key_of: impl Fn(&TableRow) -> String,
+) -> Result<Vec<String>, StableRowKeyError> {
+    let mut seen = HashMap::<String, usize>::with_capacity(rows.len());
+    let mut keys = Vec::with_capacity(rows.len());
+    for (index, row) in rows {
+        let key = key_of(row);
+        if key.trim().is_empty() {
+            return Err(StableRowKeyError::Empty { index: *index });
+        }
+        if let Some(first_index) = seen.insert(key.clone(), *index) {
+            return Err(StableRowKeyError::Duplicate {
+                key,
+                first_index,
+                duplicate_index: *index,
+            });
+        }
+        keys.push(key);
+    }
+    Ok(keys)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ResolvedBodyRow {
+    render_key: String,
+    stable_key: Option<String>,
+    index: usize,
+    row: TableRow,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ResolvedBodyRows {
+    Valid(Vec<ResolvedBodyRow>),
+    Invalid(StableRowKeyError),
+}
+
+fn resolve_body_rows(
+    rows: Vec<(usize, TableRow)>,
+    row_key: Option<Callback<TableRow, String>>,
+) -> ResolvedBodyRows {
+    let stable_keys = match row_key {
+        Some(key_of) => match validate_stable_row_keys(&rows, |row| key_of.run(row.clone())) {
+            Ok(keys) => Some(keys),
+            Err(error) => return ResolvedBodyRows::Invalid(error),
+        },
+        None => None,
+    };
+
+    ResolvedBodyRows::Valid(
+        rows.into_iter()
+            .enumerate()
+            .map(|(position, (index, row))| {
+                let stable_key = stable_keys.as_ref().map(|keys| keys[position].clone());
+                let render_key = stable_key.as_ref().map_or_else(
+                    || format!("position:{index}"),
+                    |key| format!("stable:{key}"),
+                );
+                ResolvedBodyRow {
+                    render_key,
+                    stable_key,
+                    index,
+                    row,
+                }
+            })
+            .collect(),
+    )
+}
+
+#[derive(Clone)]
+pub struct DataTableBodyRow {
+    pub index: usize,
+    pub stable_key: Option<String>,
+    pub row: TableRow,
+}
+
+#[derive(Clone)]
+pub struct DataTableBodyClick {
+    pub row: DataTableBodyRow,
+    pub ctrl: bool,
+    pub shift: bool,
+}
 
 /// DataTable body component with loading and empty states
 #[component]
@@ -54,8 +169,8 @@ pub fn DataTableBody(
     /// Row-interaction callback, invoked with `(absolute_index, ctrl_or_meta,
     /// shift)`. Modifiers are passed as plain bools rather than an event so the
     /// same path serves both a mouse click and a keyboard Enter/Space.
-    #[prop(optional, into)]
-    on_row_click: Option<Callback<(usize, bool, bool)>>,
+    #[prop(optional_no_strip)]
+    on_row_click: Option<Callback<DataTableBodyClick>>,
 
     /// Secondary row activation: fired with the row's absolute index on a
     /// double-click, or Shift+Enter from the keyboard (`ldui-tmr`). When set,
@@ -68,7 +183,13 @@ pub fn DataTableBody(
     /// no `IntoReactiveValue` impl for `Option<Callback<_>>` in this leptos
     /// version (E0277) — both found by this workspace's CI, 2026-08-24.
     #[prop(optional_no_strip)]
-    on_row_inspect: Option<Callback<usize>>,
+    on_row_inspect: Option<Callback<DataTableBodyRow>>,
+
+    /// Optional stable business key. When supplied, the body reconciles row
+    /// DOM by this key rather than by page position. Empty and duplicate keys
+    /// suppress every data row and render a visible configuration error.
+    #[prop(optional_no_strip)]
+    row_key: Option<Callback<TableRow, String>>,
 
     /// Whether rows are keyboard-operable: focusable (`tabindex=0`) with
     /// Enter/Space activating the same behaviour as a click, and carrying
@@ -111,228 +232,316 @@ pub fn DataTableBody(
     #[prop(optional_no_strip)]
     row_class_fn: Option<Callback<(usize, TableRow), String>>,
 ) -> impl IntoView {
+    let resolved_rows = Memo::new(move |_| resolve_body_rows(rows.get(), row_key));
+    let cell_renderers = StoredValue::new(cell_renderers);
+    let typed_cells = StoredValue::new(typed_cells);
+
     view! {
         <tbody>
-            {move || {
-                if loading.get() {
-                    // Loading state
-                    let col_count = columns.get().len();
-                    view! {
-                        <tr class=loading_row_class>
-                            <td colspan=col_count class="border border-table-grid py-8 text-center forced-colors:border-[CanvasText]">
-                                {texts.with(|t| t.loading.clone())}
-                            </td>
-                        </tr>
-                    }.into_any()
-                } else if rows.get().is_empty() {
-                    // Empty state
-                    let col_count = columns.get().len();
-                    view! {
-                        <tr class=empty_row_class>
-                            <td colspan=col_count class="border border-table-grid py-8 text-center forced-colors:border-[CanvasText]">
-                                {texts.with(|t| t.empty.clone())}
-                            </td>
-                        </tr>
-                    }.into_any()
-                } else {
-                    // Data rows
-                    let rows_vec = rows.get();
-                    let cols = columns.get();
-                    let renderers = cell_renderers.clone();
-                    let typed_cell_fns = typed_cells.clone();
-
-                    rows_vec.iter().map(|(abs_idx, row)| {
-                        let abs_idx = *abs_idx;
-                        let extra_row_class = row_class_fn
-                            .map(|f| f.run((abs_idx, row.clone())))
-                            .unwrap_or_default();
-                        let row_class_dyn = Signal::derive(move || {
-                            let extra = extra_row_class.clone();
-                            if selected_rows.with(|s| s.contains(&abs_idx)) {
-                                merge_classes!(row_class, selected_row_class, extra).to_class()
-                            } else {
-                                merge_classes!(row_class, extra).to_class()
-                            }
-                        });
-
-                        // `tabindex`/`aria-selected` only on interactive tables,
-                        // so a plain display table adds no tab stops. A `<tr>`
-                        // carries the implicit ARIA role `row`, on which
-                        // `aria-selected` is valid.
-                        let tabindex = interactive.then_some(0);
-                        let aria_selected = move || {
-                            interactive.then(|| {
-                                if selected_rows.with(|s| s.contains(&abs_idx)) {
-                                    "true"
-                                } else {
-                                    "false"
-                                }
+            <Show when=move || loading.get()>
+                <tr class=loading_row_class>
+                    <td
+                        colspan=move || columns.with(|columns| columns.len().max(1))
+                        class="border border-table-grid py-8 text-center forced-colors:border-[CanvasText]"
+                    >
+                        {move || texts.with(|texts| texts.loading.clone())}
+                    </td>
+                </tr>
+            </Show>
+            <Show when=move || {
+                !loading.get() && matches!(&*resolved_rows.read(), ResolvedBodyRows::Valid(rows) if rows.is_empty())
+            }>
+                <tr class=empty_row_class>
+                    <td
+                        colspan=move || columns.with(|columns| columns.len().max(1))
+                        class="border border-table-grid py-8 text-center forced-colors:border-[CanvasText]"
+                    >
+                        {move || texts.with(|texts| texts.empty.clone())}
+                    </td>
+                </tr>
+            </Show>
+            <Show when=move || {
+                !loading.get() && matches!(&*resolved_rows.read(), ResolvedBodyRows::Invalid(_))
+            }>
+                <tr data-table-row-key-error="true">
+                    <td
+                        colspan=move || columns.with(|columns| columns.len().max(1))
+                        role="alert"
+                        class="border border-error bg-error/10 px-3 py-4 text-error forced-colors:border-[CanvasText] forced-colors:text-[CanvasText]"
+                    >
+                        {move || resolved_rows.with(|rows| match rows {
+                            ResolvedBodyRows::Invalid(error) => error.to_string(),
+                            ResolvedBodyRows::Valid(_) => String::new(),
+                        })}
+                    </td>
+                </tr>
+            </Show>
+            <Show when=move || {
+                !loading.get() && matches!(&*resolved_rows.read(), ResolvedBodyRows::Valid(rows) if !rows.is_empty())
+            }>
+                <For
+                    each=move || resolved_rows.with(|rows| match rows {
+                        ResolvedBodyRows::Valid(rows) => rows
+                            .iter()
+                            .map(|row| (row.render_key.clone(), row.stable_key.clone()))
+                            .collect::<Vec<_>>(),
+                        ResolvedBodyRows::Invalid(_) => Vec::new(),
+                    })
+                    key=|(render_key, _)| render_key.clone()
+                    children=move |(render_key, stable_key)| {
+                        let current_row = Memo::new(move |_| {
+                            resolved_rows.with(|rows| match rows {
+                                ResolvedBodyRows::Valid(rows) => rows
+                                    .iter()
+                                    .find(|row| row.render_key == render_key)
+                                    .cloned(),
+                                ResolvedBodyRows::Invalid(_) => None,
                             })
-                        };
-                        let detail = detail_renderer
-                            .and_then(|renderer| renderer.run((abs_idx, row.clone())));
+                        });
+                        let renderers = cell_renderers.get_value();
+                        let typed_cell_fns = typed_cells.get_value();
 
                         view! {
                             <>
-                            <tr
-                                class=move || row_class_dyn.get()
-                                tabindex=tabindex
-                                aria-selected=aria_selected
-                                on:click=move |ev: web_sys::MouseEvent| {
-                                    // The repeat click of a double-click is the
-                                    // inspector's, not the activator's -- letting
-                                    // it through would run on_row_click twice per
-                                    // double-click (ldui-tmr).
-                                    if click_swallowed_by_inspect(ev.detail(), on_row_inspect.is_some()) {
-                                        return;
-                                    }
-                                    if let Some(cb) = on_row_click {
-                                        cb.run((abs_idx, ev.ctrl_key() || ev.meta_key(), ev.shift_key()));
-                                    }
-                                }
-                                on:dblclick=move |ev: web_sys::MouseEvent| {
-                                    if let Some(cb) = on_row_inspect {
-                                        ev.prevent_default();
-                                        cb.run(abs_idx);
-                                    }
-                                }
-                                on:keydown=move |ev: web_sys::KeyboardEvent| {
-                                    if !interactive {
-                                        return;
-                                    }
-                                    let key = ev.key();
-                                    let ctrl = ev.ctrl_key() || ev.meta_key();
-                                    // Shift+Enter is the keyboard equivalent of a
-                                    // double-click when an inspector is wired;
-                                    // Shift+Space keeps range selection.
-                                    if key_inspects(&key, ctrl, ev.shift_key(), on_row_inspect.is_some()) {
-                                        ev.prevent_default();
-                                        if let Some(cb) = on_row_inspect {
-                                            cb.run(abs_idx);
-                                        }
-                                        return;
-                                    }
-                                    // Enter and Space activate/select, matching a
-                                    // click; Space additionally would scroll the
-                                    // page, so suppress its default.
-                                    if key == "Enter" || key == " " {
-                                        ev.prevent_default();
-                                        if let Some(cb) = on_row_click {
-                                            cb.run((abs_idx, ctrl, ev.shift_key()));
-                                        }
-                                    }
-                                }
-                            >
-                                {cols.iter().map(|col| {
-                                    let cell_value = row.get(col.id).cloned().unwrap_or_default();
-                                    let cell_class = merge_classes!(
-                                        "border border-table-grid forced-colors:border-[CanvasText]",
-                                        body_cell_class,
-                                        col.class.unwrap_or("")
-                                    );
-                                    let col_id = col.id;
-                                    let is_action = col.is_action;
-
-                                    // Build truncation style if enabled. Static per column (doesn't
-                                    // depend on `column_widths`), computed once here and cloned into
-                                    // the reactive width closure below.
-                                    let truncate_style = if col.truncate {
-                                        let max_w = col.max_width.map(|w| format!("max-width: {}px; ", w)).unwrap_or_default();
-                                        Some(format!("{}overflow: hidden; text-overflow: ellipsis; white-space: nowrap;", max_w))
-                                    } else {
-                                        None
-                                    };
-
-                                    // Column-resize width override, kept in sync with the header.
-                                    // Scoped to its own reactive closure bound to just this cell's
-                                    // `style` attribute (mirrors `row_class_dyn` above) instead of
-                                    // being read in this outer per-row/per-column map -- so a
-                                    // column-width drag only re-renders each cell's style, not the
-                                    // whole body.
-                                    let style_attr = move || {
-                                        let width_style = column_widths
-                                            .with(|m| m.get(col_id).copied())
-                                            .map(|w| format!("width: {}px; ", w.round()));
-                                        match (width_style, truncate_style.clone()) {
-                                            (Some(w), Some(t)) => Some(format!("{w}{t}")),
-                                            (Some(w), None) => Some(w),
-                                            (None, Some(t)) => Some(t),
-                                            (None, None) => None,
-                                        }
-                                    };
-
-                                    // Title attribute for native tooltip when truncated
-                                    let title_attr = if col.truncate {
-                                        Some(cell_value.clone())
-                                    } else {
-                                        None
-                                    };
-
-                                    // Precedence: full custom renderer, then typed cell
-                                    // (Badge/Icon), then plain text. `renderer_index`
-                                    // always wins when both are set on a column.
-                                    let content = match col.renderer_index.and_then(|i| renderers.get(i)) {
-                                        Some(renderer) => renderer.run((abs_idx, row.clone())),
-                                        None => match col.typed_cell_index.and_then(|i| typed_cell_fns.get(i)) {
-                                            Some(typed_fn) => match typed_fn.run((abs_idx, row.clone())) {
-                                                TypedCell::Text(s) => view! { {s} }.into_any(),
-                                                TypedCell::Badge { text, color } => view! {
-                                                    <Badge color=color>{text}</Badge>
-                                                }.into_any(),
-                                                TypedCell::Icon { name, color } => view! {
-                                                    <Icon name=name color=color />
-                                                }.into_any(),
-                                            },
-                                            None => view! { {cell_value.clone()} }.into_any(),
-                                        },
-                                    };
-
-                                    view! {
-                                        <td
-                                            class=cell_class
-                                            style=style_attr
-                                            title=title_attr
-                                            // Action cells ([`Column::action`]) keep their events:
-                                            // a click or Enter/Space on a button/link inside must
-                                            // not bubble into the row's activate/select handling.
-                                            on:click=move |ev: web_sys::MouseEvent| {
-                                                if is_action {
-                                                    ev.stop_propagation();
-                                                }
-                                            }
-                                            on:keydown=move |ev: web_sys::KeyboardEvent| {
-                                                if is_action {
-                                                    ev.stop_propagation();
-                                                }
-                                            }
-                                        >
-                                            {content}
-                                        </td>
-                                    }
-                                }).collect_view()}
-                            </tr>
-                            {detail.map(|detail| view! {
                                 <tr
-                                    class="data-table-detail-row bg-base-100"
-                                    data-table-detail-row="true"
-                                    data-table-detail-for=abs_idx
-                                    on:click=move |event| event.stop_propagation()
-                                    on:dblclick=move |event| event.stop_propagation()
-                                    on:keydown=move |event| event.stop_propagation()
+                                    data-row-key=stable_key
+                                    data-row-index=move || current_row.get().map(|row| row.index)
+                                    class=move || current_row.with(|current| {
+                                        let Some(current) = current else {
+                                            return String::new();
+                                        };
+                                        let extra = row_class_fn
+                                            .map(|callback| callback.run((current.index, current.row.clone())))
+                                            .unwrap_or_default();
+                                        if selected_rows.with(|selected| selected.contains(&current.index)) {
+                                            merge_classes!(row_class, selected_row_class, extra).to_class()
+                                        } else {
+                                            merge_classes!(row_class, extra).to_class()
+                                        }
+                                    })
+                                    tabindex=interactive.then_some(0)
+                                    aria-selected=move || interactive.then(|| {
+                                        current_row.with(|current| {
+                                            current
+                                                .as_ref()
+                                                .is_some_and(|row| selected_rows.with(|selected| selected.contains(&row.index)))
+                                                .to_string()
+                                        })
+                                    })
+                                    on:click=move |event: web_sys::MouseEvent| {
+                                        if click_swallowed_by_inspect(event.detail(), on_row_inspect.is_some()) {
+                                            return;
+                                        }
+                                        if let (Some(callback), Some(row)) = (on_row_click, current_row.get_untracked()) {
+                                            callback.run(DataTableBodyClick {
+                                                row: DataTableBodyRow {
+                                                    index: row.index,
+                                                    stable_key: row.stable_key,
+                                                    row: row.row,
+                                                },
+                                                ctrl: event.ctrl_key() || event.meta_key(),
+                                                shift: event.shift_key(),
+                                            });
+                                        }
+                                    }
+                                    on:dblclick=move |event: web_sys::MouseEvent| {
+                                        if let (Some(callback), Some(row)) = (on_row_inspect, current_row.get_untracked()) {
+                                            event.prevent_default();
+                                            callback.run(DataTableBodyRow {
+                                                index: row.index,
+                                                stable_key: row.stable_key,
+                                                row: row.row,
+                                            });
+                                        }
+                                    }
+                                    on:keydown=move |event: web_sys::KeyboardEvent| {
+                                        if !interactive {
+                                            return;
+                                        }
+                                        let key = event.key();
+                                        let ctrl = event.ctrl_key() || event.meta_key();
+                                        if key_inspects(&key, ctrl, event.shift_key(), on_row_inspect.is_some()) {
+                                            event.prevent_default();
+                                            if let (Some(callback), Some(row)) = (on_row_inspect, current_row.get_untracked()) {
+                                                callback.run(DataTableBodyRow {
+                                                    index: row.index,
+                                                    stable_key: row.stable_key,
+                                                    row: row.row,
+                                                });
+                                            }
+                                            return;
+                                        }
+                                        if key == "Enter" || key == " " {
+                                            event.prevent_default();
+                                            if let (Some(callback), Some(row)) = (on_row_click, current_row.get_untracked()) {
+                                                callback.run(DataTableBodyClick {
+                                                    row: DataTableBodyRow {
+                                                        index: row.index,
+                                                        stable_key: row.stable_key,
+                                                        row: row.row,
+                                                    },
+                                                    ctrl,
+                                                    shift: event.shift_key(),
+                                                });
+                                            }
+                                        }
+                                    }
                                 >
-                                    <td
-                                        colspan=cols.len().max(1)
-                                        class="border border-table-grid px-3 py-2 text-sm text-base-content/80 forced-colors:border-[CanvasText]"
-                                    >
-                                        {detail}
-                                    </td>
+                                    {move || current_row.get().map(|current| {
+                                        columns.get().iter().map(|column| {
+                                            let cell_value = current.row.get(column.id).cloned().unwrap_or_default();
+                                            let cell_class = merge_classes!(
+                                                "border border-table-grid forced-colors:border-[CanvasText]",
+                                                body_cell_class,
+                                                column.class.unwrap_or("")
+                                            );
+                                            let column_id = column.id;
+                                            let is_action = column.is_action;
+                                            let truncate_style = if column.truncate {
+                                                let max_width = column
+                                                    .max_width
+                                                    .map(|width| format!("max-width: {width}px; "))
+                                                    .unwrap_or_default();
+                                                Some(format!(
+                                                    "{max_width}overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                                                ))
+                                            } else {
+                                                None
+                                            };
+                                            let style_attr = move || {
+                                                let width_style = column_widths
+                                                    .with(|widths| widths.get(column_id).copied())
+                                                    .map(|width| format!("width: {}px; ", width.round()));
+                                                match (width_style, truncate_style.clone()) {
+                                                    (Some(width), Some(truncate)) => Some(format!("{width}{truncate}")),
+                                                    (Some(width), None) => Some(width),
+                                                    (None, Some(truncate)) => Some(truncate),
+                                                    (None, None) => None,
+                                                }
+                                            };
+                                            let title = column.truncate.then_some(cell_value.clone());
+                                            let content = match column
+                                                .renderer_index
+                                                .and_then(|index| renderers.get(index))
+                                            {
+                                                Some(renderer) => renderer.run((current.index, current.row.clone())),
+                                                None => match column
+                                                    .typed_cell_index
+                                                    .and_then(|index| typed_cell_fns.get(index))
+                                                {
+                                                    Some(typed_cell) => match typed_cell.run((current.index, current.row.clone())) {
+                                                        TypedCell::Text(text) => view! { {text} }.into_any(),
+                                                        TypedCell::Badge { text, color } => view! {
+                                                            <Badge color=color>{text}</Badge>
+                                                        }.into_any(),
+                                                        TypedCell::Icon { name, color } => view! {
+                                                            <Icon name=name color=color />
+                                                        }.into_any(),
+                                                    },
+                                                    None => view! { {cell_value} }.into_any(),
+                                                },
+                                            };
+
+                                            view! {
+                                                <td
+                                                    class=cell_class
+                                                    style=style_attr
+                                                    title=title
+                                                    on:click=move |event: web_sys::MouseEvent| {
+                                                        if is_action {
+                                                            event.stop_propagation();
+                                                        }
+                                                    }
+                                                    on:keydown=move |event: web_sys::KeyboardEvent| {
+                                                        if is_action {
+                                                            event.stop_propagation();
+                                                        }
+                                                    }
+                                                >
+                                                    {content}
+                                                </td>
+                                            }
+                                        }).collect_view()
+                                    })}
                                 </tr>
-                            })}
+                                {move || current_row.get().and_then(|current| {
+                                    detail_renderer
+                                        .and_then(|renderer| renderer.run((current.index, current.row)))
+                                        .map(|detail| view! {
+                                            <tr
+                                                class="data-table-detail-row bg-base-100"
+                                                data-table-detail-row="true"
+                                                data-table-detail-for=current.index
+                                                data-row-key=current.stable_key
+                                                on:click=move |event| event.stop_propagation()
+                                                on:dblclick=move |event| event.stop_propagation()
+                                                on:keydown=move |event| event.stop_propagation()
+                                            >
+                                                <td
+                                                    colspan=move || columns.with(|columns| columns.len().max(1))
+                                                    class="border border-table-grid px-3 py-2 text-sm text-base-content/80 forced-colors:border-[CanvasText]"
+                                                >
+                                                    {detail}
+                                                </td>
+                                            </tr>
+                                        })
+                                })}
                             </>
                         }
-                    }).collect_view().into_any()
-                }
-            }}
+                    }
+                />
+            </Show>
         </tbody>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(id: &str, name: &str) -> TableRow {
+        HashMap::from([("id", id.to_owned()), ("name", name.to_owned())])
+    }
+
+    #[test]
+    fn stable_row_keys_preserve_business_identity_across_reorder_and_updates() {
+        let first = vec![
+            (0, row("matter-1", "First")),
+            (1, row("matter-2", "Second")),
+        ];
+        let reordered = vec![
+            (0, row("matter-2", "Updated")),
+            (1, row("matter-1", "First")),
+        ];
+
+        let first_keys =
+            validate_stable_row_keys(&first, |row| row["id"].clone()).expect("unique stable keys");
+        let reordered_keys = validate_stable_row_keys(&reordered, |row| row["id"].clone())
+            .expect("same stable keys after replacement");
+
+        assert_eq!(first_keys, vec!["matter-1", "matter-2"]);
+        assert_eq!(reordered_keys, vec!["matter-2", "matter-1"]);
+    }
+
+    #[test]
+    fn empty_and_duplicate_stable_row_keys_fail_closed() {
+        let empty = vec![(0, row("", "Missing"))];
+        assert_eq!(
+            validate_stable_row_keys(&empty, |row| row["id"].clone()),
+            Err(StableRowKeyError::Empty { index: 0 })
+        );
+
+        let duplicate = vec![
+            (0, row("matter-1", "First")),
+            (1, row("matter-1", "Duplicate")),
+        ];
+        assert_eq!(
+            validate_stable_row_keys(&duplicate, |row| row["id"].clone()),
+            Err(StableRowKeyError::Duplicate {
+                key: "matter-1".to_owned(),
+                first_index: 0,
+                duplicate_index: 1,
+            })
+        );
     }
 }

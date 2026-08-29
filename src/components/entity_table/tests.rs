@@ -1,6 +1,7 @@
 use super::*;
+use crate::components::badge::{BadgeColor, BadgeStyle};
 use crate::components::data_table::{clamp_page, page_bounds, page_count};
-use leptos::prelude::{Callback, Get, RwSignal, Set, StoredValue};
+use leptos::prelude::{Callback, Get, IntoAny, RwSignal, Set, StoredValue};
 use leptos::reactive::owner::Owner;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -119,6 +120,166 @@ fn multi_sort_extracts_each_text_key_once_per_row() {
 
     assert_eq!(client_calls.get(), rows.len());
     assert_eq!(office_calls.get(), rows.len());
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct TypedSortRow {
+    id: &'static str,
+    number: i64,
+    date: (u16, u8, u8),
+    label: &'static str,
+    optional: Option<i64>,
+}
+
+fn typed_sort_rows() -> Vec<TypedSortRow> {
+    vec![
+        TypedSortRow {
+            id: "ten",
+            number: 10,
+            date: (2026, 1, 2),
+            label: "Zulu",
+            optional: None,
+        },
+        TypedSortRow {
+            id: "two-a",
+            number: 2,
+            date: (2025, 12, 31),
+            label: "Alpha",
+            optional: Some(10),
+        },
+        TypedSortRow {
+            id: "negative",
+            number: -3,
+            date: (2026, 1, 1),
+            label: "Bravo",
+            optional: Some(2),
+        },
+        TypedSortRow {
+            id: "two-b",
+            number: 2,
+            date: (2026, 2, 1),
+            label: "Charlie",
+            optional: Some(10),
+        },
+    ]
+}
+
+fn sorted_typed_ids(
+    rows: &[TypedSortRow],
+    column: EntityColumn<TypedSortRow>,
+    sort: EntitySort,
+) -> Vec<&'static str> {
+    sorted_indices(rows, &[column], &sort)
+        .into_iter()
+        .map(|index| rows[index].id)
+        .collect()
+}
+
+#[test]
+fn typed_sort_keys_cover_signed_numeric_date_time_and_string_ordering() {
+    let rows = typed_sort_rows();
+
+    assert_eq!(
+        sorted_typed_ids(
+            &rows,
+            EntityColumn::text("number", "Number", |row: &TypedSortRow| row
+                .number
+                .to_string())
+            .sortable_by_key(|row| row.number),
+            EntitySort::ascending("number"),
+        ),
+        ["negative", "two-a", "two-b", "ten"],
+        "typed numeric ordering must not fall back to lexical display text"
+    );
+    assert_eq!(
+        sorted_typed_ids(
+            &rows,
+            EntityColumn::text("number", "Number", |row: &TypedSortRow| row
+                .number
+                .to_string())
+            .sortable_by_key(|row| row.number),
+            EntitySort::descending("number"),
+        ),
+        ["ten", "two-a", "two-b", "negative"],
+        "equal typed keys preserve stable source order under descending sort"
+    );
+    assert_eq!(
+        sorted_typed_ids(
+            &rows,
+            EntityColumn::text("date", "Date", |row: &TypedSortRow| format!(
+                "{:04}-{:02}-{:02}",
+                row.date.0, row.date.1, row.date.2
+            ))
+            .sortable_by_key(|row| row.date),
+            EntitySort::ascending("date"),
+        ),
+        ["two-a", "negative", "ten", "two-b"]
+    );
+    assert_eq!(
+        sorted_typed_ids(
+            &rows,
+            EntityColumn::text("label", "Label", |row: &TypedSortRow| row.label.to_owned())
+                .sortable_by_key(|row| row.label.to_owned()),
+            EntitySort::ascending("label"),
+        ),
+        ["two-a", "negative", "two-b", "ten"]
+    );
+}
+
+#[test]
+fn optional_typed_sort_keys_keep_explicit_null_placement_in_both_directions() {
+    let rows = typed_sort_rows();
+    for direction in [
+        EntitySortDirection::Ascending,
+        EntitySortDirection::Descending,
+    ] {
+        let sort = match direction {
+            EntitySortDirection::Ascending => EntitySort::ascending("optional"),
+            EntitySortDirection::Descending => EntitySort::descending("optional"),
+        };
+        let first = EntityColumn::text("optional", "Optional", |row: &TypedSortRow| {
+            row.optional
+                .map_or_else(|| "None".to_owned(), |value| value.to_string())
+        })
+        .sortable_by_optional_key(EntityNullOrder::First, |row| row.optional);
+        let last = EntityColumn::text("optional", "Optional", |row: &TypedSortRow| {
+            row.optional
+                .map_or_else(|| "None".to_owned(), |value| value.to_string())
+        })
+        .sortable_by_optional_key(EntityNullOrder::Last, |row| row.optional);
+
+        assert_eq!(sorted_typed_ids(&rows, first, sort.clone())[0], "ten");
+        assert_eq!(sorted_typed_ids(&rows, last, sort).last(), Some(&"ten"));
+    }
+}
+
+#[test]
+fn typed_sort_key_is_extracted_once_per_row_and_composes_in_multi_sort() {
+    let rows = typed_sort_rows();
+    let calls = Rc::new(Cell::new(0));
+    let calls_for_key = Rc::clone(&calls);
+    let columns = vec![
+        EntityColumn::text("number", "Number", |row: &TypedSortRow| {
+            row.number.to_string()
+        })
+        .sortable_by_key(move |row| {
+            calls_for_key.set(calls_for_key.get() + 1);
+            row.number
+        }),
+        EntityColumn::text("label", "Label", |row: &TypedSortRow| row.label.to_owned())
+            .sortable_by_key(|row| row.label.to_ascii_lowercase()),
+    ];
+    let sort = EntitySort::multiple([
+        EntitySortColumn::ascending("number"),
+        EntitySortColumn::descending("label"),
+    ]);
+
+    assert_eq!(
+        sorted_indices(&rows, &columns, &sort),
+        [2, 3, 1, 0],
+        "the typed primary key and normalized secondary key compose by clause priority"
+    );
+    assert_eq!(calls.get(), rows.len());
 }
 
 #[test]
@@ -766,6 +927,368 @@ fn opinionated_page_sizes_are_fixed() {
     assert!(valid_page_size(50));
     assert!(valid_page_size(100));
     assert!(!valid_page_size(10));
+}
+
+#[test]
+fn entity_column_text_overflow_builders_are_typed_and_source_local() {
+    let wrapped = EntityColumn::text("name", "Name", |row: &Row| row.name.to_owned());
+    let ellipsis = wrapped.clone().ellipsis();
+    let clamped = wrapped.clone().line_clamp(2);
+
+    assert_eq!(wrapped.text_overflow, EntityTextOverflow::Wrap);
+    assert_eq!(ellipsis.text_overflow, EntityTextOverflow::Ellipsis);
+    assert_eq!(
+        clamped.text_overflow,
+        EntityTextOverflow::LineClamp(std::num::NonZeroU8::new(2).unwrap())
+    );
+    assert!(entity_text_overflow_style(ellipsis.text_overflow).contains("text-overflow:ellipsis"));
+    assert!(entity_text_overflow_style(clamped.text_overflow).contains("-webkit-line-clamp:2"));
+}
+
+#[test]
+#[should_panic(expected = "EntityColumn line clamp must be positive")]
+fn entity_column_line_clamp_rejects_zero() {
+    let _ = EntityColumn::text("name", "Name", |row: &Row| row.name.to_owned()).line_clamp(0);
+}
+
+#[test]
+fn rich_renderer_keeps_visual_precedence_over_text_overflow_metadata() {
+    let column = EntityColumn::text("name", "Name", |row: &Row| row.name.to_owned())
+        .line_clamp(2)
+        .render_with(|row: &Row| row.name.to_owned().into_any());
+
+    assert!(column.renderer.is_some());
+    assert_eq!(column.text_overflow.as_str(), "line-clamp");
+    assert_eq!((column.text)(&rows()[0]), "Zulu");
+}
+
+#[test]
+fn entity_column_alignment_and_tabular_number_builders_are_typed() {
+    let base = EntityColumn::text("amount", "Amount", |row: &Row| row.rank.to_string());
+    assert_eq!(base.alignment, EntityColumnAlignment::Auto);
+    assert!(!base.tabular_numbers);
+
+    let centered = base.clone().align_center();
+    assert_eq!(centered.alignment, EntityColumnAlignment::Center);
+    let started = base.clone().align_start();
+    assert_eq!(started.alignment, EntityColumnAlignment::Start);
+    let numeric = base.align_end().tabular_numbers();
+    assert_eq!(numeric.alignment, EntityColumnAlignment::End);
+    assert!(numeric.tabular_numbers);
+    assert_eq!(
+        entity_alignment_class(EntityColumnAlignment::Start),
+        "text-left"
+    );
+    assert_eq!(
+        entity_alignment_class(EntityColumnAlignment::Center),
+        "text-center"
+    );
+    assert_eq!(
+        entity_alignment_class(EntityColumnAlignment::End),
+        "text-right"
+    );
+    assert_eq!(
+        entity_header_justify_class(EntityColumnAlignment::End),
+        "justify-end"
+    );
+}
+
+#[test]
+fn rich_renderer_retains_wrapper_level_numeric_presentation() {
+    let column = EntityColumn::text("amount", "Amount", |row: &Row| row.rank.to_string())
+        .align_end()
+        .tabular_numbers()
+        .render_with(|_| ().into_any());
+
+    assert_eq!(column.alignment, EntityColumnAlignment::End);
+    assert!(column.tabular_numbers);
+    assert!(column.renderer.is_some());
+}
+
+#[test]
+fn semantic_badge_and_icon_builders_keep_canonical_text_source_local() {
+    let badge =
+        EntityColumn::text("status", "Status", |row: &Row| row.name.to_owned()).badge_with(|row| {
+            (row.rank > 1).then(|| {
+                EntityBadgePresentation::new(BadgeColor::Warning).with_style(BadgeStyle::Outline)
+            })
+        });
+    let icon =
+        EntityColumn::text("state", "State", |row: &Row| row.name.to_owned()).icon_with(|row| {
+            (row.rank > 1)
+                .then(|| EntityIconPresentation::new("triangle-alert", EntityIconColor::Warning))
+        });
+
+    assert_eq!((badge.text)(&rows()[0]), "Zulu");
+    assert_eq!((icon.text)(&rows()[0]), "Zulu");
+    assert!(matches!(
+        badge.presentation,
+        Some(EntityCellPresentation::Badge(_))
+    ));
+    assert!(matches!(
+        icon.presentation,
+        Some(EntityCellPresentation::Icon(_))
+    ));
+}
+
+#[test]
+fn semantic_cell_configuration_has_opinionated_defaults_and_rich_precedence() {
+    let badge = EntityBadgePresentation::new(BadgeColor::Success);
+    assert_eq!(badge.color, BadgeColor::Success);
+    assert_eq!(badge.style, BadgeStyle::Soft);
+    assert_eq!(EntityIconColor::Error.as_class(), "text-error");
+
+    let column = EntityColumn::text("status", "Status", |row: &Row| row.name.to_owned())
+        .badge_with(|_| Some(EntityBadgePresentation::new(BadgeColor::Info)))
+        .render_with(|_| ().into_any());
+    assert!(column.presentation.is_some());
+    assert!(
+        column.renderer.is_some(),
+        "render_with remains the visual winner"
+    );
+}
+
+#[test]
+fn column_chooser_trigger_defaults_to_localized_text() {
+    assert_eq!(
+        EntityColumnChooserTrigger::default(),
+        EntityColumnChooserTrigger::Text
+    );
+}
+
+#[test]
+fn responsive_filter_metadata_keeps_label_activity_and_clear_intent_caller_owned() {
+    let owner = Owner::new();
+    owner.with(|| {
+        let label = RwSignal::new("Workflow status".to_owned());
+        let active = RwSignal::new(true);
+        let clear_count = Arc::new(Mutex::new(0_u32));
+        let observed_count = Arc::clone(&clear_count);
+        let filter = EntityColumnFilter::new("status", || "filter".into_any()).with_responsive(
+            label,
+            active,
+            Callback::new(move |_| *observed_count.lock().unwrap() += 1),
+        );
+
+        assert_eq!(filter.label("Fallback"), "Workflow status");
+        assert!(filter.is_active());
+        filter.clear();
+        assert_eq!(*clear_count.lock().unwrap(), 1);
+
+        label.set("Estado del flujo".to_owned());
+        active.set(false);
+        assert_eq!(filter.label("Fallback"), "Estado del flujo");
+        assert!(!filter.is_active());
+    });
+
+    let compatibility = EntityColumnFilter::new("status", || "filter".into_any());
+    assert_eq!(compatibility.label("Status"), "Status");
+    assert!(!compatibility.is_active());
+}
+
+#[test]
+fn controlled_text_filter_derives_activity_and_clear_from_the_supplied_value() {
+    let owner = Owner::new();
+    owner.with(|| {
+        let label = RwSignal::new("Client".to_owned());
+        let value = RwSignal::new("Ada".to_owned());
+        let proposals = Arc::new(Mutex::new(Vec::<String>::new()));
+        let observed = Arc::clone(&proposals);
+        let filter = EntityColumnFilter::text(
+            "client",
+            "client-name-filter",
+            label,
+            value,
+            "Filter clients",
+            Callback::new(move |next| observed.lock().unwrap().push(next)),
+        );
+
+        assert_eq!(filter.control_id(), Some("client-name-filter"));
+        assert_eq!(filter.label("Fallback"), "Client");
+        assert!(filter.is_active());
+
+        filter.clear();
+        assert_eq!(&*proposals.lock().unwrap(), &[String::new()]);
+        assert!(
+            filter.is_active(),
+            "a rejected clear proposal must not disagree with the controlled value"
+        );
+
+        value.set(String::new());
+        assert!(!filter.is_active());
+        label.set("Cliente".to_owned());
+        assert_eq!(filter.label("Fallback"), "Cliente");
+    });
+}
+
+#[test]
+fn controlled_select_filter_keeps_value_identity_separate_from_reactive_labels() {
+    let owner = Owner::new();
+    owner.with(|| {
+        let value = RwSignal::new("ready".to_owned());
+        let options = RwSignal::new(vec![
+            EntityColumnFilterOption::new("ready", "Ready"),
+            EntityColumnFilterOption::new("urgent", "Urgent"),
+        ]);
+        let proposals = Arc::new(Mutex::new(Vec::<String>::new()));
+        let observed = Arc::clone(&proposals);
+        let filter = EntityColumnFilter::select(
+            "status",
+            "workflow-status-filter",
+            "Status",
+            value,
+            "All statuses",
+            options,
+            Callback::new(move |next| observed.lock().unwrap().push(next)),
+        );
+
+        assert_eq!(filter.control_id(), Some("workflow-status-filter"));
+        assert!(filter.is_active());
+        options.set(vec![
+            EntityColumnFilterOption::new("ready", "Listo"),
+            EntityColumnFilterOption::new("urgent", "Urgente"),
+        ]);
+        assert_eq!(value.get(), "ready");
+
+        filter.clear();
+        assert_eq!(&*proposals.lock().unwrap(), &[String::new()]);
+        assert_eq!(value.get(), "ready");
+        value.set(String::new());
+        assert!(!filter.is_active());
+    });
+}
+
+#[test]
+#[should_panic(expected = "EntityColumnFilter control_id must not be empty")]
+fn controlled_filter_rejects_an_empty_dom_identity() {
+    let owner = Owner::new();
+    owner.with(|| {
+        let _ = EntityColumnFilter::text(
+            "client",
+            "   ",
+            "Client",
+            RwSignal::new(String::new()),
+            "Filter clients",
+            Callback::new(|_| {}),
+        );
+    });
+}
+
+#[test]
+fn display_projection_uses_render_order_visibility_sort_and_canonical_text() {
+    let rows = rows();
+    let mut columns = columns();
+    columns[0] = columns[0]
+        .clone()
+        .render_with(|_| "decorative client markup".into_any());
+    let mut preferences = EntityTablePreferences::new(1);
+    preferences.page_size = 2;
+    preferences.sort = EntitySort::ascending("rank");
+    preferences.column_order = ["rank", "client", "office", "actions"]
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+    preferences.hidden_columns.insert("office".to_owned());
+
+    let projection = entity_table_display_projection(
+        &rows,
+        &columns,
+        &preferences,
+        0,
+        2,
+        &|row: &Row| row.id.to_owned(),
+        EntityTableActionColumnPolicy::Exclude,
+    );
+
+    assert_eq!(
+        projection.columns,
+        [
+            EntityTableDisplayColumn::new("rank", "Rank", false),
+            EntityTableDisplayColumn::new("client", "Client", false),
+        ]
+    );
+    assert_eq!(
+        projection.rows(EntityTableProjectionScope::AllFiltered),
+        [
+            EntityTableDisplayRow::new("r2", ["1", "Alpha"]),
+            EntityTableDisplayRow::new("r3", ["1", "Bravo"]),
+            EntityTableDisplayRow::new("r1", ["2", "Zulu"]),
+        ]
+    );
+    assert_eq!(
+        projection.rows(EntityTableProjectionScope::CurrentPage),
+        [
+            EntityTableDisplayRow::new("r2", ["1", "Alpha"]),
+            EntityTableDisplayRow::new("r3", ["1", "Bravo"]),
+        ]
+    );
+}
+
+#[test]
+fn display_projection_current_page_and_action_opt_in_are_explicit() {
+    let rows = rows();
+    let columns = columns();
+    let mut preferences = EntityTablePreferences::new(1);
+    preferences.page_size = 2;
+
+    let projection = entity_table_display_projection(
+        &rows,
+        &columns,
+        &preferences,
+        1,
+        2,
+        &|row: &Row| row.id.to_owned(),
+        EntityTableActionColumnPolicy::Include,
+    );
+
+    assert_eq!(
+        projection
+            .columns
+            .iter()
+            .map(|column| (column.id.as_str(), column.is_action))
+            .collect::<Vec<_>>(),
+        [
+            ("client", false),
+            ("rank", false),
+            ("office", false),
+            ("actions", true),
+        ]
+    );
+    assert_eq!(
+        projection.rows(EntityTableProjectionScope::CurrentPage),
+        [EntityTableDisplayRow::new(
+            "r3",
+            ["Bravo", "1", "r3", "Claim"]
+        )]
+    );
+    assert_eq!(
+        projection
+            .rows(EntityTableProjectionScope::AllFiltered)
+            .len(),
+        3
+    );
+}
+
+#[test]
+fn viewport_fit_policy_is_explicit_and_does_not_replace_the_preference() {
+    let bounded = EntityTableViewportFit::max_height("calc(100vh - 12rem)").with_min_rows(7);
+    assert_eq!(bounded.height(), Some("calc(100vh - 12rem)"));
+    assert_eq!(bounded.min_rows(), 7);
+
+    let fill_parent = EntityTableViewportFit::fill_parent().with_min_rows(0);
+    assert_eq!(fill_parent.height(), None);
+    assert_eq!(fill_parent.min_rows(), 1);
+
+    let preferences = EntityTablePreferences::new(1);
+    assert_eq!(
+        super::component::effective_page_size(Some(11), preferences.page_size),
+        11
+    );
+    assert_eq!(
+        super::component::effective_page_size(None, preferences.page_size),
+        25
+    );
+    assert_eq!(preferences.page_size, 25);
 }
 
 #[test]

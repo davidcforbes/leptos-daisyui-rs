@@ -44,7 +44,7 @@ pub use filter_bar::{
     SnapshotDefaultSaveState, filter_active_summary, filter_bar_class, filter_result_summary,
 };
 pub use list_page::{LIST_PAGE_BASE_CLASS, ListPage, list_page_class};
-pub use page_header::PageHeader;
+pub use page_header::{PageHeader, PageHeaderNavigationLayout};
 pub use page_state_panel::{PageStatePanel, PageStatePanelTexts};
 pub use snapshot_table::{
     LocalResultSummary, PageStatePanelKind, SnapshotAccess, SnapshotActionDisposition,

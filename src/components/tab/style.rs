@@ -89,3 +89,23 @@ impl TabPlacement {
         }
     }
 }
+
+/// Keyboard and accessibility orientation of a controlled [`TabSet`](super::TabSet).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TabOrientation {
+    /// Left and Right Arrow move through the tab list.
+    #[default]
+    Horizontal,
+    /// Up and Down Arrow move through the tab list.
+    Vertical,
+}
+
+impl TabOrientation {
+    /// Value emitted through `aria-orientation`.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Horizontal => "horizontal",
+            Self::Vertical => "vertical",
+        }
+    }
+}

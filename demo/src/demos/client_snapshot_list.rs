@@ -147,6 +147,11 @@ pub fn ClientSnapshotListDemo() -> impl IntoView {
     let retained_action_count = RwSignal::new(0_usize);
     let removed_rows = RwSignal::new(BTreeSet::<String>::new());
     let activate_count = RwSignal::new(0_usize);
+    let toolbar_action_count = RwSignal::new(0_usize);
+    let display_projection = RwSignal::new(EntityTableDisplayProjection::default());
+    let exported_current_rows = RwSignal::new(0_usize);
+    let exported_all_rows = RwSignal::new(0_usize);
+    let exported_first_key = RwSignal::new(String::new());
     let last_activated = RwSignal::new(String::new());
     let spanish = RwSignal::new(false);
     let access_generation = RwSignal::new(0_u64);
@@ -167,6 +172,10 @@ pub fn ClientSnapshotListDemo() -> impl IntoView {
         debug_state::set("entity_table.preferences", table_preferences.get());
     });
     on_cleanup(move || debug_state::remove("entity_table.preferences"));
+    Effect::new(move |_| {
+        debug_state::set("entity_table.display_projection", display_projection.get());
+    });
+    on_cleanup(move || debug_state::remove("entity_table.display_projection"));
 
     let snapshot = Signal::derive_local(move || {
         let removed = removed_rows.get();
@@ -240,58 +249,101 @@ pub fn ClientSnapshotListDemo() -> impl IntoView {
             spanish.get(),
         )
     });
-    let column_filters = Signal::derive_local(move || {
-        let (status_label, status_all, case_label, case_all) = if spanish.get() {
-            (
-                "Estado",
-                "Todos los estados",
-                "Tipo de caso",
-                "Todos los tipos",
-            )
-        } else {
-            ("Status", "All statuses", "Case type", "All case types")
-        };
-        vec![
-            EntityColumnFilter::new("status", move || {
-                view! {
-                    <label class="block w-full">
-                        <span class="sr-only">{status_label}</span>
-                        <select
-                            class="select select-bordered select-xs w-full bg-table-filter text-table-filter-content"
-                            aria-label=status_label
-                            data-testid="entity-status-filter"
-                            prop:value=move || status.get()
-                            on:change=move |event| status.set(event_target_value(&event))
-                        >
-                            <option value="">{status_all}</option>
-                            <option value="Ready">"Ready"</option>
-                            <option value="Urgent">"Urgent"</option>
-                        </select>
-                    </label>
+    let column_filter_definitions = StoredValue::new_local(vec![
+        EntityColumnFilter::text(
+            "client",
+            "entity-client-filter",
+            Signal::derive(move || {
+                if spanish.get() {
+                    "Cliente".to_owned()
+                } else {
+                    "Client".to_owned()
                 }
-                .into_any()
             }),
-            EntityColumnFilter::new("case_type", move || {
-                view! {
-                    <label class="block w-full">
-                        <span class="sr-only">{case_label}</span>
-                        <select
-                            class="select select-bordered select-xs w-full bg-table-filter text-table-filter-content"
-                            aria-label=case_label
-                            data-testid="entity-case-filter"
-                            prop:value=move || case_type.get()
-                            on:change=move |event| case_type.set(event_target_value(&event))
-                        >
-                            <option value="">{case_all}</option>
-                            <option value="Family">"Family"</option>
-                            <option value="Humanitarian">"Humanitarian"</option>
-                        </select>
-                    </label>
+            search,
+            Signal::derive(move || {
+                if spanish.get() {
+                    "Filtrar clientes".to_owned()
+                } else {
+                    "Filter clients".to_owned()
                 }
-                .into_any()
             }),
-        ]
-    });
+            Callback::new(move |next| search.set(next)),
+        ),
+        EntityColumnFilter::select(
+            "status",
+            "entity-status-filter",
+            Signal::derive(move || {
+                if spanish.get() {
+                    "Estado".to_owned()
+                } else {
+                    "Status".to_owned()
+                }
+            }),
+            status,
+            Signal::derive(move || {
+                if spanish.get() {
+                    "Todos los estados".to_owned()
+                } else {
+                    "All statuses".to_owned()
+                }
+            }),
+            Signal::derive(move || {
+                if spanish.get() {
+                    vec![
+                        EntityColumnFilterOption::new("Ready", "Listo"),
+                        EntityColumnFilterOption::new("Urgent", "Urgente"),
+                        EntityColumnFilterOption::new("Rejected", "Rechazado"),
+                    ]
+                } else {
+                    vec![
+                        EntityColumnFilterOption::new("Ready", "Ready"),
+                        EntityColumnFilterOption::new("Urgent", "Urgent"),
+                        EntityColumnFilterOption::new("Rejected", "Rejected proposal"),
+                    ]
+                }
+            }),
+            Callback::new(move |next| {
+                if next != "Rejected" {
+                    status.set(next);
+                }
+            }),
+        ),
+        EntityColumnFilter::select(
+            "case_type",
+            "entity-case-filter",
+            Signal::derive(move || {
+                if spanish.get() {
+                    "Tipo de caso".to_owned()
+                } else {
+                    "Case type".to_owned()
+                }
+            }),
+            case_type,
+            Signal::derive(move || {
+                if spanish.get() {
+                    "Todos los tipos".to_owned()
+                } else {
+                    "All case types".to_owned()
+                }
+            }),
+            Signal::derive(move || {
+                if spanish.get() {
+                    vec![
+                        EntityColumnFilterOption::new("Family", "Familia"),
+                        EntityColumnFilterOption::new("Humanitarian", "Humanitario"),
+                    ]
+                } else {
+                    vec![
+                        EntityColumnFilterOption::new("Family", "Family"),
+                        EntityColumnFilterOption::new("Humanitarian", "Humanitarian"),
+                    ]
+                }
+            }),
+            Callback::new(move |next| case_type.set(next)),
+        ),
+    ]);
+    let column_filters = Signal::derive_local(move || column_filter_definitions.get_value());
     let filter_result = Signal::derive(move || {
         FilterResultSummary::new(filtered.get().len(), snapshot.get().len())
     });
@@ -323,6 +375,9 @@ pub fn ClientSnapshotListDemo() -> impl IntoView {
                 region_label: "Tabla de clientes".to_owned(),
                 rows_per_page: "Filas por página".to_owned(),
                 choose_columns: "Elegir columnas".to_owned(),
+                filters: "Filtros de columnas".to_owned(),
+                filter_active: "Filtro activo".to_owned(),
+                clear_filter: "Quitar el filtro {column}".to_owned(),
                 column_order: "Orden de columnas".to_owned(),
                 move_earlier: "Mover {column} antes desde la posición {position} de {total}"
                     .to_owned(),
@@ -412,6 +467,15 @@ pub fn ClientSnapshotListDemo() -> impl IntoView {
             <PageHeader
                 title="Client snapshot list"
                 subtitle="One selected office downloads once; filtering, sorting, paging, and column preferences stay local."
+                back=Box::new(|| view! {
+                    <a
+                        class="btn btn-ghost btn-sm"
+                        href="#client-snapshot-table"
+                        data-testid="client-snapshot-back"
+                    >
+                        "← Back"
+                    </a>
+                }.into_any())
                 freshness=Box::new(move || view! {
                     <Badge color=BadgeColor::Success class="badge-sm">"Live"
                     </Badge>
@@ -505,6 +569,9 @@ pub fn ClientSnapshotListDemo() -> impl IntoView {
                 <span>"Kept actions: " <strong data-testid="entity-retain-count">{move || retained_action_count.get()}</strong></span>
                 <span>"Default saves: " <strong data-testid="entity-save-count">{move || save_count.get()}</strong></span>
                 <span>"Row activations: " <strong data-testid="entity-activate-count">{move || activate_count.get()}</strong></span>
+                <span>"Toolbar actions: " <strong data-testid="entity-toolbar-action-count">{move || toolbar_action_count.get()}</strong></span>
+                <span>"Exported page/all: " <strong data-testid="entity-export-counts">{move || format!("{}/{}", exported_current_rows.get(), exported_all_rows.get())}</strong></span>
+                <span>"Exported first key: " <strong data-testid="entity-export-first-key">{move || exported_first_key.get()}</strong></span>
                 <span>"Last row: " <strong data-testid="entity-last-row">{move || last_activated.get()}</strong></span>
             </div>
             <div class="flex flex-wrap gap-1" aria-label="Default save state fixture">
@@ -531,6 +598,33 @@ pub fn ClientSnapshotListDemo() -> impl IntoView {
                     preference_version=1
                     texts=entity_texts
                     show_reset_actions=true
+                    column_chooser_trigger=EntityColumnChooserTrigger::Icon
+                    toolbar_actions=Box::new(move || {
+                        view! {
+                            <Button
+                                class="btn-outline btn-sm"
+                                attr:data-testid="entity-toolbar-export"
+                                attr:aria-label="Export current rows"
+                                on_click=Callback::new(move |_| {
+                                    let projection = display_projection.get_untracked();
+                                    let current = projection.rows(EntityTableProjectionScope::CurrentPage);
+                                    let all = projection.rows(EntityTableProjectionScope::AllFiltered);
+                                    exported_current_rows.set(current.len());
+                                    exported_all_rows.set(all.len());
+                                    exported_first_key.set(
+                                        current.first().map_or_else(String::new, |row| row.key.clone()),
+                                    );
+                                    toolbar_action_count.update(|count| *count += 1);
+                                })
+                            >
+                                "Export CSV"
+                            </Button>
+                        }
+                        .into_any()
+                    })
+                    on_display_projection=Callback::new(move |projection| {
+                        display_projection.set(projection);
+                    })
                     on_row_activate=Callback::new(move |key: String| {
                         activate_count.update(|count| *count += 1);
                         last_activated.set(key);

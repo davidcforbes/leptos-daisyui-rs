@@ -97,8 +97,11 @@ pub(crate) use chooser::{ColumnVisibilityAction, column_visibility_action};
 pub use clipboard::{cell_text, row_text, row_with_headers_text};
 pub use component::*;
 pub use filter::{
-    ColumnFilters, DataTableFilterRow, FILTER_ALL, distinct_values, has_filterable_columns,
-    prune_stale_filters, row_matches_filters, row_matches_search,
+    COLUMN_TEXT_FILTER_DEBOUNCE_MS, ColumnFilters, DataTableFilterOption,
+    DataTableFilterOptionError, DataTableFilterOptions, DataTableFilterRow, FILTER_ALL,
+    distinct_values, filter_options_from_strings, has_exact_filterable_columns,
+    has_filterable_columns, prune_stale_column_filters, prune_stale_filters,
+    row_matches_column_filters, row_matches_filters, row_matches_search, validate_filter_options,
 };
 pub(crate) use geometry::{
     StableColumnTrack, StableTableColGroup, stable_column_width, stable_table_content_style,

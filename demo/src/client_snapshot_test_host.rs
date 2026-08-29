@@ -16,7 +16,9 @@ use leptos::mount::mount_to_body;
 use leptos::prelude::*;
 use leptos_daisyui_rs::test_mode;
 use leptos_daisyui_rs::tokens::{UiAnimationsPreamble, UiTokensPreamble};
-use snapshot_table_page::SnapshotTablePageFixture;
+use snapshot_table_page::{
+    EntityTablePresentationFixture, EntityTableViewportFitFixture, SnapshotTablePageFixture,
+};
 
 fn main() {
     console_error_panic_hook::set_once();
@@ -40,11 +42,21 @@ fn main() {
         let snapshot_fixture = web_sys::window()
             .and_then(|window| window.location().pathname().ok())
             .is_some_and(|path| path.ends_with("/snapshot-table-page"));
+        let viewport_fit_fixture = web_sys::window()
+            .and_then(|window| window.location().pathname().ok())
+            .is_some_and(|path| path.ends_with("/entity-table-viewport-fit"));
+        let presentation_fixture = web_sys::window()
+            .and_then(|window| window.location().pathname().ok())
+            .is_some_and(|path| path.ends_with("/entity-table-presentation"));
         view! {
             <UiTokensPreamble />
             <UiAnimationsPreamble />
             <main class="min-h-screen bg-base-200 p-4 sm:p-6">
-                {if snapshot_fixture {
+                {if presentation_fixture {
+                    view! { <EntityTablePresentationFixture /> }.into_any()
+                } else if viewport_fit_fixture {
+                    view! { <EntityTableViewportFitFixture /> }.into_any()
+                } else if snapshot_fixture {
                     view! { <SnapshotTablePageFixture /> }.into_any()
                 } else {
                     view! { <ClientSnapshotListDemo /> }.into_any()

@@ -42,7 +42,13 @@ shell, changing column widths, or moving the scroll origin.
 
 Sorting reorders an **index permutation**, never `data` itself. Every index the component hands you — `selected_rows`, `on_row_activate`, `cell_renderers`, `row_class_fn` — is an **absolute index into `data`**, so it survives pagination and sorting. A row on page 5 of a descending sort reports the same index it had on page 1 unsorted.
 
-Selection is cleared automatically when `data`, the sort column, or the sort order changes, because those indices may no longer point at the same row.
+Without `row_key`, selection is cleared automatically when `data`, the sort
+column, or the sort order changes, because those indices may no longer point at
+the same row. Supply `row_key` when rows have a stable business identity. The
+selection is then remapped by key, and the shared body also reconciles the
+mounted row DOM by that key so focus does not slide to a different entity after
+replacement or reorder. Empty and duplicate keys fail closed with a visible
+table-body alert.
 
 ## Props
 
@@ -59,6 +65,7 @@ Selection is cleared automatically when `data`, the sort column, or the sort ord
 | `classes` | `DataTableClasses` | `Default` | Per-element class overrides |
 | `texts` | `DataTableTexts` | `Default` | User-facing strings (i18n) |
 | `sort_texts` | `DataTableSortTexts` | `Default` | Reactive current-state and next-action names for sortable header controls |
+| `text_filter_label` | `Signal<String>` | `"Filter {column} by text"` | Reactive accessible-name template for substring filter inputs |
 | `class` | `&'static str` | `""` | Additional container classes |
 | `table_size` | `Signal<TableSize>` | `Md` | daisyUI table density |
 | `zebra` | `Signal<bool>` | `false` | Zebra striping |
@@ -67,6 +74,7 @@ Selection is cleared automatically when `data`, the sort column, or the sort ord
 | `max_height` | `Option<String>` | `None` | Viewport-constrained scrolling, e.g. `"calc(100vh - 260px)"` |
 | `selected_rows` | `Option<RwSignal<BTreeSet<usize>>>` | `None` | Multi-select state (absolute indices). Owned locally if omitted. Supplying it makes rows keyboard-operable |
 | `selection_anchor` | `Option<RwSignal<Option<usize>>>` | `None` | Anchor for Shift-range selection |
+| `row_key` | `Option<Callback<TableRow, String>>` | `None` | Stable business identity for selection remapping and keyed row DOM |
 | `on_row_activate` | `Option<Callback<usize>>` | `None` | Plain click/Enter/Space activates instead of selecting. Supplying it makes rows keyboard-operable |
 | `on_sort_change` | `Option<Callback<(&'static str, SortOrder)>>` | `None` | Fired after a header click changes sort state |
 | `cell_renderers` | `Vec<CellRenderer>` | `[]` | Custom cell views, indexed by `Column::renderer_index` |
@@ -84,10 +92,16 @@ Column::new("balance", "Balance")          // sortable
 Column::new_non_sortable("actions", "")    // not sortable
 ```
 
+Every sortable header reserves a fixed-width indicator slot. An idle column
+shows a quiet bidirectional `⇅` affordance; the active column shows `↑` or `↓`
+at full emphasis. Moving the active sort therefore changes neither column
+geometry nor the discoverability of the other sortable columns.
+
 | Builder | Effect |
 |---------|--------|
 | `.with_sort_as(SortAs)` | How cells compare when sorting (see below) |
 | `.filterable()` | Give this column a dropdown in the filter row |
+| `.filterable_text()` | Give this column a 150ms-debounced, case-insensitive substring input |
 | `.with_min_width(u32)` / `.with_max_width(u32)` | Width bounds in px |
 | `.with_truncate()` | Ellipsis overflow (pair with `with_max_width`) |
 | `.with_class(&'static str)` | Extra classes for this column's cells |
@@ -228,9 +242,17 @@ fn BasicTable() -> impl IntoView {
 
 ### Search and per-column filters
 
-A `filterable()` column gets a dropdown of its distinct values beneath the header. Filters combine with each other **and** with the search box — all must match. A table with no `filterable` column renders no filter row at all.
+Use `filterable()` for a finite, low-cardinality exact dropdown (status, owner,
+type). Use `filterable_text()` for a high-cardinality value such as a job name,
+matter number, or destination. Its aligned text input applies a
+case-insensitive substring after 150ms: `mat` matches both `zoho-matters` and
+`Matter_Timeline`. Empty input removes that filter.
 
-Best on low-cardinality columns (status, owner, type); a dropdown of a thousand distinct ids is not a usable filter.
+Both kinds share `ColumnFilters`, combine with each other **and** with the
+table-wide search, and use AND semantics. `Column::filter_kind()` returns
+`Some(ColumnFilterKind::Exact | Contains)` so server consumers can interpret
+the same string map without changing its transport shape. A table with neither
+builder renders no filter row.
 
 <details>
 <summary>View Code</summary>
@@ -242,7 +264,7 @@ use leptos_daisyui_rs::components::*;
 #[component]
 fn FilteredTable(data: Signal<Vec<TableRow>>) -> impl IntoView {
     let columns = vec![
-        Column::new("name", "Name"),                      // no dropdown
+        Column::new("name", "Name").filterable_text(),   // substring input
         Column::new("role", "Role").filterable(),
         Column::new("status", "Status").filterable(),
     ];
@@ -409,20 +431,267 @@ contract as `data-table-data-mode="server-query"` for runtime audits.
 |------|------|-------------|
 | `rows` | `Signal<Vec<TableRow>>` | The current page's rows only |
 | `columns` | `Signal<Vec<Column>>` | Column definitions |
-| `current_page` | `Signal<i64>` | Current page index |
-| `total_count` | `Signal<i64>` | Total rows across all pages |
-| `page_size` | `Signal<i64>` | Rows per page |
-| `on_page_change` | `Callback<i64>` | Fired when the user pages |
+| `current_page` | `Option<Signal<i64>>` | Legacy offset page index; supply with the other three legacy offset props |
+| `total_count` | `Option<Signal<i64>>` | Legacy offset population total |
+| `page_size` | `Option<Signal<i64>>` | Legacy offset rows per page |
+| `on_page_change` | `Option<Callback<i64>>` | Legacy numbered-page callback |
+| `pagination` | `Option<ServerTablePagination>` | Explicit offset or cursor strategy; mutually exclusive with legacy offset props |
+| `query_capabilities` | `ServerQueryCapabilities` | Endpoint-supported search, page-size, sorting, and filtering controls; defaults to all enabled |
 | `on_search` | `Option<Callback<String>>` | Debounced search box; the parent performs the query |
 | `on_query_change` | `Option<Callback<TableQuery>>` | Reports the complete server query after paging, search, sort, or filter changes |
-| `filter_options` | `Option<Signal<HashMap<&'static str, Vec<String>>>>` | Population-wide choices for filterable columns |
+| `query_ownership` | `Option<ServerTableQueryOwnership>` | Preferred explicit controlled/uncontrolled ownership; controlled mode supplies displayed-query truth and receives full replacements |
+| `query_reset_key` | `Option<Signal<String>>` | Combined dataset/access identity; a change proposes a clean first-page query while preserving page size |
+| `page_size_options` | `Signal<Vec<i64>>` | Positive choices for the controlled server-query page-size selector |
+| `filter_options` | `Option<Signal<HashMap<&'static str, Vec<String>>>>` | Population-wide choices for exact filterable columns |
+| `filter_option_entries` | `Option<Signal<DataTableFilterOptions>>` | Population-wide typed choices with separate stable values and reactive display labels; mutually exclusive with `filter_options` |
+| `filter_vocabulary` | `Option<ServerFilterVocabulary>` | Optional explicit vocabulary truth; required as `CurrentSlice` when authoritative `filter_options` are absent |
+| `text_filter_label` | `Signal<String>` | Reactive accessible-name template for substring inputs |
+| `row_key` | `Option<Callback<TableRow, String>>` | Stable business identity used to reconcile row DOM across server-slice replacement |
+| `selection` | `Option<ServerTableSelection>` | Controlled zero-or-one selected business key and replacement callback; requires `row_key` |
 | `on_row_activate` | `Option<Callback<usize>>` | Plain click or keyboard activation with the current-page row index |
+| `on_row_activate_keyed` | `Option<Callback<ServerTableRowAction>>` | Plain click or keyboard activation with a stable key, page-local index, and displayed row snapshot; requires `row_key` |
 | `on_row_inspect` | `Option<Callback<usize>>` | Double-click or Shift+Enter inspection with the current-page row index |
+| `on_row_inspect_keyed` | `Option<Callback<ServerTableRowAction>>` | Double-click or Shift+Enter inspection with the same keyed snapshot; requires `row_key` |
 | `loading`, `classes`, `texts`, `sort_texts`, `class`, `table_size`, `zebra`, `pin_rows`, `pin_cols`, `max_height`, `cell_renderers`, `typed_cells`, `detail_renderer`, `row_class_fn`, `node_ref` | | As `DataTable` |
 
 **Not available**: `selected_rows` / `selection_anchor` (the server variant
 has no selection state machine), `auto_page_size`, `paginate`, `searchable`
 (use `on_search`), `on_sort_change` (use `on_query_change`).
+
+### Server query ownership
+
+For new server-owned pages, use
+`ServerTableQueryOwnership::controlled(current, on_change)`. The supplied
+`TableQuery` is the query represented by the displayed slice: its search,
+single sort, column filters, page size, and 1-based page drive every
+visible control and `aria-sort`. Each user transition proposes one complete
+replacement. The component does not optimistically overwrite supplied truth;
+a synchronous accepted or normalized replacement is rendered, while a
+declined or delayed search, filter, or page-size proposal is reasserted in the
+DOM. External Reset or route restoration is therefore an ordinary replacement
+of `current` and causes no callback loop.
+
+Bind `query_reset_key` to a collision-safe combination of dataset identity and
+access generation. When it changes, the component proposes page one with empty
+search/sort/filters and the current page-size choice. This prevents a query
+from one authorization or dataset scope leaking into the next. Runtime
+localization changes only `texts`, `sort_texts`, and live column headings; it
+does not rewrite query state.
+
+The historical `current_page`, `page_size`, `on_page_change`, and
+`on_query_change` props remain the uncontrolled offset compatibility path.
+Controlled ownership and `on_query_change` are mutually exclusive so a single
+gesture cannot be delivered through two query callbacks.
+
+### Server query capabilities
+
+Pagination strategy and query capability are separate contracts. A keyset
+endpoint can accept opaque Previous/Next cursors while rejecting search,
+page-size, sorting, or filtering. Declare that truth with one cohesive value:
+
+```rust,no_run
+let capabilities = ServerQueryCapabilities::navigation_only()
+    .with_search(true)
+    .with_sorting(true);
+
+view! {
+    <ServerDataTable
+        rows=rows
+        columns=columns
+        pagination=cursor_pagination
+        query_capabilities=capabilities
+    />
+}
+```
+
+`ServerQueryCapabilities::default()` and `::all()` preserve the historical
+full-query behavior. `::navigation_only()` renders only the pagination
+strategy's navigation. The four `with_*` builders independently enable search,
+page-size selection, sortable headers, and the aligned column-filter row.
+Disabling a capability removes its native control and its proposal path;
+sortable/filterable column declarations remain reusable and are projected as
+inert for that table instance.
+
+A disabled search capability cannot be combined with `on_search` or a
+non-empty supplied search. Likewise, disabled sorting/filtering reject a
+supplied active sort/filter instead of silently representing a query the
+endpoint says it cannot execute. Page size remains part of every query because
+the fixed server slice still has a size; disabling page-size capability removes
+only the user's ability to change it. Contradictions render `role="alert"`
+with `data-server-query-capability-config-error`.
+
+Runtime audits can read `data-server-query-search`,
+`data-server-query-page-size`, `data-server-query-sorting`, and
+`data-server-query-filtering` (`enabled` or `disabled`) from the table root.
+
+### Truthful server filter vocabularies
+
+A server page is a window, not a population. When filtering is enabled and an
+exact column is `filterable()`, supply population-authoritative `filter_options` or
+`filter_option_entries`. Existing string maps remain a shorthand where value
+equals label. Typed `DataTableFilterOption::new(value, label)` entries keep the
+stable query/transport value separate from localized visible copy. `TableQuery`
+continues to carry only the value; replacing the entries signal for a locale
+change replaces labels without changing accepted query state.
+
+```rust,no_run
+let role_options = Signal::derive(move || HashMap::from([(
+    "role",
+    vec![
+        DataTableFilterOption::new("provider.desk", t("Desk provider")),
+        DataTableFilterOption::new("provider.crm", t("CRM provider")),
+    ],
+)]));
+
+view! {
+    <ServerDataTable
+        rows=rows
+        columns=columns
+        pagination=pagination
+        filter_option_entries=role_options
+    />
+}
+```
+
+The table keeps an accepted query value in the dropdown even if a later option
+refresh temporarily omits it, so it remains visible and removable while
+metadata and rows load independently. Because no label accompanied that
+missing entry, the retained fallback displays the stable value until the
+authoritative entry returns. Duplicate stable values or a real option using
+the reserved empty value render one fail-closed `role="alert"` header row with
+`data-table-filter-options-error="true"`; no aliased dropdown is rendered.
+Supplying both string and typed option props is also rejected.
+
+If an endpoint intentionally filters only the displayed slice, declare and
+label that narrower truth explicitly:
+
+```rust,no_run
+let current_slice_copy = Signal::derive(move || {
+    if spanish.get() {
+        ServerCurrentSliceFilterTexts::new(
+            "Todos en esta página",
+            "Filtrar la página actual por {column}",
+        )
+    } else {
+        ServerCurrentSliceFilterTexts::default()
+    }
+});
+
+view! {
+    <ServerDataTable
+        rows=rows
+        columns=columns
+        pagination=pagination
+        filter_vocabulary=ServerFilterVocabulary::current_slice(current_slice_copy)
+    />
+}
+```
+
+Current-slice mode derives distinct values from the displayed rows and uses
+its dedicated reactive labels for both the empty option and accessible select
+name. Combining it with authoritative `filter_options` is contradictory and
+fails visibly. Omitting both contracts also renders a `role="alert"` with
+`data-server-filter-vocabulary-config-error` and suppresses the filter row; it
+never presents one page's values as if they covered the server population.
+
+`filterable_text()` does not consume or derive a finite vocabulary. A
+text-only server filter row therefore needs no `filter_options`; the parent
+reads its own matching `Column` definition and applies a case-insensitive
+contains predicate when handling `TableQuery.filters`. In a mixed row, only
+the exact columns require authoritative or explicitly current-slice options.
+When filtering capability is disabled or no column is filterable, no
+vocabulary is required and no filter control or proposal path exists.
+
+Runtime audits can read `data-server-filter-vocabulary` as `authoritative`,
+`current-slice`, `disabled`, or `invalid`.
+
+### Cursor pagination
+
+Use `ServerTablePagination::cursor(ServerCursorPagination::controlled(...))`
+for keyset APIs that return opaque previous/next cursors without a population
+total. The caller supplies a controlled `ServerCursorQuery`, the accepted
+`ServerCursorPage` metadata for the rows currently displayed, and one
+full-query replacement callback. No page number, total, or offset range is
+rendered. The root exposes `data-server-pagination-strategy="cursor"` for
+runtime audits.
+
+`ServerCursorToken` is deliberately opaque: the component only returns a
+cloned token through `ServerCursorRequest::Previous` or `Next`; it never parses
+or exposes the value. Enabled search, sort, filter, page-size, Reset, and
+reset-key changes all set the request to `ServerCursorRequest::First`.
+Previous and Next each emit exactly one replacement. For a fixed-slice
+endpoint, pass `ServerQueryCapabilities::navigation_only()`; no unsupported
+query-shape control is rendered or armed.
+
+The page metadata also carries a typed `ServerCursorSliceState`. Use
+`RetainedWhileLoading` while a new request is pending and
+`RetainedAfterFailure` when the latest request failed. Existing rows remain
+visible, the status caption describes them as retained, and navigation is
+disabled while loading. `ServerCursorTexts` localizes those captions without
+adding cursor-only fields to `DataTableTexts`.
+
+The explicit `pagination` prop rejects any simultaneous legacy offset prop,
+and cursor pagination rejects the offset-only `query_ownership` and
+`on_query_change` props. A configuration error renders a `role="alert"`
+instead of silently picking one strategy. Existing offset callers remain
+source-compatible: omitting `pagination` and supplying the historical four
+offset props constructs the offset strategy automatically.
+
+### Stable server-row identity
+
+Server pages should supply `row_key` whenever a record has a canonical id. It
+is more than a convenient `data-*` attribute: the key is the keyed-rendering
+identity for the source row and its optional detail row. Reordering a retained
+slice moves the existing node; insertion/removal preserves unaffected nodes;
+and cursor replacement cannot recycle page position zero for a different
+entity. A same-key row update refreshes its cells and callback snapshot while
+keeping the source row mounted.
+
+Prefer the keyed callbacks for navigation or inspection that may cross an
+asynchronous boundary. `ServerTableRowAction` contains `key`, `page_index`, and
+the exact displayed `row`, so the consumer never has to look up an index in a
+newer server slice. The historical index callbacks remain source-compatible
+and may be supplied alongside them.
+
+```rust,no_run
+view! {
+    <ServerDataTable
+        rows=rows
+        columns=columns
+        pagination=pagination
+        row_key=Callback::new(|row: TableRow| row["matter_id"].clone())
+        selection=ServerTableSelection::controlled(
+            selected_matter.into(),
+            Callback::new(move |proposed| selected_matter.set(proposed)),
+        )
+        on_row_activate_keyed=Callback::new(|action: ServerTableRowAction| {
+            open_matter(action.key, action.row);
+        })
+    />
+}
+```
+
+The contract rejects whitespace-only keys and duplicate keys within a
+displayed slice. In either case the body renders one `role="alert"` row with
+`data-table-row-key-error="true"` and no data rows. Supplying a keyed callback
+without `row_key` renders a root configuration alert with
+`data-server-row-key-config-error`; it never falls back to a racing index
+lookup.
+
+`ServerTableSelection` is strictly controlled. The supplied `selected_key`
+signal alone determines selected styling and `aria-selected`; a click, Enter,
+or Space emits `Some(clicked_key)` without mutating it. A rejected or delayed
+proposal therefore leaves the accepted row painted, with no feedback loop.
+When the accepted key is absent from a cursor slice, every displayed row is
+unselected; returning to a slice containing it paints that key again. The
+caller decides when to clear a selection that leaves the current slice.
+
+Ctrl/Meta/Shift-modified row gestures are inert because this is a
+single-selection contract, not a hidden multi-select state machine. When
+selection and activation callbacks are both supplied, the selection proposal
+is emitted first and the explicit activation callback then fires from the same
+plain gesture. Double-click keeps the existing contract: its first click takes
+the plain path once, its repeat click is swallowed, and inspection fires once.
 
 ## Helper functions
 
@@ -435,8 +704,11 @@ All pure and independently usable:
 | `column_sort_as(columns, col_id)` | A column's declared `SortAs` |
 | `distinct_values(data, col_id)` | A column's sorted, deduped, non-empty values |
 | `row_matches_filters(row, filters)` | Whether a row satisfies active filters (AND) |
+| `row_matches_column_filters(row, columns, filters)` | Exact/contains matching using each column's declared kind |
 | `prune_stale_filters(filters, options)` | Drop selections whose value vanished |
+| `prune_stale_column_filters(filters, options, columns)` | Drop stale exact values while retaining free-form contains text |
 | `has_filterable_columns(columns)` | Whether to render a filter row |
+| `has_exact_filterable_columns(columns)` | Whether a server filter row needs a finite vocabulary |
 | `rows_per_page_for_height(viewport, header, row)` | The raw geometric fit used by `auto_page_size` |
 | `auto_page_size_for_height(viewport, header, row, configured, min_rows)` | Responsive fit with the short-viewport fallback policy |
 | `page_count(total, size)` / `clamp_page(...)` / `page_bounds(...)` | Shared zero-based client-pagination state used by both client table implementations |
@@ -475,7 +747,7 @@ dynamically:
 @source inline("btn btn-sm join join-item btn-active btn-disabled");
 @source inline("text-sm text-base-content/60");
 /* Per-column filter row */
-@source inline("select select-bordered select-xs w-full font-normal p-1");
+@source inline("select select-bordered select-xs input input-bordered input-xs w-full font-normal p-1");
 ```
 
 ## Accessibility
@@ -487,7 +759,7 @@ dynamically:
   resize by 16 pixels; Home/End select the allowed bounds. Keyboard and pointer
   paths share the same clamp logic and never activate sorting or scroll the
   page.
-- The search box and every filter dropdown have both a localized accessible name and a real associated visually-hidden `<label>`. Placeholder text and physical column position are never the naming mechanism.
+- The search box and every exact or substring filter control have both a localized accessible name and a real associated visually-hidden `<label>`. Placeholder text and physical column position are never the naming mechanism.
 - Sort state changes are conveyed through `aria-sort` rather than the `▲`/`▼` glyph alone.
 - **Keyboard operation.** When the table is interactive — `selected_rows` or `on_row_activate` supplied — each row is focusable (`tabindex=0`) and carries `aria-selected`. **Enter** and **Space** do exactly what a plain click does (activate, or select); **Ctrl/Cmd** and **Shift** with Enter/Space toggle and range-extend selection, mirroring the mouse. Space suppresses its default page-scroll. A plain display table (neither prop) adds no tab stops.
 
@@ -497,7 +769,7 @@ dynamically:
 
 1. **Choose from data ownership first.** New typed snapshots use `EntityTable`; server slices use `ServerDataTable`; this dynamic client component is the compatibility path.
 2. **Declare `SortAs::Number` on every money, percentage, duration or count column.** Text order puts `"$1,000"` before `"$900"`, and the bug looks like working software.
-3. **Keep `filterable()` for low-cardinality columns.** Filter by status or owner, search by name or id.
+3. **Match filter control to cardinality.** Use `filterable()` for finite status/owner choices and `filterable_text()` for names, ids, and other high-cardinality substrings.
 4. **Pair `auto_page_size` with `max_height`** (or a definite-height parent). Tune `min_rows` only when five is inappropriate; `page_size` is the intentional scroll fallback below that threshold.
 5. **Treat every index as absolute.** Don't add the page offset yourself — it's already applied.
 6. **Re-check selection after mutating `data`.** It's cleared on data and sort changes by design.

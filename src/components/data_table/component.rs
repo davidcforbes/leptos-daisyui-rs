@@ -1,14 +1,15 @@
 use crate::components::data_table::auto_page::{
     DEFAULT_AUTO_MIN_ROWS, FALLBACK_HEADER_HEIGHT, FALLBACK_ROW_HEIGHT, auto_page_size_for_height,
 };
-use crate::components::data_table::body::DataTableBody;
+use crate::components::data_table::body::{DataTableBody, DataTableBodyClick, DataTableBodyRow};
 use crate::components::data_table::chooser::{
     CHOOSER_STORAGE_PREFIX, DataTableColumnChooser, parse_hidden, serialize_hidden, visible_columns,
 };
 use crate::components::data_table::controls::DataTableControls;
 use crate::components::data_table::filter::{
-    ColumnFilters, DataTableFilterRow, distinct_values, has_filterable_columns,
-    prune_stale_filters, row_matches_filters, row_matches_search,
+    ColumnFilters, DataTableFilterRow, distinct_values, filter_options_from_strings,
+    has_filterable_columns, prune_stale_column_filters, row_matches_column_filters,
+    row_matches_search,
 };
 use crate::components::data_table::geometry::{
     StableColumnTrack, StableTableColGroup, stable_column_width, stable_table_content_style,
@@ -21,8 +22,8 @@ use crate::components::data_table::selection::{
 };
 use crate::components::data_table::sort::{column_sort_as, compare_cells};
 use crate::components::data_table::types::{
-    CellRenderer, Column, DataTableClasses, DataTableSortTexts, DataTableTexts, RowDetailRenderer,
-    SortOrder, TableRow, TypedCellFn,
+    CellRenderer, Column, ColumnFilterKind, DataTableClasses, DataTableSortTexts, DataTableTexts,
+    RowDetailRenderer, SortOrder, TableRow, TypedCellFn,
 };
 use crate::components::data_table::{TABLE_SCROLL_WRAPPER_CLASS, next_data_table_search_id};
 use crate::components::table::{Table, TableSize};
@@ -173,8 +174,8 @@ fn local_storage_set(key: &str, value: &str) {
 /// @source inline("flex justify-between items-center mt-4 gap-2");
 /// @source inline("btn btn-sm join join-item btn-active btn-disabled");
 /// @source inline("text-sm text-base-content/75");
-/// // Per-column filter row (Column::filterable -> filter.rs)
-/// @source inline("select select-bordered select-xs w-full font-normal p-1");
+/// // Per-column filter row (Column::filterable/filterable_text -> filter.rs)
+/// @source inline("select select-bordered select-xs input input-bordered input-xs w-full font-normal p-1");
 /// ```
 ///
 /// ## Node References
@@ -263,6 +264,11 @@ pub fn DataTable(
     /// relocalize without remounting or resetting table state.
     #[prop(into, default = Signal::stored(DataTableSortTexts::default()))]
     sort_texts: Signal<DataTableSortTexts>,
+
+    /// Localized accessible-name template for substring column filters;
+    /// `{column}` is replaced with the live header.
+    #[prop(into, default = Signal::stored("Filter {column} by text".to_owned()))]
+    text_filter_label: Signal<String>,
 
     /// Additional CSS classes for container
     #[prop(optional, into)]
@@ -550,7 +556,7 @@ pub fn DataTable(
             .collect::<Vec<_>>()
     });
 
-    // ── Per-column filter row (opt-in via `Column::filterable`) ──
+    // ── Per-column filter row (exact dropdown or substring input) ──
 
     // Active dropdown selections, shared with `DataTableFilterRow`.
     let column_filters = RwSignal::new(ColumnFilters::new());
@@ -560,22 +566,23 @@ pub fn DataTable(
 
     // Option lists per filterable column, derived from the *unfiltered* data so
     // that choosing one option never removes the others from their dropdowns.
-    let filter_options = Memo::new(move |_| {
+    let raw_filter_options = Memo::new(move |_| {
         let all_data = data.get();
         columns.with(|cols| {
             cols.iter()
-                .filter(|c| c.filterable)
+                .filter(|column| column.filter_kind() == Some(ColumnFilterKind::Exact))
                 .map(|c| (c.id, distinct_values(&all_data, c.id)))
                 .collect::<HashMap<&'static str, Vec<String>>>()
         })
     });
+    let filter_options = Memo::new(move |_| filter_options_from_strings(raw_filter_options.get()));
 
     // Drop selections whose value disappeared from the new data; a filter
     // pinned to a value that no longer exists silently matches zero rows.
     Effect::new(move |_| {
-        let options = filter_options.get();
+        let options = raw_filter_options.get();
         column_filters.update(|f| {
-            if prune_stale_filters(f, &options) {
+            if prune_stale_column_filters(f, &options, &columns.get_untracked()) {
                 set_current_page.set(0);
             }
         });
@@ -614,7 +621,9 @@ pub fn DataTable(
                 let Some(row) = all_data.get(i) else {
                     return false;
                 };
-                if !filters.is_empty() && !row_matches_filters(row, &filters) {
+                if !filters.is_empty()
+                    && !row_matches_column_filters(row, &search_columns, &filters)
+                {
                     return false;
                 }
                 // Caller-controlled predicate, ANDed with the built-ins.
@@ -773,7 +782,10 @@ pub fn DataTable(
     // Enter/Space (modifiers passed as bools, not an event). A plain
     // interaction activates when the consumer opted in via `on_row_activate`; a
     // modified one always feeds the existing Ctrl/Shift multi-select semantics.
-    let on_row_click = Callback::new(move |(abs_idx, ctrl, shift): (usize, bool, bool)| {
+    let on_row_click = Callback::new(move |event: DataTableBodyClick| {
+        let abs_idx = event.row.index;
+        let ctrl = event.ctrl;
+        let shift = event.shift;
         match row_click_kind(ctrl, shift, on_row_activate.is_some()) {
             RowClickKind::Activate => {
                 if let Some(cb) = on_row_activate {
@@ -799,6 +811,8 @@ pub fn DataTable(
             }
         }
     });
+    let body_on_row_inspect = on_row_inspect
+        .map(|callback| Callback::new(move |row: DataTableBodyRow| callback.run(row.index)));
 
     // ── Responsive paging (`auto_page_size`) ──
     //
@@ -1081,6 +1095,7 @@ pub fn DataTable(
                                         filter_label=Signal::derive(move || {
                                             texts.with(|texts| texts.filter_label.clone())
                                         })
+                                        text_filter_label=text_filter_label
                                     />
                                 })
                             }}
@@ -1096,8 +1111,9 @@ pub fn DataTable(
                             selected_rows=Signal::derive(move || selected_rows.get())
                             loading_row_class=classes.loading_row
                             empty_row_class=classes.empty_row
-                            on_row_click=on_row_click
-                            on_row_inspect=on_row_inspect
+                            on_row_click=Some(on_row_click)
+                            on_row_inspect=body_on_row_inspect
+                            row_key=row_key
                             interactive=row_interactive
                             cell_renderers=cell_renderers
                             column_widths=Signal::derive(move || column_widths.get())

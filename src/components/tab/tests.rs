@@ -147,3 +147,41 @@ fn test_all_tab_placements_return_valid_classes() {
         assert_eq!(variant.as_str(), expected);
     }
 }
+
+#[test]
+fn controlled_tab_orientation_exposes_aria_values() {
+    assert_eq!(TabOrientation::Horizontal.as_str(), "horizontal");
+    assert_eq!(TabOrientation::Vertical.as_str(), "vertical");
+    assert_eq!(TabOrientation::default(), TabOrientation::Horizontal);
+}
+
+#[test]
+fn controlled_tab_dom_ids_are_collision_safe_for_stable_keys() {
+    use super::component::{tab_dom_id, tab_panel_dom_id};
+
+    assert_eq!(
+        tab_dom_id("account", "overview"),
+        "account-tab-6f76657276696577"
+    );
+    assert_eq!(
+        tab_panel_dom_id("account", "overview"),
+        "account-panel-6f76657276696577"
+    );
+    assert_ne!(tab_dom_id("account", "a/b"), tab_dom_id("account", "a-b"));
+}
+
+#[test]
+fn controlled_tab_navigation_wraps_and_skips_disabled_items() {
+    use super::component::{TabMove, next_enabled_tab};
+
+    let disabled = [false, true, false, false];
+    assert_eq!(next_enabled_tab(Some(0), &disabled, TabMove::Next), Some(2));
+    assert_eq!(next_enabled_tab(Some(3), &disabled, TabMove::Next), Some(0));
+    assert_eq!(
+        next_enabled_tab(Some(0), &disabled, TabMove::Previous),
+        Some(3)
+    );
+    assert_eq!(next_enabled_tab(None, &disabled, TabMove::Home), Some(0));
+    assert_eq!(next_enabled_tab(None, &disabled, TabMove::End), Some(3));
+    assert_eq!(next_enabled_tab(None, &[true, true], TabMove::Next), None);
+}

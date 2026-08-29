@@ -122,14 +122,14 @@ pub fn DataTableDemo() -> impl IntoView {
     // the table chrome (headers, empty state) — asserted by the reactivity
     // suite's `data_table_headers_relocalize_via_dom`.
     let locale_es = RwSignal::new(false);
-    // Only low-cardinality columns opt in to filtering. This existing
-    // searchable/filterable fixture also consumes the locale signal so the
-    // browser suite can prove stateful control localization without adding a
-    // duplicate set of audited controls to the showcase page.
+    // A high-cardinality name uses a substring text box; low-cardinality
+    // columns use exact dropdowns. This existing fixture also consumes the
+    // locale signal so the browser suite can prove stateful control
+    // localization without adding duplicate audited controls.
     let filterable_columns = Signal::derive(move || {
         if locale_es.get() {
             vec![
-                Column::new("name", "Nombre"),
+                Column::new("name", "Nombre").filterable_text(),
                 Column::new("email", "Correo"),
                 Column::new("role", "Rol").filterable(),
                 Column::new("department", "Departamento").filterable(),
@@ -137,7 +137,7 @@ pub fn DataTableDemo() -> impl IntoView {
             ]
         } else {
             vec![
-                Column::new("name", "Name"),
+                Column::new("name", "Name").filterable_text(),
                 Column::new("email", "Email"),
                 Column::new("role", "Role").filterable(),
                 Column::new("department", "Department").filterable(),
@@ -165,12 +165,20 @@ pub fn DataTableDemo() -> impl IntoView {
                 next: "Siguiente".to_string(),
                 search_placeholder: "Buscar...".to_string(),
                 search_label: "Buscar en la tabla".to_string(),
+                page_size_label: "Filas por página".to_string(),
                 row_range: "Mostrando {start}\u{2013}{end} de {total}".to_string(),
                 filter_all: "Todos".to_string(),
                 filter_label: "Filtrar por {column}".to_string(),
             }
         } else {
             DataTableTexts::default()
+        }
+    });
+    let localized_text_filter_label = Signal::derive(move || {
+        if locale_es.get() {
+            "Filtrar {column} por texto".to_owned()
+        } else {
+            "Filter {column} by text".to_owned()
         }
     });
     let localized_sort_texts = Signal::derive(move || {
@@ -267,6 +275,10 @@ pub fn DataTableDemo() -> impl IntoView {
     let server_rows = RwSignal::new(Vec::<HashMap<&'static str, String>>::new());
     let server_page = RwSignal::new(1_i64);
     let server_total = RwSignal::new(0_i64);
+    let server_query = RwSignal::new(TableQuery::first_page(10));
+    let server_accept_changes = RwSignal::new(true);
+    let server_query_scope = RwSignal::new("dataset-a".to_owned());
+    let server_proposal_count = RwSignal::new(0_u32);
     let last_query = RwSignal::new(String::new());
     // Server-variant activation forwarding (ldui-1gp): the same
     // click/dblclick contract as the client table, with page-local indices.
@@ -327,14 +339,206 @@ pub fn DataTableDemo() -> impl IntoView {
         ));
         crate::debug_state::set("server_datatable.query", query_debug);
     };
+    let propose_server_query = move |mut query: TableQuery| {
+        server_proposal_count.update(|count| *count += 1);
+        if !server_accept_changes.get_untracked() {
+            last_query.set(format!("declined proposal: {query:?}"));
+            return;
+        }
+        // Simulated server normalization: route/query persistence commonly
+        // trims and case-folds free text before accepting displayed truth.
+        query.search = query.search.trim().to_lowercase();
+        server_query.set(query.clone());
+        run_server_query(query);
+    };
     // Initial fetch: page 1, no query shape.
-    run_server_query(TableQuery {
-        page: 1,
-        page_size: 10,
-        search: String::new(),
-        sort: None,
-        filters: ColumnFilters::new(),
+    run_server_query(server_query.get_untracked());
+
+    // Cursor-owned server table: cursors are opaque to the component. This
+    // fixture interprets its own `offset:*` tokens only to simulate a backend.
+    let cursor_fixture = StoredValue::new(generate_users(13));
+    let cursor_rows = RwSignal::new(Vec::<HashMap<&'static str, String>>::new());
+    let cursor_query = RwSignal::new(ServerCursorQuery::first_slice(4));
+    let cursor_page = RwSignal::new(ServerCursorPage::default());
+    let cursor_loading = RwSignal::new(false);
+    let cursor_proposal_count = RwSignal::new(0_u32);
+    let cursor_last_request = RwSignal::new(String::new());
+    let cursor_keyed_activation = RwSignal::new(Option::<ServerTableRowAction>::None);
+    let cursor_keyed_inspection = RwSignal::new(Option::<ServerTableRowAction>::None);
+    let cursor_selected_key = RwSignal::new(Option::<String>::None);
+    let cursor_accept_selection = RwSignal::new(true);
+    let cursor_selection_proposals = RwSignal::new(0_u32);
+    let cursor_last_selection_proposal = RwSignal::new(Option::<String>::None);
+    let cursor_accept_changes = RwSignal::new(true);
+    let cursor_include_analyst_option = RwSignal::new(true);
+    let cursor_columns = RwSignal::new(vec![
+        Column::new("name", "Name").filterable_text(),
+        Column::new("email", "Email"),
+        Column::new("role", "Role").filterable(),
+    ]);
+    let cursor_filter_option_entries = Signal::derive(move || {
+        let spanish = locale_es.get();
+        let mut roles = vec![
+            DataTableFilterOption::new(
+                "role.admin",
+                if spanish {
+                    "Administrador"
+                } else {
+                    "Administrator"
+                },
+            ),
+            DataTableFilterOption::new(
+                "role.developer",
+                if spanish {
+                    "Desarrollador"
+                } else {
+                    "Developer"
+                },
+            ),
+            DataTableFilterOption::new(
+                "role.designer",
+                if spanish { "Diseñador" } else { "Designer" },
+            ),
+            DataTableFilterOption::new("role.manager", if spanish { "Gerente" } else { "Manager" }),
+        ];
+        if cursor_include_analyst_option.get() {
+            roles.push(DataTableFilterOption::new(
+                "role.analyst",
+                if spanish { "Analista" } else { "Analyst" },
+            ));
+        }
+        HashMap::from([("role", roles)])
     });
+    let run_cursor_query = move |query: ServerCursorQuery| {
+        let request_label = match &query.request {
+            ServerCursorRequest::First => "First".to_owned(),
+            ServerCursorRequest::Previous(cursor) => {
+                format!("Previous({})", cursor.as_str())
+            }
+            ServerCursorRequest::Next(cursor) => format!("Next({})", cursor.as_str()),
+        };
+        let requested_offset = match &query.request {
+            ServerCursorRequest::First => 0,
+            ServerCursorRequest::Previous(cursor) | ServerCursorRequest::Next(cursor) => cursor
+                .as_str()
+                .strip_prefix("offset:")
+                .and_then(|value| value.parse::<usize>().ok())
+                .unwrap_or(0),
+        };
+        let mut items = cursor_fixture.get_value();
+        items.retain(|row| {
+            query.filters.iter().all(|(column, value)| {
+                if *column == "name" {
+                    return row
+                        .get(column)
+                        .is_some_and(|cell| cell.to_lowercase().contains(&value.to_lowercase()));
+                }
+                let canonical_value = match (*column, value.as_str()) {
+                    ("role", "role.admin") => "Admin",
+                    ("role", "role.developer") => "Developer",
+                    ("role", "role.designer") => "Designer",
+                    ("role", "role.manager") => "Manager",
+                    ("role", "role.analyst") => "Analyst",
+                    _ => value,
+                };
+                row.get(column).is_some_and(|cell| cell == canonical_value)
+            })
+        });
+        if !query.search.is_empty() {
+            let search = query.search.to_lowercase();
+            items.retain(|row| {
+                row.values()
+                    .any(|value| value.to_lowercase().contains(&search))
+            });
+        }
+        if let Some((column, order)) = query.sort {
+            items.sort_by(|left, right| {
+                let ordering = left.get(column).cmp(&right.get(column));
+                match order {
+                    SortOrder::Asc => ordering,
+                    SortOrder::Desc => ordering.reverse(),
+                }
+            });
+        }
+        let size = query.page_size.max(1) as usize;
+        let start = requested_offset.min(items.len());
+        let previous = (start > 0)
+            .then(|| ServerCursorToken::new(format!("offset:{}", start.saturating_sub(size))));
+        let next = (start + size < items.len())
+            .then(|| ServerCursorToken::new(format!("offset:{}", start + size)));
+        cursor_rows.set(items.into_iter().skip(start).take(size).collect());
+        cursor_page.set(ServerCursorPage::new(previous, next));
+        cursor_loading.set(false);
+        cursor_last_request.set(format!(
+            "request={request_label} size={} search={:?} sort={:?} filters={:?}",
+            query.page_size, query.search, query.sort, query.filters
+        ));
+    };
+    let propose_cursor_query = move |query: ServerCursorQuery| {
+        cursor_proposal_count.update(|count| *count += 1);
+        if !cursor_accept_changes.get_untracked() {
+            cursor_last_request.set(format!("declined filters={:?}", query.filters));
+            return;
+        }
+        cursor_query.set(query.clone());
+        run_cursor_query(query);
+    };
+    run_cursor_query(cursor_query.get_untracked());
+    let cursor_pagination = ServerTablePagination::cursor(ServerCursorPagination::controlled(
+        cursor_query.into(),
+        cursor_page.into(),
+        Callback::new(propose_cursor_query),
+    ));
+    let navigation_only_query = RwSignal::new(ServerCursorQuery::first_slice(4));
+    let navigation_only_page = RwSignal::new(ServerCursorPage::new(
+        None,
+        Some(ServerCursorToken::new("navigation-only-next")),
+    ));
+    let navigation_only_proposals = RwSignal::new(0_u32);
+    let navigation_only_pagination =
+        ServerTablePagination::cursor(ServerCursorPagination::controlled(
+            navigation_only_query.into(),
+            navigation_only_page.into(),
+            Callback::new(move |query| {
+                navigation_only_proposals.update(|count| *count += 1);
+                navigation_only_query.set(query);
+            }),
+        ));
+    let mixed_capability_query = RwSignal::new(ServerCursorQuery::first_slice(4));
+    let mixed_capability_page = RwSignal::new(ServerCursorPage::new(
+        None,
+        Some(ServerCursorToken::new("mixed-next")),
+    ));
+    let mixed_capability_proposals = RwSignal::new(0_u32);
+    let mixed_capability_pagination =
+        ServerTablePagination::cursor(ServerCursorPagination::controlled(
+            mixed_capability_query.into(),
+            mixed_capability_page.into(),
+            Callback::new(move |query| {
+                mixed_capability_proposals.update(|count| *count += 1);
+                mixed_capability_query.set(query);
+            }),
+        ));
+    let current_slice_query = RwSignal::new(ServerCursorQuery::first_slice(4));
+    let current_slice_page = RwSignal::new(ServerCursorPage::new(
+        None,
+        Some(ServerCursorToken::new("current-slice-next")),
+    ));
+    let current_slice_pagination =
+        ServerTablePagination::cursor(ServerCursorPagination::controlled(
+            current_slice_query.into(),
+            current_slice_page.into(),
+            Callback::new(move |query| current_slice_query.set(query)),
+        ));
+    let conflicting_capability_query =
+        RwSignal::new(ServerCursorQuery::first_slice(4).with_search("unsupported supplied search"));
+    let conflicting_capability_page = RwSignal::new(ServerCursorPage::default());
+    let conflicting_capability_pagination =
+        ServerTablePagination::cursor(ServerCursorPagination::controlled(
+            conflicting_capability_query.into(),
+            conflicting_capability_page.into(),
+            Callback::new(|_| {}),
+        ));
 
     // Column resize + typed cells (Badge/Icon) + row background + clipboard export
     let feature_data = RwSignal::new(generate_users(12));
@@ -775,10 +979,10 @@ pub fn DataTableDemo() -> impl IntoView {
             // Per-column filter row
             <Section title="Per-Column Filter Row">
                 <p class="text-sm opacity-70 mb-4">
-                    "Columns opt in with " <code>"Column::filterable()"</code> ", which gives them a "
-                    "dropdown of their distinct values beneath the header. Filters combine with each "
-                    "other and with the search box (all must match). Columns that don't opt in get no "
-                    "dropdown, and a table with no filterable column renders no filter row at all."
+                    <code>"Column::filterable()"</code> " gives low-cardinality columns an exact "
+                    "dropdown; " <code>"Column::filterable_text()"</code> " gives high-cardinality "
+                    "columns a debounced substring box in the same aligned row. Filters combine with "
+                    "each other and the table search (all must match)."
                 </p>
                 <DataTable
                     data=Signal::derive(move || generate_users(60))
@@ -786,6 +990,7 @@ pub fn DataTableDemo() -> impl IntoView {
                     page_size=8
                     searchable=true
                     texts=localized_texts
+                    text_filter_label=localized_text_filter_label
                     attr:id="filter-row-table"
                 />
             </Section>
@@ -916,6 +1121,7 @@ pub fn DataTableDemo() -> impl IntoView {
                         next: "Siguiente".to_string(),
                         search_placeholder: "Buscar...".to_string(),
                         search_label: "Buscar en la tabla".to_string(),
+                        page_size_label: "Filas por página".to_string(),
                         row_range: "Mostrando {start}\u{2013}{end} de {total}".to_string(),
                         filter_all: "Todos".to_string(),
                         filter_label: "Filtrar por {column}".to_string(),
@@ -1283,16 +1489,66 @@ pub fn DataTableDemo() -> impl IntoView {
                         }}
                     </code>
                 </p>
+                <div class="mb-3 flex flex-wrap items-center gap-2" data-testid="server-query-controls">
+                    <Button
+                        on:click=move |_| {
+                            let reset = TableQuery::first_page(
+                                server_query.get_untracked().page_size,
+                            );
+                            server_query.set(reset.clone());
+                            run_server_query(reset);
+                        }
+                        attr:data-testid="server-query-reset"
+                    >
+                        "Reset query"
+                    </Button>
+                    <Button
+                        on:click=move |_| {
+                            server_accept_changes.update(|accept| *accept = !*accept)
+                        }
+                        attr:data-testid="server-query-accept"
+                    >
+                        {move || if server_accept_changes.get() {
+                            "Reject proposals"
+                        } else {
+                            "Accept proposals"
+                        }}
+                    </Button>
+                    <Button
+                        on:click=move |_| {
+                            server_query_scope.update(|scope| {
+                                *scope = if scope == "dataset-a" {
+                                    "dataset-b".to_owned()
+                                } else {
+                                    "dataset-a".to_owned()
+                                }
+                            })
+                        }
+                        attr:data-testid="server-query-scope"
+                    >
+                        "Change dataset/access scope"
+                    </Button>
+                    <span class="text-xs">
+                        "Proposals: "
+                        <code data-testid="server-query-proposals">
+                            {move || server_proposal_count.get().to_string()}
+                        </code>
+                    </span>
+                </div>
                 <ServerDataTable
                     rows=server_rows
                     columns=server_columns
                     current_page=Signal::derive(move || server_page.get())
                     total_count=Signal::derive(move || server_total.get())
-                    page_size=10_i64
+                    page_size=Signal::derive(move || server_query.get().page_size)
                     on_page_change=Callback::new(move |_page: i64| {
-                        // The typed query fires too; the work happens there.
+                        // Controlled query ownership carries the full proposal.
                     })
-                    on_query_change=Callback::new(run_server_query)
+                    query_ownership=ServerTableQueryOwnership::controlled(
+                        server_query.into(),
+                        Callback::new(propose_server_query),
+                    )
+                    query_reset_key=server_query_scope
                     filter_options=Signal::derive(move || {
                         let all = server_fixture.get_value();
                         HashMap::from([
@@ -1306,8 +1562,294 @@ pub fn DataTableDemo() -> impl IntoView {
                     on_row_inspect=Callback::new(move |idx: usize| {
                         server_inspected.set(Some(idx));
                     })
+                    texts=localized_texts
+                    sort_texts=localized_sort_texts
                     attr:id="server-table"
                 />
+            </Section>
+
+            <Section title="Cursor-Owned Server Table">
+                <p class="text-sm opacity-70 mb-2">
+                    "This table has opaque Previous/Next cursors and no population total or "
+                    "fabricated page number. Query-shape changes restart from the first cursor."
+                </p>
+                <p class="text-xs opacity-60 mb-3">
+                    "Last query: "
+                    <code data-testid="cursor-last-query">
+                        {move || cursor_last_request.get()}
+                    </code>
+                    " · Proposals: "
+                    <code data-testid="cursor-query-proposals">
+                        {move || cursor_proposal_count.get().to_string()}
+                    </code>
+                    " · Keyed activation: "
+                    <code data-testid="cursor-keyed-activation">
+                        {move || cursor_keyed_activation.get().map_or_else(
+                            || "(none)".to_owned(),
+                            |action| format!(
+                                "{}|{}|{}",
+                                action.key,
+                                action.page_index,
+                                action.row.get("name").cloned().unwrap_or_default(),
+                            ),
+                        )}
+                    </code>
+                    " · Keyed inspection: "
+                    <code data-testid="cursor-keyed-inspection">
+                        {move || cursor_keyed_inspection.get().map_or_else(
+                            || "(none)".to_owned(),
+                            |action| format!(
+                                "{}|{}|{}",
+                                action.key,
+                                action.page_index,
+                                action.row.get("name").cloned().unwrap_or_default(),
+                            ),
+                        )}
+                    </code>
+                    " · Selected: "
+                    <code data-testid="cursor-selected-key">
+                        {move || cursor_selected_key.get().unwrap_or_else(|| "(none)".to_owned())}
+                    </code>
+                    " · Selection proposals: "
+                    <code data-testid="cursor-selection-proposals">
+                        {move || cursor_selection_proposals.get().to_string()}
+                    </code>
+                    " · Last selection proposal: "
+                    <code data-testid="cursor-last-selection-proposal">
+                        {move || cursor_last_selection_proposal.get().unwrap_or_else(|| "(none)".to_owned())}
+                    </code>
+                </p>
+                <div class="mb-3 flex flex-wrap gap-2">
+                    <Button
+                        on:click=move |_| cursor_accept_changes.update(|accept| *accept = !*accept)
+                        attr:data-testid="cursor-query-accept"
+                    >
+                        {move || if cursor_accept_changes.get() {
+                            "Reject cursor proposals"
+                        } else {
+                            "Accept cursor proposals"
+                        }}
+                    </Button>
+                    <Button
+                        on:click=move |_| locale_es.update(|spanish| *spanish = !*spanish)
+                        attr:data-testid="cursor-filter-locale"
+                    >
+                        "Toggle filter labels"
+                    </Button>
+                    <Button
+                        on:click=move |_| {
+                            cursor_include_analyst_option.update(|include| *include = !*include)
+                        }
+                        attr:data-testid="cursor-filter-active-option"
+                    >
+                        "Toggle active option metadata"
+                    </Button>
+                    <Button
+                        on:click=move |_| cursor_accept_selection.update(|accept| *accept = !*accept)
+                        attr:data-testid="cursor-selection-accept"
+                    >
+                        {move || if cursor_accept_selection.get() {
+                            "Reject selection proposals"
+                        } else {
+                            "Accept selection proposals"
+                        }}
+                    </Button>
+                    <Button
+                        on:click=move |_| cursor_rows.update(|rows| rows.reverse())
+                        attr:data-testid="cursor-reverse-rows"
+                    >
+                        "Reverse displayed rows"
+                    </Button>
+                    <Button
+                        on:click=move |_| {
+                            cursor_rows.update(|rows| {
+                                if rows.iter().all(|row| row.get("id").is_none_or(|id| id != "inserted")) {
+                                    rows.insert(0, HashMap::from([
+                                        ("id", "inserted".to_owned()),
+                                        ("name", "Inserted row".to_owned()),
+                                        ("email", "inserted@example.com".to_owned()),
+                                        ("role", "Analyst".to_owned()),
+                                        ("department", "Finance".to_owned()),
+                                        ("status", "Active".to_owned()),
+                                        ("joined", "2026-08-29".to_owned()),
+                                    ]));
+                                }
+                            })
+                        }
+                        attr:data-testid="cursor-insert-row"
+                    >
+                        "Insert displayed row"
+                    </Button>
+                    <Button
+                        on:click=move |_| {
+                            cursor_rows.update(|rows| {
+                                rows.retain(|row| row.get("id").is_none_or(|id| id != "inserted"));
+                            })
+                        }
+                        attr:data-testid="cursor-remove-inserted-row"
+                    >
+                        "Remove inserted row"
+                    </Button>
+                    <Button
+                        on:click=move |_| {
+                            cursor_rows.update(|rows| {
+                                if let Some(first) = rows.first().cloned() {
+                                    rows.push(first);
+                                }
+                            })
+                        }
+                        attr:data-testid="cursor-duplicate-row-key"
+                    >
+                        "Duplicate displayed key"
+                    </Button>
+                    <Button
+                        on:click=move |_| run_cursor_query(cursor_query.get_untracked())
+                        attr:data-testid="cursor-restore-rows"
+                    >
+                        "Restore server slice"
+                    </Button>
+                    <Button
+                        on:click=move |_| {
+                            cursor_page.update(|page| {
+                                page.state = ServerCursorSliceState::RetainedWhileLoading;
+                            });
+                            cursor_loading.set(true);
+                        }
+                        attr:data-testid="cursor-retain-loading"
+                    >
+                        "Retain while loading"
+                    </Button>
+                    <Button
+                        on:click=move |_| {
+                            cursor_page.update(|page| {
+                                page.state = ServerCursorSliceState::RetainedAfterFailure;
+                            });
+                            cursor_loading.set(false);
+                        }
+                        attr:data-testid="cursor-retain-failure"
+                    >
+                        "Retain after failure"
+                    </Button>
+                    <Button
+                        on:click=move |_| {
+                            cursor_page.update(|page| {
+                                page.state = ServerCursorSliceState::Current;
+                            });
+                            cursor_loading.set(false);
+                        }
+                        attr:data-testid="cursor-current"
+                    >
+                        "Mark current"
+                    </Button>
+                </div>
+                <ServerDataTable
+                    rows=cursor_rows
+                    columns=cursor_columns
+                    pagination=cursor_pagination
+                    loading=cursor_loading
+                    page_size_options=Signal::stored(vec![4_i64, 8_i64, 13_i64])
+                    filter_option_entries=cursor_filter_option_entries
+                    row_key=Callback::new(|row: TableRow| {
+                        row.get("id").cloned().unwrap_or_default()
+                    })
+                    selection=ServerTableSelection::controlled(
+                        cursor_selected_key.into(),
+                        Callback::new(move |proposed: Option<String>| {
+                            cursor_selection_proposals.update(|count| *count += 1);
+                            cursor_last_selection_proposal.set(proposed.clone());
+                            if cursor_accept_selection.get_untracked() {
+                                cursor_selected_key.set(proposed);
+                            }
+                        }),
+                    )
+                    on_row_activate_keyed=Callback::new(move |action| {
+                        cursor_keyed_activation.set(Some(action));
+                    })
+                    on_row_inspect_keyed=Callback::new(move |action| {
+                        cursor_keyed_inspection.set(Some(action));
+                    })
+                    attr:id="cursor-server-table"
+                />
+                <div class="mt-6 grid gap-4 xl:grid-cols-2">
+                    <div>
+                        <h3 class="font-semibold">"Fixed-slice navigation only"</h3>
+                        <p class="text-xs opacity-60">
+                            "Proposals: "
+                            <code data-testid="cursor-navigation-only-proposals">
+                                {move || navigation_only_proposals.get().to_string()}
+                            </code>
+                        </p>
+                        <ServerDataTable
+                            rows=cursor_rows
+                            columns=cursor_columns
+                            pagination=navigation_only_pagination
+                            query_capabilities=ServerQueryCapabilities::navigation_only()
+                            attr:id="cursor-navigation-only-table"
+                        />
+                    </div>
+                    <div>
+                        <h3 class="font-semibold">"Mixed: search and sort"</h3>
+                        <p class="text-xs opacity-60">
+                            "Proposals: "
+                            <code data-testid="cursor-mixed-capability-proposals">
+                                {move || mixed_capability_proposals.get().to_string()}
+                            </code>
+                        </p>
+                        <ServerDataTable
+                            rows=cursor_rows
+                            columns=cursor_columns
+                            pagination=mixed_capability_pagination
+                            query_capabilities=ServerQueryCapabilities::navigation_only()
+                                .with_search(true)
+                                .with_sorting(true)
+                            attr:id="cursor-mixed-capability-table"
+                        />
+                    </div>
+                </div>
+                <div class="mt-6 grid gap-4 xl:grid-cols-2">
+                    <div id="cursor-current-slice-vocabulary">
+                        <h3 class="font-semibold">"Explicit current-slice vocabulary"</h3>
+                        <ServerDataTable
+                            rows=cursor_rows
+                            columns=cursor_columns
+                            pagination=current_slice_pagination
+                            query_capabilities=ServerQueryCapabilities::navigation_only()
+                                .with_filtering(true)
+                            filter_vocabulary=ServerFilterVocabulary::current_slice(
+                                Signal::stored(ServerCurrentSliceFilterTexts::default()),
+                            )
+                        />
+                    </div>
+                    <div id="cursor-missing-vocabulary">
+                        <h3 class="font-semibold">"Rejected ambiguous vocabulary"</h3>
+                        <ServerDataTable
+                            rows=cursor_rows
+                            columns=cursor_columns
+                            pagination=current_slice_pagination
+                            query_capabilities=ServerQueryCapabilities::navigation_only()
+                                .with_filtering(true)
+                        />
+                    </div>
+                </div>
+                <div class="mt-3" id="cursor-capability-conflict">
+                    <ServerDataTable
+                        rows=cursor_rows
+                        columns=cursor_columns
+                        pagination=conflicting_capability_pagination
+                        query_capabilities=ServerQueryCapabilities::navigation_only()
+                    />
+                </div>
+                <div class="mt-3" id="cursor-mixed-config">
+                    <ServerDataTable
+                        rows=cursor_rows
+                        columns=cursor_columns
+                        pagination=cursor_pagination
+                        current_page=Signal::stored(1_i64)
+                        total_count=Signal::stored(13_i64)
+                        page_size=Signal::stored(4_i64)
+                        on_page_change=Callback::new(|_| {})
+                    />
+                </div>
             </Section>
 
             // Column resize, typed cells (Badge/Icon), row background, clipboard export

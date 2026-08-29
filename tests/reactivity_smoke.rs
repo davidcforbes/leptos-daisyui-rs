@@ -33,7 +33,7 @@ use common::{
     assert_no_browser_errors, begin_browser_error_capture, click, click_svg_fraction, harness_at,
     move_pointer_to_svg_fraction, oracle,
 };
-use pixelproof_web::Key;
+use pixelproof_web::{Key, ViewportSize};
 use serde_json::json;
 
 /// The bridge reports the route it's on.
@@ -501,6 +501,9 @@ async fn data_table_sort_preserves_shell_geometry_and_semantic_bands() {
             const indicatorWidths = Array.from(
                 root.querySelectorAll('thead tr:first-child th button')
             ).map(button => button.querySelector('[data-table-sort-indicator]')?.getBoundingClientRect().width ?? 0);
+            const indicators = Array.from(
+                root.querySelectorAll('thead tr:first-child th button [data-table-sort-indicator]')
+            );
             return {
                 headerBackground: getComputedStyle(header).backgroundColor,
                 headerContent: getComputedStyle(header).color,
@@ -508,6 +511,9 @@ async fn data_table_sort_preserves_shell_geometry_and_semantic_bands() {
                 filterContent: getComputedStyle(filter).color,
                 grid: getComputedStyle(cell).borderRightColor,
                 indicatorWidths,
+                indicatorTexts: indicators.map(indicator => indicator.textContent.trim()),
+                indicatorStates: indicators.map(indicator => indicator.dataset.tableSortState),
+                indicatorOpacities: indicators.map(indicator => Number(getComputedStyle(indicator).opacity)),
             };
         })()"#,
     )
@@ -524,6 +530,30 @@ async fn data_table_sort_preserves_shell_geometry_and_semantic_bands() {
                 .iter()
                 .all(|width| width.as_f64().is_some_and(|width| width > 0.0))),
         "every sortable header reserves an indicator slot: {palette}"
+    );
+    assert!(
+        palette["indicatorTexts"]
+            .as_array()
+            .is_some_and(|texts| texts.iter().all(|text| text == &json!("⇅"))),
+        "every idle sortable header needs a visible bidirectional affordance: {palette}"
+    );
+    assert!(
+        palette["indicatorStates"]
+            .as_array()
+            .is_some_and(|states| states.iter().all(|state| state == &json!("idle"))),
+        "initial sortable headers must identify their indicator as idle: {palette}"
+    );
+    assert!(
+        palette["indicatorOpacities"]
+            .as_array()
+            .is_some_and(|values| {
+                values.iter().all(|value| {
+                    value
+                        .as_f64()
+                        .is_some_and(|opacity| opacity > 0.0 && opacity < 1.0)
+                })
+            }),
+        "idle affordances should be visible but quieter than the active arrow: {palette}"
     );
 
     assert_no_browser_errors(&h, "sort-stable shared DataTable geometry").await;
@@ -2055,6 +2085,931 @@ async fn server_table_round_trips_typed_query() {
         q.contains("page=2"),
         "page navigation must round-trip through the query: {q}"
     );
+
+    assert_eq!(
+        eval_json(
+            &h,
+            r#"(() => {
+                const input = document.querySelector('#server-table input[type="text"]');
+                input.value = '  USER 1  ';
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                return document.querySelector('#server-table').dataset.serverQueryOwnership;
+            })()"#,
+        )
+        .await,
+        json!("controlled")
+    );
+    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+    let normalized = eval_json(
+        &h,
+        r#"(() => ({
+            value: document.querySelector('#server-table input[type="text"]').value,
+            query: document.querySelector('[data-testid="server-last-query"]').textContent,
+        }))()"#,
+    )
+    .await;
+    assert_eq!(normalized["value"], json!("user 1"));
+    assert!(
+        normalized["query"]
+            .as_str()
+            .unwrap()
+            .contains("search=\"user 1\"")
+    );
+    assert!(normalized["query"].as_str().unwrap().contains("page=1"));
+
+    click(&h, "[data-testid='server-query-reset']").await;
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    let reset = eval_json(
+        &h,
+        r#"(() => ({
+            search: document.querySelector('#server-table input[type="text"]').value,
+            sort: document.querySelector('#server-table thead th:first-child').getAttribute('aria-sort'),
+            role: document.querySelector('#server-table [data-table-filter-column="role"] select').value,
+            pageSize: document.querySelector('#server-table select[id$="-page-size"]').value,
+        }))()"#,
+    )
+    .await;
+    assert_eq!(reset["search"], json!(""));
+    assert!(reset["sort"].is_null() || reset["sort"] == json!("none"));
+    assert_eq!(reset["role"], json!(""));
+    assert_eq!(reset["pageSize"], json!("10"));
+
+    click(&h, "[data-testid='server-query-accept']").await;
+    let before_rejections: u64 = testid_text(&h, "server-query-proposals")
+        .await
+        .parse()
+        .expect("numeric proposal count");
+    click(&h, "#server-table thead th:first-child").await;
+    assert_eq!(
+        eval_json(
+            &h,
+            r#"(() => {
+                const select = document.querySelector('#server-table [data-table-filter-column="role"] select');
+                select.value = 'Admin';
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+                const size = document.querySelector('#server-table select[id$="-page-size"]');
+                size.value = '25';
+                size.dispatchEvent(new Event('change', { bubbles: true }));
+                const search = document.querySelector('#server-table input[type="text"]');
+                search.value = 'declined';
+                search.dispatchEvent(new Event('input', { bubbles: true }));
+                return true;
+            })()"#,
+        )
+        .await,
+        json!(true)
+    );
+    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+    let rejected = eval_json(
+        &h,
+        r#"(() => ({
+            search: document.querySelector('#server-table input[type="text"]').value,
+            sort: document.querySelector('#server-table thead th:first-child').getAttribute('aria-sort'),
+            role: document.querySelector('#server-table [data-table-filter-column="role"] select').value,
+            pageSize: document.querySelector('#server-table select[id$="-page-size"]').value,
+            proposals: Number(document.querySelector('[data-testid="server-query-proposals"]').textContent),
+        }))()"#,
+    )
+    .await;
+    assert_eq!(rejected["search"], json!(""));
+    assert!(rejected["sort"].is_null() || rejected["sort"] == json!("none"));
+    assert_eq!(rejected["role"], json!(""));
+    assert_eq!(rejected["pageSize"], json!("10"));
+    assert_eq!(rejected["proposals"], json!(before_rejections + 4));
+
+    let before_locale = rejected["proposals"].clone();
+    click(&h, "#locale-toggle").await;
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    let localized = eval_json(
+        &h,
+        r#"(() => ({
+            searchLabel: document.querySelector('#server-table input[type="text"]').getAttribute('aria-label'),
+            pageSizeLabel: document.querySelector('#server-table select[id$="-page-size"]').getAttribute('aria-label'),
+            filterLabel: document.querySelector('#server-table [data-table-filter-column="role"] select').getAttribute('aria-label'),
+            proposals: Number(document.querySelector('[data-testid="server-query-proposals"]').textContent),
+        }))()"#,
+    )
+    .await;
+    assert_eq!(localized["searchLabel"], json!("Buscar en la tabla"));
+    assert_eq!(localized["pageSizeLabel"], json!("Filas por página"));
+    assert!(localized["filterLabel"].as_str().unwrap().contains("Role"));
+    assert_eq!(localized["proposals"], before_locale);
+
+    click(&h, "[data-testid='server-query-accept']").await;
+    click(&h, "#server-table thead th:first-child").await;
+    let before_scope: u64 = testid_text(&h, "server-query-proposals")
+        .await
+        .parse()
+        .expect("numeric proposal count before scope reset");
+    click(&h, "[data-testid='server-query-scope']").await;
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    let scoped = eval_json(
+        &h,
+        r#"(() => ({
+            search: document.querySelector('#server-table input[type="text"]').value,
+            sort: document.querySelector('#server-table thead th:first-child').getAttribute('aria-sort'),
+            role: document.querySelector('#server-table [data-table-filter-column="role"] select').value,
+            proposals: Number(document.querySelector('[data-testid="server-query-proposals"]').textContent),
+        }))()"#,
+    )
+    .await;
+    assert_eq!(scoped["search"], json!(""));
+    assert!(scoped["sort"].is_null() || scoped["sort"] == json!("none"));
+    assert_eq!(scoped["role"], json!(""));
+    assert_eq!(scoped["proposals"], json!(before_scope + 1));
+
+    assert_server_table_cursor_pagination_preserves_slice_truth(&h).await;
+}
+
+/// Cursor paging (ldui-9k1): opaque previous/next tokens produce exactly one
+/// controlled query proposal, shape changes restart at `First`, retained rows
+/// stay visible and truthfully labelled, and mixed offset/cursor props are
+/// rejected instead of silently choosing a strategy.
+async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelproof_web::Harness) {
+    let initial = eval_json(
+        &h,
+        r#"(() => {
+            const table = document.querySelector('#cursor-server-table');
+            const controls = table.querySelector('[data-server-cursor-state]');
+            return {
+                strategy: table.dataset.serverPaginationStrategy,
+                ownership: table.dataset.serverQueryOwnership,
+                rows: table.querySelectorAll('tbody tr').length,
+                buttons: controls.querySelectorAll('button').length,
+                status: controls.querySelector('[role="status"]').textContent.trim(),
+                proposals: Number(document.querySelector('[data-testid="cursor-query-proposals"]').textContent),
+                vocabulary: table.dataset.serverFilterVocabulary,
+                roles: Array.from(table.querySelectorAll('tbody tr[data-row-key]')).map(row => row.cells[2].textContent.trim()),
+                roleOptions: Array.from(table.querySelector('[data-table-filter-column="role"] select').options).map(option => option.value),
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(initial["strategy"], json!("cursor"));
+    assert_eq!(initial["ownership"], json!("controlled"));
+    assert_eq!(initial["rows"], json!(4));
+    assert_eq!(initial["buttons"], json!(2));
+    assert_eq!(initial["status"], json!("Showing 4 rows"));
+    assert_eq!(initial["proposals"], json!(0));
+    assert_eq!(initial["vocabulary"], json!("authoritative"));
+    assert!(
+        !initial["roles"]
+            .as_array()
+            .is_some_and(|roles| roles.contains(&json!("Analyst"))),
+        "Analyst is deliberately absent from the first four-row slice: {initial}"
+    );
+    assert!(
+        initial["roleOptions"]
+            .as_array()
+            .is_some_and(|options| options.contains(&json!("role.analyst"))),
+        "the authoritative population vocabulary must still offer Analyst: {initial}"
+    );
+
+    assert_eq!(
+        eval_json(
+            &h,
+            r#"(() => {
+                const current = document.querySelector('#cursor-current-slice-vocabulary [data-table-data-mode="server-query"]');
+                const missing = document.querySelector('#cursor-missing-vocabulary [data-table-data-mode="server-query"]');
+                const currentSelect = current.querySelector('[data-table-filter-column="role"] select');
+                const missingError = missing.querySelector('[data-server-filter-vocabulary-config-error]');
+                return {
+                    current: {
+                        vocabulary: current.dataset.serverFilterVocabulary,
+                        allLabel: currentSelect.options[0].textContent.trim(),
+                        aria: currentSelect.getAttribute('aria-label'),
+                        options: Array.from(currentSelect.options).map(option => option.value),
+                    },
+                    missing: {
+                        vocabulary: missing.dataset.serverFilterVocabulary,
+                        role: missingError.getAttribute('role'),
+                        message: missingError.textContent.trim(),
+                        filterRows: missing.querySelectorAll('tr.data-table-filter-row').length,
+                    },
+                };
+            })()"#,
+        )
+        .await,
+        json!({
+            "current": {
+                "vocabulary": "current-slice",
+                "allLabel": "All on this page",
+                "aria": "Filter current page by Role",
+                "options": ["", "Admin", "Designer", "Developer", "Manager"],
+            },
+            "missing": {
+                "vocabulary": "invalid",
+                "role": "alert",
+                "message": "ServerDataTable filterable columns require authoritative filter_options or an explicit current-slice vocabulary",
+                "filterRows": 0,
+            },
+        })
+    );
+
+    // Stable-key reconciliation: moving, inserting around, and removing
+    // around a row must preserve that business entity's exact DOM node and
+    // focus. The mutation buttons are invoked programmatically so clicking a
+    // separate control does not itself steal focus from the row under test.
+    assert_eq!(
+        eval_json(
+            &h,
+            r#"(() => {
+                const row = document.querySelector('#cursor-server-table tbody tr[data-row-key="001"]');
+                row.__lduiIdentityProbe = 'row-001';
+                row.focus();
+                document.querySelector('[data-testid="cursor-reverse-rows"]').click();
+                return true;
+            })()"#,
+        )
+        .await,
+        json!(true)
+    );
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    assert_eq!(
+        eval_json(
+            &h,
+            r#"(() => {
+                const row = document.querySelector('#cursor-server-table tbody tr[data-row-key="001"]');
+                return {
+                    keys: Array.from(document.querySelectorAll('#cursor-server-table tbody tr[data-row-key]')).map(row => row.dataset.rowKey),
+                    probe: row.__lduiIdentityProbe ?? null,
+                    focused: document.activeElement === row,
+                    index: Number(row.dataset.rowIndex),
+                };
+            })()"#,
+        )
+        .await,
+        json!({
+            "keys": ["004", "003", "002", "001"],
+            "probe": "row-001",
+            "focused": true,
+            "index": 3,
+        })
+    );
+
+    assert_eq!(
+        eval_json(
+            &h,
+            r#"(() => {
+                document.querySelector('[data-testid="cursor-insert-row"]').click();
+                const inserted = document.querySelector('#cursor-server-table tbody tr[data-row-key="inserted"]');
+                const stable = document.querySelector('#cursor-server-table tbody tr[data-row-key="001"]');
+                const afterInsert = {
+                    inserted: !!inserted,
+                    probe: stable.__lduiIdentityProbe ?? null,
+                    index: Number(stable.dataset.rowIndex),
+                    focused: document.activeElement === stable,
+                };
+                document.querySelector('[data-testid="cursor-remove-inserted-row"]').click();
+                return {
+                    afterInsert,
+                    insertedAfterRemove: !!document.querySelector('#cursor-server-table tbody tr[data-row-key="inserted"]'),
+                    indexAfterRemove: Number(stable.dataset.rowIndex),
+                    probeAfterRemove: stable.__lduiIdentityProbe ?? null,
+                    focusedAfterRemove: document.activeElement === stable,
+                };
+            })()"#,
+        )
+        .await,
+        json!({
+            "afterInsert": {
+                "inserted": true,
+                "probe": "row-001",
+                "index": 4,
+                "focused": true,
+            },
+            "insertedAfterRemove": false,
+            "indexAfterRemove": 3,
+            "probeAfterRemove": "row-001",
+            "focusedAfterRemove": true,
+        })
+    );
+
+    click(
+        &h,
+        "#cursor-server-table tbody tr[data-row-key='001'] td:first-child",
+    )
+    .await;
+    assert_eq!(
+        testid_text(&h, "cursor-keyed-activation").await,
+        "001|3|User 1",
+        "keyed activation must carry the displayed identity snapshot"
+    );
+    assert_eq!(
+        eval_json(
+            &h,
+            r#"(() => ({
+                accepted: document.querySelector('[data-testid="cursor-selected-key"]').textContent.trim(),
+                proposals: Number(document.querySelector('[data-testid="cursor-selection-proposals"]').textContent),
+                selected: Array.from(document.querySelectorAll('#cursor-server-table tbody tr[aria-selected="true"]')).map(row => row.dataset.rowKey),
+            }))()"#,
+        )
+        .await,
+        json!({ "accepted": "001", "proposals": 1, "selected": ["001"] })
+    );
+    assert_eq!(
+        eval_json(
+            &h,
+            r#"(() => {
+                const row = document.querySelector('#cursor-server-table tbody tr[data-row-key="001"]');
+                row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true }));
+                return true;
+            })()"#,
+        )
+        .await,
+        json!(true)
+    );
+    assert_eq!(
+        testid_text(&h, "cursor-keyed-inspection").await,
+        "001|3|User 1",
+        "keyed inspection must carry the displayed identity snapshot"
+    );
+
+    // Rejected proposals never paint optimistic selection. The callback sees
+    // exactly one proposed key, while the accepted key and aria-selected row
+    // remain 001. Re-enable acceptance and prove keyboard Space uses the same
+    // controlled path.
+    assert_eq!(
+        eval_json(
+            &h,
+            r#"(() => {
+                document.querySelector('[data-testid="cursor-selection-accept"]').click();
+                document.querySelector('#cursor-server-table tbody tr[data-row-key="002"]').click();
+                return {
+                    accepted: document.querySelector('[data-testid="cursor-selected-key"]').textContent.trim(),
+                    proposed: document.querySelector('[data-testid="cursor-last-selection-proposal"]').textContent.trim(),
+                    proposals: Number(document.querySelector('[data-testid="cursor-selection-proposals"]').textContent),
+                    selected: Array.from(document.querySelectorAll('#cursor-server-table tbody tr[aria-selected="true"]')).map(row => row.dataset.rowKey),
+                };
+            })()"#,
+        )
+        .await,
+        json!({
+            "accepted": "001",
+            "proposed": "002",
+            "proposals": 2,
+            "selected": ["001"],
+        })
+    );
+    assert_eq!(
+        eval_json(
+            &h,
+            r#"(() => {
+                document.querySelector('[data-testid="cursor-selection-accept"]').click();
+                document.querySelector('#cursor-server-table tbody tr[data-row-key="003"]').focus();
+                return true;
+            })()"#,
+        )
+        .await,
+        json!(true)
+    );
+    h.press_key_sequence(&[Key::Space])
+        .await
+        .expect("Space selects the focused keyed server row");
+    assert_eq!(
+        eval_json(
+            &h,
+            r#"(() => ({
+                accepted: document.querySelector('[data-testid="cursor-selected-key"]').textContent.trim(),
+                proposals: Number(document.querySelector('[data-testid="cursor-selection-proposals"]').textContent),
+                selected: Array.from(document.querySelectorAll('#cursor-server-table tbody tr[aria-selected="true"]')).map(row => row.dataset.rowKey),
+            }))()"#,
+        )
+        .await,
+        json!({ "accepted": "003", "proposals": 3, "selected": ["003"] })
+    );
+
+    // Duplicate keys fail closed: only an explicit alert row renders. Restore
+    // the accepted server slice before continuing the cursor journey.
+    assert_eq!(
+        eval_json(
+            &h,
+            r#"(() => {
+                document.querySelector('[data-testid="cursor-duplicate-row-key"]').click();
+                const table = document.querySelector('#cursor-server-table');
+                return {
+                    dataRows: table.querySelectorAll('tbody tr[data-row-key]').length,
+                    errors: table.querySelectorAll('tbody tr[data-table-row-key-error] [role="alert"]').length,
+                    message: table.querySelector('tbody tr[data-table-row-key-error]')?.textContent.trim() ?? '',
+                };
+            })()"#,
+        )
+        .await,
+        json!({
+            "dataRows": 0,
+            "errors": 1,
+            "message": "DataTable row_key returned duplicate key \"004\" for page rows 0 and 4",
+        })
+    );
+    assert_eq!(
+        eval_json(
+            &h,
+            r#"(() => {
+                document.querySelector('[data-testid="cursor-restore-rows"]').click();
+                return Array.from(document.querySelectorAll('#cursor-server-table tbody tr[data-row-key]')).map(row => row.dataset.rowKey);
+            })()"#,
+        )
+        .await,
+        json!(["001", "002", "003", "004"])
+    );
+
+    // A cursor replacement must not recycle the focused row-001 node for the
+    // different entity that takes page position zero.
+    assert_eq!(
+        eval_json(
+            &h,
+            r#"(() => {
+                const old = document.querySelector('#cursor-server-table tbody tr[data-row-key="001"]');
+                old.__lduiOldPageProbe = true;
+                old.focus();
+                document.querySelector('#cursor-server-table [data-server-cursor-action="next"]').click();
+                const next = document.querySelector('#cursor-server-table tbody tr[data-row-key="005"]');
+                return {
+                    nextExists: !!next,
+                    inheritedProbe: next?.__lduiOldPageProbe ?? false,
+                    focusTransferred: document.activeElement === next,
+                };
+            })()"#,
+        )
+        .await,
+        json!({
+            "nextExists": true,
+            "inheritedProbe": false,
+            "focusTransferred": false,
+        })
+    );
+    assert_eq!(
+        count_of(&h, "#cursor-server-table tbody tr[aria-selected='true']",).await,
+        0,
+        "accepted key 003 is outside the next slice and must not transfer by index"
+    );
+
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    assert_eq!(testid_text(&h, "cursor-query-proposals").await, "1");
+    assert!(
+        testid_text(&h, "cursor-last-query")
+            .await
+            .contains("request=Next(offset:4)"),
+        "Next must forward the exact opaque server token"
+    );
+    assert!(
+        eval_json(
+            &h,
+            "document.querySelector('#cursor-server-table tbody tr').textContent",
+        )
+        .await
+        .as_str()
+        .is_some_and(|text| text.contains("User 5"))
+    );
+
+    click(
+        &h,
+        "#cursor-server-table [data-server-cursor-action='previous']",
+    )
+    .await;
+    assert_eq!(testid_text(&h, "cursor-query-proposals").await, "2");
+    assert!(
+        eval_json(
+            &h,
+            "document.querySelector('#cursor-server-table tbody tr').textContent",
+        )
+        .await
+        .as_str()
+        .is_some_and(|text| text.contains("User 1"))
+    );
+    assert_eq!(
+        eval_json(
+            &h,
+            r#"document.querySelector('#cursor-server-table tbody tr[aria-selected="true"]')?.dataset.rowKey ?? null"#,
+        )
+        .await,
+        json!("003"),
+        "returning to the previous slice restores the accepted business key"
+    );
+
+    click(&h, "#cursor-server-table thead th:first-child").await;
+    assert_eq!(testid_text(&h, "cursor-query-proposals").await, "3");
+    let sorted = testid_text(&h, "cursor-last-query").await;
+    assert!(sorted.contains("request=First") && sorted.contains("sort=Some"));
+
+    // A high-cardinality server column emits the same stable filter map, with
+    // its Contains interpretation carried by the supplied Column definition.
+    assert_eq!(
+        eval_json(
+            &h,
+            r#"(() => {
+                const input = document.querySelector('#cursor-server-table [data-table-filter-column="name"] input[data-table-filter-kind="contains"]');
+                input.value = 'USER 1';
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                return { aria: input.getAttribute('aria-label'), immediate: input.value };
+            })()"#,
+        )
+        .await,
+        json!({ "aria": "Filter Name by text", "immediate": "USER 1" })
+    );
+    tokio::time::sleep(std::time::Duration::from_millis(225)).await;
+    assert_eq!(testid_text(&h, "cursor-query-proposals").await, "4");
+    assert!(
+        testid_text(&h, "cursor-last-query")
+            .await
+            .contains("USER 1"),
+        "the debounced proposal must preserve the entered substring value"
+    );
+    assert!(
+        eval_json(
+            &h,
+            "document.querySelector('#cursor-server-table tbody').textContent",
+        )
+        .await
+        .as_str()
+        .is_some_and(|text| text.contains("User 1"))
+    );
+
+    assert_eq!(
+        eval_json(
+            &h,
+            r#"(() => {
+                const input = document.querySelector('#cursor-server-table [data-table-filter-column="name"] input');
+                input.value = '';
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                return input.value;
+            })()"#,
+        )
+        .await,
+        json!("")
+    );
+    tokio::time::sleep(std::time::Duration::from_millis(225)).await;
+    assert_eq!(testid_text(&h, "cursor-query-proposals").await, "5");
+
+    assert_eq!(
+        eval_json(
+            &h,
+            r#"(() => {
+                const filter = document.querySelector('#cursor-server-table [data-table-filter-column="role"] select');
+                filter.value = 'role.analyst';
+                filter.dispatchEvent(new Event('change', { bubbles: true }));
+                return true;
+            })()"#,
+        )
+        .await,
+        json!(true)
+    );
+    assert_eq!(testid_text(&h, "cursor-query-proposals").await, "6");
+    assert!(
+        testid_text(&h, "cursor-last-query")
+            .await
+            .contains("role.analyst")
+    );
+
+    // Labels are reactive presentation while the stable value remains query
+    // truth. If metadata temporarily omits the accepted value, the framework
+    // retains a removable fallback option instead of blanking the select.
+    assert_eq!(
+        eval_json(
+            &h,
+            r#"(() => {
+                document.querySelector('[data-testid="cursor-filter-locale"]').click();
+                const select = document.querySelector('#cursor-server-table [data-table-filter-column="role"] select');
+                return {
+                    value: select.value,
+                    label: select.selectedOptions[0].textContent.trim(),
+                };
+            })()"#,
+        )
+        .await,
+        json!({ "value": "role.analyst", "label": "Analista" })
+    );
+    click(&h, "[data-testid='cursor-filter-active-option']").await;
+    assert_eq!(
+        eval_json(
+            &h,
+            r#"(() => {
+                const select = document.querySelector('#cursor-server-table [data-table-filter-column="role"] select');
+                return { value: select.value, label: select.selectedOptions[0].textContent.trim() };
+            })()"#,
+        )
+        .await,
+        json!({ "value": "role.analyst", "label": "role.analyst" })
+    );
+    click(&h, "[data-testid='cursor-filter-active-option']").await;
+    assert_eq!(
+        eval_json(
+            &h,
+            r#"(() => {
+                const select = document.querySelector('#cursor-server-table [data-table-filter-column="role"] select');
+                return { value: select.value, label: select.selectedOptions[0].textContent.trim() };
+            })()"#,
+        )
+        .await,
+        json!({ "value": "role.analyst", "label": "Analista" })
+    );
+
+    assert_eq!(
+        eval_json(
+            &h,
+            r#"(() => {
+                document.querySelector('[data-testid="cursor-query-accept"]').click();
+                const input = document.querySelector('#cursor-server-table [data-table-filter-column="name"] input');
+                input.value = 'User 2';
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                return true;
+            })()"#,
+        )
+        .await,
+        json!(true)
+    );
+    tokio::time::sleep(std::time::Duration::from_millis(225)).await;
+    assert_eq!(testid_text(&h, "cursor-query-proposals").await, "7");
+    assert!(
+        testid_text(&h, "cursor-last-query")
+            .await
+            .contains("User 2"),
+        "the rejected proposal must still carry the entered substring"
+    );
+    assert_eq!(
+        eval_json(
+            &h,
+            r#"document.querySelector('#cursor-server-table [data-table-filter-column="name"] input').value"#,
+        )
+        .await,
+        json!(""),
+        "controlled rejection must restore the accepted empty substring"
+    );
+    assert_eq!(
+        eval_json(
+            &h,
+            r#"document.querySelector('#cursor-server-table [data-table-filter-column="role"] select').value"#,
+        )
+        .await,
+        json!("role.analyst"),
+        "a rejected text proposal must not disturb an accepted exact filter"
+    );
+    click(&h, "[data-testid='cursor-query-accept']").await;
+
+    assert_eq!(
+        eval_json(
+            &h,
+            r#"(() => {
+                const size = document.querySelector('#cursor-server-table select[id$="-page-size"]');
+                size.value = '8';
+                size.dispatchEvent(new Event('change', { bubbles: true }));
+                return true;
+            })()"#,
+        )
+        .await,
+        json!(true)
+    );
+    assert_eq!(testid_text(&h, "cursor-query-proposals").await, "8");
+    assert!(
+        testid_text(&h, "cursor-last-query")
+            .await
+            .contains("request=First")
+    );
+
+    assert_eq!(
+        eval_json(
+            &h,
+            r#"(() => {
+                const input = document.querySelector('#cursor-server-table input[id^="ldui-data-table-search-"]');
+                input.value = 'User 1';
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                return true;
+            })()"#,
+        )
+        .await,
+        json!(true)
+    );
+    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+    assert_eq!(testid_text(&h, "cursor-query-proposals").await, "9");
+    assert!(
+        testid_text(&h, "cursor-last-query")
+            .await
+            .contains("request=First")
+    );
+
+    let retained_rows = count_of(&h, "#cursor-server-table tbody tr").await;
+    click(&h, "[data-testid='cursor-retain-loading']").await;
+    let retained_loading = eval_json(
+        &h,
+        r#"(() => {
+            const table = document.querySelector('#cursor-server-table');
+            const controls = table.querySelector('[data-server-cursor-state]');
+            return {
+                rows: table.querySelectorAll('tbody tr').length,
+                state: controls.dataset.serverCursorState,
+                status: controls.querySelector('[role="status"]').textContent.trim(),
+                disabled: Array.from(controls.querySelectorAll('button')).every(button => button.disabled),
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(retained_loading["rows"], json!(retained_rows));
+    assert_eq!(retained_loading["state"], json!("retained-loading"));
+    assert!(
+        retained_loading["status"]
+            .as_str()
+            .is_some_and(|text| text.contains("retained rows while loading"))
+    );
+    assert_eq!(retained_loading["disabled"], json!(true));
+
+    click(&h, "[data-testid='cursor-retain-failure']").await;
+    let retained_failure = eval_json(
+        &h,
+        r#"(() => {
+            const table = document.querySelector('#cursor-server-table');
+            const controls = table.querySelector('[data-server-cursor-state]');
+            return {
+                rows: table.querySelectorAll('tbody tr').length,
+                state: controls.dataset.serverCursorState,
+                status: controls.querySelector('[role="status"]').textContent.trim(),
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(retained_failure["rows"], json!(retained_rows));
+    assert_eq!(retained_failure["state"], json!("retained-failure"));
+    assert!(
+        retained_failure["status"]
+            .as_str()
+            .is_some_and(|text| text.contains("latest request failed"))
+    );
+
+    assert_eq!(
+        eval_json(
+            &h,
+            r#"(() => {
+                const error = document.querySelector('#cursor-mixed-config [data-server-pagination-config-error]');
+                return {
+                    role: error.getAttribute('role'),
+                    message: error.dataset.serverPaginationConfigError,
+                    tables: document.querySelectorAll('#cursor-mixed-config table').length,
+                };
+            })()"#,
+        )
+        .await,
+        json!({
+            "role": "alert",
+            "message": "ServerDataTable pagination is mutually exclusive with legacy offset props",
+            "tables": 0,
+        })
+    );
+
+    assert_server_table_controls_match_declared_query_capabilities(&h).await;
+}
+
+/// Server query capabilities (ldui-8v5): a fixed cursor slice exposes only
+/// Previous/Next and cannot emit unsupported shape proposals, while a mixed
+/// policy independently enables search/sort and the omitted policy preserves
+/// the historical full-query controls.
+async fn assert_server_table_controls_match_declared_query_capabilities(
+    h: &pixelproof_web::Harness,
+) {
+    let navigation_only = eval_json(
+        &h,
+        r#"(() => {
+            const table = document.querySelector('#cursor-navigation-only-table');
+            return {
+                search: table.dataset.serverQuerySearch,
+                pageSize: table.dataset.serverQueryPageSize,
+                sorting: table.dataset.serverQuerySorting,
+                filtering: table.dataset.serverQueryFiltering,
+                textInputs: table.querySelectorAll('input[type="text"]').length,
+                pageSizeSelects: table.querySelectorAll('select[id$="-page-size"]').length,
+                filterRows: table.querySelectorAll('[data-table-filter-row]').length,
+                sortButtons: table.querySelectorAll('[data-table-sort-state]').length,
+                navigationButtons: table.querySelectorAll('[data-server-cursor-action]').length,
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(
+        navigation_only,
+        json!({
+            "search": "disabled",
+            "pageSize": "disabled",
+            "sorting": "disabled",
+            "filtering": "disabled",
+            "textInputs": 0,
+            "pageSizeSelects": 0,
+            "filterRows": 0,
+            "sortButtons": 0,
+            "navigationButtons": 2,
+        })
+    );
+
+    click(&h, "#cursor-navigation-only-table thead th:first-child").await;
+    assert_eq!(
+        testid_text(&h, "cursor-navigation-only-proposals").await,
+        "0",
+        "an inert header cannot produce an unsupported sort proposal"
+    );
+    click(
+        &h,
+        "#cursor-navigation-only-table [data-server-cursor-action='next']",
+    )
+    .await;
+    assert_eq!(
+        testid_text(&h, "cursor-navigation-only-proposals").await,
+        "1",
+        "cursor navigation remains independently operable"
+    );
+
+    let mixed = eval_json(
+        &h,
+        r#"(() => {
+            const table = document.querySelector('#cursor-mixed-capability-table');
+            return {
+                search: table.dataset.serverQuerySearch,
+                pageSize: table.dataset.serverQueryPageSize,
+                sorting: table.dataset.serverQuerySorting,
+                filtering: table.dataset.serverQueryFiltering,
+                textInputs: table.querySelectorAll('input[type="text"]').length,
+                pageSizeSelects: table.querySelectorAll('select[id$="-page-size"]').length,
+                filterRows: table.querySelectorAll('[data-table-filter-row]').length,
+                sortButtons: table.querySelectorAll('[data-table-sort-state]').length,
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(
+        mixed,
+        json!({
+            "search": "enabled",
+            "pageSize": "disabled",
+            "sorting": "enabled",
+            "filtering": "disabled",
+            "textInputs": 1,
+            "pageSizeSelects": 0,
+            "filterRows": 0,
+            "sortButtons": 3,
+        })
+    );
+    click(&h, "#cursor-mixed-capability-table thead th:first-child").await;
+    assert_eq!(
+        testid_text(&h, "cursor-mixed-capability-proposals").await,
+        "1"
+    );
+    assert_eq!(
+        eval_json(
+            &h,
+            r#"(() => {
+                const input = document.querySelector('#cursor-mixed-capability-table input[type="text"]');
+                input.value = 'matter';
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                return true;
+            })()"#,
+        )
+        .await,
+        json!(true)
+    );
+    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+    assert_eq!(
+        testid_text(&h, "cursor-mixed-capability-proposals").await,
+        "2"
+    );
+
+    let compatible_default = eval_json(
+        &h,
+        r#"(() => {
+            const table = document.querySelector('#cursor-server-table');
+            return {
+                markers: [
+                    table.dataset.serverQuerySearch,
+                    table.dataset.serverQueryPageSize,
+                    table.dataset.serverQuerySorting,
+                    table.dataset.serverQueryFiltering,
+                ],
+                search: table.querySelectorAll('input[type="text"]').length,
+                pageSize: table.querySelectorAll('select[id$="-page-size"]').length,
+                filters: table.querySelectorAll('[data-table-filter-row]').length,
+                sorts: table.querySelectorAll('[data-table-sort-state]').length,
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(
+        compatible_default["markers"],
+        json!(["enabled", "enabled", "enabled", "enabled"])
+    );
+    assert_eq!(compatible_default["search"], json!(1));
+    assert_eq!(compatible_default["pageSize"], json!(1));
+    assert_eq!(compatible_default["filters"], json!(1));
+    assert_eq!(compatible_default["sorts"], json!(3));
+
+    assert_eq!(
+        eval_json(
+            &h,
+            r#"(() => {
+                const error = document.querySelector('#cursor-capability-conflict [data-server-query-capability-config-error]');
+                return { role: error.getAttribute('role'), message: error.textContent.trim() };
+            })()"#,
+        )
+        .await,
+        json!({
+            "role": "alert",
+            "message": "ServerDataTable query enables search while the search capability is disabled",
+        })
+    );
 }
 
 /// Server-variant activation forwarding (ldui-1gp): ServerDataTable passes
@@ -2221,11 +3176,14 @@ async fn data_table_control_names_relocalize_without_resetting_state() {
         &h,
         r#"(() => {
             const root = document.querySelector('#filter-row-table');
-            const search = root?.querySelector('input[type="text"]');
+            const search = root?.querySelector('input[id^="ldui-data-table-search-"]');
+            const textFilter = root?.querySelector('[data-table-filter-column="name"] input[data-table-filter-kind="contains"]');
             const filter = root?.querySelector('tr.data-table-filter-row select');
-            if (!search || !filter) return false;
-            search.value = 'User 2';
+            if (!search || !textFilter || !filter) return false;
+            search.value = 'User';
             search.dispatchEvent(new Event('input', { bubbles: true }));
+            textFilter.value = 'USER 2';
+            textFilter.dispatchEvent(new Event('input', { bubbles: true }));
             filter.value = 'Admin';
             filter.dispatchEvent(new Event('change', { bubbles: true }));
             return true;
@@ -2243,7 +3201,8 @@ async fn data_table_control_names_relocalize_without_resetting_state() {
         format!(
             r#"(() => {{
                 const root = document.querySelector('{root}');
-                const search = root.querySelector('input[type="text"]');
+                const search = root.querySelector('input[id^="ldui-data-table-search-"]');
+                const textFilter = root.querySelector('[data-table-filter-column="name"] input[data-table-filter-kind="contains"]');
                 const filter = root.querySelector('tr.data-table-filter-row select');
                 const labelText = element => Array.from(element.labels || [])
                     .map(label =>
@@ -2260,6 +3219,11 @@ async fn data_table_control_names_relocalize_without_resetting_state() {
                         aria: search.getAttribute('aria-label'),
                         labels: labelText(search),
                     }},
+                    textFilter: {{
+                        value: textFilter.value,
+                        aria: textFilter.getAttribute('aria-label'),
+                        labels: labelText(textFilter),
+                    }},
                     filter: {{
                         value: filter.value,
                         aria: filter.getAttribute('aria-label'),
@@ -2274,10 +3238,16 @@ async fn data_table_control_names_relocalize_without_resetting_state() {
     let english = eval_json(&h, &describe("en")).await;
     assert_eq!(english["rows"], json!(2));
     assert_eq!(english["sort"], json!("ascending"));
-    assert_eq!(english["search"]["value"], json!("User 2"));
+    assert_eq!(english["search"]["value"], json!("User"));
     assert_eq!(english["search"]["placeholder"], json!("Search..."));
     assert_eq!(english["search"]["aria"], json!("Search table"));
     assert_eq!(english["search"]["labels"], json!(["Search table"]));
+    assert_eq!(english["textFilter"]["value"], json!("USER 2"));
+    assert_eq!(english["textFilter"]["aria"], json!("Filter Name by text"));
+    assert_eq!(
+        english["textFilter"]["labels"],
+        json!(["Filter Name by text"])
+    );
     assert_eq!(english["filter"]["value"], json!("Admin"));
     assert_eq!(english["filter"]["aria"], json!("Filter by Role"));
     assert_eq!(english["filter"]["labels"], json!(["Filter by Role"]));
@@ -2293,10 +3263,19 @@ async fn data_table_control_names_relocalize_without_resetting_state() {
         json!("ascending"),
         "locale change reset sort"
     );
-    assert_eq!(spanish["search"]["value"], json!("User 2"));
+    assert_eq!(spanish["search"]["value"], json!("User"));
     assert_eq!(spanish["search"]["placeholder"], json!("Buscar..."));
     assert_eq!(spanish["search"]["aria"], json!("Buscar en la tabla"));
     assert_eq!(spanish["search"]["labels"], json!(["Buscar en la tabla"]));
+    assert_eq!(spanish["textFilter"]["value"], json!("USER 2"));
+    assert_eq!(
+        spanish["textFilter"]["aria"],
+        json!("Filtrar Nombre por texto")
+    );
+    assert_eq!(
+        spanish["textFilter"]["labels"],
+        json!(["Filtrar Nombre por texto"])
+    );
     assert_eq!(spanish["filter"]["value"], json!("Admin"));
     assert_eq!(spanish["filter"]["aria"], json!("Filtrar por Rol"));
     assert_eq!(spanish["filter"]["labels"], json!(["Filtrar por Rol"]));
@@ -2304,11 +3283,54 @@ async fn data_table_control_names_relocalize_without_resetting_state() {
     assert_no_browser_errors(&h, "localized DataTable control state").await;
 }
 
-/// Tabs: clicking the second tab of the Basic Tabs strip selects index 1.
+/// Tabs: controlled selection, roving focus, relationships, localization,
+/// overflow, orientation, disabled skipping, and removal recovery stay coherent.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires demo dev server (cargo make test-visual)"]
 async fn tab_click_selects_via_oracle() {
     let h = harness_at("/components/tab").await;
+
+    let initial = eval_json(
+        &h,
+        r#"(() => {
+            const set = document.querySelector('#basic-tabs');
+            const list = set.querySelector('[role="tablist"]');
+            const tabs = Array.from(list.querySelectorAll('[role="tab"]'));
+            const panels = Array.from(set.querySelectorAll('[role="tabpanel"]'));
+            return {
+                mode: set.dataset.tabset,
+                listRole: list.getAttribute('role'),
+                label: list.getAttribute('aria-label'),
+                orientation: list.getAttribute('aria-orientation'),
+                selected: tabs.filter(tab => tab.getAttribute('aria-selected') === 'true').map(tab => tab.textContent.trim()),
+                roving: tabs.filter(tab => tab.tabIndex === 0).map(tab => tab.textContent.trim()),
+                relationships: tabs.map(tab => ({
+                    tabId: tab.id,
+                    controls: tab.getAttribute('aria-controls'),
+                    panelExists: !!document.getElementById(tab.getAttribute('aria-controls')),
+                    panelLabelledBy: document.getElementById(tab.getAttribute('aria-controls'))?.getAttribute('aria-labelledby'),
+                })),
+                visiblePanels: panels.filter(panel => !panel.hidden).map(panel => panel.textContent.trim()),
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(initial["mode"], json!("controlled"));
+    assert_eq!(initial["listRole"], json!("tablist"));
+    assert_eq!(initial["label"], json!("Basic tabs"));
+    assert_eq!(initial["orientation"], json!("horizontal"));
+    assert_eq!(initial["selected"], json!(["Tab 1"]));
+    assert_eq!(initial["roving"], json!(["Tab 1"]));
+    assert_eq!(initial["visiblePanels"], json!(["Content for Tab 1"]));
+    assert!(
+        initial["relationships"]
+            .as_array()
+            .is_some_and(|relationships| relationships.iter().all(|relationship| {
+                relationship["panelExists"] == json!(true)
+                    && relationship["tabId"] == relationship["panelLabelledBy"]
+            })),
+        "every tab must own one labelled panel: {initial}"
+    );
 
     click(&h, "main .tabs .tab:nth-child(2)").await;
     let s = oracle(&h).await;
@@ -2317,6 +3339,217 @@ async fn tab_click_selects_via_oracle() {
     click(&h, "main .tabs .tab:nth-child(3)").await;
     let s = oracle(&h).await;
     assert_eq!(s["state"]["tab.active"], json!(2), "oracle: {s}");
+
+    click(&h, "#basic-tabs [role='tab']:nth-child(1)").await;
+    h.page()
+        .find_element("#basic-tabs [role='tab']:nth-child(1)")
+        .await
+        .expect("find first controlled tab")
+        .focus()
+        .await
+        .expect("focus first controlled tab");
+    h.press_key_sequence(&[Key::ArrowRight])
+        .await
+        .expect("move controlled tab focus");
+    assert_eq!(
+        eval_json(
+            &h,
+            r#"(() => ({
+                focused: document.activeElement.textContent.trim(),
+                selected: document.querySelector('#basic-tabs [role="tab"][aria-selected="true"]').textContent.trim(),
+                roving: Array.from(document.querySelectorAll('#basic-tabs [role="tab"]')).filter(tab => tab.tabIndex === 0).map(tab => tab.textContent.trim()),
+            }))()"#,
+        )
+        .await,
+        json!({ "focused": "Tab 2", "selected": "Tab 1", "roving": ["Tab 2"] }),
+        "Arrow movement is manual activation and must not mutate controlled selection"
+    );
+    h.press_key_sequence(&[Key::Enter])
+        .await
+        .expect("select focused controlled tab");
+    let s = oracle(&h).await;
+    assert_eq!(s["state"]["tab.active"], json!(1), "oracle: {s}");
+    assert_eq!(
+        eval_json(
+            &h,
+            r#"(() => ({
+                selected: document.querySelector('#basic-tabs [role="tab"][aria-selected="true"]').textContent.trim(),
+                panel: document.querySelector('#basic-tabs [role="tabpanel"]:not([hidden])').textContent.trim(),
+            }))()"#,
+        )
+        .await,
+        json!({ "selected": "Tab 2", "panel": "Content for Tab 2" })
+    );
+    h.press_key_sequence(&[Key::Tab])
+        .await
+        .expect("leave the tablist through its single roving stop");
+    assert_eq!(
+        eval_json(&h, "document.activeElement.getAttribute('role')").await,
+        json!("tabpanel"),
+        "Tab must leave the composite for the selected panel"
+    );
+
+    h.set_viewport(ViewportSize::new(320, 844))
+        .await
+        .expect("set compact controlled-tabs viewport");
+    let compact = eval_json(
+        &h,
+        r#"(() => {
+            const fixture = document.querySelector('[data-testid="controlled-tab-fixture"]');
+            const list = fixture.querySelector('[role="tablist"]');
+            const gamma = fixture.querySelector('#controlled-tabs-fixture-tab-67616d6d61');
+            return {
+                scrollable: list.scrollWidth > list.clientWidth,
+                overflowX: getComputedStyle(list).overflowX,
+                pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+                gammaDisabled: gamma.getAttribute('aria-disabled'),
+                gammaTabIndex: gamma.tabIndex,
+                rovingCount: Array.from(list.querySelectorAll('[role="tab"]')).filter(tab => tab.tabIndex === 0).length,
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(compact["scrollable"], json!(true));
+    assert!(matches!(
+        compact["overflowX"].as_str(),
+        Some("auto" | "scroll")
+    ));
+    assert_eq!(compact["pageOverflow"], json!(false));
+    assert_eq!(compact["gammaDisabled"], json!("true"));
+    assert_eq!(compact["gammaTabIndex"], json!(-1));
+    assert_eq!(compact["rovingCount"], json!(1));
+
+    click(&h, "[data-testid='tab-select-beta']").await;
+    let beta = "#controlled-tabs-fixture-tab-62657461";
+    h.page()
+        .find_element(beta)
+        .await
+        .expect("find externally selected Beta tab")
+        .focus()
+        .await
+        .expect("focus Beta tab");
+    h.press_key_sequence(&[Key::ArrowRight])
+        .await
+        .expect("skip disabled Gamma tab");
+    assert_eq!(
+        eval_json(
+            &h,
+            r#"(() => ({
+                focused: document.activeElement.id,
+                selected: document.querySelector('#controlled-tabs-fixture [role="tab"][aria-selected="true"]').id,
+            }))()"#,
+        )
+        .await,
+        json!({
+            "focused": "controlled-tabs-fixture-tab-64656c7461",
+            "selected": "controlled-tabs-fixture-tab-62657461",
+        })
+    );
+    h.press_key_sequence(&[Key::Space])
+        .await
+        .expect("Space selects focused Delta tab");
+    assert_eq!(
+        oracle(&h).await["state"]["tab.fixture.selected"],
+        json!("delta")
+    );
+    h.press_key_sequence(&[Key::Home])
+        .await
+        .expect("Home focuses first enabled tab");
+    assert_eq!(
+        eval_json(&h, "document.activeElement.id").await,
+        json!("controlled-tabs-fixture-tab-616c706861")
+    );
+    h.press_key_sequence(&[Key::End])
+        .await
+        .expect("End focuses last enabled tab");
+    assert_eq!(
+        eval_json(&h, "document.activeElement.id").await,
+        json!("controlled-tabs-fixture-tab-7a657461")
+    );
+
+    let before_locale_ids = eval_json(
+        &h,
+        "Array.from(document.querySelectorAll('#controlled-tabs-fixture [role=\"tab\"]')).map(tab => tab.id)",
+    )
+    .await;
+    click(&h, "[data-testid='tab-toggle-locale']").await;
+    assert_eq!(
+        eval_json(
+            &h,
+            r#"(() => ({
+                label: document.querySelector('#controlled-tabs-fixture [role="tablist"]').getAttribute('aria-label'),
+                first: document.querySelector('#controlled-tabs-fixture [role="tab"]').textContent.trim(),
+                ids: Array.from(document.querySelectorAll('#controlled-tabs-fixture [role="tab"]')).map(tab => tab.id),
+            }))()"#,
+        )
+        .await,
+        json!({ "label": "Flujo de trabajo", "first": "Alfa", "ids": before_locale_ids })
+    );
+
+    click(&h, "[data-testid='tab-toggle-orientation']").await;
+    h.page()
+        .find_element("#controlled-tabs-fixture-tab-616c706861")
+        .await
+        .expect("find Alpha after orientation replacement")
+        .focus()
+        .await
+        .expect("focus Alpha in vertical tabset");
+    h.press_key_sequence(&[Key::ArrowDown])
+        .await
+        .expect("move through vertical tabs");
+    assert_eq!(
+        eval_json(
+            &h,
+            r#"(() => ({
+                orientation: document.querySelector('#controlled-tabs-fixture [role="tablist"]').getAttribute('aria-orientation'),
+                focused: document.activeElement.id,
+            }))()"#,
+        )
+        .await,
+        json!({ "orientation": "vertical", "focused": "controlled-tabs-fixture-tab-62657461" })
+    );
+
+    eval_json(
+        &h,
+        "document.querySelector('[data-testid=\"tab-select-beta\"]').click(); true",
+    )
+    .await;
+    h.page()
+        .find_element(beta)
+        .await
+        .expect("find Beta before removal")
+        .focus()
+        .await
+        .expect("focus selected Beta before removal");
+    eval_json(
+        &h,
+        "document.querySelector('[data-testid=\"tab-remove-beta\"]').click(); true",
+    )
+    .await;
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+    assert_eq!(
+        eval_json(
+            &h,
+            r#"(() => ({
+                betaTabs: document.querySelectorAll('#controlled-tabs-fixture-tab-62657461').length,
+                betaPanels: document.querySelectorAll('#controlled-tabs-fixture-panel-62657461').length,
+                selected: document.querySelector('#controlled-tabs-fixture [role="tab"][aria-selected="true"]').id,
+                focused: document.activeElement.id,
+                visiblePanel: document.querySelector('#controlled-tabs-fixture [role="tabpanel"]:not([hidden])').textContent.trim(),
+                rovingCount: Array.from(document.querySelectorAll('#controlled-tabs-fixture [role="tab"]')).filter(tab => tab.tabIndex === 0).length,
+            }))()"#,
+        )
+        .await,
+        json!({
+            "betaTabs": 0,
+            "betaPanels": 0,
+            "selected": "controlled-tabs-fixture-tab-616c706861",
+            "focused": "controlled-tabs-fixture-tab-616c706861",
+            "visiblePanel": "Alpha panel",
+            "rovingCount": 1,
+        })
+    );
+    assert_no_browser_errors(&h, "controlled accessible Tabs").await;
 }
 
 /// Theme switch: clicking the "cupcake" card in the BaseThemeSelector flips

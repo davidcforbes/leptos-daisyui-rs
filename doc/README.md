@@ -73,9 +73,11 @@ Each component documentation follows a consistent structure:
 ### Data Components
 - [EntityTable](./components/entity_table.md) - Typed complete-client-snapshot table with governed preference ownership
 - [DataTable](./components/data_table.md) - Sorting, pagination, filtering, search, selection, row activation, and column resizing (plus `ServerDataTable` for server-side paging)
+- [AppShell](./components/app_shell.md) - Full-height application frame with optional pinned top/status regions and responsive start/center/end top-bar composition
 
 ### Layout Components
 - [Accordion](./components/accordion.md) - Collapsible content sections
+- [Tabs and TabSet](./components/tab.md) - Controlled accessible tabsets with stable keys, roving focus, and associated panels
 
 ### Feedback Components
 - [Alert](./components/alert.md) - Notification messages with different severity levels

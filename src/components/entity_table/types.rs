@@ -1,14 +1,134 @@
 //! Public types used to configure a typed entity table.
 
-use leptos::prelude::{AnyView, Callback, LocalStorage, Signal};
+use crate::components::badge::{BadgeColor, BadgeStyle};
+use crate::components::input::{Input, InputSize};
+use crate::components::select::{Select, SelectSize};
+use leptos::html::{Input as HtmlInput, Select as HtmlSelect};
+use leptos::prelude::{
+    AddAnyAttr, AnyView, Callable, Callback, ClassAttribute, CollectView, ElementChild, Get,
+    GetUntracked, IntoAny, LocalStorage, NodeRef, Signal, view,
+};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::num::NonZeroU8;
 use std::rc::Rc;
 
 /// A callback that renders one typed cell from a borrowed row.
 pub type EntityCellRenderer<T> = Rc<dyn Fn(&T) -> AnyView>;
+
+/// A callback that maps a typed row to an ordinary semantic badge treatment.
+pub type EntityBadgeCell<T> = Rc<dyn Fn(&T) -> Option<EntityBadgePresentation>>;
+
+/// A callback that maps a typed row to an ordinary semantic icon treatment.
+pub type EntityIconCell<T> = Rc<dyn Fn(&T) -> Option<EntityIconPresentation>>;
+
+/// Framework-owned visual treatment for a canonical text value.
+pub enum EntityCellPresentation<T> {
+    /// Render canonical text inside an LDUI badge when the mapper returns `Some`.
+    Badge(EntityBadgeCell<T>),
+    /// Render a decorative LDUI icon plus canonical screen-reader text.
+    Icon(EntityIconCell<T>),
+}
+
+impl<T> Clone for EntityCellPresentation<T> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Badge(mapper) => Self::Badge(Rc::clone(mapper)),
+            Self::Icon(mapper) => Self::Icon(Rc::clone(mapper)),
+        }
+    }
+}
+
+impl<T> fmt::Debug for EntityCellPresentation<T> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Badge(_) => "EntityCellPresentation::Badge(..)",
+            Self::Icon(_) => "EntityCellPresentation::Icon(..)",
+        })
+    }
+}
+
+/// Framework-owned badge appearance. Visible text always comes from the
+/// column's canonical text callback.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EntityBadgePresentation {
+    /// daisyUI semantic badge color.
+    pub color: BadgeColor,
+    /// daisyUI badge surface treatment.
+    pub style: BadgeStyle,
+}
+
+impl EntityBadgePresentation {
+    /// Creates an opinionated soft badge in one semantic color.
+    pub fn new(color: BadgeColor) -> Self {
+        Self {
+            color,
+            style: BadgeStyle::Soft,
+        }
+    }
+
+    /// Replaces the opinionated soft treatment.
+    pub fn with_style(mut self, style: BadgeStyle) -> Self {
+        self.style = style;
+        self
+    }
+}
+
+/// Semantic text color for an icon-only EntityTable cell.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum EntityIconColor {
+    /// Inherit the table's normal content color.
+    #[default]
+    Default,
+    /// Neutral semantic foreground.
+    Neutral,
+    /// Primary brand foreground.
+    Primary,
+    /// Informational foreground.
+    Info,
+    /// Positive foreground.
+    Success,
+    /// Caution foreground.
+    Warning,
+    /// Error foreground.
+    Error,
+}
+
+impl EntityIconColor {
+    /// Static semantic utility used by the framework-owned icon.
+    pub const fn as_class(self) -> &'static str {
+        match self {
+            Self::Default => "",
+            Self::Neutral => "text-neutral",
+            Self::Primary => "text-primary",
+            Self::Info => "text-info",
+            Self::Success => "text-success",
+            Self::Warning => "text-warning",
+            Self::Error => "text-error",
+        }
+    }
+}
+
+/// Framework-owned icon treatment; canonical text remains its accessible label.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EntityIconPresentation {
+    /// Lucide-compatible LDUI icon name.
+    pub name: String,
+    /// Framework semantic foreground.
+    pub color: EntityIconColor,
+}
+
+impl EntityIconPresentation {
+    /// Creates one icon-only presentation.
+    pub fn new(name: impl Into<String>, color: EntityIconColor) -> Self {
+        Self {
+            name: name.into(),
+            color,
+        }
+    }
+}
 
 /// A callback that renders the compact representation of a borrowed row.
 pub type EntityRowRenderer<T> = Rc<dyn Fn(&T) -> AnyView>;
@@ -16,17 +136,226 @@ pub type EntityRowRenderer<T> = Rc<dyn Fn(&T) -> AnyView>;
 /// A callback that renders one controlled filter beneath its stable column.
 pub type EntityColumnFilterRenderer = Rc<dyn Fn() -> AnyView>;
 
+type EntityControlledColumnFilterRenderer = Rc<dyn Fn(EntityColumnFilterPlacement) -> AnyView>;
+
+#[derive(Clone, Copy)]
+pub(crate) enum EntityColumnFilterPlacement {
+    Header,
+    Responsive,
+}
+
+/// Row scope selected from an atomic [`EntityTableDisplayProjection`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EntityTableProjectionScope {
+    /// Rows on the table's current effective page.
+    #[default]
+    CurrentPage,
+    /// Every locally filtered row in the table's current sort order.
+    AllFiltered,
+}
+
+/// Whether action columns participate in a display projection.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EntityTableActionColumnPolicy {
+    /// Omit action columns because their canonical copy normally describes UI,
+    /// not exported domain data.
+    #[default]
+    Exclude,
+    /// Include action columns explicitly.
+    Include,
+}
+
+/// One ordered visible column in an EntityTable display projection.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EntityTableDisplayColumn {
+    /// Stable column identity.
+    pub id: String,
+    /// Current reactive/localized column label.
+    pub label: String,
+    /// Whether the column is an action column included by explicit policy.
+    pub is_action: bool,
+}
+
+impl EntityTableDisplayColumn {
+    /// Creates one owned projected column descriptor.
+    pub fn new(id: impl Into<String>, label: impl Into<String>, is_action: bool) -> Self {
+        Self {
+            id: id.into(),
+            label: label.into(),
+            is_action,
+        }
+    }
+}
+
+/// One stable row and its canonical cell text in projected column order.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EntityTableDisplayRow {
+    /// Stable row key supplied to the table.
+    pub key: String,
+    /// Canonical full text aligned with the projection's ordered columns.
+    pub cells: Vec<String>,
+}
+
+impl EntityTableDisplayRow {
+    /// Creates one owned projected row.
+    pub fn new<I, S>(key: impl Into<String>, cells: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        Self {
+            key: key.into(),
+            cells: cells.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+/// Atomic, read-only projection of the table's displayed data model.
+///
+/// `rows(AllFiltered)` and `rows(CurrentPage)` share the same ordered row
+/// storage, so callers cannot accidentally combine columns from one table
+/// state with rows from another. The projection deliberately carries no
+/// dataset identity or download policy.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EntityTableDisplayProjection {
+    /// Ordered visible columns used by every projected row.
+    pub columns: Vec<EntityTableDisplayColumn>,
+    all_filtered_rows: Vec<EntityTableDisplayRow>,
+    current_page_start: usize,
+    current_page_end: usize,
+}
+
+impl EntityTableDisplayProjection {
+    pub(crate) fn from_parts(
+        columns: Vec<EntityTableDisplayColumn>,
+        all_filtered_rows: Vec<EntityTableDisplayRow>,
+        current_page_start: usize,
+        current_page_end: usize,
+    ) -> Self {
+        let end = current_page_end.min(all_filtered_rows.len());
+        let start = current_page_start.min(end);
+        Self {
+            columns,
+            all_filtered_rows,
+            current_page_start: start,
+            current_page_end: end,
+        }
+    }
+
+    /// Returns rows for the explicitly selected export/display scope.
+    pub fn rows(&self, scope: EntityTableProjectionScope) -> &[EntityTableDisplayRow] {
+        match scope {
+            EntityTableProjectionScope::CurrentPage => {
+                &self.all_filtered_rows[self.current_page_start..self.current_page_end]
+            }
+            EntityTableProjectionScope::AllFiltered => &self.all_filtered_rows,
+        }
+    }
+
+    /// Half-open bounds of the current page inside `AllFiltered` rows.
+    pub fn current_page_bounds(&self) -> std::ops::Range<usize> {
+        self.current_page_start..self.current_page_end
+    }
+}
+
 /// A callback that returns the stable identity of a borrowed row.
 pub type EntityRowKey<T> = Rc<dyn Fn(&T) -> String>;
 
 /// A callback that compares two borrowed rows for one column.
 pub type EntityComparator<T> = Rc<dyn Fn(&T, &T) -> Ordering>;
 
-/// A callback that extracts one normalized text key for local sorting.
+/// Prepared index comparator produced after typed keys have been extracted.
+pub type EntityPreparedSortComparator = Rc<dyn Fn(usize, usize) -> Ordering>;
+
+/// Type-erased factory for typed local sort keys.
 ///
-/// The table evaluates this once per row when the dataset or sort changes,
-/// avoiding string allocation inside the `O(n log n)` comparison loop.
-pub type EntitySortKey<T> = Rc<dyn Fn(&T) -> String>;
+/// Implementations extract one key per row and return an index comparator, so
+/// the `O(n log n)` sort loop never reruns a consumer extractor. Most callers
+/// use [`EntityColumn::sortable_by_key`] or
+/// [`EntityColumn::sortable_by_optional_key`] rather than implementing this
+/// trait directly.
+pub trait EntitySortKeyFactory<T> {
+    /// Extracts keys for `rows` and prepares comparison for one direction.
+    fn prepare(&self, rows: &[T], direction: EntitySortDirection) -> EntityPreparedSortComparator;
+}
+
+/// A clonable, type-erased typed-key factory stored by [`EntityColumn`].
+pub type EntitySortKey<T> = Rc<dyn EntitySortKeyFactory<T>>;
+
+struct TypedEntitySortKey<T, K> {
+    extract: Rc<dyn Fn(&T) -> K>,
+}
+
+impl<T: 'static, K: Ord + 'static> EntitySortKeyFactory<T> for TypedEntitySortKey<T, K> {
+    fn prepare(&self, rows: &[T], direction: EntitySortDirection) -> EntityPreparedSortComparator {
+        let keys = rows
+            .iter()
+            .map(|row| (self.extract)(row))
+            .collect::<Vec<_>>();
+        Rc::new(move |left, right| {
+            let ordering = keys[left].cmp(&keys[right]);
+            match direction {
+                EntitySortDirection::Ascending => ordering,
+                EntitySortDirection::Descending => ordering.reverse(),
+            }
+        })
+    }
+}
+
+struct OptionalEntitySortKey<T, K> {
+    null_order: EntityNullOrder,
+    extract: Rc<dyn Fn(&T) -> Option<K>>,
+}
+
+impl<T: 'static, K: Ord + 'static> EntitySortKeyFactory<T> for OptionalEntitySortKey<T, K> {
+    fn prepare(&self, rows: &[T], direction: EntitySortDirection) -> EntityPreparedSortComparator {
+        let null_order = self.null_order;
+        let keys = rows
+            .iter()
+            .map(|row| (self.extract)(row))
+            .collect::<Vec<_>>();
+        Rc::new(move |left, right| match (&keys[left], &keys[right]) {
+            (None, None) => Ordering::Equal,
+            (None, Some(_)) => match null_order {
+                EntityNullOrder::First => Ordering::Less,
+                EntityNullOrder::Last => Ordering::Greater,
+            },
+            (Some(_), None) => match null_order {
+                EntityNullOrder::First => Ordering::Greater,
+                EntityNullOrder::Last => Ordering::Less,
+            },
+            (Some(left), Some(right)) => {
+                let ordering = left.cmp(right);
+                match direction {
+                    EntitySortDirection::Ascending => ordering,
+                    EntitySortDirection::Descending => ordering.reverse(),
+                }
+            }
+        })
+    }
+}
+
+fn typed_entity_sort_key<T: 'static, K: Ord + 'static>(
+    extract: impl Fn(&T) -> K + 'static,
+) -> EntitySortKey<T> {
+    Rc::new(TypedEntitySortKey {
+        extract: Rc::new(extract),
+    })
+}
+
+/// Absolute placement of absent optional sort keys.
+///
+/// The policy is preserved for both ascending and descending value order.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum EntityNullOrder {
+    /// Missing values precede every present value.
+    First,
+    /// Missing values follow every present value.
+    #[default]
+    Last,
+}
 
 /// Static or reactive typed column declarations for [`EntityTable`](super::EntityTable).
 ///
@@ -100,7 +429,41 @@ impl<T: 'static> From<Signal<EntityRowRenderer<T>, LocalStorage>> for EntityComp
 pub struct EntityColumnFilter {
     /// Stable target column identifier.
     pub column_id: &'static str,
-    renderer: EntityColumnFilterRenderer,
+    renderer: EntityColumnFilterRender,
+    responsive: Option<EntityColumnFilterResponsive>,
+    control_id: Option<Rc<str>>,
+}
+
+#[derive(Clone)]
+enum EntityColumnFilterRender {
+    Custom(EntityColumnFilterRenderer),
+    Controlled(EntityControlledColumnFilterRenderer),
+}
+
+/// One stable submitted value and its current localized display label.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EntityColumnFilterOption {
+    /// Stable value proposed to the controlled filter owner.
+    pub value: String,
+    /// Current user-facing label for the stable value.
+    pub label: String,
+}
+
+impl EntityColumnFilterOption {
+    /// Creates a stable value/display-label pair.
+    pub fn new(value: impl Into<String>, label: impl Into<String>) -> Self {
+        Self {
+            value: value.into(),
+            label: label.into(),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct EntityColumnFilterResponsive {
+    label: Signal<String>,
+    active: Signal<bool>,
+    on_clear: Callback<()>,
 }
 
 impl EntityColumnFilter {
@@ -108,12 +471,232 @@ impl EntityColumnFilter {
     pub fn new(column_id: &'static str, render: impl Fn() -> AnyView + 'static) -> Self {
         Self {
             column_id,
-            renderer: Rc::new(render),
+            renderer: EntityColumnFilterRender::Custom(Rc::new(render)),
+            responsive: None,
+            control_id: None,
         }
     }
 
-    pub(crate) fn render(&self) -> AnyView {
-        (self.renderer)()
+    /// Creates an opinionated controlled text filter.
+    ///
+    /// `control_id` must be unique within the document. The header control
+    /// uses it verbatim and the responsive copy uses a deterministic suffix,
+    /// so both presentations can coexist without duplicate DOM IDs. The
+    /// callback only proposes replacements; the supplied `value` remains the
+    /// sole source of truth for the control and active-filter state.
+    pub fn text(
+        column_id: &'static str,
+        control_id: impl Into<String>,
+        label: impl Into<Signal<String>>,
+        value: impl Into<Signal<String>>,
+        placeholder: impl Into<Signal<String>>,
+        on_change: Callback<String>,
+    ) -> Self {
+        let control_id = Rc::<str>::from(control_id.into());
+        assert_valid_entity_filter_control_id(&control_id);
+        let label = label.into();
+        let value = value.into();
+        let placeholder = placeholder.into();
+        let renderer_control_id = Rc::clone(&control_id);
+        let renderer = Rc::new(move |placement| {
+            let id = placed_entity_filter_control_id(&renderer_control_id, placement);
+            let label_for = id.clone();
+            let node_ref = NodeRef::<HtmlInput>::new();
+            let restore_ref = node_ref;
+            let controlled_change = Callback::new(move |next| {
+                on_change.run(next);
+                if let Some(input) = restore_ref.get() {
+                    input.set_value(&value.get_untracked());
+                }
+            });
+            view! {
+                <label class="block w-full" for=label_for>
+                    <span class="sr-only">{move || label.get()}</span>
+                    <Input
+                        size=InputSize::Xs
+                        class="input-bordered w-full bg-table-filter text-table-filter-content"
+                        value=value
+                        placeholder=placeholder
+                        on_input=controlled_change
+                        node_ref=node_ref
+                        attr:id=id
+                        attr:data-entity-filter-control=column_id
+                        attr:data-entity-filter-placement=entity_filter_placement_name(placement)
+                    />
+                </label>
+            }
+            .into_any()
+        });
+        Self::controlled(column_id, control_id, label, value, on_change, renderer)
+    }
+
+    /// Creates an opinionated controlled single-select filter.
+    ///
+    /// The empty string is reserved for the localized `all_label` option.
+    /// Option labels may be replaced reactively without changing the stable
+    /// controlled value. As with [`Self::text`], proposals never mutate the
+    /// supplied value inside the component.
+    pub fn select(
+        column_id: &'static str,
+        control_id: impl Into<String>,
+        label: impl Into<Signal<String>>,
+        value: impl Into<Signal<String>>,
+        all_label: impl Into<Signal<String>>,
+        options: impl Into<Signal<Vec<EntityColumnFilterOption>>>,
+        on_change: Callback<String>,
+    ) -> Self {
+        let control_id = Rc::<str>::from(control_id.into());
+        assert_valid_entity_filter_control_id(&control_id);
+        let label = label.into();
+        let value = value.into();
+        let all_label = all_label.into();
+        let options = options.into();
+        let renderer_control_id = Rc::clone(&control_id);
+        let renderer = Rc::new(move |placement| {
+            let id = placed_entity_filter_control_id(&renderer_control_id, placement);
+            let label_for = id.clone();
+            let node_ref = NodeRef::<HtmlSelect>::new();
+            let restore_ref = node_ref;
+            let controlled_change = Callback::new(move |next| {
+                on_change.run(next);
+                if let Some(select) = restore_ref.get() {
+                    select.set_value(&value.get_untracked());
+                }
+            });
+            view! {
+                <label class="block w-full" for=label_for>
+                    <span class="sr-only">{move || label.get()}</span>
+                    <Select
+                        size=SelectSize::Xs
+                        class="select-bordered w-full bg-table-filter text-table-filter-content"
+                        id=id
+                        label=Signal::derive(move || Some(label.get()))
+                        value=value
+                        on_change=controlled_change
+                        node_ref=node_ref
+                        attr:data-entity-filter-control=column_id
+                        attr:data-entity-filter-placement=entity_filter_placement_name(placement)
+                    >
+                        <option value="">{move || all_label.get()}</option>
+                        {move || {
+                            options
+                                .get()
+                                .into_iter()
+                                .filter(|option| !option.value.is_empty())
+                                .map(|option| {
+                                    view! { <option value=option.value>{option.label}</option> }
+                                })
+                                .collect_view()
+                        }}
+                    </Select>
+                </label>
+            }
+            .into_any()
+        });
+        Self::controlled(column_id, control_id, label, value, on_change, renderer)
+    }
+
+    fn controlled(
+        column_id: &'static str,
+        control_id: Rc<str>,
+        label: Signal<String>,
+        value: Signal<String>,
+        on_change: Callback<String>,
+        renderer: EntityControlledColumnFilterRenderer,
+    ) -> Self {
+        Self {
+            column_id,
+            renderer: EntityColumnFilterRender::Controlled(renderer),
+            responsive: Some(EntityColumnFilterResponsive {
+                label,
+                active: Signal::derive(move || !value.get().is_empty()),
+                on_clear: Callback::new(move |_| on_change.run(String::new())),
+            }),
+            control_id: Some(control_id),
+        }
+    }
+
+    /// Caller-owned base DOM ID for a typed controlled filter.
+    ///
+    /// Custom renderers return `None` because their markup remains entirely
+    /// caller-owned.
+    pub fn control_id(&self) -> Option<&str> {
+        self.control_id.as_deref()
+    }
+
+    /// Adds localized compact/hidden-column presentation to a controlled filter.
+    ///
+    /// The caller continues to own the filter value. `active` discloses whether
+    /// hiding this column would conceal an effective constraint, and `on_clear`
+    /// supplies the matching consumer-owned reset intent.
+    pub fn with_responsive(
+        mut self,
+        label: impl Into<Signal<String>>,
+        active: impl Into<Signal<bool>>,
+        on_clear: Callback<()>,
+    ) -> Self {
+        self.responsive = Some(EntityColumnFilterResponsive {
+            label: label.into(),
+            active: active.into(),
+            on_clear,
+        });
+        self
+    }
+
+    /// Localized responsive label, falling back to the current column header.
+    pub fn label(&self, fallback: &str) -> String {
+        self.responsive
+            .as_ref()
+            .map_or_else(|| fallback.to_owned(), |state| state.label.get())
+    }
+
+    /// Whether this caller-owned filter currently constrains the result set.
+    pub fn is_active(&self) -> bool {
+        self.responsive
+            .as_ref()
+            .is_some_and(|state| state.active.get())
+    }
+
+    /// Emits the caller-owned clear intent when responsive metadata was supplied.
+    pub fn clear(&self) {
+        if let Some(state) = &self.responsive {
+            state.on_clear.run(());
+        }
+    }
+
+    pub(crate) fn clear_callback(&self) -> Option<Callback<()>> {
+        self.responsive.as_ref().map(|state| state.on_clear)
+    }
+
+    pub(crate) fn render(&self, placement: EntityColumnFilterPlacement) -> AnyView {
+        match &self.renderer {
+            EntityColumnFilterRender::Custom(renderer) => renderer(),
+            EntityColumnFilterRender::Controlled(renderer) => renderer(placement),
+        }
+    }
+}
+
+fn assert_valid_entity_filter_control_id(control_id: &str) {
+    assert!(
+        !control_id.trim().is_empty(),
+        "EntityColumnFilter control_id must not be empty"
+    );
+}
+
+fn placed_entity_filter_control_id(
+    control_id: &str,
+    placement: EntityColumnFilterPlacement,
+) -> String {
+    match placement {
+        EntityColumnFilterPlacement::Header => control_id.to_owned(),
+        EntityColumnFilterPlacement::Responsive => format!("{control_id}-responsive"),
+    }
+}
+
+fn entity_filter_placement_name(placement: EntityColumnFilterPlacement) -> &'static str {
+    match placement {
+        EntityColumnFilterPlacement::Header => "header",
+        EntityColumnFilterPlacement::Responsive => "responsive",
     }
 }
 
@@ -440,6 +1023,103 @@ impl EntitySort {
     }
 }
 
+/// Framework-owned overflow policy for a plain [`EntityColumn`] text value.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum EntityTextOverflow {
+    /// Wrap naturally, including at otherwise-unbreakable content.
+    #[default]
+    Wrap,
+    /// Keep one line and show an ellipsis when the declared column is narrower.
+    Ellipsis,
+    /// Clip to a positive number of visual lines.
+    LineClamp(NonZeroU8),
+}
+
+impl EntityTextOverflow {
+    /// Stable runtime marker emitted by the default cell renderer.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Wrap => "wrap",
+            Self::Ellipsis => "ellipsis",
+            Self::LineClamp(_) => "line-clamp",
+        }
+    }
+
+    /// Positive line count for a clamp policy.
+    pub const fn lines(self) -> Option<NonZeroU8> {
+        match self {
+            Self::LineClamp(lines) => Some(lines),
+            Self::Wrap | Self::Ellipsis => None,
+        }
+    }
+}
+
+pub(crate) fn entity_text_overflow_style(overflow: EntityTextOverflow) -> String {
+    match overflow {
+        EntityTextOverflow::Wrap => {
+            "min-width:0;max-width:100%;overflow-wrap:anywhere;white-space:normal;".to_owned()
+        }
+        EntityTextOverflow::Ellipsis => "display:block;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;".to_owned(),
+        EntityTextOverflow::LineClamp(lines) => format!(
+            "display:-webkit-box;min-width:0;max-width:100%;overflow:hidden;overflow-wrap:anywhere;-webkit-box-orient:vertical;-webkit-line-clamp:{};",
+            lines.get()
+        ),
+    }
+}
+
+/// Horizontal presentation of an EntityTable column.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum EntityColumnAlignment {
+    /// Compatibility default: start-aligned wide content and end-aligned
+    /// values in the framework's compact label/value rows.
+    #[default]
+    Auto,
+    /// Align headers and values to the inline start edge.
+    Start,
+    /// Center headers and values.
+    Center,
+    /// Align headers and values to the inline end edge.
+    End,
+}
+
+impl EntityColumnAlignment {
+    /// Stable marker emitted for browser audits.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Start => "start",
+            Self::Center => "center",
+            Self::End => "end",
+        }
+    }
+}
+
+pub(crate) const fn entity_alignment_class(alignment: EntityColumnAlignment) -> &'static str {
+    match alignment {
+        EntityColumnAlignment::Auto | EntityColumnAlignment::Start => "text-left",
+        EntityColumnAlignment::Center => "text-center",
+        EntityColumnAlignment::End => "text-right",
+    }
+}
+
+pub(crate) const fn entity_compact_alignment_class(
+    alignment: EntityColumnAlignment,
+) -> &'static str {
+    match alignment {
+        EntityColumnAlignment::Auto | EntityColumnAlignment::End => "text-right",
+        EntityColumnAlignment::Start => "text-left",
+        EntityColumnAlignment::Center => "text-center",
+    }
+}
+
+pub(crate) const fn entity_header_justify_class(alignment: EntityColumnAlignment) -> &'static str {
+    match alignment {
+        EntityColumnAlignment::Auto | EntityColumnAlignment::Start => "justify-start",
+        EntityColumnAlignment::Center => "justify-center",
+        EntityColumnAlignment::End => "justify-end",
+    }
+}
+
 /// Column behavior and borrowed-row callbacks for [`EntityTable`](super::EntityTable).
 pub struct EntityColumn<T> {
     /// Stable identifier used by sort and persisted preferences.
@@ -458,10 +1138,18 @@ pub struct EntityColumn<T> {
     pub min_width: Option<u32>,
     /// Optional initial width in pixels.
     pub initial_width: Option<u32>,
+    /// Overflow policy used by the framework's plain-text renderer.
+    pub text_overflow: EntityTextOverflow,
+    /// Framework-owned horizontal alignment.
+    pub alignment: EntityColumnAlignment,
+    /// Whether values inherit tabular numeral glyph widths.
+    pub tabular_numbers: bool,
     /// Plain text used for default rendering and accessible/exported content.
     pub text: Rc<dyn Fn(&T) -> String>,
     /// Optional rich renderer invoked with a borrowed typed row.
     pub renderer: Option<EntityCellRenderer<T>>,
+    /// Optional framework-owned semantic badge or icon presentation.
+    pub presentation: Option<EntityCellPresentation<T>>,
     /// Typed comparator invoked with borrowed rows.
     pub comparator: Option<EntityComparator<T>>,
     /// Normalized text key extracted once per row by the default sorter.
@@ -479,8 +1167,12 @@ impl<T> Clone for EntityColumn<T> {
             resizable: self.resizable,
             min_width: self.min_width,
             initial_width: self.initial_width,
+            text_overflow: self.text_overflow,
+            alignment: self.alignment,
+            tabular_numbers: self.tabular_numbers,
             text: Rc::clone(&self.text),
             renderer: self.renderer.as_ref().map(Rc::clone),
+            presentation: self.presentation.clone(),
             comparator: self.comparator.as_ref().map(Rc::clone),
             sort_key: self.sort_key.as_ref().map(Rc::clone),
         }
@@ -499,6 +1191,10 @@ impl<T> fmt::Debug for EntityColumn<T> {
             .field("resizable", &self.resizable)
             .field("min_width", &self.min_width)
             .field("initial_width", &self.initial_width)
+            .field("text_overflow", &self.text_overflow)
+            .field("alignment", &self.alignment)
+            .field("tabular_numbers", &self.tabular_numbers)
+            .field("presentation", &self.presentation)
             .finish_non_exhaustive()
     }
 }
@@ -521,10 +1217,16 @@ impl<T: 'static> EntityColumn<T> {
             resizable: true,
             min_width: None,
             initial_width: None,
+            text_overflow: EntityTextOverflow::Wrap,
+            alignment: EntityColumnAlignment::Auto,
+            tabular_numbers: false,
             text,
             renderer: None,
+            presentation: None,
             comparator: None,
-            sort_key: Some(Rc::new(move |row| comparator_text(row).to_lowercase())),
+            sort_key: Some(typed_entity_sort_key(move |row| {
+                comparator_text(row).to_lowercase()
+            })),
         }
     }
 
@@ -571,6 +1273,100 @@ impl<T: 'static> EntityColumn<T> {
         self
     }
 
+    /// Maps rows to a framework-owned badge; `None` falls back to plain text.
+    /// A rich [`Self::render_with`] renderer always takes visual precedence.
+    pub fn badge_with(
+        mut self,
+        presentation: impl Fn(&T) -> Option<EntityBadgePresentation> + 'static,
+    ) -> Self {
+        self.presentation = Some(EntityCellPresentation::Badge(Rc::new(presentation)));
+        self
+    }
+
+    /// Maps rows to a framework-owned icon; `None` falls back to plain text.
+    /// A rich [`Self::render_with`] renderer always takes visual precedence.
+    pub fn icon_with(
+        mut self,
+        presentation: impl Fn(&T) -> Option<EntityIconPresentation> + 'static,
+    ) -> Self {
+        self.presentation = Some(EntityCellPresentation::Icon(Rc::new(presentation)));
+        self
+    }
+
+    /// Uses an ordered typed key extracted once per row.
+    ///
+    /// Integers, signed values, strings, date/time types, tuples, and domain
+    /// newtypes implementing [`Ord`] all use this path. Equal keys retain
+    /// stable source order. Use [`Self::sortable_by_optional_key`] rather than
+    /// relying on `Option`'s implicit ordering when absence is meaningful.
+    pub fn sortable_by_key<K: Ord + 'static>(
+        mut self,
+        extract: impl Fn(&T) -> K + 'static,
+    ) -> Self {
+        self.sortable = true;
+        self.comparator = None;
+        self.sort_key = Some(typed_entity_sort_key(extract));
+        self
+    }
+
+    /// Uses an optional ordered key with explicit, direction-independent null placement.
+    pub fn sortable_by_optional_key<K: Ord + 'static>(
+        mut self,
+        null_order: EntityNullOrder,
+        extract: impl Fn(&T) -> Option<K> + 'static,
+    ) -> Self {
+        self.sortable = true;
+        self.comparator = None;
+        self.sort_key = Some(Rc::new(OptionalEntitySortKey {
+            null_order,
+            extract: Rc::new(extract),
+        }));
+        self
+    }
+
+    /// Clips the framework-rendered canonical text to one line with ellipsis.
+    /// A rich [`Self::render_with`] renderer takes visual precedence.
+    pub fn ellipsis(mut self) -> Self {
+        self.text_overflow = EntityTextOverflow::Ellipsis;
+        self
+    }
+
+    /// Clips the framework-rendered canonical text to `lines` visual lines.
+    ///
+    /// # Panics
+    /// Panics when `lines` is zero; a zero-line cell has no useful or
+    /// accessible visual presentation.
+    pub fn line_clamp(mut self, lines: u8) -> Self {
+        self.text_overflow = EntityTextOverflow::LineClamp(
+            NonZeroU8::new(lines).expect("EntityColumn line clamp must be positive"),
+        );
+        self
+    }
+
+    /// Aligns the wide header/value and compact value to the inline start.
+    pub fn align_start(mut self) -> Self {
+        self.alignment = EntityColumnAlignment::Start;
+        self
+    }
+
+    /// Centers the wide header/value and compact value.
+    pub fn align_center(mut self) -> Self {
+        self.alignment = EntityColumnAlignment::Center;
+        self
+    }
+
+    /// Aligns the wide header/value and compact value to the inline end.
+    pub fn align_end(mut self) -> Self {
+        self.alignment = EntityColumnAlignment::End;
+        self
+    }
+
+    /// Uses tabular-width numeral glyphs without formatting the canonical text.
+    pub fn tabular_numbers(mut self) -> Self {
+        self.tabular_numbers = true;
+        self
+    }
+
     /// Sets this column's minimum width in pixels.
     pub fn with_min_width(mut self, width: u32) -> Self {
         self.min_width = Some(width);
@@ -588,6 +1384,16 @@ impl<T: 'static> EntityColumn<T> {
         self.resizable = false;
         self
     }
+}
+
+/// Framework-owned presentation for the column-chooser trigger.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum EntityColumnChooserTrigger {
+    /// Show the localized `EntityTableTexts::choose_columns` label.
+    #[default]
+    Text,
+    /// Show a compact gear glyph while retaining the localized accessible name.
+    Icon,
 }
 
 /// Versioned user preferences persisted independently of a dataset snapshot.
@@ -619,6 +1425,52 @@ impl EntityTablePreferences {
             hidden_columns: BTreeSet::new(),
             column_widths: BTreeMap::new(),
         }
+    }
+}
+
+/// Opt-in viewport-fit paging policy for [`EntityTable`](super::EntityTable).
+///
+/// The derived row capacity is presentation state. It never replaces or
+/// persists [`EntityTablePreferences::page_size`], which remains the fixed-mode
+/// value and the safe fallback for very short viewports.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EntityTableViewportFit {
+    height: Option<String>,
+    min_rows: usize,
+}
+
+impl EntityTableViewportFit {
+    /// Fills a parent that already provides a definite height.
+    pub const fn fill_parent() -> Self {
+        Self {
+            height: None,
+            min_rows: 5,
+        }
+    }
+
+    /// Uses a caller-supplied CSS height/maximum-height expression as the
+    /// table's definite layout budget.
+    pub fn max_height(height: impl Into<String>) -> Self {
+        Self {
+            height: Some(height.into()),
+            min_rows: 5,
+        }
+    }
+
+    /// Sets the minimum usable row count before fixed-size fallback scrolling.
+    pub const fn with_min_rows(mut self, min_rows: usize) -> Self {
+        self.min_rows = if min_rows == 0 { 1 } else { min_rows };
+        self
+    }
+
+    /// Explicit CSS height budget, or `None` when filling a definite parent.
+    pub fn height(&self) -> Option<&str> {
+        self.height.as_deref()
+    }
+
+    /// Minimum usable responsive row count.
+    pub const fn min_rows(&self) -> usize {
+        self.min_rows
     }
 }
 
@@ -696,6 +1548,12 @@ pub struct EntityTableTexts {
     pub rows_per_page: String,
     /// Accessible label for the column chooser.
     pub choose_columns: String,
+    /// Label for the responsive controlled-filter panel.
+    pub filters: String,
+    /// Active-filter status shown beside a chooser item that cannot be hidden.
+    pub filter_active: String,
+    /// Clear-filter template with a `{column}` placeholder.
+    pub clear_filter: String,
     /// Visible and accessible label for the column-order list.
     pub column_order: String,
     /// Move-earlier template with `{column}`, `{position}`, and `{total}`.
@@ -752,6 +1610,9 @@ impl Default for EntityTableTexts {
             region_label: "Data table".to_owned(),
             rows_per_page: "Rows per page".to_owned(),
             choose_columns: "Choose columns".to_owned(),
+            filters: "Filters".to_owned(),
+            filter_active: "Filter active".to_owned(),
+            clear_filter: "Clear {column} filter".to_owned(),
             column_order: "Column order".to_owned(),
             move_earlier: "Move {column} earlier from position {position} of {total}".to_owned(),
             move_later: "Move {column} later from position {position} of {total}".to_owned(),

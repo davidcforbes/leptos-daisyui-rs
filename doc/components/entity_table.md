@@ -46,6 +46,7 @@ erase the compile-time distinction the snapshot component exists to provide.
 | `row_key: EntityRowKey<T>` | Stable identity used for keyed DOM rows and activation. |
 | `dataset_identity: Signal<String>` | Identifies the downloaded dataset; a change resets only the current page. |
 | `page_reset_key` | Optional identity for local view-state changes that should reset only paging. |
+| `viewport_fit` | Optional `EntityTableViewportFit`; derives visible row capacity from a definite parent or CSS height without changing the saved page-size preference. |
 | `compact_row: EntityCompactRow<T>` | Default, static, or reactive single-cell renderer used at compact breakpoints without duplicating rows. |
 | `column_filters: EntityColumnFilters` | Controlled one-to-one filter controls aligned beneath stable desktop columns. |
 | `source_data` | Optional authoritative source membership used only for safe post-removal focus recovery. |
@@ -53,6 +54,10 @@ erase the compile-time distinction the snapshot component exists to provide.
 | `preference_ownership` | Controlled or uncontrolled preference policy. |
 | `storage_key` | Legacy local-storage compatibility prop; mutually exclusive with `preference_ownership`. |
 | `page_size_control_id` | Optional stable caller-owned DOM ID for the rows-per-page select. |
+| `toolbar_actions` | Optional caller-rendered table utilities placed after page size and immediately before the framework-owned column chooser. |
+| `on_display_projection` | Optional callback receiving one atomic read-only snapshot of ordered visible columns plus sorted/filtered rows and current-page bounds. |
+| `projection_action_columns` | `Exclude` by default; set `EntityTableActionColumnPolicy::Include` only when action-copy intentionally belongs in the projection. |
+| `column_chooser_trigger` | Reactive `Text` (default) or compact framework-owned `Icon` presentation; the localized accessible name is unchanged. |
 
 Page number, free-text search, selected dataset, row data, and snapshot revision
 are transient state and do not belong in `EntityTablePreferences`.
@@ -62,6 +67,20 @@ For the canonical page, pass a state-minted
 page supplies its filtered rows as `data` and the complete displayed snapshot
 as `source_data`. Standalone tables should preserve the same distinction and
 give each page-size control a collision-safe `page_size_control_id`.
+
+`toolbar_actions` is presentation-only composition. The table owns the
+wrapping toolbar and chooser placement; the caller owns action labels and
+behavior (for example Export CSV or Refresh). Omitting the slot produces no
+wrapper or markup change. Supplying it cannot mutate table preferences or
+dataset identity unless the caller explicitly wires such behavior into its own
+action.
+
+`EntityColumnChooserTrigger::Icon` renders a compact gear button next to those
+actions. It is presentation-only: both variants remain native buttons with the
+same localized `aria-label`, menu relationship, expanded state, Enter/Space
+activation, Escape dismissal, and focus restoration. The icon is
+`aria-hidden`, and its forced-colors border/text use system colors. Consumers
+cannot replace the chooser control or remove its semantics.
 
 ## Reactive column semantics
 
@@ -84,20 +103,153 @@ resetting consumer state.
 or accessible string, including column-order actions, resize names/value text,
 sort state/action/summary copy, region name, pagination, and empty state.
 
+## Plain-text overflow policies
+
+`EntityColumn::text` wraps normally by default. Use `.ellipsis()` for a
+single clipped line or `.line_clamp(lines)` for a positive, bounded number of
+lines. Passing zero to `line_clamp` is rejected immediately. The same policy
+is applied to the ordinary wide cell and the framework's default compact row,
+so a breakpoint does not silently change which value is shown.
+
+The original text callback remains canonical: its complete value stays in the
+DOM for assistive technology, sorting, and future display projections. Clipped
+cells also expose that same complete value as a native `title`; they do not add
+a second screen-reader-only copy that would be spoken twice. A long unbroken
+value therefore cannot widen its declared track, but it is never shortened in
+the data model.
+
+`render_with` remains the rich-content escape hatch and takes precedence over
+the plain-text overflow policy. A custom renderer owns its own clipping and
+accessible composition; the table does not wrap it in an additional overflow
+element. Prefer the typed policy whenever the cell is otherwise ordinary text.
+
+## Alignment and numeric presentation
+
+Formatting stays caller-owned: the canonical text callback decides currency,
+percentage, duration, sign, optional, and localized display strings. Add
+`.align_start()`, `.align_center()`, or `.align_end()` when the framework should
+align the wide header, wide value, and compact value consistently. Add
+`.tabular_numbers()` to inherit tabular-width numeral glyphs without changing
+the text or its sort key.
+
+The compatibility `Auto` default preserves current layout: wide content starts
+at the inline start while values in the default compact label/value row end at
+the inline end. An explicit alignment uses that edge in both layouts. Compact
+labels always remain at the start so columns scan as label/value pairs.
+
+Alignment and tabular numerals live on the header/cell presentation wrappers.
+They therefore survive resize, reorder, visibility, sorting, scrolling, and
+forced-colors mode and still apply as inherited presentation around a
+`render_with` result. A rich renderer may deliberately override either style
+inside its own markup. The canonical full text remains the accessibility,
+sorting, and export value; these builders never introduce number formatters.
+
+## Semantic badge and icon cells
+
+Use `.badge_with(...)` or `.icon_with(...)` for ordinary status treatment that
+does not justify a custom view. The canonical text callback remains the only
+value source. A badge displays that text once inside an LDUI small soft badge;
+the mapper chooses its semantic `BadgeColor` and may replace the default
+`BadgeStyle::Soft`. An icon is decorative and the canonical text is emitted
+once as screen-reader copy, so sorting, accessibility, and future export all
+agree even though the visible cell is glyph-only.
+
+Both mappers return `Option`. `None` deliberately falls back to the ordinary
+plain-text renderer for unknown or unmapped domain states. An empty canonical
+value renders an empty marked cell instead of an unlabeled badge/icon or an
+invented, non-localized placeholder. Reactive row or column replacement
+updates visible badge text and icon accessibility copy. Wide and compact rows
+use the same renderer, and forced-colors hooks route borders and foregrounds
+through system colors.
+
+`render_with` always wins regardless of builder call order. Alignment and
+tabular-number metadata still live on the surrounding cell, but the rich
+renderer owns all inner markup. This keeps existing custom cells compatible
+while making the common badge/icon path auditable and consistent.
+
+## Display and export projection
+
+Bind `on_display_projection` to caller-owned state when a toolbar action must
+export exactly what the table is displaying. Each
+`EntityTableDisplayProjection` atomically contains ordered visible column
+descriptors, stable row keys, canonical full cell text, every locally filtered
+row in current sort order, and the current-page half-open bounds. Select rows
+explicitly with `rows(EntityTableProjectionScope::CurrentPage)` or
+`rows(EntityTableProjectionScope::AllFiltered)`.
+
+The projection follows the same data signal, typed sort, effective page size,
+page, hidden-column set, user column order, reactive labels, row-key callback,
+and canonical `EntityColumn::text` callbacks as rendering. Compact layout does
+not create a second projection. Clipping, badges, icons, and `render_with`
+markup never replace canonical export text. Action columns are excluded by
+default and require `EntityTableActionColumnPolicy::Include` to opt in.
+
+The callback is an observation seam, not an export engine: LDUI does not add a
+dataset identity, initiate a download, select CSV, or decide authorization and
+domain export policy. Store the latest snapshot in caller state and read it
+inside the colocated `toolbar_actions` callback.
+
 ## Hybrid aligned filters
 
-Use `EntityColumnFilter::new("stable_column_id", renderer)` for a controlled
-filter that maps one-to-one to a column. `EntityColumnFilters` renders one
-second-header cell for every visible column and places the control only in its
-target cell. Reorder and visibility use the same ordered descriptor list as
-the header and body, so tracks cannot drift. Filter cells stop pointer,
-keyboard, and pointer-down propagation; selecting a value cannot sort, resize,
-or activate a row.
+Prefer `EntityColumnFilter::text(...)` and `EntityColumnFilter::select(...)`
+for ordinary controlled filters. Both require a document-unique base control
+ID, a reactive localized label, the accepted value signal, and a replacement
+callback. `text` also accepts a reactive placeholder. `select` accepts a
+reactive localized all-option label and reactive
+`EntityColumnFilterOption` value/label pairs, so locale replacement never
+changes the stable submitted value.
+
+The supplied value is the only source of truth. A proposal that the caller
+rejects is immediately replaced in the DOM by the accepted value; external
+replacement, dataset reset, and clear all flow through that same signal and
+callback. Active metadata is derived from the accepted value and cannot drift
+from the rendered control. The header uses the supplied base ID and the
+responsive copy uses its deterministic `-responsive` suffix, avoiding duplicate
+IDs when presentation changes.
+
+Use `EntityColumnFilter::new("stable_column_id", renderer)` as the compatible
+escape hatch for unusual controls. Add `.with_responsive(label, active,
+on_clear)` when a custom filter must remain usable in compact layouts. Custom
+markup, IDs, active state, and clear semantics remain caller-owned.
+
+At desktop width, `EntityColumnFilters` renders one light-blue second-header
+cell for every visible column and places the control only in its target cell.
+Below `lg`, the same renderer instance moves to a labelled responsive panel;
+the hidden desktop row contains no duplicate controls or IDs. An active filter
+disables its column's hide item and announces that reason. If controlled or
+legacy preferences nevertheless arrive with that active column hidden, its
+single control appears in the responsive panel at desktop width as well, with
+the caller-owned clear intent. Inactive hidden filters return without reset
+when their column is restored.
+
+Reorder and visibility use the same ordered descriptor list as the header and
+body, so tracks cannot drift. Filter cells stop pointer, keyboard, and
+pointer-down propagation; selecting a value cannot sort, resize, or activate a
+row.
 
 Keep global search and controls that do not map to one column in the utility
 `FilterBar`. The complete pattern has exactly one Reset and one Save as Default
 there; it does not duplicate column controls above the table. See
 [`client-snapshot-list.md`](../patterns/client-snapshot-list.md).
+
+## Viewport-fit paging
+
+Fixed 25/50/100 paging remains the default. Opt in with
+`EntityTableViewportFit::fill_parent()` when the table's parent has a definite
+height, or `EntityTableViewportFit::max_height("...")` when the table should own
+that CSS height budget. The table measures its real header (including the
+filter band) and first body row, then derives a presentation-only row capacity.
+The rows-per-page select continues to show and persist the caller's configured
+fallback; measurement never writes a synthetic preference.
+
+Resize observation and reactive table inputs trigger a coalesced remeasurement,
+so browser-height, localized header/filter copy, column visibility, and row-height
+changes settle without a reload. If fewer than the policy's minimum usable rows
+fit, the configured page size is rendered and the table region becomes the one
+internal vertical scroller. The toolbar and pager stay outside that region, and
+page clamping uses the effective capacity so a resize cannot leave a stale page
+index. `with_min_rows(...)` changes the fallback threshold without changing the
+configured page size.
 
 ## Visual hierarchy and shell stability
 
@@ -190,6 +342,27 @@ let sort = EntitySort::multiple([
 Clauses are compared lexicographically, with stable dataset order breaking full
 ties. Text keys are extracted once per row for each active text clause rather
 than allocated inside the comparison loop.
+
+For values whose displayed text is not their true order, attach a typed key:
+
+```rust,no_run
+use leptos_daisyui_rs::components::{EntityColumn, EntityNullOrder};
+
+let count = EntityColumn::text("count", "Count", |row: &Row| row.count.to_string())
+    .sortable_by_key(|row| row.count);
+let date = EntityColumn::text("date", "Date", |row: &Row| row.date_label.clone())
+    .sortable_by_key(|row| row.date); // any date/time type implementing Ord
+let owner = EntityColumn::text("owner", "Owner", |row: &Row| row.owner_label())
+    .sortable_by_optional_key(EntityNullOrder::Last, |row| row.owner_sort_key());
+```
+
+`sortable_by_key` accepts signed or unsigned integers, strings, date/time
+types, tuples, and domain newtypes implementing `Ord`. Each key is extracted
+once per row, equal keys retain source order, and ordered multi-sort uses the
+same prepared keys. `sortable_by_optional_key` requires `First` or `Last`;
+that null placement is absolute in both ascending and descending value order.
+The existing normalized text fallback and `sortable_by` two-row comparator
+remain available for ordinary text and domain-specific comparisons.
 
 A plain header activation keeps the compatibility single-sort cycle: ascending,
 descending, then system order. Shift+activation edits one clause without

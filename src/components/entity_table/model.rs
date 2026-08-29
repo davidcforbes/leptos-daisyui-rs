@@ -1,11 +1,13 @@
 //! Pure ordering, pagination, visibility, and resize behavior.
 
 use super::types::{
-    EntityColumn, EntityComparator, EntitySort, EntitySortDirection, EntityTablePreferences,
+    EntityColumn, EntityComparator, EntityPreparedSortComparator, EntitySort, EntitySortDirection,
+    EntityTableActionColumnPolicy, EntityTableDisplayColumn, EntityTableDisplayProjection,
+    EntityTableDisplayRow, EntityTablePreferences,
 };
 use crate::components::data_table::{
     ColumnVisibilityAction, MAX_COLUMN_WIDTH, clamp_page, column_visibility_action,
-    effective_min_width, resized_width,
+    effective_min_width, page_bounds, resized_width,
 };
 use std::collections::BTreeSet;
 use std::rc::Rc;
@@ -151,8 +153,7 @@ pub fn sorted_indices<T>(rows: &[T], columns: &[EntityColumn<T>], sort: &EntityS
                 .find(|column| column.id == clause.column && column.sortable)?;
             if let Some(sort_key) = column.sort_key.as_ref() {
                 return Some(PreparedSort::Keys {
-                    direction: clause.direction,
-                    keys: rows.iter().map(|row| sort_key(row)).collect(),
+                    compare: sort_key.prepare(rows, clause.direction),
                 });
             }
             column
@@ -177,10 +178,68 @@ pub fn sorted_indices<T>(rows: &[T], columns: &[EntityColumn<T>], sort: &EntityS
     indices
 }
 
+/// Builds one atomic display/export projection from the table's canonical
+/// ordering, visibility, paging, row-key, and cell-text rules.
+pub fn entity_table_display_projection<T>(
+    rows: &[T],
+    columns: &[EntityColumn<T>],
+    preferences: &EntityTablePreferences,
+    current_page: usize,
+    effective_page_size: usize,
+    row_key: &dyn Fn(&T) -> String,
+    action_columns: EntityTableActionColumnPolicy,
+) -> EntityTableDisplayProjection {
+    let indices = sorted_indices(rows, columns, &preferences.sort);
+    entity_table_display_projection_from_indices(
+        rows,
+        columns,
+        preferences,
+        &indices,
+        current_page,
+        effective_page_size,
+        row_key,
+        action_columns,
+    )
+}
+
+pub(crate) fn entity_table_display_projection_from_indices<T>(
+    rows: &[T],
+    columns: &[EntityColumn<T>],
+    preferences: &EntityTablePreferences,
+    indices: &[usize],
+    current_page: usize,
+    effective_page_size: usize,
+    row_key: &dyn Fn(&T) -> String,
+    action_columns: EntityTableActionColumnPolicy,
+) -> EntityTableDisplayProjection {
+    let projected_columns = ordered_columns(preferences, columns)
+        .into_iter()
+        .filter(|column| !preferences.hidden_columns.contains(column.id))
+        .filter(|column| {
+            !column.is_action || action_columns == EntityTableActionColumnPolicy::Include
+        })
+        .collect::<Vec<_>>();
+    let descriptors = projected_columns
+        .iter()
+        .map(|column| EntityTableDisplayColumn::new(column.id, &column.header, column.is_action))
+        .collect::<Vec<_>>();
+    let projected_rows = indices
+        .iter()
+        .map(|index| {
+            let row = &rows[*index];
+            EntityTableDisplayRow::new(
+                row_key(row),
+                projected_columns.iter().map(|column| (column.text)(row)),
+            )
+        })
+        .collect::<Vec<_>>();
+    let bounds = page_bounds(current_page, effective_page_size, projected_rows.len());
+    EntityTableDisplayProjection::from_parts(descriptors, projected_rows, bounds.start, bounds.end)
+}
+
 enum PreparedSort<T> {
     Keys {
-        direction: EntitySortDirection,
-        keys: Vec<String>,
+        compare: EntityPreparedSortComparator,
     },
     Comparator {
         direction: EntitySortDirection,
@@ -191,9 +250,7 @@ enum PreparedSort<T> {
 impl<T> PreparedSort<T> {
     fn compare(&self, left: usize, right: usize, rows: &[T]) -> std::cmp::Ordering {
         match self {
-            Self::Keys { direction, keys } => {
-                ordered_for_direction(keys[left].cmp(&keys[right]), *direction)
-            }
+            Self::Keys { compare } => compare(left, right),
             Self::Comparator { direction, compare } => {
                 ordered_for_direction(compare(&rows[left], &rows[right]), *direction)
             }

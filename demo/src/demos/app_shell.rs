@@ -33,7 +33,7 @@ pub fn AppShellDemo() -> impl IntoView {
                     <code>"AppShellIconNavGroup"</code>
                     "'s "<code>"pinned"</code>" prop."
                 </p>
-                <div class="h-96 bg-base-200 rounded-lg overflow-hidden border border-base-300">
+                <div id="app-shell-no-top-fixture" class="h-96 bg-base-200 rounded-lg overflow-hidden border border-base-300">
                     <AppShell active_section=section>
                         <AppShellIconNav class="w-16 border-r border-base-content/10">
                             <AppShellHeader title="Acme">
@@ -130,6 +130,82 @@ pub fn AppShellDemo() -> impl IntoView {
                                         </div>
                                     </div>
                                 </div>
+                            </div>
+                        </AppShellContent>
+                    </AppShell>
+                </div>
+            </Section>
+
+            <Section title="Pinned Application Top Bar" col=true>
+                <p class="text-sm text-base-content/70 mb-4">
+                    <code>"AppShellTopBar"</code>
+                    " keeps generic start, center, and end composition pinned above the scrolling content. The caller still owns the brand, search transport, locale value, and account action."
+                </p>
+                <div
+                    id="app-shell-top-bar-fixture"
+                    class="h-72 max-w-full overflow-hidden rounded-lg border border-base-300 bg-base-200"
+                >
+                    <AppShell
+                        top_bar=Box::new(|| {
+                            view! {
+                                <AppShellTopBar
+                                    label=Signal::stored("Satellite application controls".to_owned())
+                                    start=Box::new(|| {
+                                        view! {
+                                            <a class="font-semibold whitespace-nowrap" href="#app-shell-top-bar-content">
+                                                "Acme Operations"
+                                            </a>
+                                        }
+                                            .into_any()
+                                    })
+                                    center=Box::new(|| {
+                                        view! {
+                                            <label class="flex min-w-0 w-full items-center gap-2">
+                                                <span class="sr-only">"Search all records"</span>
+                                                <input
+                                                    type="search"
+                                                    class="input input-bordered input-sm min-w-0 w-full"
+                                                    placeholder="Search all records"
+                                                />
+                                            </label>
+                                        }
+                                            .into_any()
+                                    })
+                                    end=Box::new(|| {
+                                        view! {
+                                            <label class="flex items-center gap-1">
+                                                <span class="sr-only">"Language"</span>
+                                                <select class="select select-bordered select-sm" aria-label="Language">
+                                                    <option value="en">"EN"</option>
+                                                    <option value="es">"ES"</option>
+                                                </select>
+                                            </label>
+                                            <button type="button" class="btn btn-ghost btn-sm whitespace-nowrap">
+                                                "A. Rivera"
+                                            </button>
+                                        }
+                                            .into_any()
+                                    })
+                                />
+                            }
+                                .into_any()
+                        })
+                        status_bar=Box::new(|| {
+                            view! {
+                                <AppShellStatusBar>
+                                    <span class="status status-success"></span>
+                                    "Connected"
+                                </AppShellStatusBar>
+                            }
+                                .into_any()
+                        })
+                    >
+                        <AppShellContent class="p-4">
+                            <div id="app-shell-top-bar-content" style="min-height: 720px">
+                                <h3 class="font-semibold">"Scrollable satellite content"</h3>
+                                <p class="text-sm text-base-content/70">
+                                    "Only this main region scrolls; application chrome stays in place."
+                                </p>
                             </div>
                         </AppShellContent>
                     </AppShell>

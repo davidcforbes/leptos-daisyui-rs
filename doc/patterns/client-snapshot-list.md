@@ -84,6 +84,33 @@ view! {
 typed `id`; when omitted inside `Field`, the field association still supplies
 its generated ID.
 
+## Page-header navigation placement
+
+`PageHeader` keeps its historical `PageHeaderNavigationLayout::InlineResponsive`
+default: the optional `back` slot shares the title cluster at wide widths and
+stacks within that cluster at compact widths. Choose
+`PageHeaderNavigationLayout::DedicatedRow` when navigation must remain on its
+own row above title, subtitle, freshness, dataset, and actions at every width:
+
+```rust,no_run
+<PageHeader
+    title="No Hires"
+    subtitle="Records requiring follow-up."
+    navigation_layout=PageHeaderNavigationLayout::DedicatedRow
+    navigation_label=Signal::stored("No Hires navigation".to_owned())
+    back=Box::new(|| view! {
+        <a href="/">"Back to Office"</a>
+    }.into_any())
+/>
+```
+
+The dedicated row is a labeled navigation landmark. Both layouts instantiate
+the back view once, keep exactly one `h1`, preserve DOM/keyboard order, and emit
+`data-page-header-navigation-layout` for browser audits. The dedicated mode
+uses `min-w-0` and wrapping around both the navigation row and the lower
+heading/action row so long labels do not squeeze the title or create page-wide
+horizontal overflow.
+
 ## Preferred hybrid filter layout
 
 The utility `FilterBar` above the table contains global search, controls that

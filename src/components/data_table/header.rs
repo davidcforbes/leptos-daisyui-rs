@@ -17,6 +17,16 @@ struct ResizeDrag {
     start_width: f64,
 }
 
+const IDLE_SORT_SYMBOL: &str = "⇅";
+
+fn sort_indicator_symbol(active: bool, order: SortOrder) -> &'static str {
+    if active {
+        order.as_symbol()
+    } else {
+        IDLE_SORT_SYMBOL
+    }
+}
+
 /// DataTable header component with sortable columns and draggable
 /// column-width dividers.
 #[component]
@@ -149,14 +159,26 @@ pub fn DataTableHeader(
                                             <span
                                                 aria-hidden="true"
                                                 data-table-sort-indicator="true"
-                                                class="inline-flex w-4 shrink-0 justify-center text-xs"
+                                                data-table-sort-state=move || {
+                                                    if sort_column.get() == Some(col_id) {
+                                                        "active"
+                                                    } else {
+                                                        "idle"
+                                                    }
+                                                }
+                                                class=move || {
+                                                    if sort_column.get() == Some(col_id) {
+                                                        "inline-flex w-4 shrink-0 justify-center text-xs opacity-100"
+                                                    } else {
+                                                        "inline-flex w-4 shrink-0 justify-center text-xs opacity-60 forced-colors:opacity-100"
+                                                    }
+                                                }
                                             >
                                                 {move || {
-                                                    if sort_column.get() == Some(col_id) {
-                                                        sort_order.get().as_symbol()
-                                                    } else {
-                                                        ""
-                                                    }
+                                                    sort_indicator_symbol(
+                                                        sort_column.get() == Some(col_id),
+                                                        sort_order.get(),
+                                                    )
                                                 }}
                                             </span>
                                         </Button>
@@ -297,4 +319,21 @@ fn separator_parent_width(target: Option<web_sys::EventTarget>) -> Option<f64> {
         .and_then(|element| element.parent_element())
         .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
         .map(|element| f64::from(element.offset_width()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn idle_sort_indicator_uses_a_quiet_bidirectional_affordance() {
+        assert_eq!(sort_indicator_symbol(false, SortOrder::Asc), "⇅");
+        assert_eq!(sort_indicator_symbol(false, SortOrder::Desc), "⇅");
+    }
+
+    #[test]
+    fn active_sort_indicator_keeps_the_directional_arrow() {
+        assert_eq!(sort_indicator_symbol(true, SortOrder::Asc), "↑");
+        assert_eq!(sort_indicator_symbol(true, SortOrder::Desc), "↓");
+    }
 }

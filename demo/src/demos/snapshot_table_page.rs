@@ -1,11 +1,13 @@
 use leptos::prelude::*;
 use leptos_daisyui_rs::components::{
-    Button, EntityColumn, EntityTablePreferenceOwnership, EntityTablePreferencePersistence,
+    BadgeColor, Button, EntityBadgePresentation, EntityColumn, EntityColumnFilter, EntityIconColor,
+    EntityIconPresentation, EntityNullOrder, EntityTable, EntityTablePreferenceOwnership,
+    EntityTablePreferencePersistence, EntityTableTexts, EntityTableViewportFit,
 };
 use leptos_daisyui_rs::patterns::{
-    PageHeader, SnapshotData, SnapshotDatasetOption, SnapshotDatasetSelectorConfig,
-    SnapshotEntityTableConfig, SnapshotLocalRowProjection, SnapshotRequestHandle,
-    SnapshotTablePage, SnapshotTableState,
+    PageHeader, PageHeaderNavigationLayout, SnapshotData, SnapshotDatasetOption,
+    SnapshotDatasetSelectorConfig, SnapshotEntityTableConfig, SnapshotLocalRowProjection,
+    SnapshotRequestHandle, SnapshotTablePage, SnapshotTableState,
 };
 use std::rc::Rc;
 use std::sync::Arc;
@@ -144,6 +146,17 @@ pub fn SnapshotTablePageFixture() -> impl IntoView {
                 <PageHeader
                     title="Snapshot table fixture"
                     subtitle="Typed identity, retained mounting, and slot-order proof."
+                    navigation_layout=PageHeaderNavigationLayout::DedicatedRow
+                    navigation_label=Signal::stored("Snapshot navigation".to_owned())
+                    back=Box::new(|| view! {
+                        <a
+                            class="btn btn-ghost btn-sm"
+                            href="#snapshot-page-table"
+                            data-testid="snapshot-page-back"
+                        >
+                            "← Back to reports"
+                        </a>
+                    }.into_any())
                 />
             }.into_any())
             dataset_selector=selector
@@ -202,5 +215,327 @@ pub fn SnapshotTablePageFixture() -> impl IntoView {
             on_retry=retry
             action_key_label=Rc::new(|key: &String| key.clone())
         />
+    }
+}
+
+/// Real-WASM fixture for framework-owned EntityTable viewport-fit paging.
+#[component]
+pub fn EntityTableViewportFitFixture() -> impl IntoView {
+    let height = RwSignal::new(520_u32);
+    let alternate_copy = RwSignal::new(false);
+    let data: Signal<Rc<Vec<FixtureRow>>, LocalStorage> = RwSignal::new_local(Rc::new(
+        (1..=60)
+            .map(|index| FixtureRow {
+                id: format!("fit-{index:02}"),
+                client: format!("Viewport client {index:02}"),
+                status: if index % 3 == 0 { "Urgent" } else { "Ready" }.to_owned(),
+            })
+            .collect::<Vec<_>>(),
+    ))
+    .into();
+    let columns = Signal::derive_local(move || {
+        vec![
+            EntityColumn::text(
+                "client",
+                if alternate_copy.get() {
+                    "Client account with localized heading"
+                } else {
+                    "Client"
+                },
+                |row: &FixtureRow| row.client.clone(),
+            )
+            .required()
+            .with_min_width(220),
+            EntityColumn::text(
+                "status",
+                if alternate_copy.get() {
+                    "Localized workflow status"
+                } else {
+                    "Status"
+                },
+                |row: &FixtureRow| row.status.clone(),
+            )
+            .with_min_width(150),
+        ]
+    });
+    let texts = Signal::derive(move || EntityTableTexts {
+        rows_per_page: if alternate_copy.get() {
+            "Rows per page used when the viewport is too short".to_owned()
+        } else {
+            "Rows per page".to_owned()
+        },
+        ..EntityTableTexts::default()
+    });
+    let filters = vec![EntityColumnFilter::new("status", || {
+        view! {
+            <span class="block min-h-8 py-1 text-xs" data-testid="viewport-fit-filter-row">
+                "Controlled status filter"
+            </span>
+        }
+        .into_any()
+    })];
+
+    view! {
+        <section id="entity-viewport-fit-fixture" class="space-y-3">
+            <div class="flex flex-wrap gap-2" aria-label="Viewport fit controls">
+                <Button attr:data-testid="viewport-fit-default" on_click=Callback::new(move |_| height.set(520))>
+                    "Default height"
+                </Button>
+                <Button attr:data-testid="viewport-fit-tall" on_click=Callback::new(move |_| height.set(800))>
+                    "Tall height"
+                </Button>
+                <Button attr:data-testid="viewport-fit-short" on_click=Callback::new(move |_| height.set(180))>
+                    "Short height"
+                </Button>
+                <Button attr:data-testid="viewport-fit-locale" on_click=Callback::new(move |_| alternate_copy.update(|value| *value = !*value))>
+                    "Toggle localized copy"
+                </Button>
+            </div>
+            <div
+                class="min-h-0 w-full"
+                style=move || format!("height: {}px", height.get())
+                data-testid="viewport-fit-budget"
+            >
+                <EntityTable
+                    data=data
+                    columns=columns
+                    column_filters=filters
+                    row_key=Rc::new(|row: &FixtureRow| row.id.clone())
+                    dataset_identity="viewport-fit-fixture"
+                    viewport_fit=EntityTableViewportFit::fill_parent().with_min_rows(3)
+                    preference_ownership=EntityTablePreferenceOwnership::uncontrolled(
+                        EntityTablePreferencePersistence::Disabled,
+                    )
+                    texts=texts
+                    page_size_control_id="viewport-fit-page-size"
+                />
+            </div>
+        </section>
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EntityTablePresentationRow {
+    id: String,
+    reference: String,
+    narrative: String,
+    rich: String,
+    number: i64,
+    date_key: (u16, u8, u8),
+    optional_rank: Option<i64>,
+    currency: String,
+    percentage: String,
+    status: String,
+    icon_label: String,
+}
+
+/// Focused browser fixture for framework-owned EntityColumn presentation.
+#[component]
+pub fn EntityTablePresentationFixture() -> impl IntoView {
+    let data = RwSignal::new_local(Rc::new(vec![
+        EntityTablePresentationRow {
+            id: "presentation-1".to_owned(),
+            reference: "REFERENCE-WITH-ONE-UNBROKEN-VALUE-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                .to_owned(),
+            narrative: "This canonical narrative is intentionally long enough to occupy more than two visual lines while remaining complete in the DOM for assistive technology and export."
+                .to_owned(),
+            rich: "Canonical rich-renderer fallback text".to_owned(),
+            number: 10,
+            date_key: (2026, 1, 2),
+            optional_rank: None,
+            currency: "-$12,345,678,901.25".to_owned(),
+            percentage: "100.00%".to_owned(),
+            status: "Needs review".to_owned(),
+            icon_label: "Enabled".to_owned(),
+        },
+        EntityTablePresentationRow {
+            id: "presentation-2".to_owned(),
+            reference: "SHORT-2".to_owned(),
+            narrative: "A short narrative.".to_owned(),
+            rich: "Second rich value".to_owned(),
+            number: 2,
+            date_key: (2025, 12, 31),
+            optional_rank: Some(10),
+            currency: "$24.00".to_owned(),
+            percentage: "20.50%".to_owned(),
+            status: "Ready".to_owned(),
+            icon_label: "Attention".to_owned(),
+        },
+        EntityTablePresentationRow {
+            id: "presentation-3".to_owned(),
+            reference: "NEGATIVE-3".to_owned(),
+            narrative: "Signed numeric ordering fixture.".to_owned(),
+            rich: "Third rich value".to_owned(),
+            number: -3,
+            date_key: (2026, 1, 1),
+            optional_rank: Some(2),
+            currency: "-$3.00".to_owned(),
+            percentage: "-3.00%".to_owned(),
+            status: "Unknown status".to_owned(),
+            icon_label: "Unknown state".to_owned(),
+        },
+        EntityTablePresentationRow {
+            id: "presentation-4".to_owned(),
+            reference: "SECOND-TWO".to_owned(),
+            narrative: "Stable equal-key ordering fixture.".to_owned(),
+            rich: "Fourth rich value".to_owned(),
+            number: 2,
+            date_key: (2026, 2, 1),
+            optional_rank: Some(10),
+            currency: "$2.00".to_owned(),
+            percentage: "2.00%".to_owned(),
+            status: String::new(),
+            icon_label: String::new(),
+        },
+    ]));
+    let semantic_localized = RwSignal::new(false);
+    let toggle_semantic_locale = Callback::new(move |_| {
+        let localized = !semantic_localized.get_untracked();
+        semantic_localized.set(localized);
+        data.update(|rows| {
+            let mut replacement = rows.as_ref().clone();
+            replacement[0].status = if localized {
+                "Revisión necesaria"
+            } else {
+                "Needs review"
+            }
+            .to_owned();
+            replacement[0].icon_label = if localized { "Habilitado" } else { "Enabled" }.to_owned();
+            *rows = Rc::new(replacement);
+        });
+    });
+    let columns = vec![
+        EntityColumn::text(
+            "reference",
+            "Reference",
+            |row: &EntityTablePresentationRow| row.reference.clone(),
+        )
+        .ellipsis()
+        .with_min_width(110)
+        .with_width(150),
+        EntityColumn::text(
+            "narrative",
+            "Narrative",
+            |row: &EntityTablePresentationRow| row.narrative.clone(),
+        )
+        .line_clamp(2)
+        .with_min_width(150)
+        .with_width(220),
+        EntityColumn::text(
+            "rich",
+            "Rich precedence",
+            |row: &EntityTablePresentationRow| row.rich.clone(),
+        )
+        .line_clamp(2)
+        .with_width(180)
+        .align_end()
+        .tabular_numbers()
+        .render_with(|row: &EntityTablePresentationRow| {
+            let text = row.rich.clone();
+            view! { <em data-entity-presentation-rich="true">{text}</em> }.into_any()
+        }),
+        EntityColumn::text(
+            "number",
+            "Typed number",
+            |row: &EntityTablePresentationRow| row.number.to_string(),
+        )
+        .sortable_by_key(|row| row.number)
+        .align_end()
+        .tabular_numbers()
+        .with_width(130),
+        EntityColumn::text("date", "Typed date", |row: &EntityTablePresentationRow| {
+            format!(
+                "{:04}-{:02}-{:02}",
+                row.date_key.0, row.date_key.1, row.date_key.2
+            )
+        })
+        .sortable_by_key(|row| row.date_key)
+        .align_center()
+        .tabular_numbers()
+        .with_width(135),
+        EntityColumn::text(
+            "optional",
+            "Optional rank",
+            |row: &EntityTablePresentationRow| {
+                row.optional_rank
+                    .map_or_else(|| "Not ranked".to_owned(), |rank| rank.to_string())
+            },
+        )
+        .sortable_by_optional_key(EntityNullOrder::Last, |row| row.optional_rank)
+        .align_end()
+        .tabular_numbers()
+        .with_width(140),
+        EntityColumn::text(
+            "currency",
+            "Currency-like",
+            |row: &EntityTablePresentationRow| row.currency.clone(),
+        )
+        .align_end()
+        .tabular_numbers()
+        .ellipsis()
+        .with_width(165),
+        EntityColumn::text(
+            "percentage",
+            "Percentage-like",
+            |row: &EntityTablePresentationRow| row.percentage.clone(),
+        )
+        .align_end()
+        .tabular_numbers()
+        .with_width(145),
+        EntityColumn::text(
+            "status_badge",
+            "Semantic badge",
+            |row: &EntityTablePresentationRow| row.status.clone(),
+        )
+        .badge_with(|row| match row.id.as_str() {
+            "presentation-1" => Some(EntityBadgePresentation::new(BadgeColor::Warning)),
+            "presentation-2" => Some(EntityBadgePresentation::new(BadgeColor::Success)),
+            "presentation-3" => None,
+            _ => Some(EntityBadgePresentation::new(BadgeColor::Info)),
+        })
+        .with_width(155),
+        EntityColumn::text(
+            "state_icon",
+            "Semantic icon",
+            |row: &EntityTablePresentationRow| row.icon_label.clone(),
+        )
+        .align_center()
+        .icon_with(|row| match row.id.as_str() {
+            "presentation-1" => Some(EntityIconPresentation::new(
+                "circle-check",
+                EntityIconColor::Success,
+            )),
+            "presentation-2" => Some(EntityIconPresentation::new(
+                "triangle-alert",
+                EntityIconColor::Warning,
+            )),
+            "presentation-3" => None,
+            _ => Some(EntityIconPresentation::new("check", EntityIconColor::Info)),
+        })
+        .with_width(145),
+    ];
+
+    view! {
+        <section
+            id="entity-table-presentation-fixture"
+            class="mx-auto max-w-3xl space-y-3 bg-base-100 p-4"
+        >
+            <h1 class="ld-text-display font-semibold">"Entity column presentation"</h1>
+            <p class="text-sm text-base-content/70">
+                "Plain canonical values demonstrate ellipsis and two-line clipping; the final column proves rich-renderer precedence."
+            </p>
+            <Button
+                attr:data-testid="entity-presentation-locale"
+                on_click=toggle_semantic_locale
+            >
+                "Toggle semantic cell locale"
+            </Button>
+            <EntityTable
+                data=data
+                columns=columns
+                row_key=Rc::new(|row: &EntityTablePresentationRow| row.id.clone())
+                dataset_identity=Signal::stored("presentation-fixture".to_owned())
+            />
+        </section>
     }
 }

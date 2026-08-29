@@ -15,6 +15,33 @@ fn test_app_shell_root_class_with_status_bar_switches_to_column() {
     assert_ne!(class, app_shell_root_class(false));
 }
 
+#[test]
+fn test_app_shell_region_root_preserves_the_legacy_no_region_contract() {
+    assert_eq!(
+        app_shell_root_class_with_regions(false, false),
+        app_shell_root_class(false)
+    );
+}
+
+#[test]
+fn test_app_shell_region_root_stacks_either_pinned_region() {
+    for (has_top_bar, has_status_bar) in [(true, false), (false, true), (true, true)] {
+        assert_eq!(
+            app_shell_root_class_with_regions(has_top_bar, has_status_bar),
+            "flex flex-col h-full w-full min-w-0 overflow-hidden"
+        );
+    }
+}
+
+#[test]
+fn test_app_shell_top_bar_classes_wrap_without_owning_domain_widths() {
+    let class = app_shell_top_bar_class();
+    assert!(class.contains("flex-wrap"));
+    assert!(class.contains("min-w-0"));
+    assert!(class.contains("shrink-0"));
+    assert!(!class.contains("w-screen"));
+}
+
 // icon_nav_background_style tests
 
 #[test]

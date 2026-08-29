@@ -1,9 +1,12 @@
-use super::style::{app_shell_root_class, icon_nav_background_style, nav_group_class};
+use super::style::{
+    app_shell_root_class_with_regions, app_shell_top_bar_class, icon_nav_background_style,
+    nav_group_class,
+};
 use crate::merge_classes;
 use crate::utils::{badge_text, badge_visible};
 use leptos::{
     ev,
-    html::{Button, Div, Nav},
+    html::{Button, Div, Header, Nav},
     prelude::*,
 };
 
@@ -47,7 +50,12 @@ use leptos::{
 /// }
 /// ```
 ///
-/// ### Status bar region
+/// ### Top and status regions
+/// Pass [`AppShellTopBar`] through `top_bar` to pin application-wide brand,
+/// search, locale, and account composition above the three-panel row. The
+/// framework owns layout and landmarks only; callers own every value and
+/// interaction inside its slots.
+///
 /// Pass [`AppShellStatusBar`] via the `status_bar` prop to pin a bottom
 /// status/info bar below the main 3-panel row -- see [`AppShellStatusBar`]'s
 /// docs for the full example. When `status_bar` is set, the root switches
@@ -58,7 +66,7 @@ use leptos::{
 ///
 /// ### Add to `input.css`
 /// ```css
-/// @source inline("flex flex-col h-full w-full flex-1 min-h-0");
+/// @source inline("flex flex-col h-full w-full min-w-0 max-w-full overflow-hidden flex-1 min-h-0 shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-base-300 bg-base-100 px-4 py-2 text-base-content order-last basis-full sm:order-none sm:min-w-32 sm:flex-1 sm:basis-auto ml-auto justify-end gap-2");
 /// ```
 ///
 /// ## Node References
@@ -89,6 +97,12 @@ pub fn AppShell(
     #[prop(optional)]
     node_ref: NodeRef<Div>,
 
+    /// Optional pinned application top region. Compose it with
+    /// [`AppShellTopBar`] so the shell retains responsive and landmark
+    /// semantics while domain content stays caller-owned.
+    #[prop(optional)]
+    top_bar: Option<Children>,
+
     /// Optional status bar region, rendered pinned to the bottom of the
     /// shell below the main 3-panel row -- pass an [`AppShellStatusBar`]
     /// here. Structural -- like `icon` on
@@ -107,21 +121,106 @@ pub fn AppShell(
     };
     provide_context(ctx);
 
+    let has_top_bar = top_bar.is_some();
     let has_status_bar = status_bar.is_some();
 
     view! {
-        <div node_ref=node_ref class=move || merge_classes!(app_shell_root_class(has_status_bar), class)>
-            {match status_bar {
-                Some(status_bar_fn) => {
+        <div
+            node_ref=node_ref
+            class=move || merge_classes!(
+                app_shell_root_class_with_regions(has_top_bar, has_status_bar),
+                class
+            )
+            data-app-shell-root
+            data-app-shell-top-bar=if has_top_bar { "present" } else { "absent" }
+            data-app-shell-status-bar=if has_status_bar { "present" } else { "absent" }
+        >
+            {match (top_bar, status_bar) {
+                (None, None) => children().into_any(),
+                (top_bar, status_bar) => {
                     view! {
-                        <div class="flex flex-1 min-h-0 w-full">{children()}</div>
-                        {status_bar_fn()}
+                        {top_bar.map(|top_bar_fn| top_bar_fn())}
+                        <div
+                            class="flex flex-1 min-h-0 min-w-0 w-full overflow-hidden"
+                            data-app-shell-body
+                        >
+                            {children()}
+                        </div>
+                        {status_bar.map(|status_bar_fn| status_bar_fn())}
                     }
                         .into_any()
-                }
-                None => children().into_any(),
+                },
             }}
         </div>
+    }
+}
+
+/// # AppShell Top Bar Component
+///
+/// A responsive application-wide banner with start, center, and end slots.
+/// It owns only layout, wrapping, and the landmark; consumers supply brand,
+/// search, locale, account, navigation, and close behavior as ordinary child
+/// views. At compact widths the center slot takes its own full row so controls
+/// do not squeeze or force horizontal page overflow.
+#[component]
+pub fn AppShellTopBar(
+    /// Localizable accessible name for the banner landmark.
+    #[prop(into, default = Signal::stored("Application controls".to_owned()))]
+    label: Signal<String>,
+
+    /// Additional CSS classes.
+    #[prop(optional, into)]
+    class: &'static str,
+
+    /// Reference to the header element.
+    #[prop(optional)]
+    node_ref: NodeRef<Header>,
+
+    /// Leading composition, normally brand or application navigation.
+    #[prop(optional)]
+    start: Option<Children>,
+
+    /// Flexible composition, normally global search or current context.
+    #[prop(optional)]
+    center: Option<Children>,
+
+    /// Trailing composition, normally locale and account actions.
+    #[prop(optional)]
+    end: Option<Children>,
+) -> impl IntoView {
+    view! {
+        <header
+            node_ref=node_ref
+            role="banner"
+            aria-label=move || label.get()
+            class=move || merge_classes!(app_shell_top_bar_class(), class)
+            data-app-shell-top-bar-region
+        >
+            {start.map(|slot| view! {
+                <div
+                    class="flex min-w-0 max-w-full shrink-0 items-center gap-2"
+                    data-app-shell-top-bar-start
+                >
+                    {slot()}
+                </div>
+            })}
+            {center.map(|slot| view! {
+                <div
+                    class="order-last flex min-w-0 basis-full items-center gap-2 sm:order-none sm:min-w-32 sm:flex-1 sm:basis-auto"
+                    data-app-shell-top-bar-center
+                >
+                    {slot()}
+                </div>
+            })}
+            {end.map(|slot| view! {
+                <div
+                    class="ml-auto flex min-w-0 max-w-full shrink-0 flex-wrap items-center justify-end gap-2"
+                    data-app-shell-top-bar-end
+                >
+                    {slot()}
+                </div>
+            })}
+        </header>
     }
 }
 

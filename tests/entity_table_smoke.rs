@@ -21,6 +21,63 @@ async fn eval_json(harness: &pixelproof_web::Harness, expression: &str) -> Value
         .unwrap_or_else(|error| panic!("JSON value for `{expression}`: {error}"))
 }
 
+async fn assert_entity_projection_matches_wide_dom(
+    harness: &pixelproof_web::Harness,
+    context: &str,
+) {
+    let state = oracle(harness).await;
+    let projection = &state["state"]["entity_table.display_projection"];
+    let projected_columns = projection["columns"]
+        .as_array()
+        .unwrap_or_else(|| panic!("missing projected columns for {context}: {projection}"));
+    let column_ids = projected_columns
+        .iter()
+        .map(|column| column["id"].clone())
+        .collect::<Vec<_>>();
+    let encoded_ids = serde_json::to_string(&column_ids).expect("encode projected column IDs");
+    let dom = eval_json(
+        harness,
+        &format!(
+            r#"(() => {{
+                const ids = {encoded_ids};
+                const table = document.querySelector('[data-entity-table-grid]');
+                const columns = ids.map(id => {{
+                    const th = table.querySelector(`thead tr:first-child th[data-entity-column="${{id}}"]`);
+                    const sort = th.querySelector('[data-entity-sort-column]');
+                    const label = sort
+                        ? sort.querySelector(':scope > span > span:first-child').textContent.trim()
+                        : th.querySelector(':scope > span').textContent.trim();
+                    return {{ id, label, is_action: false }};
+                }});
+                const rows = Array.from(table.querySelectorAll('tbody tr[data-entity-row-key]')).map(row => ({{
+                    key: row.dataset.entityRowKey,
+                    cells: ids.map(id => row.querySelector(`td[data-entity-column="${{id}}"]`).textContent.trim()),
+                }}));
+                return {{ columns, rows }};
+            }})()"#,
+        ),
+    )
+    .await;
+    assert_eq!(
+        dom["columns"], projection["columns"],
+        "projected columns diverged from the wide DOM after {context}"
+    );
+    let all_rows = projection["all_filtered_rows"]
+        .as_array()
+        .unwrap_or_else(|| panic!("missing projected rows for {context}: {projection}"));
+    let start = projection["current_page_start"]
+        .as_u64()
+        .expect("projected current-page start") as usize;
+    let end = projection["current_page_end"]
+        .as_u64()
+        .expect("projected current-page end") as usize;
+    assert_eq!(
+        dom["rows"],
+        Value::Array(all_rows[start..end].to_vec()),
+        "projected current-page rows diverged from the wide DOM after {context}"
+    );
+}
+
 async fn mark_entity_table_geometry(harness: &pixelproof_web::Harness) -> Value {
     eval_json(
         harness,
@@ -134,6 +191,203 @@ fn assert_entity_table_geometry_unchanged(result: &Value, journey: &str) {
             .is_some_and(|delta| delta <= 0.5),
         "{journey} moved table shell geometry by more than 0.5px: {result}"
     );
+}
+
+async fn viewport_fit_snapshot(harness: &pixelproof_web::Harness) -> Value {
+    eval_json(
+        harness,
+        r#"(() => {
+            const root = document.querySelector('#entity-viewport-fit-fixture [data-entity-table]');
+            const region = root.querySelector('[data-entity-focus-region]');
+            const rows = Array.from(root.querySelectorAll('[data-entity-table-grid] tbody tr'));
+            const effective = Number(root.dataset.entityEffectivePageSize);
+            const configured = Number(root.dataset.entityConfiguredPageSize);
+            const pageButtons = Array.from(root.querySelectorAll('[data-entity-page]'))
+                .filter(button => /^\d+$/.test(button.dataset.entityPage));
+            const currentPage = Number(pageButtons.find(button => button.disabled)?.dataset.entityPage ?? 1);
+            const verticalScrollers = Array.from(root.querySelectorAll('*')).filter(element => {
+                const overflow = getComputedStyle(element).overflowY;
+                return (overflow === 'auto' || overflow === 'scroll')
+                    && element.scrollHeight > element.clientHeight + 1;
+            });
+            const last = rows.at(-1)?.getBoundingClientRect();
+            const regionRect = region.getBoundingClientRect();
+            const viewportWidth = document.documentElement.clientWidth;
+            const overflowing = Array.from(document.querySelectorAll('body *'))
+                .map(element => ({ element, rect: element.getBoundingClientRect() }))
+                .filter(({ rect }) => rect.right > viewportWidth + 1 || rect.left < -1)
+                .slice(0, 8)
+                .map(({ element, rect }) => ({
+                    tag: element.tagName,
+                    id: element.id,
+                    className: String(element.className),
+                    left: rect.left,
+                    right: rect.right,
+                    width: rect.width,
+                }));
+            return {
+                effective,
+                configured,
+                rows: rows.length,
+                first: rows[0]?.dataset.rowKey ?? null,
+                currentPage,
+                totalPages: Math.max(1, Math.ceil(60 / effective)),
+                rootHeight: root.getBoundingClientRect().height,
+                regionHeight: region.clientHeight,
+                regionScrollHeight: region.scrollHeight,
+                regionScrolls: region.scrollHeight > region.clientHeight + 1,
+                verticalScrollers: verticalScrollers.length,
+                clippedLastRow: !!last && last.bottom > regionRect.bottom + 1,
+                pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+                documentWidth: document.documentElement.scrollWidth,
+                viewportWidth,
+                overflowing,
+                rowsPerPageLabel: root.querySelector('label span')?.textContent.trim() ?? null,
+                rowHeights: rows.map(row => row.getBoundingClientRect().height),
+                rowTops: rows.map(row => row.getBoundingClientRect().top - regionRect.top),
+                tableHeight: root.querySelector('[data-entity-table-grid]').getBoundingClientRect().height,
+                headerHeight: root.querySelector('thead')?.getBoundingClientRect().height ?? null,
+                regionOffsetHeight: region.offsetHeight,
+                horizontalScrollbar: region.offsetHeight - region.clientHeight,
+            };
+        })()"#,
+    )
+    .await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
+async fn viewport_fit_paging_remeasures_without_persisting_or_nesting_scroll() {
+    let harness = harness_at("/components/entity-table-viewport-fit").await;
+    wait_for_selector(
+        &harness,
+        "#entity-viewport-fit-fixture [data-entity-table-grid] tbody tr",
+    )
+    .await;
+    begin_browser_error_capture(&harness).await;
+    tokio::time::sleep(Duration::from_millis(250)).await;
+
+    let initial = viewport_fit_snapshot(&harness).await;
+    assert_eq!(initial["configured"], json!(25));
+    assert!(
+        initial["effective"]
+            .as_u64()
+            .is_some_and(|rows| (3..25).contains(&rows)),
+        "initial fit: {initial}"
+    );
+    assert_eq!(initial["rows"], initial["effective"]);
+    assert_eq!(initial["regionScrolls"], json!(false));
+    assert_eq!(initial["verticalScrollers"], json!(0));
+    assert_eq!(initial["clippedLastRow"], json!(false));
+
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => {
+                const root = document.querySelector('#entity-viewport-fit-fixture [data-entity-table]');
+                const original = root.dataset.entityEffectivePageSize;
+                root.dataset.entityEffectivePageSize = '0';
+                const caught = root.querySelectorAll('tbody tr').length !== Number(root.dataset.entityEffectivePageSize);
+                root.dataset.entityEffectivePageSize = original;
+                return caught && Number(root.dataset.entityEffectivePageSize) > 0;
+            })()"#,
+        )
+        .await,
+        json!(true),
+        "the row-count/effective-capacity oracle must catch and revert a corrupted marker"
+    );
+
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => {
+                for (let index = 0; index < 20; index += 1) {
+                    const next = document.querySelector('[data-entity-page="next"]');
+                    if (next.disabled) break;
+                    next.click();
+                }
+                return true;
+            })()"#,
+        )
+        .await,
+        json!(true)
+    );
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let last_small_page = viewport_fit_snapshot(&harness).await;
+    assert_eq!(
+        last_small_page["currentPage"],
+        last_small_page["totalPages"]
+    );
+
+    click(&harness, "[data-testid='viewport-fit-tall']").await;
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    let tall = viewport_fit_snapshot(&harness).await;
+    assert!(
+        tall["effective"].as_u64() > initial["effective"].as_u64(),
+        "tall fit did not grow: initial={initial}, tall={tall}"
+    );
+    assert!(tall["rows"].as_u64().is_some_and(|rows| rows > 0));
+    assert_eq!(tall["currentPage"], tall["totalPages"]);
+    assert_eq!(tall["configured"], json!(25));
+    assert_eq!(tall["regionScrolls"], json!(false));
+    assert_eq!(tall["clippedLastRow"], json!(false));
+
+    harness
+        .set_viewport(ViewportSize::new(390, 844))
+        .await
+        .expect("set compact viewport for fit recomputation");
+    click(&harness, "[data-testid='viewport-fit-locale']").await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let localized = viewport_fit_snapshot(&harness).await;
+    assert!(
+        localized["rowsPerPageLabel"]
+            .as_str()
+            .is_some_and(|label| label.contains("viewport is too short"))
+    );
+    assert_eq!(localized["configured"], json!(25));
+    assert_eq!(
+        localized["pageOverflow"],
+        json!(false),
+        "localized fit overflowed the page: {localized}"
+    );
+    assert_eq!(
+        localized["clippedLastRow"],
+        json!(false),
+        "localized fit clipped its last row: {localized}"
+    );
+
+    click(&harness, "[data-entity-column-chooser]").await;
+    click(&harness, "[role='menu'] [data-entity-column='status']").await;
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    let hidden_column = viewport_fit_snapshot(&harness).await;
+    assert_eq!(hidden_column["configured"], json!(25));
+    assert_eq!(
+        hidden_column["pageOverflow"],
+        json!(false),
+        "hidden-column fit overflowed the page: {hidden_column}"
+    );
+    assert_eq!(hidden_column["clippedLastRow"], json!(false));
+
+    click(&harness, "[data-entity-page='1']").await;
+    click(&harness, "[data-testid='viewport-fit-short']").await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let short = viewport_fit_snapshot(&harness).await;
+    assert_eq!(short["effective"], json!(25));
+    assert_eq!(short["configured"], json!(25));
+    assert_eq!(short["rows"], json!(25));
+    assert_eq!(short["regionScrolls"], json!(true));
+    assert_eq!(short["verticalScrollers"], json!(1));
+    assert_eq!(short["pageOverflow"], json!(false));
+
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let settled = viewport_fit_snapshot(&harness).await;
+    assert_eq!(
+        settled["effective"], short["effective"],
+        "fit capacity oscillated: short={short}, settled={settled}"
+    );
+    assert_eq!(settled["currentPage"], short["currentPage"]);
+
+    assert_no_browser_errors(&harness, "EntityTable viewport-fit paging").await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -461,6 +715,7 @@ async fn controlled_preferences_reorder_columns_and_compose_sort_clauses() {
         ]),
         "controlled preference oracle after multi-sort: {state}"
     );
+    assert_entity_projection_matches_wide_dom(&harness, "controlled multi-sort").await;
 
     harness
         .page()
@@ -550,6 +805,563 @@ async fn controlled_preferences_reorder_columns_and_compose_sort_clauses() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
+async fn entity_table_toolbar_action_stays_adjacent_and_operable() {
+    let harness = harness_at("/components/client-snapshot-list").await;
+    begin_browser_error_capture(&harness).await;
+    assert_entity_projection_matches_wide_dom(&harness, "initial toolbar mount").await;
+
+    let inspect = |width: &'static str| {
+        let harness = &harness;
+        async move {
+            eval_json(
+                harness,
+                &format!(
+                r#"(() => {{
+                    const root = document.querySelector('[data-entity-table]');
+                    const action = root.querySelector('[data-testid="entity-toolbar-export"]');
+                    const chooser = root.querySelector('[data-entity-column-chooser]');
+                    const menu = root.querySelector('[role="menu"]');
+                    const focusables = Array.from(root.querySelectorAll('select, button, [role="button"][tabindex="0"]'));
+                    const actionBox = action.getBoundingClientRect();
+                    const chooserBox = chooser.getBoundingClientRect();
+                    return {{
+                        width: {width},
+                        actions: root.querySelectorAll('[data-testid="entity-toolbar-export"]').length,
+                        label: action.getAttribute('aria-label'),
+                        chooserTag: chooser.tagName.toLowerCase(),
+                        chooserPresentation: chooser.dataset.entityColumnChooserPresentation,
+                        chooserLabel: chooser.getAttribute('aria-label'),
+                        chooserText: chooser.textContent.trim(),
+                        chooserExpanded: chooser.getAttribute('aria-expanded'),
+                        chooserForcedColors: chooser.className.includes('forced-colors:border'),
+                        visible: actionBox.width > 0 && actionBox.height > 0,
+                        withinViewport: actionBox.left >= 0 && actionBox.right <= document.documentElement.clientWidth,
+                        chooserVisible: chooserBox.width > 0 && chooserBox.right <= document.documentElement.clientWidth,
+                        menuVisible: menu.getBoundingClientRect().width > 0,
+                        actionOrder: focusables.indexOf(action),
+                        chooserOrder: focusables.indexOf(chooser),
+                    }};
+                }})()"#
+                ),
+            )
+            .await
+        }
+    };
+
+    harness
+        .page()
+        .find_element("[data-entity-column-chooser]")
+        .await
+        .expect("find column chooser")
+        .focus()
+        .await
+        .expect("focus column chooser");
+    harness
+        .press_key_sequence(&[Key::Enter])
+        .await
+        .expect("keyboard-open column chooser");
+    let wide = inspect("1280").await;
+    assert_eq!(wide["actions"], json!(1));
+    assert_eq!(wide["label"], json!("Export current rows"));
+    assert_eq!(wide["chooserTag"], json!("button"));
+    assert_eq!(wide["chooserPresentation"], json!("icon"));
+    assert_eq!(wide["chooserLabel"], json!("Choose columns"));
+    assert_eq!(wide["chooserText"], json!("⚙"));
+    assert_eq!(wide["chooserExpanded"], json!("true"));
+    assert_eq!(wide["chooserForcedColors"], json!(true));
+    assert_eq!(wide["visible"], json!(true));
+    assert_eq!(wide["withinViewport"], json!(true));
+    assert_eq!(wide["chooserVisible"], json!(true));
+    assert_eq!(wide["menuVisible"], json!(true));
+    assert!(wide["actionOrder"].as_i64() < wide["chooserOrder"].as_i64());
+    harness
+        .press_key_sequence(&[Key::Escape])
+        .await
+        .expect("dismiss chooser with Escape");
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => ({
+                expanded: document.querySelector('[data-entity-column-chooser]').getAttribute('aria-expanded'),
+                focused: document.activeElement === document.querySelector('[data-entity-column-chooser]'),
+                menuVisible: document.querySelector('[data-entity-column-chooser]').parentElement.querySelector('[role="menu"]').getBoundingClientRect().width > 0,
+            }))()"#,
+        )
+        .await,
+        json!({ "expanded": "false", "focused": true, "menuVisible": false })
+    );
+    harness
+        .press_key_sequence(&[Key::Enter])
+        .await
+        .expect("reopen chooser before action");
+    click(&harness, "[data-testid='entity-toolbar-export']").await;
+    assert_eq!(
+        eval_json(
+            &harness,
+            "document.querySelector('[data-testid=\"entity-toolbar-action-count\"]').textContent",
+        )
+        .await,
+        json!("1")
+    );
+    let first_export = eval_json(
+        &harness,
+        r#"(() => ({
+            counts: document.querySelector('[data-testid="entity-export-counts"]').textContent,
+            firstKey: document.querySelector('[data-testid="entity-export-first-key"]').textContent,
+        }))()"#,
+    )
+    .await;
+    assert_eq!(first_export["counts"], json!("25/72"));
+    assert_eq!(first_export["firstKey"], json!("office-mx-000"));
+    let wide_projection =
+        oracle(&harness).await["state"]["entity_table.display_projection"].clone();
+
+    harness
+        .set_viewport(ViewportSize::new(390, 844))
+        .await
+        .expect("set compact toolbar viewport");
+    harness
+        .page()
+        .find_element("[data-entity-column-chooser]")
+        .await
+        .expect("find compact column chooser")
+        .focus()
+        .await
+        .expect("focus compact column chooser");
+    harness
+        .press_key_sequence(&[Key::Enter])
+        .await
+        .expect("keyboard-open compact column chooser");
+    let compact = inspect("390").await;
+    assert_eq!(compact["actions"], json!(1));
+    assert_eq!(compact["visible"], json!(true));
+    assert_eq!(compact["withinViewport"], json!(true));
+    assert_eq!(compact["chooserVisible"], json!(true));
+    assert_eq!(compact["menuVisible"], json!(true));
+    assert_eq!(compact["chooserExpanded"], json!("true"));
+    assert!(compact["actionOrder"].as_i64() < compact["chooserOrder"].as_i64());
+    click(&harness, "[data-testid='entity-toolbar-export']").await;
+    assert_eq!(
+        eval_json(
+            &harness,
+            "document.querySelector('[data-testid=\"entity-toolbar-action-count\"]').textContent",
+        )
+        .await,
+        json!("2")
+    );
+    assert_eq!(
+        oracle(&harness).await["state"]["entity_table.display_projection"],
+        wide_projection,
+        "compact presentation changed the export projection"
+    );
+
+    harness
+        .set_viewport(ViewportSize::new(1280, 800))
+        .await
+        .expect("restore wide viewport for EntityColumn presentation");
+    harness
+        .navigate("/components/entity-table-presentation?pp-freeze=1")
+        .await
+        .expect("navigate to EntityColumn presentation fixture");
+    wait_for_selector(
+        &harness,
+        "#entity-table-presentation-fixture [data-entity-row-key='presentation-1']",
+    )
+    .await;
+
+    let inspect_presentation = || {
+        eval_json(
+            &harness,
+            r#"(() => {
+                const root = document.querySelector('#entity-table-presentation-fixture');
+                const row = root.querySelector('[data-entity-row-key="presentation-1"]');
+                const reference = row.querySelector('td[data-entity-column="reference"] [data-entity-text-overflow]');
+                const narrative = row.querySelector('td[data-entity-column="narrative"] [data-entity-text-overflow]');
+                const richCell = row.querySelector('td[data-entity-column="rich"]');
+                const numberCell = row.querySelector('td[data-entity-column="number"]');
+                const optionalCell = row.querySelector('td[data-entity-column="optional"]');
+                const currencyCell = row.querySelector('td[data-entity-column="currency"]');
+                const percentageCell = row.querySelector('td[data-entity-column="percentage"]');
+                const badgeCell = row.querySelector('td[data-entity-column="status_badge"]');
+                const iconCell = row.querySelector('td[data-entity-column="state_icon"]');
+                const unknownRow = root.querySelector('[data-entity-row-key="presentation-3"]');
+                const emptyRow = root.querySelector('[data-entity-row-key="presentation-4"]');
+                const numberHeader = root.querySelector('th[data-entity-column="number"]');
+                const referenceStyle = getComputedStyle(reference);
+                const narrativeStyle = getComputedStyle(narrative);
+                const lineHeight = Number.parseFloat(narrativeStyle.lineHeight);
+                return {
+                    reference: {
+                        policy: reference.dataset.entityTextOverflow,
+                        title: reference.title,
+                        text: reference.textContent,
+                        overflow: referenceStyle.textOverflow,
+                        whiteSpace: referenceStyle.whiteSpace,
+                        clips: reference.scrollWidth > reference.clientWidth,
+                    },
+                    narrative: {
+                        policy: narrative.dataset.entityTextOverflow,
+                        lines: narrative.dataset.entityLineClamp,
+                        title: narrative.title,
+                        text: narrative.textContent,
+                        clamp: narrativeStyle.webkitLineClamp,
+                        overflow: narrativeStyle.overflow,
+                        boundedToTwoLines: Number.isFinite(lineHeight)
+                            && narrative.getBoundingClientRect().height <= lineHeight * 2 + 2,
+                    },
+                    rich: {
+                        custom: !!richCell.querySelector('[data-entity-presentation-rich]'),
+                        overflowMarkers: richCell.querySelectorAll('[data-entity-text-overflow]').length,
+                        alignment: richCell.dataset.entityAlignment,
+                        tabular: richCell.dataset.entityTabularNumbers,
+                        textAlign: getComputedStyle(richCell).textAlign,
+                        numericVariant: getComputedStyle(richCell).fontVariantNumeric,
+                    },
+                    numeric: {
+                        headerAlignment: numberHeader.dataset.entityAlignment,
+                        headerTextAlign: getComputedStyle(numberHeader).textAlign,
+                        headerForcedColors: numberHeader.className.includes('forced-colors:border'),
+                        cellAlignment: numberCell.dataset.entityAlignment,
+                        cellTextAlign: getComputedStyle(numberCell).textAlign,
+                        cellTabular: numberCell.dataset.entityTabularNumbers,
+                        numericVariant: getComputedStyle(numberCell).fontVariantNumeric,
+                        signedText: numberCell.textContent.trim(),
+                        optionalText: optionalCell.textContent.trim(),
+                        currencyText: currencyCell.textContent.trim(),
+                        percentageText: percentageCell.textContent.trim(),
+                        currencyTitle: currencyCell.querySelector('[data-entity-text-overflow]').title,
+                    },
+                    semantic: {
+                        badgeText: badgeCell.querySelector('[data-entity-semantic-cell="badge"]').textContent.trim(),
+                        badgeClass: badgeCell.querySelector('.badge').className,
+                        badgeForcedColors: badgeCell.querySelector('.badge').className.includes('forced-colors:border'),
+                        iconName: iconCell.querySelector('[data-entity-semantic-cell="icon"]').dataset.entityIconName,
+                        iconAccessible: iconCell.querySelector('.sr-only').textContent,
+                        iconSvgHidden: iconCell.querySelector('svg').getAttribute('aria-hidden'),
+                        iconForcedColors: iconCell.querySelector('[data-entity-semantic-cell="icon"]').className.includes('forced-colors:text'),
+                        unknownBadge: unknownRow.querySelector('td[data-entity-column="status_badge"] [data-entity-semantic-fallback]').textContent.trim(),
+                        unknownIcon: unknownRow.querySelector('td[data-entity-column="state_icon"] [data-entity-semantic-fallback]').textContent.trim(),
+                        emptyBadge: emptyRow.querySelector('td[data-entity-column="status_badge"] [data-entity-semantic-fallback]').dataset.entitySemanticFallback,
+                        emptyIcon: emptyRow.querySelector('td[data-entity-column="state_icon"] [data-entity-semantic-fallback]').dataset.entitySemanticFallback,
+                    },
+                    pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+                };
+            })()"#,
+        )
+    };
+
+    let wide_presentation = inspect_presentation().await;
+    assert_eq!(wide_presentation["reference"]["policy"], json!("ellipsis"));
+    assert_eq!(
+        wide_presentation["reference"]["overflow"],
+        json!("ellipsis")
+    );
+    assert_eq!(
+        wide_presentation["reference"]["whiteSpace"],
+        json!("nowrap")
+    );
+    assert_eq!(wide_presentation["reference"]["clips"], json!(true));
+    assert_eq!(
+        wide_presentation["reference"]["title"],
+        wide_presentation["reference"]["text"]
+    );
+    assert_eq!(
+        wide_presentation["narrative"]["policy"],
+        json!("line-clamp")
+    );
+    assert_eq!(wide_presentation["narrative"]["lines"], json!("2"));
+    assert_eq!(wide_presentation["narrative"]["clamp"], json!("2"));
+    assert_eq!(wide_presentation["narrative"]["overflow"], json!("hidden"));
+    assert_eq!(
+        wide_presentation["narrative"]["boundedToTwoLines"],
+        json!(true)
+    );
+    assert_eq!(
+        wide_presentation["narrative"]["title"],
+        wide_presentation["narrative"]["text"]
+    );
+    assert_eq!(wide_presentation["rich"]["custom"], json!(true));
+    assert_eq!(wide_presentation["rich"]["overflowMarkers"], json!(0));
+    assert_eq!(wide_presentation["rich"]["alignment"], json!("end"));
+    assert_eq!(wide_presentation["rich"]["tabular"], json!("true"));
+    assert_eq!(wide_presentation["rich"]["textAlign"], json!("right"));
+    assert!(
+        wide_presentation["rich"]["numericVariant"]
+            .as_str()
+            .is_some_and(|value| value.contains("tabular-nums"))
+    );
+    assert_eq!(
+        wide_presentation["numeric"]["headerAlignment"],
+        json!("end")
+    );
+    assert_eq!(
+        wide_presentation["numeric"]["headerTextAlign"],
+        json!("right")
+    );
+    assert_eq!(
+        wide_presentation["numeric"]["headerForcedColors"],
+        json!(true)
+    );
+    assert_eq!(wide_presentation["numeric"]["cellAlignment"], json!("end"));
+    assert_eq!(
+        wide_presentation["numeric"]["cellTextAlign"],
+        json!("right")
+    );
+    assert_eq!(wide_presentation["numeric"]["cellTabular"], json!("true"));
+    assert!(
+        wide_presentation["numeric"]["numericVariant"]
+            .as_str()
+            .is_some_and(|value| value.contains("tabular-nums"))
+    );
+    assert_eq!(wide_presentation["numeric"]["signedText"], json!("10"));
+    assert_eq!(
+        wide_presentation["numeric"]["optionalText"],
+        json!("Not ranked")
+    );
+    assert_eq!(
+        wide_presentation["numeric"]["currencyText"],
+        json!("-$12,345,678,901.25")
+    );
+    assert_eq!(
+        wide_presentation["numeric"]["currencyTitle"],
+        wide_presentation["numeric"]["currencyText"]
+    );
+    assert_eq!(
+        wide_presentation["numeric"]["percentageText"],
+        json!("100.00%")
+    );
+    assert_eq!(
+        wide_presentation["semantic"]["badgeText"],
+        json!("Needs review")
+    );
+    assert!(
+        wide_presentation["semantic"]["badgeClass"]
+            .as_str()
+            .is_some_and(
+                |classes| classes.contains("badge-soft") && classes.contains("badge-warning")
+            )
+    );
+    assert_eq!(
+        wide_presentation["semantic"]["badgeForcedColors"],
+        json!(true)
+    );
+    assert_eq!(
+        wide_presentation["semantic"]["iconName"],
+        json!("circle-check")
+    );
+    assert_eq!(
+        wide_presentation["semantic"]["iconAccessible"],
+        json!("Enabled")
+    );
+    assert_eq!(
+        wide_presentation["semantic"]["iconSvgHidden"],
+        json!("true")
+    );
+    assert_eq!(
+        wide_presentation["semantic"]["iconForcedColors"],
+        json!(true)
+    );
+    assert_eq!(
+        wide_presentation["semantic"]["unknownBadge"],
+        json!("Unknown status")
+    );
+    assert_eq!(
+        wide_presentation["semantic"]["unknownIcon"],
+        json!("Unknown state")
+    );
+    assert_eq!(wide_presentation["semantic"]["emptyBadge"], json!("empty"));
+    assert_eq!(wide_presentation["semantic"]["emptyIcon"], json!("empty"));
+    assert_eq!(wide_presentation["pageOverflow"], json!(false));
+
+    click(&harness, "[data-testid='entity-presentation-locale']").await;
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => {
+                const row = document.querySelector('[data-entity-row-key="presentation-1"]');
+                return {
+                    badge: row.querySelector('td[data-entity-column="status_badge"] [data-entity-semantic-cell]').textContent.trim(),
+                    icon: row.querySelector('td[data-entity-column="state_icon"] .sr-only').textContent,
+                };
+            })()"#,
+        )
+        .await,
+        json!({ "badge": "Revisión necesaria", "icon": "Habilitado" }),
+        "reactive canonical localization must update visible badge and icon accessibility copy"
+    );
+
+    let narrative_separator = "th[data-entity-column='narrative'] [role='separator']";
+    let before_resize = eval_json(
+        &harness,
+        &format!(
+            "Number(document.querySelector(\"{narrative_separator}\").getAttribute('aria-valuenow'))"
+        ),
+    )
+    .await;
+    harness
+        .page()
+        .find_element(narrative_separator)
+        .await
+        .expect("find narrative resize separator")
+        .focus()
+        .await
+        .expect("focus narrative resize separator");
+    harness
+        .press_key_sequence(&[Key::ArrowLeft, Key::ArrowLeft])
+        .await
+        .expect("resize narrative column from the keyboard");
+    let after_resize = eval_json(
+        &harness,
+        &format!(
+            "Number(document.querySelector(\"{narrative_separator}\").getAttribute('aria-valuenow'))"
+        ),
+    )
+    .await;
+    assert!(
+        after_resize.as_f64() < before_resize.as_f64(),
+        "keyboard resize must reduce the narrative column width: before={before_resize}, after={after_resize}"
+    );
+    let resized_presentation = inspect_presentation().await;
+    assert_eq!(resized_presentation["narrative"]["lines"], json!("2"));
+    assert_eq!(
+        resized_presentation["narrative"]["text"],
+        wide_presentation["narrative"]["text"]
+    );
+
+    click(
+        &harness,
+        "th[data-entity-column='number'] [data-entity-sort-column='number']",
+    )
+    .await;
+    let ascending_typed = eval_json(
+        &harness,
+        r#"(() => {
+            const header = document.querySelector('th[data-entity-column="number"]');
+            return {
+                rows: Array.from(document.querySelectorAll('#entity-table-presentation-fixture tbody [data-entity-row-key]')).map(row => row.dataset.entityRowKey),
+                aria: header.getAttribute('aria-sort'),
+                priority: header.dataset.entitySortPriority,
+                direction: header.dataset.entitySortDirection,
+                marker: header.querySelector('[data-entity-sort-indicator]').textContent.trim(),
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(
+        ascending_typed,
+        json!({
+            "rows": ["presentation-3", "presentation-2", "presentation-4", "presentation-1"],
+            "aria": "ascending",
+            "priority": "1",
+            "direction": "ascending",
+            "marker": "▲1",
+        }),
+        "typed numeric sort must place -3, 2, 2, 10 rather than sorting display strings"
+    );
+    click(
+        &harness,
+        "th[data-entity-column='number'] [data-entity-sort-column='number']",
+    )
+    .await;
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => {
+                const header = document.querySelector('th[data-entity-column="number"]');
+                return {
+                    rows: Array.from(document.querySelectorAll('#entity-table-presentation-fixture tbody [data-entity-row-key]')).map(row => row.dataset.entityRowKey),
+                    aria: header.getAttribute('aria-sort'),
+                    marker: header.querySelector('[data-entity-sort-indicator]').textContent.trim(),
+                };
+            })()"#,
+        )
+        .await,
+        json!({
+            "rows": ["presentation-1", "presentation-2", "presentation-4", "presentation-3"],
+            "aria": "descending",
+            "marker": "▼1",
+        }),
+        "descending typed order must retain source order for the equal 2 keys"
+    );
+
+    harness
+        .set_viewport(ViewportSize::new(390, 844))
+        .await
+        .expect("set compact EntityColumn presentation viewport");
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let compact_presentation = eval_json(
+        &harness,
+        r#"(() => {
+            const row = document.querySelector('#entity-table-presentation-fixture [data-entity-row-key="presentation-1"]');
+            const reference = row.querySelector('td.lg\\:hidden [data-entity-column="reference"] [data-entity-text-overflow]');
+            const narrative = row.querySelector('td.lg\\:hidden [data-entity-column="narrative"] [data-entity-text-overflow]');
+            const rich = row.querySelector('td.lg\\:hidden [data-entity-column="rich"]');
+            const number = row.querySelector('td.lg\\:hidden [data-entity-column="number"]');
+            const optional = row.querySelector('td.lg\\:hidden [data-entity-column="optional"]');
+            const currency = row.querySelector('td.lg\\:hidden [data-entity-column="currency"]');
+            const badge = row.querySelector('td.lg\\:hidden [data-entity-column="status_badge"]');
+            const icon = row.querySelector('td.lg\\:hidden [data-entity-column="state_icon"]');
+            return {
+                referencePolicy: reference.dataset.entityTextOverflow,
+                referenceTitle: reference.title,
+                referenceText: reference.textContent,
+                narrativeLines: narrative.dataset.entityLineClamp,
+                narrativeTitle: narrative.title,
+                narrativeText: narrative.textContent,
+                richCustom: !!rich.querySelector('[data-entity-presentation-rich]'),
+                richOverflowMarkers: rich.querySelectorAll('[data-entity-text-overflow]').length,
+                numberAlignment: number.dataset.entityAlignment,
+                numberTextAlign: getComputedStyle(number.lastElementChild).textAlign,
+                numberVariant: getComputedStyle(number.lastElementChild).fontVariantNumeric,
+                optionalText: optional.lastElementChild.textContent.trim(),
+                currencyText: currency.lastElementChild.textContent.trim(),
+                badgeText: badge.querySelector('[data-entity-semantic-cell="badge"]').textContent.trim(),
+                iconAccessible: icon.querySelector('.sr-only').textContent,
+                pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(compact_presentation["referencePolicy"], json!("ellipsis"));
+    assert_eq!(
+        compact_presentation["referenceTitle"],
+        compact_presentation["referenceText"]
+    );
+    assert_eq!(compact_presentation["narrativeLines"], json!("2"));
+    assert_eq!(
+        compact_presentation["narrativeTitle"],
+        compact_presentation["narrativeText"]
+    );
+    assert_eq!(compact_presentation["richCustom"], json!(true));
+    assert_eq!(compact_presentation["richOverflowMarkers"], json!(0));
+    assert_eq!(compact_presentation["numberAlignment"], json!("end"));
+    assert_eq!(compact_presentation["numberTextAlign"], json!("right"));
+    assert!(
+        compact_presentation["numberVariant"]
+            .as_str()
+            .is_some_and(|value| value.contains("tabular-nums"))
+    );
+    assert_eq!(compact_presentation["optionalText"], json!("Not ranked"));
+    assert_eq!(
+        compact_presentation["currencyText"],
+        json!("-$12,345,678,901.25")
+    );
+    assert_eq!(
+        compact_presentation["badgeText"],
+        json!("Revisión necesaria")
+    );
+    assert_eq!(compact_presentation["iconAccessible"], json!("Habilitado"));
+    assert_eq!(compact_presentation["pageOverflow"], json!(false));
+
+    assert_no_browser_errors(
+        &harness,
+        "EntityTable toolbar actions and EntityColumn overflow presentation",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
 async fn client_snapshot_list_contract_works_end_to_end() {
     let harness = harness_at("/components/client-snapshot-list").await;
     begin_browser_error_capture(&harness).await;
@@ -617,6 +1429,7 @@ async fn client_snapshot_list_contract_works_end_to_end() {
     );
     assert_eq!(initial["pageSizeSelectLabel"], json!("Rows per page"));
     assert_eq!(initial["controlIdsDistinct"], json!(true));
+    assert_entity_projection_matches_wide_dom(&harness, "initial client snapshot").await;
 
     let sort_button = "[data-entity-table-grid] thead th:first-child button";
     harness
@@ -670,6 +1483,7 @@ async fn client_snapshot_list_contract_works_end_to_end() {
             .contains("Activate to restore system order")
     );
     assert_eq!(descending["first"], json!("office-mx-071"));
+    assert_entity_projection_matches_wide_dom(&harness, "descending sort").await;
 
     let changed = eval_json(
         &harness,
@@ -707,6 +1521,7 @@ async fn client_snapshot_list_contract_works_end_to_end() {
             .unwrap()
             .contains("Delhi Client 010")
     );
+    assert_entity_projection_matches_wide_dom(&harness, "filtered dataset replacement").await;
 
     let active_filter_report = ldui_audit::audit_page(
         &harness,
@@ -776,6 +1591,7 @@ async fn client_snapshot_list_contract_works_end_to_end() {
         .await,
         json!({ "rows": 50, "range": "Showing 1-50 of 72" })
     );
+    assert_entity_projection_matches_wide_dom(&harness, "page-size replacement").await;
     click(&harness, "[data-entity-page='next']").await;
     assert_eq!(
         eval_json(
@@ -788,6 +1604,7 @@ async fn client_snapshot_list_contract_works_end_to_end() {
         .await,
         json!({ "rows": 22, "first": "office-in-050" })
     );
+    assert_entity_projection_matches_wide_dom(&harness, "next page").await;
     click(&harness, "[data-entity-page='previous']").await;
 
     click(&harness, "[data-entity-column-chooser]").await;
@@ -801,6 +1618,7 @@ async fn client_snapshot_list_contract_works_end_to_end() {
     )
     .await;
     assert_eq!(hidden_status["statusHeader"], json!(false));
+    assert_entity_projection_matches_wide_dom(&harness, "hidden status column").await;
     assert_eq!(
         hidden_status["stored"],
         Value::Null,
@@ -1146,14 +1964,19 @@ async fn hybrid_filters_localization_defaults_and_focus_recovery_are_framework_o
             const table = document.querySelector('[data-entity-table-grid]');
             const header = Array.from(table.querySelectorAll('thead tr:first-child th'));
             const filters = Array.from(table.querySelectorAll('[data-entity-column-filter-row] th'));
+            const controls = Array.from(table.querySelectorAll('[data-entity-filter-control]'));
             header.forEach((cell, index) => cell.__hybridNode = `header-${index}`);
             return {
                 headerIds: header.map(cell => cell.dataset.entityColumn),
                 filterIds: filters.map(cell => cell.dataset.entityColumn),
-                controls: table.querySelectorAll('[data-entity-column-filter-row] select').length,
-                statusCell: table.querySelector('[data-testid="entity-status-filter"]')?.closest('th')?.dataset.entityColumn,
-                caseCell: table.querySelector('[data-testid="entity-case-filter"]')?.closest('th')?.dataset.entityColumn,
-                detachedStatus: document.querySelectorAll('[data-filter-bar] [data-testid="entity-status-filter"]').length,
+                controls: controls.length,
+                controlIds: controls.map(control => control.id),
+                uniqueControlIds: new Set(controls.map(control => control.id)).size,
+                labelsTargetControls: controls.every(control => control.closest('label')?.htmlFor === control.id),
+                statusCell: table.querySelector('#entity-status-filter')?.closest('th')?.dataset.entityColumn,
+                caseCell: table.querySelector('#entity-case-filter')?.closest('th')?.dataset.entityColumn,
+                clientCell: table.querySelector('#entity-client-filter')?.closest('th')?.dataset.entityColumn,
+                detachedStatus: document.querySelectorAll('[data-filter-bar] #entity-status-filter').length,
                 resets: document.querySelectorAll('[data-filter-reset]').length,
                 saves: document.querySelectorAll('[data-filter-save-default]').length,
                 generation: Number(document.querySelector('[data-entity-focus-region]').dataset.entityColumnGeneration),
@@ -1162,18 +1985,30 @@ async fn hybrid_filters_localization_defaults_and_focus_recovery_are_framework_o
     )
     .await;
     assert_eq!(initial["headerIds"], initial["filterIds"]);
-    assert_eq!(initial["controls"], json!(2));
+    assert_eq!(initial["controls"], json!(3));
+    assert_eq!(initial["uniqueControlIds"], initial["controls"]);
+    assert_eq!(initial["labelsTargetControls"], json!(true));
+    assert_eq!(
+        initial["controlIds"],
+        json!([
+            "entity-client-filter",
+            "entity-status-filter",
+            "entity-case-filter"
+        ])
+    );
+    assert_eq!(initial["clientCell"], json!("client"));
     assert_eq!(initial["statusCell"], json!("status"));
     assert_eq!(initial["caseCell"], json!("case_type"));
     assert_eq!(initial["detachedStatus"], json!(0));
     assert_eq!(initial["resets"], json!(1));
     assert_eq!(initial["saves"], json!(1));
+    assert_entity_projection_matches_wide_dom(&harness, "initial controlled filters").await;
 
     assert_eq!(
         eval_json(
             &harness,
             r#"(() => {
-                const select = document.querySelector('[data-testid="entity-status-filter"]');
+                const select = document.querySelector('#entity-status-filter');
                 const sort = document.querySelector("th[data-entity-column='status']").getAttribute('aria-sort');
                 select.value = 'Urgent';
                 select.dispatchEvent(new Event('change', { bubbles: true }));
@@ -1206,6 +2041,25 @@ async fn hybrid_filters_localization_defaults_and_focus_recovery_are_framework_o
     );
     assert_eq!(filtered["saveDisabled"], json!(false));
     assert_eq!(filtered["resetDisabled"], json!(false));
+    assert_entity_projection_matches_wide_dom(&harness, "local status filter").await;
+
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => {
+                const select = document.querySelector('#entity-status-filter');
+                select.value = 'Rejected';
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+                return {
+                    value: select.value,
+                    rows: document.querySelectorAll('[data-entity-table-grid] tbody tr').length,
+                };
+            })()"#,
+        )
+        .await,
+        json!({ "value": "Urgent", "rows": 24 }),
+        "a rejected controlled proposal must restore the accepted DOM value"
+    );
 
     assert_eq!(
         eval_json(
@@ -1311,6 +2165,35 @@ async fn hybrid_filters_localization_defaults_and_focus_recovery_are_framework_o
     );
 
     click(&harness, "[data-entity-column-chooser]").await;
+    let active_hide = eval_json(
+        &harness,
+        r#"(() => {
+            const item = document.querySelector("[role='menu'] [data-entity-column='status']");
+            const control = item.matches('[role="menuitemcheckbox"]')
+                ? item
+                : item.querySelector('[role="menuitemcheckbox"]');
+            const before = control.getAttribute('aria-checked');
+            control.click();
+            return {
+                disabled: control.getAttribute('aria-disabled'),
+                before,
+                after: control.getAttribute('aria-checked'),
+                statusHeader: !!document.querySelector("thead th[data-entity-column='status']"),
+                activeCopy: item.textContent.replace(/\s+/g, ' ').trim(),
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(active_hide["disabled"], json!("true"));
+    assert_eq!(active_hide["before"], json!("true"));
+    assert_eq!(active_hide["after"], json!("true"));
+    assert_eq!(active_hide["statusHeader"], json!(true));
+    assert!(
+        active_hide["activeCopy"]
+            .as_str()
+            .unwrap()
+            .contains("Filter active")
+    );
     click(
         &harness,
         "[data-entity-column-order='status'][data-entity-column-move='later']",
@@ -1326,7 +2209,7 @@ async fn hybrid_filters_localization_defaults_and_focus_recovery_are_framework_o
             return {
                 headers: headerCells.map(cell => cell.dataset.entityColumn),
                 filters: Array.from(table.querySelectorAll('[data-entity-column-filter-row] th')).map(cell => cell.dataset.entityColumn),
-                statusCell: table.querySelector('[data-testid="entity-status-filter"]')?.closest('th')?.dataset.entityColumn,
+                statusCell: table.querySelector('#entity-status-filter')?.closest('th')?.dataset.entityColumn,
             };
         })()"#,
     )
@@ -1339,6 +2222,7 @@ async fn hybrid_filters_localization_defaults_and_focus_recovery_are_framework_o
             .unwrap()
             .contains(&json!("case_type"))
     );
+    assert_entity_projection_matches_wide_dom(&harness, "reorder and hidden column").await;
 
     let before_locale_preferences =
         oracle(&harness).await["state"]["entity_table.preferences"].clone();
@@ -1352,11 +2236,12 @@ async fn hybrid_filters_localization_defaults_and_focus_recovery_are_framework_o
             return {
                 labels: headers.map(cell => cell.textContent.replace(/\s+/g, ' ').trim()),
                 sameNodes: headers.every(cell => cell.__beforeLocale === cell.dataset.entityColumn),
-                statusLabel: table.querySelector('[data-testid="entity-status-filter"]').getAttribute('aria-label'),
+                statusLabel: table.querySelector('#entity-status-filter').getAttribute('aria-label'),
+                statusOption: table.querySelector('#entity-status-filter option:checked').textContent,
                 reset: document.querySelector('[data-filter-reset]').textContent.trim(),
                 save: document.querySelector('[data-filter-save-default]').textContent.trim(),
                 datasetStatus: document.querySelector('[data-dataset-selector-status]')?.textContent.trim(),
-                statusValue: table.querySelector('[data-testid="entity-status-filter"]').value,
+                statusValue: table.querySelector('#entity-status-filter').value,
                 generation: Number(document.querySelector('[data-entity-focus-region]').dataset.entityColumnGeneration),
             };
         })()"#,
@@ -1370,6 +2255,7 @@ async fn hybrid_filters_localization_defaults_and_focus_recovery_are_framework_o
     );
     assert_eq!(localized["sameNodes"], json!(true));
     assert_eq!(localized["statusLabel"], json!("Estado"));
+    assert_eq!(localized["statusOption"], json!("Urgente"));
     assert_eq!(localized["reset"], json!("Restablecer"));
     assert_eq!(localized["save"], json!("Guardar como predeterminado"));
     assert!(
@@ -1385,27 +2271,150 @@ async fn hybrid_filters_localization_defaults_and_focus_recovery_are_framework_o
         before_locale_preferences,
         "locale-only column replacement reset surviving table preferences"
     );
+    assert_entity_projection_matches_wide_dom(&harness, "localized column replacement").await;
+    let localized_wide_projection =
+        oracle(&harness).await["state"]["entity_table.display_projection"].clone();
 
     harness
         .set_viewport(ViewportSize::new(390, 844))
         .await
         .expect("set localized compact viewport");
     tokio::time::sleep(Duration::from_millis(150)).await;
-    let compact_copy = eval_json(
+    let compact = eval_json(
         &harness,
-        "document.querySelector('[data-entity-table-grid] tbody tr td:first-child').textContent.replace(/\\s+/g, ' ').trim()",
+        r#"(() => ({
+            rowCopy: document.querySelector('[data-entity-table-grid] tbody tr td:first-child').textContent.replace(/\s+/g, ' ').trim(),
+            panel: document.querySelector('[data-entity-responsive-filter-panel]')?.textContent.replace(/\s+/g, ' ').trim(),
+            panelControls: document.querySelectorAll('[data-entity-responsive-filter-panel] [data-entity-filter-control]').length,
+            headerControls: document.querySelectorAll('[data-entity-column-filter-row] [data-entity-filter-control]').length,
+            controlIds: Array.from(document.querySelectorAll('[data-entity-filter-control]')).map(control => control.id),
+            uniqueControlIds: new Set(Array.from(document.querySelectorAll('[data-entity-filter-control]')).map(control => control.id)).size,
+            statusId: document.querySelector('[data-entity-filter-control="status"]')?.id,
+            caseId: document.querySelector('[data-entity-filter-control="case_type"]')?.id,
+            statusValue: document.querySelector('[data-entity-filter-control="status"]')?.value,
+            clearStatus: document.querySelectorAll('[data-entity-clear-filter="status"]').length,
+            caseHidden: !Array.from(document.querySelectorAll('[data-entity-table-grid] tbody tr:first-child td[data-entity-column="case_type"]'))
+                .some(cell => getComputedStyle(cell).display !== 'none'),
+        }))()"#,
     )
     .await;
     assert!(
-        compact_copy.as_str().unwrap().contains("Cliente")
-            && compact_copy.as_str().unwrap().contains("Estado"),
-        "default compact copy retained the old locale: {compact_copy}"
+        compact["rowCopy"].as_str().unwrap().contains("Cliente")
+            && compact["rowCopy"].as_str().unwrap().contains("Estado"),
+        "default compact copy retained the old locale: {compact}"
     );
+    assert!(
+        compact["panel"]
+            .as_str()
+            .unwrap()
+            .contains("Filtros de columnas")
+    );
+    assert!(compact["panel"].as_str().unwrap().contains("Estado"));
+    assert!(compact["panel"].as_str().unwrap().contains("Tipo de caso"));
+    assert_eq!(compact["panelControls"], json!(3));
+    assert_eq!(compact["headerControls"], json!(0));
+    assert_eq!(compact["uniqueControlIds"], compact["panelControls"]);
+    assert_eq!(
+        compact["statusId"],
+        json!("entity-status-filter-responsive")
+    );
+    assert_eq!(compact["caseId"], json!("entity-case-filter-responsive"));
+    assert_eq!(compact["statusValue"], json!("Urgent"));
+    assert_eq!(compact["clearStatus"], json!(1));
+    assert_eq!(compact["caseHidden"], json!(true));
+    assert_eq!(
+        oracle(&harness).await["state"]["entity_table.display_projection"],
+        localized_wide_projection,
+        "compact layout changed the atomic display projection"
+    );
+
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => {
+                const select = document.querySelector('[data-entity-filter-control="case_type"]');
+                select.value = 'Family';
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+                return true;
+            })()"#,
+        )
+        .await,
+        json!(true)
+    );
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(
+        eval_json(
+            &harness,
+            "document.querySelector('[data-entity-filter-control=\"case_type\"]').value",
+        )
+        .await,
+        json!("Family")
+    );
+    harness
+        .page()
+        .find_element("[data-entity-clear-filter='status']")
+        .await
+        .expect("find compact status clear control")
+        .focus()
+        .await
+        .expect("focus compact status clear control");
+    harness
+        .press_key_sequence(&[Key::Enter])
+        .await
+        .expect("clear the controlled status filter with Enter");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => ({
+                value: document.querySelector('[data-entity-filter-control="status"]').value,
+                clearButtons: document.querySelectorAll('[data-entity-clear-filter="status"]').length,
+                caseValue: document.querySelector('[data-entity-filter-control="case_type"]').value,
+                uniqueIds: new Set(Array.from(document.querySelectorAll('[data-entity-filter-control]')).map(control => control.id)).size,
+                controlCount: document.querySelectorAll('[data-entity-filter-control]').length,
+            }))()"#,
+        )
+        .await,
+        json!({ "value": "", "clearButtons": 0, "caseValue": "Family", "uniqueIds": 3, "controlCount": 3 })
+    );
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => {
+                const select = document.querySelector('[data-entity-filter-control="status"]');
+                select.value = 'Urgent';
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+                return true;
+            })()"#,
+        )
+        .await,
+        json!(true)
+    );
+    tokio::time::sleep(Duration::from_millis(100)).await;
     harness
         .set_viewport(ViewportSize::new(1280, 800))
         .await
         .expect("restore wide viewport");
     tokio::time::sleep(Duration::from_millis(150)).await;
+
+    click(&harness, "[data-entity-column-chooser]").await;
+    click(&harness, "[role='menu'] [data-entity-column='case_type']").await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let restored_filter = eval_json(
+        &harness,
+        r#"(() => ({
+            total: document.querySelectorAll('[data-entity-filter-control="case_type"]').length,
+            aligned: document.querySelector('[data-entity-filter-control="case_type"]')?.closest('th')?.dataset.entityColumn,
+            value: document.querySelector('[data-entity-filter-control="case_type"]')?.value,
+            fallbackPanel: document.querySelectorAll('[data-entity-responsive-filter-panel]').length,
+        }))()"#,
+    )
+    .await;
+    assert_eq!(restored_filter["total"], json!(1));
+    assert_eq!(restored_filter["aligned"], json!("case_type"));
+    assert_eq!(restored_filter["value"], json!("Family"));
+    assert_eq!(restored_filter["fallbackPanel"], json!(0));
+    assert_entity_projection_matches_wide_dom(&harness, "restored hidden filtered column").await;
 
     click(&harness, "[data-filter-reset]").await;
     click(&harness, "[data-testid='toggle-client-locale']").await;
@@ -1486,7 +2495,7 @@ async fn hybrid_filters_localization_defaults_and_focus_recovery_are_framework_o
                 const row = button.closest('[data-entity-row-key]');
                 const status = row.querySelector('td:nth-of-type(3)')?.textContent.trim();
                 button.focus();
-                const select = document.querySelector('[data-testid="entity-status-filter"]');
+                const select = document.querySelector('[data-entity-filter-control="status"]');
                 select.value = status === 'Urgent' ? 'Ready' : 'Urgent';
                 select.dispatchEvent(new Event('change', { bubbles: true }));
                 return true;

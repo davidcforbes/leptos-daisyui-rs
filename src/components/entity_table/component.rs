@@ -2,25 +2,31 @@
 
 use super::model::{
     ENTITY_PAGE_SIZE_CHOICES, EntityColumnMove, EntityFocusRecord, EntityFocusTarget,
-    SortedIndexCache, emit_normalized_preference_change, focus_target, move_column, next_sort,
+    SortedIndexCache, emit_normalized_preference_change,
+    entity_table_display_projection_from_indices, focus_target, move_column, next_sort,
     next_sort_additive, normalize_preferences, ordered_columns, page_after_dataset_change,
     page_after_row_delta, reset_columns, reset_sort, set_preferred_width, sorted_indices,
     toggle_hidden_column,
 };
 use super::storage::{load_preferences, save_preferences};
 use super::types::{
-    EntityColumn, EntityColumnFilter, EntityColumnFilters, EntityColumns, EntityCompactRow,
-    EntityRowKey, EntityRowRenderer, EntitySort, EntitySortDirection,
-    EntityTablePreferenceOwnership, EntityTablePreferencePersistence, EntityTablePreferences,
-    EntityTableTexts,
+    EntityCellPresentation, EntityColumn, EntityColumnAlignment, EntityColumnChooserTrigger,
+    EntityColumnFilter, EntityColumnFilterPlacement, EntityColumnFilters, EntityColumns,
+    EntityCompactRow, EntityRowKey, EntityRowRenderer, EntitySort, EntitySortDirection,
+    EntityTableActionColumnPolicy, EntityTableDisplayProjection, EntityTablePreferenceOwnership,
+    EntityTablePreferencePersistence, EntityTablePreferences, EntityTableTexts,
+    EntityTableViewportFit, EntityTextOverflow, entity_alignment_class,
+    entity_compact_alignment_class, entity_header_justify_class, entity_text_overflow_style,
 };
+use crate::components::badge::{Badge, BadgeSize};
 use crate::components::button::Button;
 use crate::components::data_table::{
-    MAX_COLUMN_WIDTH, PageSlot, StableColumnTrack, StableTableColGroup, clamp_page,
-    effective_min_width, keyboard_resized_width, page_bounds, page_count, page_window, row_range,
-    stable_column_width, stable_table_content_style,
+    FALLBACK_HEADER_HEIGHT, FALLBACK_ROW_HEIGHT, MAX_COLUMN_WIDTH, PageSlot, StableColumnTrack,
+    StableTableColGroup, auto_page_size_for_height, clamp_page, effective_min_width,
+    keyboard_resized_width, page_bounds, page_count, page_window, row_range, stable_column_width,
+    stable_table_content_style,
 };
-use crate::components::dropdown::{Dropdown, DropdownPlacement};
+use crate::components::icon::{Icon, IconSize};
 use crate::components::menu::{Menu, MenuCheckItem};
 use crate::components::pagination::Pagination;
 use crate::components::select::Select;
@@ -29,9 +35,28 @@ use leptos::prelude::*;
 use leptos::tachys::reactive_graph::OwnedView;
 use std::collections::BTreeMap;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use web_sys::wasm_bindgen::JsCast;
 
 const MAX_VISIBLE_PAGES: usize = 7;
+static ENTITY_CHOOSER_ID: AtomicU64 = AtomicU64::new(0);
+
+fn next_entity_chooser_id() -> String {
+    format!(
+        "ldui-entity-column-chooser-{}",
+        ENTITY_CHOOSER_ID.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
+pub(super) fn effective_page_size(
+    measured_rows: Option<usize>,
+    configured_page_size: usize,
+) -> usize {
+    match measured_rows {
+        Some(rows) => rows.max(1),
+        None => configured_page_size.max(1),
+    }
+}
 
 /// Marks one stable, repeatable row action for framework-owned focus recovery.
 ///
@@ -73,6 +98,8 @@ struct EntityHeaderDescriptor {
     resizable: bool,
     min_width: Option<u32>,
     initial_width: Option<u32>,
+    alignment: EntityColumnAlignment,
+    tabular_numbers: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -165,6 +192,33 @@ fn column_filter_signal(
         EntityColumnFilters::Static(filters) => RwSignal::new_local(filters).into(),
         EntityColumnFilters::Reactive(filters) => filters,
     }
+}
+
+fn compact_filter_layout_signal() -> RwSignal<bool> {
+    const QUERY: &str = "(max-width: 1023.98px)";
+
+    let media = web_sys::window()
+        .and_then(|window| window.match_media(QUERY).ok())
+        .flatten();
+    let compact = RwSignal::new(media.as_ref().is_some_and(web_sys::MediaQueryList::matches));
+
+    if let Some(media) = media {
+        let observed_media = media.clone();
+        let listener =
+            wasm_bindgen::closure::Closure::wrap(Box::new(move |_event: web_sys::Event| {
+                compact.set(observed_media.matches())
+            }) as Box<dyn FnMut(web_sys::Event)>);
+        let _ = media.add_event_listener_with_callback("change", listener.as_ref().unchecked_ref());
+        let guard = send_wrapper::SendWrapper::new((media, listener));
+        on_cleanup(move || {
+            let (media, listener) = guard.take();
+            let _ = media
+                .remove_event_listener_with_callback("change", listener.as_ref().unchecked_ref());
+            drop(listener);
+        });
+    }
+
+    compact
 }
 
 pub(super) struct PreferenceState<T: 'static> {
@@ -388,6 +442,10 @@ pub fn EntityTable<T>(
     /// Use this for immediate local-filter changes.
     #[prop(optional, into)]
     page_reset_key: Option<Signal<String>>,
+    /// Optional framework-owned viewport-fit paging. The measured capacity is
+    /// presentation state and never changes persisted table preferences.
+    #[prop(optional)]
+    viewport_fit: Option<EntityTableViewportFit>,
     /// Optional renderer for the single-cell compact row layout.
     #[prop(optional, into)]
     compact_row: EntityCompactRow<T>,
@@ -427,6 +485,21 @@ pub fn EntityTable<T>(
     /// Shows separate reset-sort and reset-columns actions.
     #[prop(optional, default = false)]
     show_reset_actions: bool,
+    /// Optional caller-rendered table utilities such as Export or Refresh.
+    /// The table owns placement and wrapping; the caller owns all behavior.
+    #[prop(optional)]
+    toolbar_actions: Option<Children>,
+    /// Emits an atomic read-only projection whenever displayed rows, columns,
+    /// ordering, paging, or canonical text change. Callers own storage, export
+    /// encoding, authorization, and download behavior.
+    #[prop(optional)]
+    on_display_projection: Option<Callback<EntityTableDisplayProjection>>,
+    /// Explicit action-column policy for `on_display_projection` snapshots.
+    #[prop(optional)]
+    projection_action_columns: EntityTableActionColumnPolicy,
+    /// Visible presentation of the framework-owned column-chooser trigger.
+    #[prop(into, default = Signal::stored(EntityColumnChooserTrigger::Text))]
+    column_chooser_trigger: Signal<EntityColumnChooserTrigger>,
     /// Enable alternating body-row striping. The opinionated default is a
     /// clean faint grid without zebra banding.
     #[prop(optional, into)]
@@ -451,8 +524,18 @@ where
     let row_key = StoredValue::new_local(row_key);
     let compact_row = CompactRowStore::new(compact_row);
     let column_filters = column_filter_signal(column_filters);
+    let compact_filter_layout = compact_filter_layout_signal();
     let source_data = source_data.unwrap_or(data);
     let focus_scope = focus_scope.unwrap_or(dataset_identity);
+    let viewport_fit_enabled = viewport_fit.is_some();
+    let viewport_fit_height = viewport_fit
+        .as_ref()
+        .and_then(EntityTableViewportFit::height)
+        .map(str::to_owned);
+    let viewport_fit_min_rows = viewport_fit
+        .as_ref()
+        .map_or(5, EntityTableViewportFit::min_rows);
+    let measured_page_size = RwSignal::new(Option::<usize>::None);
     let sorted_index_cache = StoredValue::new_local(SortedIndexCache::new());
     let semantic_generation = RwSignal::new(0_u64);
     let column_widths = RwSignal::new(initial_widths);
@@ -467,6 +550,20 @@ where
     let table_region = NodeRef::<leptos::html::Div>::new();
     let dataset_transition = DatasetTransitionController::new(current_page, preferences);
     let page_size_select = NodeRef::<leptos::html::Select>::new();
+    let column_chooser_open = RwSignal::new(false);
+    let column_chooser_trigger_ref = NodeRef::<leptos::html::Button>::new();
+    let column_chooser_menu_id = next_entity_chooser_id();
+    let column_chooser_controls_id = column_chooser_menu_id.clone();
+    let configured_page_size =
+        Signal::derive(move || preferences.with(|preferences| preferences.page_size.max(1)));
+    let page_capacity = Signal::derive(move || {
+        effective_page_size(
+            viewport_fit_enabled
+                .then(|| measured_page_size.get())
+                .flatten(),
+            configured_page_size.get(),
+        )
+    });
 
     if let Some(reactive_columns) = reactive_columns {
         let initial_run = StoredValue::new(true);
@@ -502,7 +599,7 @@ where
 
     Effect::new(move |_| {
         let total_rows = data.get().len();
-        let page_size = preferences.with(|preferences| preferences.page_size);
+        let page_size = page_capacity.get();
         let next_page = page_after_row_delta(current_page.get_untracked(), page_size, total_rows);
         if next_page != current_page.get_untracked() {
             current_page.set(next_page);
@@ -562,12 +659,7 @@ where
     });
 
     let total_rows = Signal::derive_local(move || data.get().len());
-    let total_pages = Signal::derive(move || {
-        page_count(
-            total_rows.get(),
-            preferences.with(|preferences| preferences.page_size),
-        )
-    });
+    let total_pages = Signal::derive(move || page_count(total_rows.get(), page_capacity.get()));
     let page_row_keys = Signal::derive_local(move || {
         let rows = data.get();
         let columns = column_store.get_value();
@@ -582,17 +674,41 @@ where
                 )
             })
             .expect("entity-table sort cache is still mounted");
-        let bounds = page_bounds(
-            current_page.get(),
-            preferences_value.page_size,
-            indices.len(),
-        );
+        let bounds = page_bounds(current_page.get(), page_capacity.get(), indices.len());
         let row_key = row_key.get_value();
         indices[bounds]
             .iter()
             .map(|index| row_key(&rows[*index]))
             .collect::<Vec<_>>()
     });
+
+    if let Some(on_display_projection) = on_display_projection {
+        Effect::new(move |_| {
+            let rows = data.get();
+            let columns = column_store.get_value();
+            let preferences_value = preferences.get();
+            let indices = sorted_index_cache
+                .try_update_value(|cache| {
+                    cache.indices(
+                        Rc::clone(&rows),
+                        &columns,
+                        &preferences_value.sort,
+                        semantic_generation.get(),
+                    )
+                })
+                .expect("entity-table sort cache is still mounted");
+            on_display_projection.run(entity_table_display_projection_from_indices(
+                rows.as_slice(),
+                &columns,
+                &preferences_value,
+                indices.as_slice(),
+                current_page.get(),
+                page_capacity.get(),
+                row_key.get_value().as_ref(),
+                projection_action_columns,
+            ));
+        });
+    }
 
     Effect::new(move |_| {
         let Some(record) = focus_record.get() else {
@@ -601,7 +717,8 @@ where
         let current_scope = focus_scope.get();
         let source_rows = source_data.get();
         let rendered_rows = data.get();
-        let preferences_value = preferences.get();
+        let mut preferences_value = preferences.get();
+        preferences_value.page_size = page_capacity.get();
         let columns = column_store.get_value();
         let row_key = row_key.get_value();
         let source_keys = source_rows
@@ -654,17 +771,213 @@ where
         }
     });
 
+    let measure_rows = move || {
+        if !viewport_fit_enabled {
+            return;
+        }
+        let Some(region) = table_region.get_untracked() else {
+            return;
+        };
+        let viewport_height = region.client_height() as f64;
+        let header_height = region
+            .query_selector("thead")
+            .ok()
+            .flatten()
+            .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
+            .map_or(FALLBACK_HEADER_HEIGHT, |element| {
+                element.get_bounding_client_rect().height()
+            });
+        let row_height = region
+            .query_selector("tbody tr")
+            .ok()
+            .flatten()
+            .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
+            .map(|element| element.get_bounding_client_rect().height())
+            .filter(|height| *height > 0.0)
+            .unwrap_or(FALLBACK_ROW_HEIGHT);
+        let Some(configured) = configured_page_size.try_get_untracked() else {
+            return;
+        };
+        let rows = auto_page_size_for_height(
+            viewport_height,
+            header_height,
+            row_height,
+            configured,
+            viewport_fit_min_rows,
+        );
+        if measured_page_size.try_get_untracked() != Some(Some(rows)) {
+            let _ = measured_page_size.try_set(Some(rows));
+        }
+    };
+    let measure_handle: StoredValue<Option<TimeoutHandle>> = StoredValue::new(None);
+    let schedule_measure = move || {
+        if !viewport_fit_enabled {
+            return;
+        }
+        if let Some(handle) = measure_handle.try_get_value().flatten() {
+            handle.clear();
+        }
+        match set_timeout_with_handle(measure_rows, std::time::Duration::ZERO) {
+            Ok(handle) => {
+                measure_handle.try_update_value(|slot| *slot = Some(handle));
+            }
+            Err(_) => measure_rows(),
+        }
+    };
+    on_cleanup(move || {
+        if let Some(handle) = measure_handle.try_get_value().flatten() {
+            handle.clear();
+        }
+    });
+
+    if viewport_fit_enabled {
+        Effect::new(move |_| {
+            let _ = data.get();
+            let _ = column_filters.get();
+            let _ = header_descriptors.get();
+            let _ = texts.get();
+            let _ = preferences.get();
+            let _ = page_capacity.get();
+            schedule_measure();
+        });
+
+        Effect::new(move |_| {
+            let Some(region) = table_region.get() else {
+                return;
+            };
+            schedule_measure();
+            let closure = wasm_bindgen::closure::Closure::wrap(Box::new(
+                move |_entries: js_sys::Array, _observer: web_sys::ResizeObserver| {
+                    schedule_measure();
+                },
+            )
+                as Box<dyn FnMut(js_sys::Array, web_sys::ResizeObserver)>);
+            match web_sys::ResizeObserver::new(closure.as_ref().unchecked_ref()) {
+                Ok(observer) => {
+                    observer.observe(region.unchecked_ref::<web_sys::Element>());
+                    if let Ok(Some(table)) = region.query_selector("table") {
+                        observer.observe(&table);
+                    }
+                    let guard = send_wrapper::SendWrapper::new((closure, observer));
+                    on_cleanup(move || {
+                        let (closure, observer) = guard.take();
+                        observer.disconnect();
+                        drop(closure);
+                    });
+                }
+                Err(_) => drop(closure),
+            }
+        });
+    }
+
+    let root_class = if viewport_fit_enabled {
+        merge_classes!("flex h-full w-full min-h-0 min-w-0 flex-col gap-3", class)
+    } else {
+        merge_classes!("w-full min-w-0 space-y-3", class)
+    };
+    let root_style = viewport_fit_enabled.then(|| match viewport_fit_height.as_deref() {
+        Some(height) => format!("height: {height}; max-height: {height}"),
+        None => "height: 100%".to_owned(),
+    });
+    let region_class = if viewport_fit_enabled {
+        "min-h-0 w-full flex-1 overflow-auto rounded-box border border-table-grid bg-base-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+    } else {
+        "w-full overflow-x-auto rounded-box border border-table-grid bg-base-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+    };
+
     view! {
         <section
-            class=merge_classes!("w-full min-w-0 space-y-3", class)
+            class=root_class
+            style=root_style
             data-entity-table="true"
             data-table-data-mode="client-snapshot"
+            data-entity-viewport-fit=viewport_fit_enabled.then_some("true")
+            data-entity-effective-page-size=move || page_capacity.get().to_string()
+            data-entity-configured-page-size=move || configured_page_size.get().to_string()
         >
-            <div class="flex flex-wrap items-center justify-end gap-2">
-                <label class="flex items-center gap-2 text-sm text-base-content/75">
-                    <span>{move || texts.with(|texts| texts.rows_per_page.clone())}</span>
+            {move || {
+                let filters = column_filters.get();
+                let compact = compact_filter_layout.get();
+                let preferences_value = preferences.get();
+                let fallback_filters = filters
+                    .into_iter()
+                    .filter(|filter| {
+                        compact
+                            || (filter.is_active()
+                                && preferences_value
+                                    .hidden_columns
+                                    .contains(filter.column_id))
+                    })
+                    .collect::<Vec<_>>();
+                if fallback_filters.is_empty() {
+                    return None;
+                }
+
+                Some(view! {
+                    <section
+                        class="shrink-0 rounded-box border border-table-grid bg-table-filter p-3 text-table-filter-content forced-colors:border-[CanvasText] forced-colors:bg-[Canvas] forced-colors:text-[CanvasText]"
+                        data-entity-responsive-filter-panel="true"
+                        aria-label=move || texts.with(|texts| texts.filters.clone())
+                        aria-live="polite"
+                    >
+                        <p class="mb-2 text-sm font-semibold">
+                            {move || texts.with(|texts| texts.filters.clone())}
+                        </p>
+                        <div class="grid min-w-0 gap-3 sm:grid-cols-2">
+                            {fallback_filters
+                                .into_iter()
+                                .map(|filter| {
+                                    let column_label = current_column_header(
+                                        column_store,
+                                        filter.column_id,
+                                    );
+                                    let label = filter.label(&column_label);
+                                    let active = filter.is_active();
+                                    let hidden = preferences_value
+                                        .hidden_columns
+                                        .contains(filter.column_id);
+                                    let on_clear = filter.clear_callback();
+                                    let clear_label = texts.with(|texts| {
+                                        texts.clear_filter.replace("{column}", &label)
+                                    });
+                                    view! {
+                                        <div
+                                            class="min-w-0 rounded-field border border-table-grid/70 bg-base-100 p-2 text-base-content forced-colors:border-[CanvasText] forced-colors:bg-[Canvas] forced-colors:text-[CanvasText]"
+                                            role="group"
+                                            aria-label=label.clone()
+                                            data-entity-responsive-filter=filter.column_id
+                                            data-entity-active-hidden-filter=(active && hidden).then_some("true")
+                                        >
+                                            <div class="mb-1 flex min-w-0 items-center justify-between gap-2">
+                                                <span class="min-w-0 text-xs font-semibold">{label.clone()}</span>
+                                                {active.then(|| {
+                                                    let on_clear = on_clear
+                                                        .expect("active responsive filters carry clear intent");
+                                                    view! {
+                                                    <Button
+                                                        class="btn-ghost btn-xs shrink-0"
+                                                        attr:data-entity-clear-filter=filter.column_id
+                                                        attr:aria-label=clear_label
+                                                        on_click=Callback::new(move |_| on_clear.run(()))
+                                                    >
+                                                        {move || texts.with(|texts| texts.filter_active.clone())}
+                                                    </Button>
+                                                }})}
+                                            </div>
+                                            {filter.render(EntityColumnFilterPlacement::Responsive)}
+                                        </div>
+                                    }
+                                })
+                                .collect_view()}
+                        </div>
+                    </section>
+                })
+            }}
+            <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                <label class="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2 text-sm text-base-content/75">
+                    <span class="min-w-0 break-words">{move || texts.with(|texts| texts.rows_per_page.clone())}</span>
                     <Select
-                        class="select-sm w-20"
+                        class="select-sm w-20 shrink-0"
                         id=page_size_control_id
                         label=Signal::derive(move || {
                             Some(texts.with(|texts| texts.rows_per_page.clone()))
@@ -692,18 +1005,70 @@ where
                     </Select>
                 </label>
 
-                <Dropdown class="dropdown-end" placement=DropdownPlacement::Bottom>
-                    <div
-                        tabindex="0"
-                        role="button"
-                        data-entity-column-chooser="true"
-                        aria-label=move || texts.with(|texts| texts.choose_columns.clone())
-                        class="btn btn-ghost btn-sm"
-                    >
-                        {move || texts.with(|texts| texts.choose_columns.clone())}
+                {toolbar_actions.map(|render_actions| view! {
+                    <div class="contents" data-entity-toolbar-actions="true">
+                        {render_actions()}
                     </div>
+                })}
+
+                <div
+                    class="dropdown dropdown-end dropdown-bottom"
+                    class:dropdown-open=move || column_chooser_open.get()
+                    data-entity-column-chooser-open=move || column_chooser_open.get().then_some("true")
+                    on:focusout=move |event: web_sys::FocusEvent| {
+                        let remains_inside = event
+                            .current_target()
+                            .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
+                            .zip(
+                                event
+                                    .related_target()
+                                    .and_then(|target| target.dyn_into::<web_sys::Node>().ok()),
+                            )
+                            .is_some_and(|(root, next)| root.contains(Some(&next)));
+                        if !remains_inside {
+                            column_chooser_open.set(false);
+                        }
+                    }
+                    on:keydown=move |event: web_sys::KeyboardEvent| {
+                        if event.key() == "Escape" && column_chooser_open.get_untracked() {
+                            event.prevent_default();
+                            event.stop_propagation();
+                            column_chooser_open.set(false);
+                            if let Some(trigger) = column_chooser_trigger_ref.get() {
+                                let _ = trigger.focus();
+                            }
+                        }
+                    }
+                >
+                    <button
+                        node_ref=column_chooser_trigger_ref
+                        type="button"
+                        data-entity-column-chooser="true"
+                        data-entity-column-chooser-presentation=move || match column_chooser_trigger.get() {
+                            EntityColumnChooserTrigger::Text => "text",
+                            EntityColumnChooserTrigger::Icon => "icon",
+                        }
+                        aria-label=move || texts.with(|texts| texts.choose_columns.clone())
+                        aria-haspopup="menu"
+                        aria-expanded=move || column_chooser_open.get().to_string()
+                        aria-controls=column_chooser_controls_id
+                        class=move || match column_chooser_trigger.get() {
+                            EntityColumnChooserTrigger::Text => "btn btn-ghost btn-sm",
+                            EntityColumnChooserTrigger::Icon => "btn btn-ghost btn-sm btn-square forced-colors:border forced-colors:border-[ButtonText] forced-colors:text-[ButtonText]",
+                        }
+                        on:click=move |_| column_chooser_open.update(|open| *open = !*open)
+                    >
+                        {move || match column_chooser_trigger.get() {
+                            EntityColumnChooserTrigger::Text => view! {
+                                <span>{texts.with(|texts| texts.choose_columns.clone())}</span>
+                            }.into_any(),
+                            EntityColumnChooserTrigger::Icon => view! {
+                                <span aria-hidden="true" class="text-lg leading-none">"⚙"</span>
+                            }.into_any(),
+                        }}
+                    </button>
                     <div class="dropdown-content bg-base-100 rounded-box z-[2] w-72 p-0 shadow-lg border border-base-300">
-                        <Menu class="w-full">
+                        <Menu class="w-full" attr:id=column_chooser_menu_id>
                             {move || column_store.with_value(|columns| {
                                 columns
                                     .iter()
@@ -714,6 +1079,14 @@ where
                                         let checked = Signal::derive(move || {
                                             !preferences.with(|preferences| {
                                                 preferences.hidden_columns.contains(column_id)
+                                            })
+                                        });
+                                        let active_filter = Signal::derive(move || {
+                                            column_filters.with(|filters| {
+                                                filters
+                                                    .iter()
+                                                    .find(|filter| filter.column_id == column_id)
+                                                    .is_some_and(EntityColumnFilter::is_active)
                                             })
                                         });
                                         let on_toggle = Callback::new(move |_| {
@@ -730,10 +1103,19 @@ where
                                         view! {
                                             <MenuCheckItem
                                                 checked=checked
+                                                disabled=active_filter
                                                 on_toggle=on_toggle
                                                 attr:data-entity-column=column_id
+                                                attr:data-entity-active-filter=move || active_filter.get().then_some("true")
                                             >
-                                                {column.header}
+                                                <span class="flex min-w-0 items-center justify-between gap-2">
+                                                    <span class="min-w-0 truncate">{column.header}</span>
+                                                    <Show when=move || active_filter.get()>
+                                                        <span class="badge badge-sm shrink-0">
+                                                            {move || texts.with(|texts| texts.filter_active.clone())}
+                                                        </span>
+                                                    </Show>
+                                                </span>
                                             </MenuCheckItem>
                                         }
                                     })
@@ -872,7 +1254,7 @@ where
                             </ol>
                         </div>
                     </div>
-                </Dropdown>
+                </div>
 
                 {show_reset_actions.then(|| view! {
                     <Button
@@ -927,7 +1309,7 @@ where
 
             <div
                 node_ref=table_region
-                class="w-full overflow-x-auto rounded-box border border-table-grid bg-base-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+                class=region_class
                 role="region"
                 tabindex="-1"
                 aria-label=move || texts.with(|texts| texts.region_label.clone())
@@ -958,12 +1340,16 @@ where
                                     column.resizable,
                                     column.min_width,
                                     column.initial_width,
+                                    column.alignment,
+                                    column.tabular_numbers,
                                 )
                                 children=move |column| {
                                 let column_id = column.id;
                                 let sortable = column.sortable;
                                 let resizable = column.resizable;
                                 let minimum_width = column.min_width;
+                                let alignment = column.alignment;
+                                let tabular_numbers = column.tabular_numbers;
                                 let minimum_value = effective_min_width(minimum_width);
                                 let width_style = move || {
                                     if flexible_column_id.get() == Some(column_id) {
@@ -992,9 +1378,15 @@ where
                                 });
                                 view! {
                                     <th
-                                        class="relative border border-table-grid bg-table-header text-table-header-content forced-colors:border-[CanvasText] forced-colors:bg-[Canvas] forced-colors:text-[CanvasText]"
+                                        class=move || merge_classes!(
+                                            "relative border border-table-grid bg-table-header text-table-header-content forced-colors:border-[CanvasText] forced-colors:bg-[Canvas] forced-colors:text-[CanvasText]",
+                                            entity_alignment_class(alignment),
+                                            tabular_numbers.then_some("tabular-nums").unwrap_or("")
+                                        )
                                         scope="col"
                                         data-entity-column=column_id
+                                        data-entity-alignment=alignment.as_str()
+                                        data-entity-tabular-numbers=tabular_numbers.then_some("true")
                                         aria-sort=move || preferences.with(|preferences| {
                                             preferences.sort.aria_value_for(column_id)
                                         })
@@ -1050,25 +1442,33 @@ where
                                                         current_page.set(0);
                                                     })
                                                 >
-                                                    <span>{move || current_header(&header_descriptors, column_id)}</span>
                                                     <span
-                                                        aria-hidden="true"
-                                                        data-entity-sort-indicator="true"
-                                                        class="inline-flex w-6 shrink-0 justify-center text-xs"
+                                                        class=move || merge_classes!(
+                                                            "flex w-full items-center gap-1",
+                                                            entity_header_justify_class(alignment),
+                                                            entity_alignment_class(alignment)
+                                                        )
                                                     >
-                                                        {move || preferences.with(|preferences| {
-                                                            let Some(direction) = preferences.sort.direction_for(column_id) else {
-                                                                return "↕".to_owned();
-                                                            };
-                                                            let marker = match direction {
-                                                                EntitySortDirection::Ascending => "▲",
-                                                                EntitySortDirection::Descending => "▼",
-                                                            };
-                                                            format!(
-                                                                "{marker}{}",
-                                                                preferences.sort.priority_for(column_id).unwrap_or(1)
-                                                            )
-                                                        })}
+                                                        <span>{move || current_header(&header_descriptors, column_id)}</span>
+                                                        <span
+                                                            aria-hidden="true"
+                                                            data-entity-sort-indicator="true"
+                                                            class="inline-flex w-6 shrink-0 justify-center text-xs"
+                                                        >
+                                                            {move || preferences.with(|preferences| {
+                                                                let Some(direction) = preferences.sort.direction_for(column_id) else {
+                                                                    return "↕".to_owned();
+                                                                };
+                                                                let marker = match direction {
+                                                                    EntitySortDirection::Ascending => "▲",
+                                                                    EntitySortDirection::Descending => "▼",
+                                                                };
+                                                                format!(
+                                                                    "{marker}{}",
+                                                                    preferences.sort.priority_for(column_id).unwrap_or(1)
+                                                                )
+                                                            })}
+                                                        </span>
                                                     </span>
                                                 </Button>
                                             })
@@ -1076,7 +1476,9 @@ where
                                             None
                                         }}
                                         {(!sortable).then(|| view! {
-                                            <span>{move || current_header(&header_descriptors, column_id)}</span>
+                                            <span class=entity_alignment_class(alignment)>
+                                                {move || current_header(&header_descriptors, column_id)}
+                                            </span>
                                         })}
                                         {resizable.then(|| view! {
                                             <span
@@ -1223,7 +1625,7 @@ where
                         </tr>
                         {move || {
                             let filters = column_filters.get();
-                            if filters.is_empty() {
+                            if filters.is_empty() || compact_filter_layout.get() {
                                 return None;
                             }
                             Some(view! {
@@ -1248,7 +1650,9 @@ where
                                                     on:keydown=move |event| event.stop_propagation()
                                                     on:pointerdown=move |event| event.stop_propagation()
                                                 >
-                                                    {filter.map(|filter| filter.render())}
+                                                    {filter.map(|filter| {
+                                                        filter.render(EntityColumnFilterPlacement::Header)
+                                                    })}
                                                 </th>
                                             }
                                         })
@@ -1301,14 +1705,14 @@ where
                 </div>
             </div>
 
-            <div class="flex flex-wrap items-center justify-between gap-3">
+            <div class="flex shrink-0 flex-wrap items-center justify-between gap-3">
                 <span class="text-sm text-base-content/75">
                     {move || {
                         let total = total_rows.get();
                         if total == 0 {
                             return String::new();
                         }
-                        let page_size = preferences.with(|preferences| preferences.page_size);
+                        let page_size = page_capacity.get();
                         let (start, end) = row_range(current_page.get(), page_size, total);
                         texts
                             .with(|texts| texts.row_range.clone())
@@ -1317,7 +1721,7 @@ where
                             .replace("{total}", &total.to_string())
                     }}
                 </span>
-                <Pagination class="flex items-center gap-1">
+                <Pagination class="max-w-full flex flex-wrap items-center justify-end gap-1">
                     <Button
                         class="join-item btn-sm"
                         attr:data-entity-page="previous"
@@ -1357,7 +1761,7 @@ where
                             current_page.update(|page| {
                                 *page = clamp_page(
                                     page.saturating_add(1),
-                                    preferences.with(|preferences| preferences.page_size),
+                                    page_capacity.get_untracked(),
                                     total_rows.get_untracked(),
                                 );
                             });
@@ -1494,10 +1898,19 @@ fn render_row_cells<T: Clone + 'static>(
         .cloned()
         .map(|column| {
             let cell = render_cell(&row, &column);
+            let alignment = column.alignment;
+            let tabular_numbers = column.tabular_numbers;
             view! {
                 <td
-                    class="hidden border border-table-grid forced-colors:border-[CanvasText] lg:table-cell"
+                    class=move || merge_classes!(
+                        "hidden border border-table-grid forced-colors:border-[CanvasText] lg:table-cell",
+                        entity_alignment_class(alignment),
+                        tabular_numbers.then_some("tabular-nums").unwrap_or("")
+                    )
+                    data-entity-column=column.id
                     data-entity-action=column.is_action.then_some("true")
+                    data-entity-alignment=alignment.as_str()
+                    data-entity-tabular-numbers=tabular_numbers.then_some("true")
                     on:click=move |event| {
                         if column.is_action {
                             event.stop_propagation();
@@ -1747,6 +2160,8 @@ fn entity_header_descriptors<T>(
             resizable: column.resizable,
             min_width: column.min_width,
             initial_width: column.initial_width,
+            alignment: column.alignment,
+            tabular_numbers: column.tabular_numbers,
         })
         .collect()
 }
@@ -1778,15 +2193,24 @@ fn render_default_compact_row<T: 'static>(row: &T, columns: &[EntityColumn<T>]) 
         .cloned()
         .map(|column| {
             let cell = render_cell(row, &column);
+            let alignment = column.alignment;
+            let tabular_numbers = column.tabular_numbers;
             view! {
                 <div
                     class="flex items-start justify-between gap-3 py-1"
+                    data-entity-column=column.id
                     data-entity-action=column.is_action.then_some("true")
+                    data-entity-alignment=alignment.as_str()
+                    data-entity-tabular-numbers=tabular_numbers.then_some("true")
                 >
                     <span class="text-xs font-medium uppercase tracking-wide text-base-content/60">
                         {column.header}
                     </span>
-                    <span class="min-w-0 text-right">{cell}</span>
+                    <span class=move || merge_classes!(
+                        "min-w-0",
+                        entity_compact_alignment_class(alignment),
+                        tabular_numbers.then_some("tabular-nums").unwrap_or("")
+                    )>{cell}</span>
                 </div>
             }
         })
@@ -1795,11 +2219,95 @@ fn render_default_compact_row<T: 'static>(row: &T, columns: &[EntityColumn<T>]) 
 }
 
 fn render_cell<T: 'static>(row: &T, column: &EntityColumn<T>) -> AnyView {
-    column
-        .renderer
-        .as_ref()
-        .map(|renderer| renderer(row))
-        .unwrap_or_else(|| (column.text)(row).into_any())
+    if let Some(renderer) = column.renderer.as_ref() {
+        return renderer(row);
+    }
+
+    let text = (column.text)(row);
+    let Some(presentation) = column.presentation.as_ref() else {
+        return render_plain_cell(text, column.text_overflow, None);
+    };
+    let presentation_kind = match presentation {
+        EntityCellPresentation::Badge(_) => "badge",
+        EntityCellPresentation::Icon(_) => "icon",
+    };
+    if text.is_empty() {
+        return view! {
+            <span
+                data-entity-semantic-cell=presentation_kind
+                data-entity-semantic-fallback="empty"
+            ></span>
+        }
+        .into_any();
+    }
+
+    match presentation {
+        EntityCellPresentation::Badge(mapper) => {
+            let Some(badge) = mapper(row) else {
+                return render_plain_cell(text, column.text_overflow, Some("plain"));
+            };
+            view! {
+                <span
+                    class="inline-flex min-w-0 max-w-full items-center forced-colors:text-[CanvasText]"
+                    data-entity-semantic-cell="badge"
+                >
+                    <Badge
+                        color=badge.color
+                        style=badge.style
+                        size=BadgeSize::Sm
+                        class="max-w-full forced-colors:border-[CanvasText] forced-colors:text-[CanvasText]"
+                    >
+                        {text}
+                    </Badge>
+                </span>
+            }
+            .into_any()
+        }
+        EntityCellPresentation::Icon(mapper) => {
+            let Some(icon) = mapper(row) else {
+                return render_plain_cell(text, column.text_overflow, Some("plain"));
+            };
+            let icon_name = icon.name;
+            let icon_name_marker = icon_name.clone();
+            view! {
+                <span
+                    class="inline-flex min-w-0 max-w-full items-center justify-center forced-colors:text-[CanvasText]"
+                    data-entity-semantic-cell="icon"
+                    data-entity-icon-name=icon_name_marker
+                >
+                    <Icon
+                        name=icon_name
+                        color=icon.color.as_class().to_owned()
+                        size=IconSize::Small
+                        class="shrink-0 forced-colors:text-[CanvasText]"
+                    />
+                    <span class="sr-only">{text}</span>
+                </span>
+            }
+            .into_any()
+        }
+    }
+}
+
+fn render_plain_cell(
+    text: String,
+    overflow: EntityTextOverflow,
+    semantic_fallback: Option<&'static str>,
+) -> AnyView {
+    let title = (!matches!(overflow, EntityTextOverflow::Wrap)).then(|| text.clone());
+    view! {
+        <span
+            class="block min-w-0 max-w-full"
+            style=entity_text_overflow_style(overflow)
+            title=title
+            data-entity-text-overflow=overflow.as_str()
+            data-entity-line-clamp=overflow.lines().map(|lines| lines.get())
+            data-entity-semantic-fallback=semantic_fallback
+        >
+            {text}
+        </span>
+    }
+    .into_any()
 }
 
 fn event_origin_is_action(target: Option<web_sys::EventTarget>) -> bool {

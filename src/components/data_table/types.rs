@@ -66,6 +66,21 @@ impl TypedCell {
 /// `Column::with_typed_cell(i)`).
 pub type TypedCellFn = Callback<(usize, TableRow), TypedCell>;
 
+/// Matching behavior for one enabled column filter.
+///
+/// Filter values continue to travel in the source-compatible
+/// [`ColumnFilters`](super::ColumnFilters) map. Consumers of
+/// [`TableQuery`](super::TableQuery) use the matching [`Column`] definition to
+/// distinguish exact dropdown values from substring text values.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ColumnFilterKind {
+    /// Case-sensitive equality, rendered as a finite option dropdown.
+    #[default]
+    Exact,
+    /// Case-insensitive substring matching, rendered as a debounced text box.
+    Contains,
+}
+
 /// Column definition for DataTable
 #[derive(Clone, Debug, PartialEq)]
 pub struct Column {
@@ -104,6 +119,10 @@ pub struct Column {
     /// `false`). Opt in with [`Column::filterable`]. When no column opts in,
     /// no filter row is rendered at all.
     pub filterable: bool,
+    /// Matching and control kind used when [`Column::filterable`] is `true`.
+    /// Existing exact dropdown columns retain [`ColumnFilterKind::Exact`];
+    /// [`Column::filterable_text`] selects [`ColumnFilterKind::Contains`].
+    pub filter_kind: ColumnFilterKind,
     /// Whether this column holds row actions (buttons/links rendered via a
     /// cell renderer). Opt in with [`Column::action`]. Events inside an
     /// action cell stay in the cell: a click or Enter/Space there never
@@ -138,6 +157,7 @@ impl Column {
             typed_cell_index: None,
             sort_as: SortAs::Text,
             filterable: false,
+            filter_kind: ColumnFilterKind::Exact,
             is_action: false,
             searched: true,
         }
@@ -158,6 +178,7 @@ impl Column {
             typed_cell_index: None,
             sort_as: SortAs::Text,
             filterable: false,
+            filter_kind: ColumnFilterKind::Exact,
             is_action: false,
             searched: true,
         }
@@ -239,7 +260,29 @@ impl Column {
     /// ```
     pub fn filterable(mut self) -> Self {
         self.filterable = true;
+        self.filter_kind = ColumnFilterKind::Exact;
         self
+    }
+
+    /// Give this high-cardinality column a debounced text box in the aligned
+    /// filter row. The active value matches a case-insensitive substring of
+    /// the cell, so `mat` matches both `zoho-matters` and
+    /// `Matter_Timeline`.
+    ///
+    /// The same string map is used by local and server tables. A server
+    /// consumer reads [`Column::filter_kind`] from the columns it supplied to
+    /// interpret this entry as `Contains`; no finite option vocabulary is
+    /// required for text-filter columns.
+    pub fn filterable_text(mut self) -> Self {
+        self.filterable = true;
+        self.filter_kind = ColumnFilterKind::Contains;
+        self
+    }
+
+    /// Returns the enabled filter kind, or `None` when this column has no
+    /// filter-row control.
+    pub fn filter_kind(&self) -> Option<ColumnFilterKind> {
+        self.filterable.then_some(self.filter_kind)
     }
 
     /// Declare whether the free-text search box matches this column
@@ -394,6 +437,8 @@ pub struct DataTableTexts {
     pub search_placeholder: String,
     /// Accessible and associated label for the search input.
     pub search_label: String,
+    /// Accessible and visible label for the server-query page-size selector.
+    pub page_size_label: String,
     /// Row-range caption format (use {start}, {end}, and {total} placeholders)
     pub row_range: String,
     /// Label for the "no filter" option in every filter-row dropdown
@@ -412,6 +457,7 @@ impl Default for DataTableTexts {
             page_indicator: "Page {current} of {total}".to_string(),
             search_placeholder: "Search...".to_string(),
             search_label: "Search table".to_string(),
+            page_size_label: "Rows per page".to_string(),
             row_range: "Showing {start}\u{2013}{end} of {total}".to_string(),
             filter_all: "All".to_string(),
             filter_label: "Filter by {column}".to_string(),

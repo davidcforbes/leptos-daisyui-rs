@@ -12,6 +12,22 @@ pub fn app_shell_root_class(has_status_bar: bool) -> &'static str {
     }
 }
 
+/// Root classes when `AppShell` owns optional pinned top and status regions.
+/// The no-region branch deliberately delegates to the historical helper so
+/// existing callers retain both their classes and their unwrapped child DOM.
+pub fn app_shell_root_class_with_regions(has_top_bar: bool, has_status_bar: bool) -> &'static str {
+    if has_top_bar || has_status_bar {
+        "flex flex-col h-full w-full min-w-0 overflow-hidden"
+    } else {
+        app_shell_root_class(false)
+    }
+}
+
+/// Responsive, pinned container classes for [`AppShellTopBar`](super::AppShellTopBar).
+pub const fn app_shell_top_bar_class() -> &'static str {
+    "flex shrink-0 min-w-0 max-w-full flex-wrap items-center gap-x-4 gap-y-2 border-b border-base-300 bg-base-100 px-4 py-2 text-base-content"
+}
+
 /// Inline `style` for `AppShellIconNav`'s branded background: a base colour, an
 /// optional gradient over it, and an optional texture image on top.
 ///

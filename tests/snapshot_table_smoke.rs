@@ -5,6 +5,7 @@ mod common;
 use common::{
     assert_no_browser_errors, begin_browser_error_capture, click, harness_at, wait_for_selector,
 };
+use pixelproof_web::ViewportSize;
 use serde_json::{Value, json};
 
 async fn eval_json(harness: &pixelproof_web::Harness, expression: &str) -> Value {
@@ -29,6 +30,9 @@ async fn contract_snapshot(harness: &pixelproof_web::Harness) -> Value {
             const entity = table?.querySelector('[data-entity-table]');
             const datasetSelect = dataset?.querySelector('select');
             const pageSizeSelect = entity?.querySelector('select');
+            const header = root?.querySelector('[data-page-header]');
+            const navigation = header?.querySelector('[data-page-navigation-row]');
+            const heading = header?.querySelector('h1');
             const slots = Array.from(root?.children || [])
                 .map(child => child.dataset.snapshotPageSlot)
                 .filter(Boolean);
@@ -55,6 +59,13 @@ async fn contract_snapshot(harness: &pixelproof_web::Harness) -> Value {
                 firstClient: table?.querySelector(
                     '[data-entity-table-grid] tbody tr td:nth-of-type(2)'
                 )?.textContent?.trim() ?? null,
+                headerLayout: header?.dataset.pageHeaderNavigationLayout ?? null,
+                headingCount: header?.querySelectorAll('h1').length ?? 0,
+                navigationRows: header?.querySelectorAll('[data-page-navigation-row]').length ?? 0,
+                navigationLabel: navigation?.getAttribute('aria-label') ?? null,
+                navigationBeforeHeading: navigation && heading
+                    ? navigation.getBoundingClientRect().bottom <= heading.getBoundingClientRect().top + 1
+                    : false,
             };
         })()"#,
     )
@@ -105,6 +116,11 @@ async fn typed_snapshot_page_preserves_order_identity_and_retained_table_node() 
     assert_eq!(initial["phase"], json!("Displaying"));
     assert_eq!(initial["rows"], json!(3));
     assert_eq!(initial["sameTableNode"], json!(true));
+    assert_eq!(initial["headerLayout"], json!("dedicated-row"));
+    assert_eq!(initial["headingCount"], json!(1));
+    assert_eq!(initial["navigationRows"], json!(1));
+    assert_eq!(initial["navigationLabel"], json!("Snapshot navigation"));
+    assert_eq!(initial["navigationBeforeHeading"], json!(true));
     assert_eq!(
         initial["datasetSelectId"],
         json!("snapshot-page-dataset-select")
@@ -249,6 +265,84 @@ async fn typed_snapshot_page_preserves_order_identity_and_retained_table_node() 
             .is_some_and(|values| values.windows(2).all(|pair| pair[0] == pair[1])),
         "generation markers diverged after atomic replacement: {replaced}"
     );
+
+    harness
+        .set_viewport(ViewportSize::new(390, 844))
+        .await
+        .expect("set compact page-header viewport");
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    let dedicated_compact = contract_snapshot(&harness).await;
+    assert_eq!(dedicated_compact["headerLayout"], json!("dedicated-row"));
+    assert_eq!(dedicated_compact["headingCount"], json!(1));
+    assert_eq!(dedicated_compact["navigationBeforeHeading"], json!(true));
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"document.documentElement.scrollWidth <= document.documentElement.clientWidth"#,
+        )
+        .await,
+        json!(true),
+        "dedicated compact PageHeader caused horizontal page overflow"
+    );
+
+    harness
+        .navigate("/components/client-snapshot-list?pp-freeze=1")
+        .await
+        .expect("navigate to inline PageHeader fixture");
+    wait_for_selector(&harness, "[data-page-header] h1").await;
+    let inline_compact = eval_json(
+        &harness,
+        r#"(() => {
+            const header = document.querySelector('[data-page-header]');
+            const back = header.querySelector('[data-testid="client-snapshot-back"]');
+            const heading = header.querySelector('h1');
+            return {
+                layout: header.dataset.pageHeaderNavigationLayout,
+                headingCount: header.querySelectorAll('h1').length,
+                navigationRows: header.querySelectorAll('[data-page-navigation-row]').length,
+                backBeforeHeading: back.getBoundingClientRect().bottom <= heading.getBoundingClientRect().top + 1,
+                pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(
+        inline_compact,
+        json!({
+            "layout": "inline-responsive",
+            "headingCount": 1,
+            "navigationRows": 0,
+            "backBeforeHeading": true,
+            "pageOverflow": false,
+        })
+    );
+
+    harness
+        .set_viewport(ViewportSize::new(1280, 800))
+        .await
+        .expect("restore wide page-header viewport");
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    let inline_wide = eval_json(
+        &harness,
+        r#"(() => {
+            const header = document.querySelector('[data-page-header]');
+            const back = header.querySelector('[data-testid="client-snapshot-back"]');
+            const heading = header.querySelector('h1');
+            const backRect = back.getBoundingClientRect();
+            const headingRect = heading.getBoundingClientRect();
+            return {
+                layout: header.dataset.pageHeaderNavigationLayout,
+                sameRow: Math.abs(backRect.top - headingRect.top) < Math.max(backRect.height, headingRect.height),
+                backBeforeHeading: backRect.right <= headingRect.left + 1,
+                headingCount: header.querySelectorAll('h1').length,
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(inline_wide["layout"], json!("inline-responsive"));
+    assert_eq!(inline_wide["sameRow"], json!(true));
+    assert_eq!(inline_wide["backBeforeHeading"], json!(true));
+    assert_eq!(inline_wide["headingCount"], json!(1));
 
     assert_no_browser_errors(&harness, "typed snapshot-table retained transitions").await;
 }
