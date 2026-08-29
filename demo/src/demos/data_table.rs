@@ -136,18 +136,29 @@ pub fn DataTableDemo() -> impl IntoView {
     let localized_columns = Signal::derive(move || {
         if locale_es.get() {
             vec![
-                Column::new("name", "Nombre"),
+                Column::new("name", "Nombre").filterable(),
                 Column::new("email", "Correo"),
             ]
         } else {
-            vec![Column::new("name", "Name"), Column::new("email", "Email")]
+            vec![
+                Column::new("name", "Name").filterable(),
+                Column::new("email", "Email"),
+            ]
         }
     });
     let localized_texts = Signal::derive(move || {
         if locale_es.get() {
             DataTableTexts {
+                loading: "Cargando datos...".to_string(),
                 empty: "No hay datos disponibles".to_string(),
-                ..Default::default()
+                page_indicator: "Página {current} de {total}".to_string(),
+                previous: "Anterior".to_string(),
+                next: "Siguiente".to_string(),
+                search_placeholder: "Buscar...".to_string(),
+                search_label: "Buscar en la tabla".to_string(),
+                row_range: "Mostrando {start}\u{2013}{end} de {total}".to_string(),
+                filter_all: "Todos".to_string(),
+                filter_label: "Filtrar por {column}".to_string(),
             }
         } else {
             DataTableTexts::default()
@@ -915,10 +926,11 @@ pub fn DataTableDemo() -> impl IntoView {
                     {move || if locale_es.get() { "Switch to English" } else { "Cambiar a español" }}
                 </Button>
                 <DataTable
-                    data=Signal::derive(Vec::<HashMap<&'static str, String>>::new)
+                    data=small_data
                     columns=localized_columns
                     texts=localized_texts
                     sort_texts=localized_sort_texts
+                    searchable=true
                     paginate=false
                     attr:id="localized-table"
                 />

@@ -213,11 +213,12 @@ different theme values.
 
 ### `cargo xtask verify-full` — with the browser suites and the real wasm build
 
-`verify-full` runs `verify`, then the client-snapshot page-scoped browser lane,
-then builds the full catalog once in release mode and reuses that same verified
-server for the reactivity/DOM-oracle suite (`test-reactivity`), layout audit
-(`test-layout`, below), and style audit (`test-style`, below). That catalog
-server is the real `wasm32-unknown-unknown` release build, so a second standalone
+`verify-full` runs `verify`, then the client-snapshot and SnapshotTable
+page-scoped browser lanes, then builds the full catalog once in release mode and
+reuses that same verified server for the 32-check reactivity/DOM-oracle suite
+(`test-reactivity`), layout audit (`test-layout`, below), and style audit
+(`test-style`, below). That catalog server is the real
+`wasm32-unknown-unknown` release build, so a second standalone
 `trunk build --release` would only repeat the same pipeline and is intentionally
 absent. It is a **separate task**, not part of the default gate, because it needs
 `npm` + `trunk` + `tailwindcss` + Chrome installed and takes minutes — keeping
@@ -233,7 +234,7 @@ catalog server removes two redundant optimization passes from `verify-full`.
 ### Gate cadence during a live Beads drain
 
 `cargo xtask verify` is the 14-step native gate listed in the table above.
-`cargo xtask verify-full` adds four browser/Wasm checks and reports 18 steps.
+`cargo xtask verify-full` adds five browser/Wasm checks and reports 19 steps.
 Say which command is running before starting it; "the verification gate" is
 ambiguous because the two commands have materially different cost and coverage.
 
@@ -254,18 +255,21 @@ Use this cadence when working through an issue queue:
 
 ## Testing policy — screenshot vs. no-screenshot
 
-The dividing line for what a gate runs automatically is **screenshot vs. no
-screenshot**, not headed-vs-headless (the same rule Rust-DeskApp uses):
+The dividing line for what may run in an automated gate is **screenshot vs. no
+screenshot**, not headed-vs-headless (the same rule Rust-DeskApp uses). Which
+non-screenshot lane runs by default is a separate tooling-cost decision:
 
-- **No screenshot → auto-gated.** Two suites qualify:
+- **No screenshot → eligible for an automated gate.** Two suites qualify:
   - The library's `cargo test --lib` suite is pure logic (enum/`as_str`
     mappings, layout/date math, pagination windowing, class building, queue
     behavior) and runs headlessly in `verify`.
-  - The **reactivity/DOM-oracle** suite (`tests/reactivity_smoke.rs`) drives real
+  - The **32-check reactivity/DOM-oracle** suite
+    (`tests/reactivity_smoke.rs`) drives real
     CDP input at the demo app and asserts internal Leptos state through the
     `window.__APP_DEBUG__` oracle — no pixels, so it is deterministic across
-    machines. It is gated by `cargo xtask test-reactivity`, and runs as a step of
-    `verify-full`. It lands in `verify-full` rather than `verify` because it
+    machines. It runs only when explicitly requested through
+    `cargo xtask test-reactivity` or `verify-full`; it is not part of ordinary
+    `verify` rebuilds. It lands in `verify-full` rather than `verify` because it
     needs npm/trunk/Chrome and a wasm build; `verify` stays zero-tooling.
 - **Screenshot / live-browser → manual.** The screenshot suite
   (`tests/visual_smoke.rs`, baselines under `tests/visual/baselines`) is
@@ -306,6 +310,10 @@ silently until someone asks. Run it at feature boundaries; a failure then
 means something, where a quarterly run just means "lots changed".
 
 ### `cargo xtask test-reactivity` — the self-spawning subset
+
+This is the independently selectable 32-check lane. Run it when reactivity,
+browser interaction, or localized state behavior needs proof; an ordinary
+native rebuild does not invoke it implicitly.
 
 The step owns the whole server lifecycle in Rust (logic in the xtask; the
 PowerShell script stays the manual/screenshot path):

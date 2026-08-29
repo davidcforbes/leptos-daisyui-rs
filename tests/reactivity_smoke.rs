@@ -3,9 +3,11 @@
 //! `window.__APP_DEBUG__` oracle (ldui-49w.3), not through pixels.
 //!
 //! No screenshots, so this suite is deterministic across machines and is
-//! **auto-gated** — it runs as the `test-reactivity` step of
-//! `cargo xtask verify-full`. (Its sibling `visual_smoke.rs` compares pixels
-//! against baselines and stays manual; see `doc/ci-cd.md`.)
+//! **selectively gated** — its 32 checks run only when explicitly requested via
+//! `cargo xtask test-reactivity` or the requested `cargo xtask verify-full`.
+//! They are deliberately absent from the ordinary `cargo xtask verify`
+//! rebuild. (Its sibling `visual_smoke.rs` compares pixels against baselines
+//! and stays manual; see `doc/ci-cd.md`.)
 //!
 //! The `#[ignore]` attributes mean "needs the demo dev server", not "manual":
 //! the gate spawns a server on a free port and passes `--ignored` explicitly,
@@ -2195,6 +2197,111 @@ async fn data_table_headers_relocalize_via_dom() {
         json!("Nombre, sin ordenar. Activar para ordenar ascendente."),
         "the mounted sort control's state/action copy must relocalize"
     );
+}
+
+/// Runtime-localized DataTable controls (ldui-rmc): changing locale must
+/// relabel the mounted search and column-filter controls without clearing the
+/// user's search text, selected filter, or active sort. This complements the
+/// header-only localization proof above and guards the full stateful a11y
+/// contract inherited by consumers.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn data_table_control_names_relocalize_without_resetting_state() {
+    let h = harness_at("/components/data-table").await;
+    begin_browser_error_capture(&h).await;
+
+    let root = "#localized-table";
+    click(
+        &h,
+        "#localized-table thead tr:first-child th:first-child > button",
+    )
+    .await;
+
+    let armed = eval_json(
+        &h,
+        r#"(() => {
+            const root = document.querySelector('#localized-table');
+            const search = root?.querySelector('input[type="text"]');
+            const filter = root?.querySelector('tr.data-table-filter-row select');
+            if (!search || !filter) return false;
+            search.value = 'User';
+            search.dispatchEvent(new Event('input', { bubbles: true }));
+            filter.value = 'User 2';
+            filter.dispatchEvent(new Event('change', { bubbles: true }));
+            return true;
+        })()"#,
+    )
+    .await;
+    assert_eq!(
+        armed,
+        json!(true),
+        "localized fixture must expose searchable and filterable controls"
+    );
+    tokio::time::sleep(std::time::Duration::from_millis(450)).await;
+
+    let describe = |locale: &'static str| {
+        format!(
+            r#"(() => {{
+                const root = document.querySelector('{root}');
+                const search = root.querySelector('input[type="text"]');
+                const filter = root.querySelector('tr.data-table-filter-row select');
+                const labelText = element => Array.from(element.labels || [])
+                    .map(label =>
+                        (label.matches('.sr-only') ? label : label.querySelector('.sr-only'))
+                            ?.textContent.trim() ?? ''
+                    );
+                return {{
+                    locale: '{locale}',
+                    rows: root.querySelectorAll('tbody tr:not([data-table-detail-row])').length,
+                    sort: root.querySelector('thead tr:first-child th:first-child')?.getAttribute('aria-sort'),
+                    search: {{
+                        value: search.value,
+                        placeholder: search.placeholder,
+                        aria: search.getAttribute('aria-label'),
+                        labels: labelText(search),
+                    }},
+                    filter: {{
+                        value: filter.value,
+                        aria: filter.getAttribute('aria-label'),
+                        labels: labelText(filter),
+                        all: filter.options[0]?.textContent.trim(),
+                    }},
+                }};
+            }})()"#
+        )
+    };
+
+    let english = eval_json(&h, &describe("en")).await;
+    assert_eq!(english["rows"], json!(1));
+    assert_eq!(english["sort"], json!("ascending"));
+    assert_eq!(english["search"]["value"], json!("User"));
+    assert_eq!(english["search"]["placeholder"], json!("Search..."));
+    assert_eq!(english["search"]["aria"], json!("Search table"));
+    assert_eq!(english["search"]["labels"], json!(["Search table"]));
+    assert_eq!(english["filter"]["value"], json!("User 2"));
+    assert_eq!(english["filter"]["aria"], json!("Filter by Name"));
+    assert_eq!(english["filter"]["labels"], json!(["Filter by Name"]));
+    assert_eq!(english["filter"]["all"], json!("All"));
+
+    click(&h, "#locale-toggle").await;
+    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+
+    let spanish = eval_json(&h, &describe("es")).await;
+    assert_eq!(spanish["rows"], json!(1), "locale change reset filtering");
+    assert_eq!(
+        spanish["sort"],
+        json!("ascending"),
+        "locale change reset sort"
+    );
+    assert_eq!(spanish["search"]["value"], json!("User"));
+    assert_eq!(spanish["search"]["placeholder"], json!("Buscar..."));
+    assert_eq!(spanish["search"]["aria"], json!("Buscar en la tabla"));
+    assert_eq!(spanish["search"]["labels"], json!(["Buscar en la tabla"]));
+    assert_eq!(spanish["filter"]["value"], json!("User 2"));
+    assert_eq!(spanish["filter"]["aria"], json!("Filtrar por Nombre"));
+    assert_eq!(spanish["filter"]["labels"], json!(["Filtrar por Nombre"]));
+    assert_eq!(spanish["filter"]["all"], json!("Todos"));
+    assert_no_browser_errors(&h, "localized DataTable control state").await;
 }
 
 /// Tabs: clicking the second tab of the Basic Tabs strip selects index 1.

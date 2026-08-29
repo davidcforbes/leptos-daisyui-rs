@@ -19,7 +19,9 @@ Integration tests are in `tests/`, PixelProof baselines in
 - `cargo xtask verify-full` adds the browser suites and release Trunk build;
   it requires npm, Trunk, and Chrome. Run `npm install` in `demo/` once.
 - `cargo xtask test-style`, `test-layout`, or `test-reactivity` runs one
-  self-hosted browser suite. `cargo make test-visual` runs screenshot checks.
+  self-hosted browser suite. The 32-check reactivity lane is explicitly
+  requested, not part of ordinary `verify` rebuilds. `cargo make test-visual`
+  runs screenshot checks.
 - `cargo make dev` serves the showcase at `http://127.0.0.1:3010`.
 
 Run xtask from the repository root. Do not use `cargo fmt --all` (it reaches

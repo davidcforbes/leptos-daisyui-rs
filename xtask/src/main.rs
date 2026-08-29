@@ -2051,6 +2051,14 @@ pub fn r() -> f32 { radius::CARD }
                 .iter()
                 .all(|s| matches!(s.run, Run::Cmd { .. }))
         );
+        assert_eq!(
+            full_steps()
+                .iter()
+                .filter(|step| step.name == "test-reactivity")
+                .count(),
+            1,
+            "the selectable lane belongs exactly once in the requested full gate"
+        );
     }
 
     #[test]
@@ -2064,6 +2072,16 @@ pub fn r() -> f32 { radius::CARD }
                 html_target: None
             }
         ));
+    }
+
+    #[test]
+    fn reactivity_lane_has_exactly_32_browser_checks() {
+        let source = include_str!("../../tests/reactivity_smoke.rs");
+        assert_eq!(
+            source.matches("#[tokio::test").count(),
+            32,
+            "the explicitly requested reactivity lane must keep its 32 checks"
+        );
     }
 
     #[test]
