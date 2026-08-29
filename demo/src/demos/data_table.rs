@@ -44,17 +44,6 @@ pub fn DataTableDemo() -> impl IntoView {
         Column::new("joined", "Joined Date"),
     ]);
 
-    // Filterable columns: only the low-cardinality ones (role, department,
-    // status) opt in -- a dropdown of 60 distinct names or emails would not be
-    // a usable filter, so `name`/`email` stay plain.
-    let filterable_columns = RwSignal::new(vec![
-        Column::new("name", "Name"),
-        Column::new("email", "Email"),
-        Column::new("role", "Role").filterable(),
-        Column::new("department", "Department").filterable(),
-        Column::new("status", "Status").filterable(),
-    ]);
-
     // Columns with non-sortable
     let mixed_columns = RwSignal::new(vec![
         Column::new("id", "ID"),
@@ -133,17 +122,37 @@ pub fn DataTableDemo() -> impl IntoView {
     // the table chrome (headers, empty state) — asserted by the reactivity
     // suite's `data_table_headers_relocalize_via_dom`.
     let locale_es = RwSignal::new(false);
-    let localized_columns = Signal::derive(move || {
+    // Only low-cardinality columns opt in to filtering. This existing
+    // searchable/filterable fixture also consumes the locale signal so the
+    // browser suite can prove stateful control localization without adding a
+    // duplicate set of audited controls to the showcase page.
+    let filterable_columns = Signal::derive(move || {
         if locale_es.get() {
             vec![
-                Column::new("name", "Nombre").filterable(),
+                Column::new("name", "Nombre"),
                 Column::new("email", "Correo"),
+                Column::new("role", "Rol").filterable(),
+                Column::new("department", "Departamento").filterable(),
+                Column::new("status", "Estado").filterable(),
             ]
         } else {
             vec![
-                Column::new("name", "Name").filterable(),
+                Column::new("name", "Name"),
                 Column::new("email", "Email"),
+                Column::new("role", "Role").filterable(),
+                Column::new("department", "Department").filterable(),
+                Column::new("status", "Status").filterable(),
             ]
+        }
+    });
+    let localized_columns = Signal::derive(move || {
+        if locale_es.get() {
+            vec![
+                Column::new("name", "Nombre"),
+                Column::new("email", "Correo"),
+            ]
+        } else {
+            vec![Column::new("name", "Name"), Column::new("email", "Email")]
         }
     });
     let localized_texts = Signal::derive(move || {
@@ -776,6 +785,7 @@ pub fn DataTableDemo() -> impl IntoView {
                     columns=filterable_columns
                     page_size=8
                     searchable=true
+                    texts=localized_texts
                     attr:id="filter-row-table"
                 />
             </Section>
@@ -926,11 +936,10 @@ pub fn DataTableDemo() -> impl IntoView {
                     {move || if locale_es.get() { "Switch to English" } else { "Cambiar a español" }}
                 </Button>
                 <DataTable
-                    data=small_data
+                    data=Signal::derive(Vec::<HashMap<&'static str, String>>::new)
                     columns=localized_columns
                     texts=localized_texts
                     sort_texts=localized_sort_texts
-                    searchable=true
                     paginate=false
                     attr:id="localized-table"
                 />

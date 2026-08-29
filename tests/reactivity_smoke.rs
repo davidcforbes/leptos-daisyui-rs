@@ -2210,23 +2210,23 @@ async fn data_table_control_names_relocalize_without_resetting_state() {
     let h = harness_at("/components/data-table").await;
     begin_browser_error_capture(&h).await;
 
-    let root = "#localized-table";
+    let root = "#filter-row-table";
     click(
         &h,
-        "#localized-table thead tr:first-child th:first-child > button",
+        "#filter-row-table thead tr:first-child th:first-child > button",
     )
     .await;
 
     let armed = eval_json(
         &h,
         r#"(() => {
-            const root = document.querySelector('#localized-table');
+            const root = document.querySelector('#filter-row-table');
             const search = root?.querySelector('input[type="text"]');
             const filter = root?.querySelector('tr.data-table-filter-row select');
             if (!search || !filter) return false;
-            search.value = 'User';
+            search.value = 'User 2';
             search.dispatchEvent(new Event('input', { bubbles: true }));
-            filter.value = 'User 2';
+            filter.value = 'Admin';
             filter.dispatchEvent(new Event('change', { bubbles: true }));
             return true;
         })()"#,
@@ -2272,34 +2272,34 @@ async fn data_table_control_names_relocalize_without_resetting_state() {
     };
 
     let english = eval_json(&h, &describe("en")).await;
-    assert_eq!(english["rows"], json!(1));
+    assert_eq!(english["rows"], json!(2));
     assert_eq!(english["sort"], json!("ascending"));
-    assert_eq!(english["search"]["value"], json!("User"));
+    assert_eq!(english["search"]["value"], json!("User 2"));
     assert_eq!(english["search"]["placeholder"], json!("Search..."));
     assert_eq!(english["search"]["aria"], json!("Search table"));
     assert_eq!(english["search"]["labels"], json!(["Search table"]));
-    assert_eq!(english["filter"]["value"], json!("User 2"));
-    assert_eq!(english["filter"]["aria"], json!("Filter by Name"));
-    assert_eq!(english["filter"]["labels"], json!(["Filter by Name"]));
+    assert_eq!(english["filter"]["value"], json!("Admin"));
+    assert_eq!(english["filter"]["aria"], json!("Filter by Role"));
+    assert_eq!(english["filter"]["labels"], json!(["Filter by Role"]));
     assert_eq!(english["filter"]["all"], json!("All"));
 
     click(&h, "#locale-toggle").await;
     tokio::time::sleep(std::time::Duration::from_millis(250)).await;
 
     let spanish = eval_json(&h, &describe("es")).await;
-    assert_eq!(spanish["rows"], json!(1), "locale change reset filtering");
+    assert_eq!(spanish["rows"], json!(2), "locale change reset filtering");
     assert_eq!(
         spanish["sort"],
         json!("ascending"),
         "locale change reset sort"
     );
-    assert_eq!(spanish["search"]["value"], json!("User"));
+    assert_eq!(spanish["search"]["value"], json!("User 2"));
     assert_eq!(spanish["search"]["placeholder"], json!("Buscar..."));
     assert_eq!(spanish["search"]["aria"], json!("Buscar en la tabla"));
     assert_eq!(spanish["search"]["labels"], json!(["Buscar en la tabla"]));
-    assert_eq!(spanish["filter"]["value"], json!("User 2"));
-    assert_eq!(spanish["filter"]["aria"], json!("Filtrar por Nombre"));
-    assert_eq!(spanish["filter"]["labels"], json!(["Filtrar por Nombre"]));
+    assert_eq!(spanish["filter"]["value"], json!("Admin"));
+    assert_eq!(spanish["filter"]["aria"], json!("Filtrar por Rol"));
+    assert_eq!(spanish["filter"]["labels"], json!(["Filtrar por Rol"]));
     assert_eq!(spanish["filter"]["all"], json!("Todos"));
     assert_no_browser_errors(&h, "localized DataTable control state").await;
 }
