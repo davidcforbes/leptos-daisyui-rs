@@ -30,8 +30,15 @@ async fn eval_json(h: &pixelproof_web::Harness, expr: &str) -> Value {
 }
 
 /// Text shown in the status banner, the root's `aria-activedescendant`
-/// target's own `data-result-key`, and the listbox's live `role="option"`
-/// key order.
+/// (both its raw id and the target's own `data-result-key`), the listbox's
+/// live `role="option"` key order, and whether the empty-state fallback or
+/// key-validation error banner is currently showing.
+///
+/// The single source of truth for reading `aria-activedescendant`: `?? null`
+/// (never a sentinel string) so an absent attribute round-trips as JSON
+/// `null`, matching `Option::None` on the Rust side. Every test below reads
+/// listbox state through this helper rather than a bespoke `eval_json` block,
+/// so this null-handling only has to be right once.
 async fn state(h: &pixelproof_web::Harness) -> Value {
     eval_json(
         h,
@@ -43,11 +50,14 @@ async fn state(h: &pixelproof_web::Harness) -> Value {
             const options = Array.from(root?.querySelectorAll('[role="option"]') ?? []);
             return {
                 statusText: status?.textContent.trim() ?? null,
+                activeDescendantId: activeId,
                 activeDescendantKey: activeEl?.dataset.resultKey ?? null,
                 optionKeys: options.map(o => o.dataset.resultKey),
                 selectedKeys: options
                     .filter(o => o.getAttribute('aria-selected') === 'true')
                     .map(o => o.dataset.resultKey),
+                emptyStateShown: !!root?.querySelector('[role="presentation"]'),
+                errorBanner: !!root?.querySelector('[data-result-list-key-error]'),
             };
         })()"#,
     )
@@ -289,28 +299,20 @@ async fn empty_result_set_renders_the_empty_state() {
 
     click(&h, &row_selector("case-a")).await;
     click(&h, "[data-testid=\"keyed-result-list-clear\"]").await;
-    let s = eval_json(
-        &h,
-        r#"(() => {
-            const root = document.querySelector('#keyed-result-list [role="listbox"]');
-            return {
-                options: root?.querySelectorAll('[role="option"]').length ?? -1,
-                empty: !!root?.querySelector('[role="presentation"]'),
-                errorBanner: !!root?.querySelector('[data-result-list-key-error]'),
-                activeDescendant: root?.getAttribute('aria-activedescendant') ?? 'present',
-            };
-        })()"#,
-    )
-    .await;
-    assert_eq!(s["options"], json!(0), "no option rows remain: {s}");
-    assert_eq!(s["empty"], json!(true), "empty-state fallback shown: {s}");
+    let s = state(&h).await;
+    assert_eq!(s["optionKeys"], json!([]), "no option rows remain: {s}");
+    assert_eq!(
+        s["emptyStateShown"],
+        json!(true),
+        "empty-state fallback shown: {s}"
+    );
     assert_eq!(
         s["errorBanner"],
         json!(false),
         "no key-validation error: {s}"
     );
     assert_eq!(
-        s["activeDescendant"],
+        s["activeDescendantId"],
         Value::Null,
         "aria-activedescendant is cleared, not pointing at a removed row: {s}"
     );

@@ -230,7 +230,9 @@ The page-scoped host and catalog are two distinct HTML/Wasm targets and therefor
 require two server builds. Consecutive suites for the same target share one
 server. In measured warm runs, Cargo's catalog compile was under one second but
 Trunk's Wasm optimization took roughly two minutes per invocation; sharing the
-catalog server removes two redundant optimization passes from `verify-full`.
+catalog server across its four suites (reactivity, layout, style, and the
+focused `KeyedResultList` proof) removes three redundant optimization passes
+from `verify-full`.
 
 ### Gate cadence during a live Beads drain
 
@@ -346,7 +348,8 @@ may still use that variable for interactive diagnosis; it is not a verification
 gate.
 
 When these catalog suites are adjacent inside `verify-full`, steps 1-3 and 5
-wrap the group once: reactivity, layout, and style all use the same current
+wrap the group once: reactivity, layout, style, and the focused
+`KeyedResultList` proof (`test-keyed-result-list`) all use the same current
 release server. Their standalone subcommands continue to own an isolated server
 so they remain independently reproducible.
 
