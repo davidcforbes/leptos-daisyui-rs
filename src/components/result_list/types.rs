@@ -11,6 +11,8 @@
 //! port is the index-movement math, kept pure here so it is unit-testable
 //! without a DOM.
 
+use std::{collections::HashMap, fmt};
+
 /// One entry in a [`ResultList`](super::ResultList) — a ranked search result.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct ResultRow {
@@ -45,6 +47,138 @@ impl ResultRow {
             &self.snippet
         }
     }
+}
+
+/// A result whose stable business identity and activation payload are kept
+/// separate from its display-only [`ResultRow`].
+///
+/// The `key` must be non-empty after trimming and unique within the current
+/// list supplied to [`KeyedResultList`](super::KeyedResultList).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ResultListItem<T> {
+    /// Stable business identity used for selection and DOM reconciliation.
+    pub key: String,
+    /// Display-only title and secondary text.
+    pub row: ResultRow,
+    /// Typed value returned to the consumer when this result is activated.
+    pub payload: T,
+}
+
+impl<T> ResultListItem<T> {
+    /// Creates a keyed result from its stable key, display row, and payload.
+    pub fn new(key: impl Into<String>, row: ResultRow, payload: T) -> Self {
+        Self {
+            key: key.into(),
+            row,
+            payload,
+        }
+    }
+}
+
+/// Why a keyed result set cannot be rendered safely.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ResultListKeyError {
+    /// The key at `index` is empty or contains only whitespace.
+    EmptyKey {
+        /// Position of the invalid item in the current list.
+        index: usize,
+    },
+    /// The same key occurs at two positions in the current list.
+    DuplicateKey {
+        /// Repeated stable key.
+        key: String,
+        /// Position where the key first occurred.
+        first_index: usize,
+        /// Position where the key occurred again.
+        duplicate_index: usize,
+    },
+}
+
+impl fmt::Display for ResultListKeyError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EmptyKey { index } => {
+                write!(formatter, "result at index {index} has an empty stable key")
+            }
+            Self::DuplicateKey {
+                key,
+                first_index,
+                duplicate_index,
+            } => write!(
+                formatter,
+                "result key `{key}` is duplicated at indices {first_index} and {duplicate_index}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for ResultListKeyError {}
+
+/// Validates that every keyed result has a non-blank key and that all keys
+/// are unique within `items`.
+pub fn validate_result_list_items<T>(
+    items: &[ResultListItem<T>],
+) -> Result<(), ResultListKeyError> {
+    let mut first_indices = HashMap::with_capacity(items.len());
+
+    for (index, item) in items.iter().enumerate() {
+        if item.key.trim().is_empty() {
+            return Err(ResultListKeyError::EmptyKey { index });
+        }
+
+        if let Some(first_index) = first_indices.insert(item.key.as_str(), index) {
+            return Err(ResultListKeyError::DuplicateKey {
+                key: item.key.clone(),
+                first_index,
+                duplicate_index: index,
+            });
+        }
+    }
+
+    Ok(())
+}
+
+/// Preserves `current` when that key still exists; otherwise selects the
+/// first current result. Returns `None` for an empty list.
+pub fn reconcile_result_key<T>(
+    current: Option<&str>,
+    items: &[ResultListItem<T>],
+) -> Option<String> {
+    current
+        .filter(|key| items.iter().any(|item| item.key == *key))
+        .map(str::to_owned)
+        .or_else(|| items.first().map(|item| item.key.clone()))
+}
+
+/// Moves a keyed selection through the current item order and clamps at the
+/// first or last result.
+pub fn move_result_key<T>(
+    current: Option<&str>,
+    delta: i32,
+    items: &[ResultListItem<T>],
+) -> Option<String> {
+    let current_index = current.and_then(|key| items.iter().position(|item| item.key == key));
+    move_selection(current_index, delta, items.len()).map(|index| items[index].key.clone())
+}
+
+/// Clones the latest item carrying `key`, if the current list still has it.
+pub fn current_result_item<T: Clone>(
+    items: &[ResultListItem<T>],
+    key: &str,
+) -> Option<ResultListItem<T>> {
+    items.iter().find(|item| item.key == key).cloned()
+}
+
+/// Builds a collision-free option id by encoding every UTF-8 key byte as two
+/// lowercase hexadecimal digits.
+pub(crate) fn keyed_option_dom_id(instance: u64, key: &str) -> String {
+    use fmt::Write as _;
+
+    let mut id = format!("ld-result-list-{instance}-option-");
+    for byte in key.as_bytes() {
+        write!(&mut id, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    id
 }
 
 /// Move the selection by `delta` rows, clamped to `[0, len - 1]` (no

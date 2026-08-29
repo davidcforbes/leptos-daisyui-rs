@@ -1,5 +1,27 @@
 use super::*;
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct CasePayload {
+    case_number: &'static str,
+    generation: u8,
+}
+
+fn keyed(
+    key: &str,
+    title: &str,
+    case_number: &'static str,
+    generation: u8,
+) -> ResultListItem<CasePayload> {
+    ResultListItem::new(
+        key,
+        ResultRow::new(title),
+        CasePayload {
+            case_number,
+            generation,
+        },
+    )
+}
+
 // ── ResultRow ──
 
 #[test]
@@ -40,6 +62,85 @@ fn secondary_line_empty_when_both_empty() {
 fn result_row_default_is_all_empty() {
     let row = ResultRow::default();
     assert_eq!(row, ResultRow::new(""));
+}
+
+// ── ResultListItem identity and replacement semantics ──
+
+#[test]
+fn keyed_items_separate_duplicate_display_from_payload_identity() {
+    let first = keyed("case-a", "Alex Morgan", "A-100", 1);
+    let second = keyed("case-b", "Alex Morgan", "B-200", 1);
+    assert_eq!(first.row, second.row);
+    assert_ne!(first.key, second.key);
+    assert_ne!(first.payload, second.payload);
+}
+
+#[test]
+fn validation_rejects_blank_and_duplicate_keys() {
+    let blank = vec![keyed("   ", "Blank", "A-100", 1)];
+    assert_eq!(
+        validate_result_list_items(&blank),
+        Err(ResultListKeyError::EmptyKey { index: 0 })
+    );
+
+    let duplicate = vec![
+        keyed("case-a", "Alex Morgan", "A-100", 1),
+        keyed("case-a", "Alex Morgan", "B-200", 1),
+    ];
+    assert_eq!(
+        validate_result_list_items(&duplicate),
+        Err(ResultListKeyError::DuplicateKey {
+            key: "case-a".to_owned(),
+            first_index: 0,
+            duplicate_index: 1,
+        })
+    );
+}
+
+#[test]
+fn replacement_preserves_key_and_uses_latest_payload() {
+    let replacement = vec![
+        keyed("case-b", "Alejandro Morgan", "B-200", 2),
+        keyed("case-a", "Alex Morgan", "A-100", 1),
+    ];
+    assert_eq!(
+        reconcile_result_key(Some("case-b"), &replacement),
+        Some("case-b".to_owned())
+    );
+    assert_eq!(
+        current_result_item(&replacement, "case-b")
+            .unwrap()
+            .payload
+            .generation,
+        2
+    );
+}
+
+#[test]
+fn removal_falls_back_to_first_and_keyboard_uses_current_order() {
+    let rows = vec![
+        keyed("case-c", "Third", "C-300", 1),
+        keyed("case-a", "First", "A-100", 1),
+    ];
+    assert_eq!(
+        reconcile_result_key(Some("case-b"), &rows),
+        Some("case-c".into())
+    );
+    assert_eq!(
+        move_result_key(Some("case-c"), 1, &rows),
+        Some("case-a".into())
+    );
+    assert_eq!(
+        move_result_key(Some("case-a"), 1, &rows),
+        Some("case-a".into())
+    );
+}
+
+#[test]
+fn option_dom_ids_are_collision_free_for_arbitrary_key_bytes() {
+    assert_ne!(keyed_option_dom_id(7, "a b"), keyed_option_dom_id(7, "a-b"));
+    assert_ne!(keyed_option_dom_id(7, "é"), keyed_option_dom_id(7, "e"));
+    assert!(keyed_option_dom_id(7, "a b").starts_with("ld-result-list-7-option-"));
 }
 
 // ── move_selection ──
