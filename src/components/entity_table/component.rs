@@ -1381,7 +1381,7 @@ where
                                         class=move || merge_classes!(
                                             "relative border border-table-grid bg-table-header text-table-header-content forced-colors:border-[CanvasText] forced-colors:bg-[Canvas] forced-colors:text-[CanvasText]",
                                             entity_alignment_class(alignment),
-                                            tabular_numbers.then_some("tabular-nums").unwrap_or("")
+                                            if tabular_numbers { "tabular-nums" } else { "" }
                                         )
                                         scope="col"
                                         data-entity-column=column_id
@@ -1905,7 +1905,7 @@ fn render_row_cells<T: Clone + 'static>(
                     class=move || merge_classes!(
                         "hidden border border-table-grid forced-colors:border-[CanvasText] lg:table-cell",
                         entity_alignment_class(alignment),
-                        tabular_numbers.then_some("tabular-nums").unwrap_or("")
+                        if tabular_numbers { "tabular-nums" } else { "" }
                     )
                     data-entity-column=column.id
                     data-entity-action=column.is_action.then_some("true")
@@ -2209,7 +2209,7 @@ fn render_default_compact_row<T: 'static>(row: &T, columns: &[EntityColumn<T>]) 
                     <span class=move || merge_classes!(
                         "min-w-0",
                         entity_compact_alignment_class(alignment),
-                        tabular_numbers.then_some("tabular-nums").unwrap_or("")
+                        if tabular_numbers { "tabular-nums" } else { "" }
                     )>{cell}</span>
                 </div>
             }

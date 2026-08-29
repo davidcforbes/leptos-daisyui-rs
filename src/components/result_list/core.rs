@@ -98,10 +98,13 @@ where
             <span
                 class="text-xs opacity-60 whitespace-normal break-words"
                 style:display=move || {
-                    current_result_item(&items.get(), &has_secondary_key)
+                    if current_result_item(&items.get(), &has_secondary_key)
                         .is_some_and(|item| !item.row.secondary_line().is_empty())
-                        .then_some("inline")
-                        .unwrap_or("none")
+                    {
+                        "inline"
+                    } else {
+                        "none"
+                    }
                 }
             >
                 {move || {

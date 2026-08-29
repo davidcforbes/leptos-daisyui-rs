@@ -130,14 +130,11 @@ pub fn validate_filter_options(
         let mut seen = HashMap::<&str, usize>::with_capacity(options.len());
         for (index, option) in options.iter().enumerate() {
             if option.value.trim().is_empty() {
-                return Err(DataTableFilterOptionError::EmptyValue {
-                    column: *column,
-                    index,
-                });
+                return Err(DataTableFilterOptionError::EmptyValue { column, index });
             }
             if let Some(first_index) = seen.insert(option.value.as_str(), index) {
                 return Err(DataTableFilterOptionError::DuplicateValue {
-                    column: *column,
+                    column,
                     value: option.value.clone(),
                     first_index,
                     duplicate_index: index,

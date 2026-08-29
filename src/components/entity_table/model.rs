@@ -202,6 +202,9 @@ pub fn entity_table_display_projection<T>(
     )
 }
 
+// Keeping the already-derived index window explicit makes this pure helper
+// directly testable without coupling it to component state.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn entity_table_display_projection_from_indices<T>(
     rows: &[T],
     columns: &[EntityColumn<T>],

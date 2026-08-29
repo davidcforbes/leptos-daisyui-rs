@@ -304,9 +304,11 @@ impl<T: 'static, K: Ord + 'static> EntitySortKeyFactory<T> for TypedEntitySortKe
     }
 }
 
+type OptionalEntitySortExtractor<T, K> = dyn Fn(&T) -> Option<K>;
+
 struct OptionalEntitySortKey<T, K> {
     null_order: EntityNullOrder,
-    extract: Rc<dyn Fn(&T) -> Option<K>>,
+    extract: Rc<OptionalEntitySortExtractor<T, K>>,
 }
 
 impl<T: 'static, K: Ord + 'static> EntitySortKeyFactory<T> for OptionalEntitySortKey<T, K> {
