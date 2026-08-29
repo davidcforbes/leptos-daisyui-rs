@@ -189,14 +189,14 @@ trunk build --release
 The demo automatically:
 - Runs Tailwind CSS compilation via pre_build hook: `npx tailwindcss -i input.css -o output.css`
 - Watches both `../src` (library) and `./src` (demo) for changes
-- Showcases all 110 components with interactive examples
+- Showcases all 113 components with interactive examples
 
 ## Architecture
 
 ### Core Structure
 
 The crate has two main modules:
-- `src/components/` - daisyUI component wrappers (110 components: full daisyUI 5 coverage plus custom additions)
+- `src/components/` - daisyUI component wrappers (113 components: full daisyUI 5 coverage plus custom additions)
 - `src/utils/` - Utility code: `ClassAttributes` for dynamic class management, plus
   reusable framework hooks (`DebouncedSignal`, `use_swr_resource`)
 - `src/motion/` - Animation primitives (`Lerp`, `Transition`, `Keyframe`/`Track`, easing, spring, `use_animated` hook)
@@ -214,6 +214,13 @@ existing feature surface (`cell_renderers`, `typed_cells`, `row_class_fn`,
 `link_column_keys`, and `bulk_select`. Never feed a server page to either client
 table. See `doc/components/entity_table.md` for migration and preference
 ownership.
+
+`SnapshotTablePage` accepts only state-minted
+`SnapshotLocalRowProjection<T>` values for controlled filtered rows. It
+validates generation/revision, keeps the complete snapshot in
+`EntityTable::source_data`, and derives dataset/page-size select IDs from the
+page contract. Standalone `DatasetSelector`/`EntityTable` calls supply
+`control_id`/`page_size_control_id`; do not patch IDs into the DOM.
 
 ### Recent additions (2026-08-25, merged to main)
 

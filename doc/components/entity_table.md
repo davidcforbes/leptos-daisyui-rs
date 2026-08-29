@@ -41,7 +41,7 @@ erase the compile-time distinction the snapshot component exists to provide.
 
 | Prop | Purpose |
 |---|---|
-| `data: Signal<Rc<Vec<T>>, LocalStorage>` | The complete selected snapshot. |
+| `data: Signal<Rc<Vec<T>>, LocalStorage>` | Rows rendered by the current local view; this may be a controlled filtered projection. |
 | `columns: EntityColumns<T>` | Static `Vec` compatibility or local reactive typed declarations; stable IDs own preference identity. |
 | `row_key: EntityRowKey<T>` | Stable identity used for keyed DOM rows and activation. |
 | `dataset_identity: Signal<String>` | Identifies the downloaded dataset; a change resets only the current page. |
@@ -52,9 +52,16 @@ erase the compile-time distinction the snapshot component exists to provide.
 | `focus_scope` | Optional opaque dataset/access generation; recovery never crosses a change. |
 | `preference_ownership` | Controlled or uncontrolled preference policy. |
 | `storage_key` | Legacy local-storage compatibility prop; mutually exclusive with `preference_ownership`. |
+| `page_size_control_id` | Optional stable caller-owned DOM ID for the rows-per-page select. |
 
 Page number, free-text search, selected dataset, row data, and snapshot revision
 are transient state and do not belong in `EntityTablePreferences`.
+
+For the canonical page, pass a state-minted
+`SnapshotLocalRowProjection<T>` through `SnapshotTablePage::local_rows`; the
+page supplies its filtered rows as `data` and the complete displayed snapshot
+as `source_data`. Standalone tables should preserve the same distinction and
+give each page-size control a collision-safe `page_size_control_id`.
 
 ## Reactive column semantics
 
@@ -295,6 +302,8 @@ The browser lane checks real keyboard reorder with boundary-safe focus
 restoration, real Enter/Shift+Enter and Shift-click multi-sort, real keyboard
 resize with controlled-model readback, paging, chooser behavior, controlled
 preference mount behavior without browser storage reads or writes, compact
-rendering, row/action activation, a vendored axe-core audit with the chooser
-open, style oracles, and the `client-snapshot` ownership marker. Native tests
-retain explicit coverage of the legacy local-storage compatibility path.
+rendering, row/action activation, stable page-size/dataset control identities,
+a vendored axe-core audit with the chooser open, style oracles, and the
+`client-snapshot` ownership marker. Native tests retain explicit coverage of
+the legacy local-storage compatibility path and generation-bound row
+projections.

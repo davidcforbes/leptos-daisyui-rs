@@ -489,7 +489,7 @@ See [`demo/custom-components.css`](demo/custom-components.css#L376-L400) for the
 
 ## Testing
 
-- **Default gate**: `cargo xtask verify` runs 14 native-only checks, including the 2,380-test library suite with `test-mode`; it does not build Wasm or invoke Chrome.
+- **Default gate**: `cargo xtask verify` runs 14 native-only checks, including the 2,382-test library suite with `test-mode`; it does not build Wasm or invoke Chrome.
 - **Selective reactivity**: `cargo xtask test-reactivity` runs exactly 32 real-browser DOM/interaction checks. It is opt-in and is not required for an ordinary rebuild.
 - **Full release evidence**: `cargo xtask verify-full` runs the 14 native checks plus five browser/Wasm lanes and reports 19 steps. Use it when browser, CSS, Wasm, or release behavior needs proof.
 - **Visual regression**: `cargo make test-visual` runs the manual PixelProof visual/reactivity smoke workflow — headless Chrome drives the demo app, screenshots are SSIM-compared against committed baselines in `tests/visual/baselines/`, and interaction state is asserted through the demo's `window.__APP_DEBUG__` oracle (enabled by `?pp-freeze=1`).

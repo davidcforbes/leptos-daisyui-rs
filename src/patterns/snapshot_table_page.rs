@@ -3,7 +3,7 @@
 use super::{
     ActionFeedback, ActionFeedbackModel, ActionFeedbackTexts, DatasetOption, DatasetSelector,
     DatasetSelectorTexts, LocalResultSummary, PageStatePanel, PageStatePanelTexts,
-    SnapshotTablePhase, SnapshotTableState,
+    SnapshotLocalRowProjection, SnapshotTablePhase, SnapshotTableState,
 };
 use crate::components::{
     EntityColumnFilters, EntityColumns, EntityCompactRow, EntityRowKey, EntityTable,
@@ -190,6 +190,10 @@ pub fn SnapshotTablePage<R, V, E, M, K>(
     /// Optional local filtered-count proof minted by the same state.
     #[prop(optional)]
     local_result: Option<Signal<Option<LocalResultSummary>, LocalStorage>>,
+    /// Optional controlled rows minted by `state`. When present, their
+    /// identity-bound summary supersedes the legacy count-only proof.
+    #[prop(optional)]
+    local_rows: Option<Signal<Option<SnapshotLocalRowProjection<R>>, LocalStorage>>,
     /// PageHeader composition. The canonical path leaves its dataset slot empty.
     header: Children,
     /// Typed selector mechanics with no selected/displayed identity field.
@@ -245,7 +249,24 @@ where
     let load_error = RwSignal::new(Option::<String>::None);
     let generation_marker = RwSignal::new("0".to_owned());
     let local_result = StoredValue::new_local(local_result);
+    let local_rows = StoredValue::new_local(local_rows);
     let entity_table = StoredValue::new_local(entity_table);
+    let effective_local_result = Signal::derive_local(move || {
+        local_rows
+            .with_value(|projection| {
+                projection.as_ref().and_then(|projection| {
+                    projection.with(|projection| {
+                        projection
+                            .as_ref()
+                            .map(|projection| projection.summary().clone())
+                    })
+                })
+            })
+            .or_else(|| {
+                local_result
+                    .with_value(|summary| summary.as_ref().and_then(|summary| summary.get()))
+            })
+    });
 
     let option_value_key = Arc::clone(&value_key);
     Effect::new(move |_| {
@@ -265,8 +286,7 @@ where
     let selected_value_key = Arc::clone(&value_key);
     Effect::new(move |_| {
         state.with(|state| {
-            let summary = local_result
-                .with_value(|summary| summary.as_ref().and_then(|summary| summary.get()));
+            let summary = effective_local_result.get();
             let view = state.view(summary.as_ref());
             generation_marker.set(view.generation().marker());
             loading.set(matches!(
@@ -298,12 +318,33 @@ where
         });
     });
 
-    let table_rows = Signal::derive_local(move || {
+    let authoritative_rows = Signal::derive_local(move || {
         state.with(|state| {
             state
                 .view(None)
                 .displayed()
                 .map(|snapshot| Rc::clone(snapshot.rows()))
+                .unwrap_or_else(|| Rc::new(Vec::new()))
+        })
+    });
+    let table_rows = Signal::derive_local(move || {
+        state.with(|state| {
+            local_rows
+                .with_value(|projection| {
+                    projection.as_ref().and_then(|projection| {
+                        projection.with(|projection| {
+                            projection.as_ref().and_then(|projection| {
+                                state.validated_local_rows(projection).map(Rc::clone)
+                            })
+                        })
+                    })
+                })
+                .or_else(|| {
+                    state
+                        .view(None)
+                        .displayed()
+                        .map(|snapshot| Rc::clone(snapshot.rows()))
+                })
                 .unwrap_or_else(|| Rc::new(Vec::new()))
         })
     });
@@ -335,6 +376,7 @@ where
                 data-snapshot-generation=move || generation_marker.get()
             >
                 <DatasetSelector
+                    control_id=format!("{contract_id}-dataset-select")
                     label=label
                     selected=selected
                     options=selector_options
@@ -352,9 +394,7 @@ where
             <div id=filters_id data-snapshot-page-slot="filters">{filters()}</div>
             <div id=feedback_id class="space-y-2" data-snapshot-page-slot="feedback">
                 {move || state.with(|state| {
-                    let summary = local_result.with_value(|summary| {
-                        summary.as_ref().and_then(|summary| summary.get())
-                    });
+                    let summary = effective_local_result.get();
                     let decision = state.view(summary.as_ref()).render_decision();
                     decision.retained_notice().then(|| {
                         let kind = decision.panel().expect("retained notice has panel");
@@ -383,15 +423,11 @@ where
             >
                 <Show
                     when=move || state.with(|state| {
-                        let summary = local_result.with_value(|summary| {
-                            summary.as_ref().and_then(|summary| summary.get())
-                        });
+                        let summary = effective_local_result.get();
                         state.view(summary.as_ref()).render_decision().table_mounted()
                     })
                     fallback=move || state.with(|state| {
-                        let summary = local_result.with_value(|summary| {
-                            summary.as_ref().and_then(|summary| summary.get())
-                        });
+                        let summary = effective_local_result.get();
                         let view = state.view(summary.as_ref());
                         let decision = view.render_decision();
                         decision.panel().map(|kind| view! {
@@ -407,6 +443,7 @@ where
                     {entity_table.with_value(|config| view! {
                         <EntityTable
                             data=table_rows
+                            source_data=authoritative_rows
                             columns=config.columns.clone()
                             row_key=Rc::clone(&config.row_key)
                             dataset_identity=generation_marker
@@ -417,6 +454,7 @@ where
                             preference_ownership=config.preference_ownership.clone()
                             preference_version=config.preference_version
                             texts=config.texts
+                            page_size_control_id=format!("{contract_id}-rows-per-page")
                             show_reset_actions=config.show_reset_actions
                             zebra=config.zebra
                             class=config.class

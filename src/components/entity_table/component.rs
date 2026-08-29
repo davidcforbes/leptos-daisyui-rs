@@ -421,6 +421,9 @@ pub fn EntityTable<T>(
     /// Localizable labels for table controls.
     #[prop(into, default = Signal::stored(EntityTableTexts::default()))]
     texts: Signal<EntityTableTexts>,
+    /// Stable, caller-owned DOM identity for the rows-per-page select.
+    #[prop(optional, into)]
+    page_size_control_id: MaybeProp<String>,
     /// Shows separate reset-sort and reset-columns actions.
     #[prop(optional, default = false)]
     show_reset_actions: bool,
@@ -662,6 +665,7 @@ where
                     <span>{move || texts.with(|texts| texts.rows_per_page.clone())}</span>
                     <Select
                         class="select-sm w-20"
+                        id=page_size_control_id
                         label=Signal::derive(move || {
                             Some(texts.with(|texts| texts.rows_per_page.clone()))
                         })

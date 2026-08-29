@@ -40,6 +40,11 @@ pub fn Select(
     #[prop(optional, into)]
     name: Signal<Option<String>>,
 
+    /// Stable DOM identity for standalone controls. When omitted, a wrapping
+    /// [`Field`](crate::components::Field) supplies its associated input ID.
+    #[prop(optional, into)]
+    id: MaybeProp<String>,
+
     /// Additional CSS classes
     #[prop(optional, into)]
     class: &'static str,
@@ -119,7 +124,7 @@ pub fn Select(
     view! {
         <select
             aria-label=move || label.get()
-            id=field_id
+            id=move || id.get().or_else(|| field_id.clone())
             aria-describedby=described_by
             aria-errormessage=error_message
             aria-invalid=aria_invalid

@@ -27,6 +27,8 @@ async fn contract_snapshot(harness: &pixelproof_web::Harness) -> Value {
             const feedback = document.getElementById('snapshot-page-feedback');
             const table = document.getElementById('snapshot-page-table');
             const entity = table?.querySelector('[data-entity-table]');
+            const datasetSelect = dataset?.querySelector('select');
+            const pageSizeSelect = entity?.querySelector('select');
             const slots = Array.from(root?.children || [])
                 .map(child => child.dataset.snapshotPageSlot)
                 .filter(Boolean);
@@ -42,9 +44,14 @@ async fn contract_snapshot(harness: &pixelproof_web::Harness) -> Value {
                 ],
                 phase: root?.dataset.snapshotPhase,
                 panel: feedback?.querySelector('[data-page-state-panel]')?.dataset.pageStatePanel ?? null,
+                tablePanel: table?.querySelector('[data-page-state-panel]')?.dataset.pageStatePanel ?? null,
                 rows: table?.querySelectorAll('[data-entity-table-grid] tbody tr').length ?? 0,
                 sameTableNode: window.__snapshotFixtureTable === entity,
-                selectedDataset: dataset?.querySelector('select')?.value ?? null,
+                selectedDataset: datasetSelect?.value ?? null,
+                datasetSelectId: datasetSelect?.id ?? null,
+                datasetSelectLabel: datasetSelect?.getAttribute('aria-label') ?? null,
+                pageSizeSelectId: pageSizeSelect?.id ?? null,
+                pageSizeSelectLabel: pageSizeSelect?.getAttribute('aria-label') ?? null,
                 firstClient: table?.querySelector(
                     '[data-entity-table-grid] tbody tr td:nth-of-type(2)'
                 )?.textContent?.trim() ?? null,
@@ -98,6 +105,16 @@ async fn typed_snapshot_page_preserves_order_identity_and_retained_table_node() 
     assert_eq!(initial["phase"], json!("Displaying"));
     assert_eq!(initial["rows"], json!(3));
     assert_eq!(initial["sameTableNode"], json!(true));
+    assert_eq!(
+        initial["datasetSelectId"],
+        json!("snapshot-page-dataset-select")
+    );
+    assert_eq!(initial["datasetSelectLabel"], json!("Office"));
+    assert_eq!(
+        initial["pageSizeSelectId"],
+        json!("snapshot-page-rows-per-page")
+    );
+    assert_eq!(initial["pageSizeSelectLabel"], json!("Rows per page"));
     assert!(
         initial["generations"]
             .as_array()
@@ -139,6 +156,63 @@ async fn typed_snapshot_page_preserves_order_identity_and_retained_table_node() 
         .await,
         json!(["header", "dataset", "kpis", "filters", "feedback", "table"]),
         "slot markers did not return to the canonical order after the negative control"
+    );
+
+    let collided_controls = eval_json(
+        &harness,
+        r#"(() => {
+            const datasetSelect = document.querySelector('#snapshot-page-dataset select');
+            const pageSizeSelect = document.querySelector('#snapshot-page-table [data-entity-table] select');
+            const original = pageSizeSelect.id;
+            pageSizeSelect.id = datasetSelect.id;
+            const collisionDetected = datasetSelect.id === pageSizeSelect.id;
+            pageSizeSelect.id = original;
+            return {
+                collisionDetected,
+                restored: datasetSelect.id !== pageSizeSelect.id,
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(collided_controls["collisionDetected"], json!(true));
+    assert_eq!(collided_controls["restored"], json!(true));
+
+    click(&harness, "[data-testid='snapshot-filter-urgent']").await;
+    let filtered = contract_snapshot(&harness).await;
+    assert_eq!(filtered["rows"], json!(1));
+    assert_eq!(filtered["firstClient"], json!("Mexico City Client 1"));
+    assert_eq!(filtered["selectedDataset"], json!("office-mx"));
+    assert_eq!(filtered["generations"], initial["generations"]);
+
+    click(&harness, "[data-testid='snapshot-filter-none']").await;
+    let no_results = contract_snapshot(&harness).await;
+    assert_eq!(no_results["rows"], json!(0));
+    assert_eq!(no_results["tablePanel"], json!("no-local-results"));
+    assert_eq!(no_results["selectedDataset"], json!("office-mx"));
+    assert_eq!(no_results["generations"], initial["generations"]);
+
+    click(&harness, "[data-testid='snapshot-filter-all']").await;
+    let restored_rows = contract_snapshot(&harness).await;
+    assert_eq!(restored_rows["rows"], json!(3));
+    assert_eq!(restored_rows["tablePanel"], Value::Null);
+    assert_eq!(restored_rows["selectedDataset"], json!("office-mx"));
+    assert_eq!(
+        restored_rows["sameTableNode"],
+        json!(false),
+        "the no-results replacement deliberately unmounts the prior table subtree"
+    );
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => {
+                window.__snapshotFixtureTable = document.querySelector(
+                    '#snapshot-page-table [data-entity-table]'
+                );
+                return !!window.__snapshotFixtureTable;
+            })()"#,
+        )
+        .await,
+        json!(true)
     );
 
     click(&harness, "[data-testid='snapshot-start-replacement']").await;

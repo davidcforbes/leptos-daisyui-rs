@@ -13,7 +13,10 @@ DatasetSelector request
   -> SnapshotTableState accepts one complete SnapshotData
   -> source rows
        -> controlled local search and filter signals
-       -> filtered rows -> EntityTable
+       -> filtered rows
+       -> SnapshotTableState::local_row_projection
+       -> SnapshotTablePage local_rows -> EntityTable data
+       -> authoritative source rows -> EntityTable source_data
 
 FilterSchema + local filter values + EntityTablePreferences
   -> SnapshotViewDefaults
@@ -24,6 +27,62 @@ FilterSchema + local filter values + EntityTablePreferences
 from its private state view. It does not generate routes, fetch data, infer
 permissions, invent columns, or persist anything. The consumer owns those
 domain and transport decisions.
+
+## Controlled local-row projection
+
+Keep one complete `SnapshotData` in `SnapshotTableState`; do not replace that
+authoritative snapshot on every local filter change. Instead, filter its
+`Rc<Vec<R>>`, call `state.local_row_projection(filtered_rows)`, and pass the
+result through `SnapshotTablePage::local_rows`. The returned
+`SnapshotLocalRowProjection<R>` carries private generation/revision binding and
+the matching `LocalResultSummary`, so the rendered rows and the no-results
+decision cannot drift apart.
+
+`SnapshotTablePage` validates the projection before use. It renders a current
+projection as `EntityTable::data`, always supplies the complete displayed rows
+as `EntityTable::source_data`, and falls back to the authoritative rows when a
+projection is stale. A pending replacement keeps the old projection valid
+while those rows remain displayed; completing a replacement or changing access
+invalidates it. Consumers cannot supply a separate dataset identity.
+
+The older `local_result` count-only prop remains source-compatible. When a
+current `local_rows` value is present, its embedded summary is authoritative;
+otherwise the page uses `local_result` as before.
+
+```rust,no_run
+let local_rows = RwSignal::new_local(None);
+
+Effect::new(move |_| {
+    let query = search.get();
+    let projection = state.with(|state| {
+        let displayed = state.view(None).displayed()?;
+        let rows = displayed
+            .rows()
+            .iter()
+            .filter(|row| matches_query(row, &query))
+            .cloned()
+            .collect::<Vec<_>>();
+        state.local_row_projection(Rc::new(rows))
+    });
+    local_rows.set(projection);
+});
+
+view! {
+    <SnapshotTablePage
+        contract_id="no-hires"
+        state=state.into()
+        local_rows=local_rows.into()
+        // header, selector, filters, table config, and callbacks omitted
+    />
+}
+```
+
+`SnapshotTablePage` derives collision-safe selector IDs from `contract_id`:
+`<contract_id>-dataset-select` and `<contract_id>-rows-per-page`. Standalone
+`DatasetSelector` and `EntityTable` callers should set `control_id` and
+`page_size_control_id` respectively. The base `Select` also accepts an explicit
+typed `id`; when omitted inside `Field`, the field association still supplies
+its generated ID.
 
 ## Preferred hybrid filter layout
 
@@ -69,6 +128,7 @@ view! {
     <EntityTable
         data=filtered_rows
         source_data=source_rows
+        page_size_control_id="client-list-page-size"
         columns=reactive_columns
         column_filters=filters
         row_key=row_key
@@ -122,4 +182,5 @@ Browser proof must cover aligned filter cells after reorder/hide, filter-event
 isolation, one Reset/Save, explicit pointer/Enter/Space save counts, every save
 state, locale updates without preference reset, latest column semantics,
 same-scope row-removal focus, hide/scope/user-moved negative cases, compact
-copy, axe, and stable table/header geometry.
+copy, distinct stable selector IDs, controlled projection/no-results behavior,
+axe, and stable table/header geometry.

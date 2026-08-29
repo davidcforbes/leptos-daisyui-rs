@@ -49,8 +49,9 @@ pub use page_state_panel::{PageStatePanel, PageStatePanelTexts};
 pub use snapshot_table::{
     LocalResultSummary, PageStatePanelKind, SnapshotAccess, SnapshotActionDisposition,
     SnapshotActionHandle, SnapshotActionStartError, SnapshotData, SnapshotDataError,
-    SnapshotGeneration, SnapshotRenderDecision, SnapshotRequestError, SnapshotRequestHandle,
-    SnapshotTablePhase, SnapshotTableState, SnapshotTableView, SnapshotTransitionDisposition,
+    SnapshotGeneration, SnapshotLocalRowProjection, SnapshotRenderDecision, SnapshotRequestError,
+    SnapshotRequestHandle, SnapshotTablePhase, SnapshotTableState, SnapshotTableView,
+    SnapshotTransitionDisposition,
 };
 pub use snapshot_table_page::{
     SnapshotDatasetOption, SnapshotDatasetSelectorConfig, SnapshotEntityTableConfig,

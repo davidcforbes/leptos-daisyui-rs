@@ -299,6 +299,36 @@ pub struct LocalResultSummary {
     filtered_count: usize,
 }
 
+impl LocalResultSummary {
+    /// Number of locally projected rows carried by this identity-bound proof.
+    pub const fn filtered_count(&self) -> usize {
+        self.filtered_count
+    }
+}
+
+/// Controlled local rows bound to exactly one displayed generation/revision.
+///
+/// The private identity proof prevents consumers from pairing filtered rows
+/// with a separately supplied dataset key. Create projections only through
+/// [`SnapshotTableState::local_row_projection`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SnapshotLocalRowProjection<R> {
+    summary: LocalResultSummary,
+    rows: Rc<Vec<R>>,
+}
+
+impl<R> SnapshotLocalRowProjection<R> {
+    /// Identity-bound filtered-count proof used by the page render decision.
+    pub const fn summary(&self) -> &LocalResultSummary {
+        &self.summary
+    }
+
+    /// Controlled rows for the generation/revision carried by [`Self::summary`].
+    pub const fn rows(&self) -> &Rc<Vec<R>> {
+        &self.rows
+    }
+}
+
 struct SnapshotLoadFailure<V, E> {
     dataset: V,
     error: E,
@@ -359,6 +389,36 @@ impl<R, V, E, M, K> SnapshotTableState<R, V, E, M, K> {
         )
     }
 
+    /// Mints controlled local rows and their count proof against the current
+    /// displayed generation/revision.
+    pub fn local_row_projection(&self, rows: Rc<Vec<R>>) -> Option<SnapshotLocalRowProjection<R>> {
+        let summary = self.local_result_summary(rows.len())?;
+        Some(SnapshotLocalRowProjection { summary, rows })
+    }
+
+    /// Returns a projection's rows only while its private generation/revision
+    /// still matches the allowed displayed snapshot.
+    pub fn validated_local_rows<'a>(
+        &self,
+        projection: &'a SnapshotLocalRowProjection<R>,
+    ) -> Option<&'a Rc<Vec<R>>> {
+        (self.validated_local_count(Some(projection.summary())) == Some(projection.rows().len()))
+            .then_some(projection.rows())
+    }
+
+    fn validated_local_count(&self, local_result: Option<&LocalResultSummary>) -> Option<usize> {
+        let displayed = (self.access == SnapshotAccess::Allowed)
+            .then_some(self.displayed.as_ref())
+            .flatten()?;
+        local_result
+            .filter(|summary| {
+                summary.generation == self.generation
+                    && summary.revision == displayed.revision
+                    && summary.filtered_count <= displayed.rows.len()
+            })
+            .map(|summary| summary.filtered_count)
+    }
+
     /// Read the only valid runtime presentation for the current controller.
     pub fn view<'a>(
         &'a self,
@@ -367,15 +427,7 @@ impl<R, V, E, M, K> SnapshotTableState<R, V, E, M, K> {
         let displayed = (self.access == SnapshotAccess::Allowed)
             .then_some(self.displayed.as_ref())
             .flatten();
-        let local_filtered_count = displayed.and_then(|snapshot| {
-            local_result
-                .filter(|summary| {
-                    summary.generation == self.generation
-                        && summary.revision == snapshot.revision
-                        && summary.filtered_count <= snapshot.rows.len()
-                })
-                .map(|summary| summary.filtered_count)
-        });
+        let local_filtered_count = self.validated_local_count(local_result);
         let phase = match self.access {
             SnapshotAccess::Expired => SnapshotTablePhase::Expired,
             SnapshotAccess::Forbidden => SnapshotTablePhase::Forbidden,

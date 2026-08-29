@@ -82,6 +82,9 @@ pub fn DatasetSelector(
     /// Visible and accessible control label.
     #[prop(into)]
     label: Signal<String>,
+    /// Stable, caller-owned DOM identity for the underlying select.
+    #[prop(optional, into)]
+    control_id: MaybeProp<String>,
     /// Current dataset key.
     #[prop(into)]
     selected: Signal<String>,
@@ -126,6 +129,7 @@ pub fn DatasetSelector(
                 </span>
                 <Select
                     class="select-sm min-w-44 bg-base-100"
+                    id=control_id
                     label=Signal::derive(move || Some(label.get()))
                     value=selected
                     disabled=Signal::derive(move || {

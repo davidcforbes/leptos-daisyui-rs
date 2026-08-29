@@ -418,6 +418,7 @@ pub fn ClientSnapshotListDemo() -> impl IntoView {
                 }.into_any())
                 dataset=Box::new(move || view! {
                     <DatasetSelector
+                        control_id="client-snapshot-dataset-selector"
                         label=Signal::derive(move || {
                             if spanish.get() { "Oficina".to_owned() } else { "Office".to_owned() }
                         })
@@ -520,6 +521,7 @@ pub fn ClientSnapshotListDemo() -> impl IntoView {
                 <EntityTable
                     data=filtered
                     source_data=snapshot
+                    page_size_control_id="client-snapshot-page-size"
                     columns=columns
                     column_filters=column_filters
                     row_key=Rc::new(|row: &DemoRow| row.id.clone())

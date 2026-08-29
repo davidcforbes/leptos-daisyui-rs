@@ -4,7 +4,8 @@ use leptos_daisyui_rs::components::{
 };
 use leptos_daisyui_rs::patterns::{
     PageHeader, SnapshotData, SnapshotDatasetOption, SnapshotDatasetSelectorConfig,
-    SnapshotEntityTableConfig, SnapshotRequestHandle, SnapshotTablePage, SnapshotTableState,
+    SnapshotEntityTableConfig, SnapshotLocalRowProjection, SnapshotRequestHandle,
+    SnapshotTablePage, SnapshotTableState,
 };
 use std::rc::Rc;
 use std::sync::Arc;
@@ -71,6 +72,27 @@ pub fn SnapshotTablePageFixture() -> impl IntoView {
 
     let state = RwSignal::new_local(initial);
     let pending = RwSignal::new_local(Option::<SnapshotRequestHandle<String>>::None);
+    let filter_mode = RwSignal::new("all");
+    let local_rows = RwSignal::new_local(Option::<SnapshotLocalRowProjection<FixtureRow>>::None);
+
+    Effect::new(move |_| {
+        let mode = filter_mode.get();
+        let projection = state.with(|state| {
+            let displayed = state.view(None).displayed()?;
+            let rows = displayed
+                .rows()
+                .iter()
+                .filter(|row| match mode {
+                    "urgent" => row.status == "Urgent",
+                    "none" => false,
+                    _ => true,
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            state.local_row_projection(Rc::new(rows))
+        });
+        local_rows.set(projection);
+    });
 
     let request_dataset = Callback::new(move |dataset: String| {
         let mut next = None;
@@ -117,6 +139,7 @@ pub fn SnapshotTablePageFixture() -> impl IntoView {
         <SnapshotTablePage
             contract_id="snapshot-page"
             state=state.into()
+            local_rows=local_rows.into()
             header=Box::new(|| view! {
                 <PageHeader
                     title="Snapshot table fixture"
@@ -134,6 +157,27 @@ pub fn SnapshotTablePageFixture() -> impl IntoView {
             }.into_any())
             filters=Box::new(move || view! {
                 <div class="flex flex-wrap gap-2" aria-label="Fixture controls">
+                    <Button
+                        attr:data-testid="snapshot-filter-all"
+                        attr:aria-pressed=move || (filter_mode.get() == "all").to_string()
+                        on_click=Callback::new(move |_| filter_mode.set("all"))
+                    >
+                        "All rows"
+                    </Button>
+                    <Button
+                        attr:data-testid="snapshot-filter-urgent"
+                        attr:aria-pressed=move || (filter_mode.get() == "urgent").to_string()
+                        on_click=Callback::new(move |_| filter_mode.set("urgent"))
+                    >
+                        "Urgent only"
+                    </Button>
+                    <Button
+                        attr:data-testid="snapshot-filter-none"
+                        attr:aria-pressed=move || (filter_mode.get() == "none").to_string()
+                        on_click=Callback::new(move |_| filter_mode.set("none"))
+                    >
+                        "No matches"
+                    </Button>
                     <Button
                         attr:data-testid="snapshot-start-replacement"
                         on_click=start_replacement

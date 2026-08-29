@@ -90,6 +90,75 @@ fn stale_local_summary_is_ignored_after_atomic_dataset_replacement() {
 }
 
 #[test]
+fn local_row_projection_is_minted_for_the_displayed_snapshot_and_rejects_stale_rows() {
+    let mut state = SnapshotTableState::<u32, &'static str, &'static str, (), &'static str>::new();
+    let first = state.start_request("mx").unwrap();
+    state.complete(first, data("mx", "r1", &[1, 2, 3]));
+
+    let projection = state
+        .local_row_projection(Rc::new(vec![2]))
+        .expect("a subset can bind to the displayed snapshot");
+    assert_eq!(projection.rows().as_slice(), &[2]);
+    assert_eq!(
+        state
+            .validated_local_rows(&projection)
+            .expect("the current projection is valid")
+            .as_slice(),
+        &[2]
+    );
+    assert_eq!(
+        state
+            .view(Some(projection.summary()))
+            .local_filtered_count(),
+        Some(1)
+    );
+
+    let replacement = state.start_request("in").unwrap();
+    assert_eq!(
+        state
+            .validated_local_rows(&projection)
+            .expect("retained rows remain current while replacement is pending")
+            .as_slice(),
+        &[2]
+    );
+    state.complete(replacement, data("in", "r1", &[9, 10]));
+
+    assert!(state.validated_local_rows(&projection).is_none());
+    assert_eq!(
+        state
+            .view(Some(projection.summary()))
+            .local_filtered_count(),
+        None
+    );
+}
+
+#[test]
+fn local_row_projection_fails_closed_without_allowed_displayed_membership() {
+    let mut state = SnapshotTableState::<u32, &'static str, &'static str, (), &'static str>::new();
+    assert!(state.local_row_projection(Rc::new(vec![])).is_none());
+
+    let request = state.start_request("mx").unwrap();
+    state.complete(request, data("mx", "r1", &[1, 2]));
+    let allowed_projection = state
+        .local_row_projection(Rc::new(vec![1]))
+        .expect("allowed displayed rows can be projected");
+    assert!(
+        state.local_row_projection(Rc::new(vec![1, 2, 3])).is_none(),
+        "a projection cannot claim more rows than the complete snapshot"
+    );
+
+    state.replace_access(SnapshotAccess::Forbidden);
+    assert!(state.validated_local_rows(&allowed_projection).is_none());
+    assert_eq!(
+        state
+            .view(Some(allowed_projection.summary()))
+            .local_filtered_count(),
+        None
+    );
+    assert!(state.local_row_projection(Rc::new(vec![])).is_none());
+}
+
+#[test]
 fn matching_local_summary_distinguishes_empty_dataset_from_no_results() {
     let mut state = SnapshotTableState::<u32, &'static str, &'static str, (), &'static str>::new();
     let request = state.start_request("mx").unwrap();

@@ -561,6 +561,8 @@ async fn client_snapshot_list_contract_works_end_to_end() {
             const table = root.querySelector('[data-entity-table-grid]');
             const firstHeader = table.querySelector('thead th:first-child');
             const chooser = root.querySelector('[data-entity-table] [role="menu"]');
+            const datasetSelect = root.querySelector('[data-dataset-selector] select');
+            const pageSizeSelect = root.querySelector('[data-entity-table] label select');
             return {
                 contract: root.dataset.pageContract,
                 dataMode: root.querySelector('[data-entity-table]').dataset.tableDataMode,
@@ -571,6 +573,11 @@ async fn client_snapshot_list_contract_works_end_to_end() {
                 chooserText: chooser.textContent.replace(/\s+/g, ' ').trim(),
                 datasetInsideFilters: !!root.querySelector('[data-filter-bar] [data-dataset-selector]'),
                 selectorResettable: root.querySelector('[data-dataset-selector]').dataset.resettableFilter,
+                datasetSelectId: datasetSelect.id,
+                datasetSelectLabel: datasetSelect.getAttribute('aria-label'),
+                pageSizeSelectId: pageSizeSelect.id,
+                pageSizeSelectLabel: pageSizeSelect.getAttribute('aria-label'),
+                controlIdsDistinct: datasetSelect.id !== pageSizeSelect.id,
             };
         })()"#,
     )
@@ -599,6 +606,17 @@ async fn client_snapshot_list_contract_works_end_to_end() {
     assert!(!chooser.contains("Client") && !chooser.contains("Actions"));
     assert_eq!(initial["datasetInsideFilters"], json!(false));
     assert_eq!(initial["selectorResettable"], json!("false"));
+    assert_eq!(
+        initial["datasetSelectId"],
+        json!("client-snapshot-dataset-selector")
+    );
+    assert_eq!(initial["datasetSelectLabel"], json!("Office"));
+    assert_eq!(
+        initial["pageSizeSelectId"],
+        json!("client-snapshot-page-size")
+    );
+    assert_eq!(initial["pageSizeSelectLabel"], json!("Rows per page"));
+    assert_eq!(initial["controlIdsDistinct"], json!(true));
 
     let sort_button = "[data-entity-table-grid] thead th:first-child button";
     harness
