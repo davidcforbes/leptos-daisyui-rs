@@ -2227,7 +2227,7 @@ async fn server_table_round_trips_typed_query() {
 /// rejected instead of silently choosing a strategy.
 async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelproof_web::Harness) {
     let initial = eval_json(
-        &h,
+        h,
         r#"(() => {
             const table = document.querySelector('#cursor-server-table');
             const controls = table.querySelector('[data-server-cursor-state]');
@@ -2267,7 +2267,7 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
 
     assert_eq!(
         eval_json(
-            &h,
+            h,
             r#"(() => {
                 const current = document.querySelector('#cursor-current-slice-vocabulary [data-table-data-mode="server-query"]');
                 const missing = document.querySelector('#cursor-missing-vocabulary [data-table-data-mode="server-query"]');
@@ -2312,7 +2312,7 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
     // separate control does not itself steal focus from the row under test.
     assert_eq!(
         eval_json(
-            &h,
+            h,
             r#"(() => {
                 const row = document.querySelector('#cursor-server-table tbody tr[data-row-key="001"]');
                 row.__lduiIdentityProbe = 'row-001';
@@ -2327,7 +2327,7 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     assert_eq!(
         eval_json(
-            &h,
+            h,
             r#"(() => {
                 const row = document.querySelector('#cursor-server-table tbody tr[data-row-key="001"]');
                 return {
@@ -2349,7 +2349,7 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
 
     assert_eq!(
         eval_json(
-            &h,
+            h,
             r#"(() => {
                 document.querySelector('[data-testid="cursor-insert-row"]').click();
                 const inserted = document.querySelector('#cursor-server-table tbody tr[data-row-key="inserted"]');
@@ -2386,18 +2386,18 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
     );
 
     click(
-        &h,
+        h,
         "#cursor-server-table tbody tr[data-row-key='001'] td:first-child",
     )
     .await;
     assert_eq!(
-        testid_text(&h, "cursor-keyed-activation").await,
+        testid_text(h, "cursor-keyed-activation").await,
         "001|3|User 1",
         "keyed activation must carry the displayed identity snapshot"
     );
     assert_eq!(
         eval_json(
-            &h,
+            h,
             r#"(() => ({
                 accepted: document.querySelector('[data-testid="cursor-selected-key"]').textContent.trim(),
                 proposals: Number(document.querySelector('[data-testid="cursor-selection-proposals"]').textContent),
@@ -2409,7 +2409,7 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
     );
     assert_eq!(
         eval_json(
-            &h,
+            h,
             r#"(() => {
                 const row = document.querySelector('#cursor-server-table tbody tr[data-row-key="001"]');
                 row.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true }));
@@ -2420,7 +2420,7 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
         json!(true)
     );
     assert_eq!(
-        testid_text(&h, "cursor-keyed-inspection").await,
+        testid_text(h, "cursor-keyed-inspection").await,
         "001|3|User 1",
         "keyed inspection must carry the displayed identity snapshot"
     );
@@ -2431,7 +2431,7 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
     // controlled path.
     assert_eq!(
         eval_json(
-            &h,
+            h,
             r#"(() => {
                 document.querySelector('[data-testid="cursor-selection-accept"]').click();
                 document.querySelector('#cursor-server-table tbody tr[data-row-key="002"]').click();
@@ -2453,7 +2453,7 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
     );
     assert_eq!(
         eval_json(
-            &h,
+            h,
             r#"(() => {
                 document.querySelector('[data-testid="cursor-selection-accept"]').click();
                 document.querySelector('#cursor-server-table tbody tr[data-row-key="003"]').focus();
@@ -2468,7 +2468,7 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
         .expect("Space selects the focused keyed server row");
     assert_eq!(
         eval_json(
-            &h,
+            h,
             r#"(() => ({
                 accepted: document.querySelector('[data-testid="cursor-selected-key"]').textContent.trim(),
                 proposals: Number(document.querySelector('[data-testid="cursor-selection-proposals"]').textContent),
@@ -2483,7 +2483,7 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
     // the accepted server slice before continuing the cursor journey.
     assert_eq!(
         eval_json(
-            &h,
+            h,
             r#"(() => {
                 document.querySelector('[data-testid="cursor-duplicate-row-key"]').click();
                 const table = document.querySelector('#cursor-server-table');
@@ -2503,7 +2503,7 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
     );
     assert_eq!(
         eval_json(
-            &h,
+            h,
             r#"(() => {
                 document.querySelector('[data-testid="cursor-restore-rows"]').click();
                 return Array.from(document.querySelectorAll('#cursor-server-table tbody tr[data-row-key]')).map(row => row.dataset.rowKey);
@@ -2517,7 +2517,7 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
     // different entity that takes page position zero.
     assert_eq!(
         eval_json(
-            &h,
+            h,
             r#"(() => {
                 const old = document.querySelector('#cursor-server-table tbody tr[data-row-key="001"]');
                 old.__lduiOldPageProbe = true;
@@ -2539,22 +2539,22 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
         })
     );
     assert_eq!(
-        count_of(&h, "#cursor-server-table tbody tr[aria-selected='true']",).await,
+        count_of(h, "#cursor-server-table tbody tr[aria-selected='true']",).await,
         0,
         "accepted key 003 is outside the next slice and must not transfer by index"
     );
 
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    assert_eq!(testid_text(&h, "cursor-query-proposals").await, "1");
+    assert_eq!(testid_text(h, "cursor-query-proposals").await, "1");
     assert!(
-        testid_text(&h, "cursor-last-query")
+        testid_text(h, "cursor-last-query")
             .await
             .contains("request=Next(offset:4)"),
         "Next must forward the exact opaque server token"
     );
     assert!(
         eval_json(
-            &h,
+            h,
             "document.querySelector('#cursor-server-table tbody tr').textContent",
         )
         .await
@@ -2563,14 +2563,14 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
     );
 
     click(
-        &h,
+        h,
         "#cursor-server-table [data-server-cursor-action='previous']",
     )
     .await;
-    assert_eq!(testid_text(&h, "cursor-query-proposals").await, "2");
+    assert_eq!(testid_text(h, "cursor-query-proposals").await, "2");
     assert!(
         eval_json(
-            &h,
+            h,
             "document.querySelector('#cursor-server-table tbody tr').textContent",
         )
         .await
@@ -2579,7 +2579,7 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
     );
     assert_eq!(
         eval_json(
-            &h,
+            h,
             r#"document.querySelector('#cursor-server-table tbody tr[aria-selected="true"]')?.dataset.rowKey ?? null"#,
         )
         .await,
@@ -2587,16 +2587,16 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
         "returning to the previous slice restores the accepted business key"
     );
 
-    click(&h, "#cursor-server-table thead th:first-child").await;
-    assert_eq!(testid_text(&h, "cursor-query-proposals").await, "3");
-    let sorted = testid_text(&h, "cursor-last-query").await;
+    click(h, "#cursor-server-table thead th:first-child").await;
+    assert_eq!(testid_text(h, "cursor-query-proposals").await, "3");
+    let sorted = testid_text(h, "cursor-last-query").await;
     assert!(sorted.contains("request=First") && sorted.contains("sort=Some"));
 
     // A high-cardinality server column emits the same stable filter map, with
     // its Contains interpretation carried by the supplied Column definition.
     assert_eq!(
         eval_json(
-            &h,
+            h,
             r#"(() => {
                 const input = document.querySelector('#cursor-server-table [data-table-filter-column="name"] input[data-table-filter-kind="contains"]');
                 input.value = 'USER 1';
@@ -2608,16 +2608,14 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
         json!({ "aria": "Filter Name by text", "immediate": "USER 1" })
     );
     tokio::time::sleep(std::time::Duration::from_millis(225)).await;
-    assert_eq!(testid_text(&h, "cursor-query-proposals").await, "4");
+    assert_eq!(testid_text(h, "cursor-query-proposals").await, "4");
     assert!(
-        testid_text(&h, "cursor-last-query")
-            .await
-            .contains("USER 1"),
+        testid_text(h, "cursor-last-query").await.contains("USER 1"),
         "the debounced proposal must preserve the entered substring value"
     );
     assert!(
         eval_json(
-            &h,
+            h,
             "document.querySelector('#cursor-server-table tbody').textContent",
         )
         .await
@@ -2627,7 +2625,7 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
 
     assert_eq!(
         eval_json(
-            &h,
+            h,
             r#"(() => {
                 const input = document.querySelector('#cursor-server-table [data-table-filter-column="name"] input');
                 input.value = '';
@@ -2639,11 +2637,11 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
         json!("")
     );
     tokio::time::sleep(std::time::Duration::from_millis(225)).await;
-    assert_eq!(testid_text(&h, "cursor-query-proposals").await, "5");
+    assert_eq!(testid_text(h, "cursor-query-proposals").await, "5");
 
     assert_eq!(
         eval_json(
-            &h,
+            h,
             r#"(() => {
                 const filter = document.querySelector('#cursor-server-table [data-table-filter-column="role"] select');
                 filter.value = 'role.analyst';
@@ -2654,9 +2652,9 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
         .await,
         json!(true)
     );
-    assert_eq!(testid_text(&h, "cursor-query-proposals").await, "6");
+    assert_eq!(testid_text(h, "cursor-query-proposals").await, "6");
     assert!(
-        testid_text(&h, "cursor-last-query")
+        testid_text(h, "cursor-last-query")
             .await
             .contains("role.analyst")
     );
@@ -2666,7 +2664,7 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
     // retains a removable fallback option instead of blanking the select.
     assert_eq!(
         eval_json(
-            &h,
+            h,
             r#"(() => {
                 document.querySelector('[data-testid="cursor-filter-locale"]').click();
                 const select = document.querySelector('#cursor-server-table [data-table-filter-column="role"] select');
@@ -2679,10 +2677,10 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
         .await,
         json!({ "value": "role.analyst", "label": "Analista" })
     );
-    click(&h, "[data-testid='cursor-filter-active-option']").await;
+    click(h, "[data-testid='cursor-filter-active-option']").await;
     assert_eq!(
         eval_json(
-            &h,
+            h,
             r#"(() => {
                 const select = document.querySelector('#cursor-server-table [data-table-filter-column="role"] select');
                 return { value: select.value, label: select.selectedOptions[0].textContent.trim() };
@@ -2691,10 +2689,10 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
         .await,
         json!({ "value": "role.analyst", "label": "role.analyst" })
     );
-    click(&h, "[data-testid='cursor-filter-active-option']").await;
+    click(h, "[data-testid='cursor-filter-active-option']").await;
     assert_eq!(
         eval_json(
-            &h,
+            h,
             r#"(() => {
                 const select = document.querySelector('#cursor-server-table [data-table-filter-column="role"] select');
                 return { value: select.value, label: select.selectedOptions[0].textContent.trim() };
@@ -2706,7 +2704,7 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
 
     assert_eq!(
         eval_json(
-            &h,
+            h,
             r#"(() => {
                 document.querySelector('[data-testid="cursor-query-accept"]').click();
                 const input = document.querySelector('#cursor-server-table [data-table-filter-column="name"] input');
@@ -2719,16 +2717,14 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
         json!(true)
     );
     tokio::time::sleep(std::time::Duration::from_millis(225)).await;
-    assert_eq!(testid_text(&h, "cursor-query-proposals").await, "7");
+    assert_eq!(testid_text(h, "cursor-query-proposals").await, "7");
     assert!(
-        testid_text(&h, "cursor-last-query")
-            .await
-            .contains("User 2"),
+        testid_text(h, "cursor-last-query").await.contains("User 2"),
         "the rejected proposal must still carry the entered substring"
     );
     assert_eq!(
         eval_json(
-            &h,
+            h,
             r#"document.querySelector('#cursor-server-table [data-table-filter-column="name"] input').value"#,
         )
         .await,
@@ -2737,18 +2733,18 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
     );
     assert_eq!(
         eval_json(
-            &h,
+            h,
             r#"document.querySelector('#cursor-server-table [data-table-filter-column="role"] select').value"#,
         )
         .await,
         json!("role.analyst"),
         "a rejected text proposal must not disturb an accepted exact filter"
     );
-    click(&h, "[data-testid='cursor-query-accept']").await;
+    click(h, "[data-testid='cursor-query-accept']").await;
 
     assert_eq!(
         eval_json(
-            &h,
+            h,
             r#"(() => {
                 const size = document.querySelector('#cursor-server-table select[id$="-page-size"]');
                 size.value = '8';
@@ -2759,16 +2755,16 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
         .await,
         json!(true)
     );
-    assert_eq!(testid_text(&h, "cursor-query-proposals").await, "8");
+    assert_eq!(testid_text(h, "cursor-query-proposals").await, "8");
     assert!(
-        testid_text(&h, "cursor-last-query")
+        testid_text(h, "cursor-last-query")
             .await
             .contains("request=First")
     );
 
     assert_eq!(
         eval_json(
-            &h,
+            h,
             r#"(() => {
                 const input = document.querySelector('#cursor-server-table input[id^="ldui-data-table-search-"]');
                 input.value = 'User 1';
@@ -2780,17 +2776,17 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
         json!(true)
     );
     tokio::time::sleep(std::time::Duration::from_millis(400)).await;
-    assert_eq!(testid_text(&h, "cursor-query-proposals").await, "9");
+    assert_eq!(testid_text(h, "cursor-query-proposals").await, "9");
     assert!(
-        testid_text(&h, "cursor-last-query")
+        testid_text(h, "cursor-last-query")
             .await
             .contains("request=First")
     );
 
-    let retained_rows = count_of(&h, "#cursor-server-table tbody tr").await;
-    click(&h, "[data-testid='cursor-retain-loading']").await;
+    let retained_rows = count_of(h, "#cursor-server-table tbody tr").await;
+    click(h, "[data-testid='cursor-retain-loading']").await;
     let retained_loading = eval_json(
-        &h,
+        h,
         r#"(() => {
             const table = document.querySelector('#cursor-server-table');
             const controls = table.querySelector('[data-server-cursor-state]');
@@ -2812,9 +2808,9 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
     );
     assert_eq!(retained_loading["disabled"], json!(true));
 
-    click(&h, "[data-testid='cursor-retain-failure']").await;
+    click(h, "[data-testid='cursor-retain-failure']").await;
     let retained_failure = eval_json(
-        &h,
+        h,
         r#"(() => {
             const table = document.querySelector('#cursor-server-table');
             const controls = table.querySelector('[data-server-cursor-state]');
@@ -2836,7 +2832,7 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
 
     assert_eq!(
         eval_json(
-            &h,
+            h,
             r#"(() => {
                 const error = document.querySelector('#cursor-mixed-config [data-server-pagination-config-error]');
                 return {
@@ -2854,7 +2850,7 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
         })
     );
 
-    assert_server_table_controls_match_declared_query_capabilities(&h).await;
+    assert_server_table_controls_match_declared_query_capabilities(h).await;
 }
 
 /// Server query capabilities (ldui-8v5): a fixed cursor slice exposes only
@@ -2865,7 +2861,7 @@ async fn assert_server_table_controls_match_declared_query_capabilities(
     h: &pixelproof_web::Harness,
 ) {
     let navigation_only = eval_json(
-        &h,
+        h,
         r#"(() => {
             const table = document.querySelector('#cursor-navigation-only-table');
             return {
@@ -2897,25 +2893,25 @@ async fn assert_server_table_controls_match_declared_query_capabilities(
         })
     );
 
-    click(&h, "#cursor-navigation-only-table thead th:first-child").await;
+    click(h, "#cursor-navigation-only-table thead th:first-child").await;
     assert_eq!(
-        testid_text(&h, "cursor-navigation-only-proposals").await,
+        testid_text(h, "cursor-navigation-only-proposals").await,
         "0",
         "an inert header cannot produce an unsupported sort proposal"
     );
     click(
-        &h,
+        h,
         "#cursor-navigation-only-table [data-server-cursor-action='next']",
     )
     .await;
     assert_eq!(
-        testid_text(&h, "cursor-navigation-only-proposals").await,
+        testid_text(h, "cursor-navigation-only-proposals").await,
         "1",
         "cursor navigation remains independently operable"
     );
 
     let mixed = eval_json(
-        &h,
+        h,
         r#"(() => {
             const table = document.querySelector('#cursor-mixed-capability-table');
             return {
@@ -2944,14 +2940,14 @@ async fn assert_server_table_controls_match_declared_query_capabilities(
             "sortButtons": 3,
         })
     );
-    click(&h, "#cursor-mixed-capability-table thead th:first-child").await;
+    click(h, "#cursor-mixed-capability-table thead th:first-child").await;
     assert_eq!(
-        testid_text(&h, "cursor-mixed-capability-proposals").await,
+        testid_text(h, "cursor-mixed-capability-proposals").await,
         "1"
     );
     assert_eq!(
         eval_json(
-            &h,
+            h,
             r#"(() => {
                 const input = document.querySelector('#cursor-mixed-capability-table input[type="text"]');
                 input.value = 'matter';
@@ -2964,12 +2960,12 @@ async fn assert_server_table_controls_match_declared_query_capabilities(
     );
     tokio::time::sleep(std::time::Duration::from_millis(400)).await;
     assert_eq!(
-        testid_text(&h, "cursor-mixed-capability-proposals").await,
+        testid_text(h, "cursor-mixed-capability-proposals").await,
         "2"
     );
 
     let compatible_default = eval_json(
-        &h,
+        h,
         r#"(() => {
             const table = document.querySelector('#cursor-server-table');
             return {
@@ -2998,7 +2994,7 @@ async fn assert_server_table_controls_match_declared_query_capabilities(
 
     assert_eq!(
         eval_json(
-            &h,
+            h,
             r#"(() => {
                 const error = document.querySelector('#cursor-capability-conflict [data-server-query-capability-config-error]');
                 return { role: error.getAttribute('role'), message: error.textContent.trim() };
