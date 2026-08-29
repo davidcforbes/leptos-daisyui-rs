@@ -42,10 +42,10 @@ CI/CD is **local-only, two-layer**: logic lives in the `xtask/` crate; cargo-mak
 just delegates. Run the gate before committing:
 
 ```bash
-cargo xtask verify        # advisory gate: tokens/sibling-tokens/fmt/clippy/build/check-demo/test (exit = # failures)
+cargo xtask verify        # 14 native-only checks; no Wasm/Chrome/reactivity lane
 cargo make verify         # same, via cargo-make
-cargo xtask verify-full   # + reactivity suite + the real trunk wasm build (needs npm/trunk/Chrome)
-cargo xtask test-reactivity          # reactivity/DOM-oracle suite alone (self-spawns a demo server)
+cargo xtask verify-full   # 19 steps: verify + five browser/Wasm lanes (needs npm/trunk/Chrome)
+cargo xtask test-reactivity          # opt-in 32-check DOM/interaction lane; never implicit in verify
 cargo xtask test-layout              # layout audit: overlap/grid/internal<=external over the real DOM
 cargo xtask test-style               # style audit: typography/shape/depth + daisyUI component-drift, ratcheted per page
 cargo xtask gen-tokens [--check]     # regenerate styles/tokens.css from ui-tokens
@@ -298,7 +298,10 @@ audit files beads into this repo's tracker continuously — check `bd list`.
   renderer-only metadata never matches); `ServerDataTable` typed
   `TableQuery`/`on_query_change` API (page/size/search/sort/filters) with
   `filter_options` for population-wide dropdowns. Both variants share
-  `TABLE_SCROLL_WRAPPER_CLASS` (horizontal overflow).
+  `TABLE_SCROLL_WRAPPER_CLASS` (horizontal overflow), fixed column tracks, the
+  dark-blue/light-blue semantic bands, and the faint full-cell grid. Consumers
+  must import `styles/tokens.css` and scan this crate's `src/**/*.rs` in their
+  own Tailwind build; demo CSS is not a delivery mechanism.
 - **DayScheduler**: opt-in interaction contract — `on_event_activate`,
   `selected_event`, `on_event_move`/`on_event_resize` (keyboard Arrow /
   Shift+Arrow minute-delta requests; consumer owns the events),
@@ -400,16 +403,21 @@ This ensures daisyUI classes from style enums properly merge with user-provided 
 daisyUI class names must be explicitly included in Tailwind CSS input for proper compilation. Each component documents required classes:
 
 ```css
-/* In demo/input.css or your project's input.css */
+/* In a sibling consuming project's input.css.
+   demo/input.css uses ../styles/tokens.css and scans ../src/**/*.rs. */
 @import "tailwindcss";
+@import "../leptos-daisyui-rs/styles/tokens.css";
 @plugin "daisyui";
 @source "../src/**/*.rs";
+@source "../leptos-daisyui-rs/src/**/*.rs";
 
 /* Example: Button component classes */
 @source inline("btn btn-neutral btn-primary ... btn-circle");
 ```
 
-See `demo/input.css` for the complete list or `stytles/daisyui-components.css` to include everything.
+Adjust consumer paths relative to `input.css`. See `demo/input.css` for the
+showcase's complete source configuration and each component guide for dynamic
+inline classes.
 
 ## Component Guidelines
 
@@ -510,10 +518,11 @@ This is an **internal fork** of `noshishiRust/leptos-daisyui-rs` and is **not**
 published to crates.io (`publish = false` in `Cargo.toml`). It is consumed as a
 **path dependency** by sibling repos in the portfolio (EUC, Rust-DeskApp). Two
 reasons it cannot be published: the crate name `leptos-daisyui-rs` is owned
-upstream, and it depends on five sibling path crates with no crates.io release
-(`table-rs`, `ui-tokens`, `ai-chat-core`, `editmark-mermaid`, `editmark-core`),
-which makes `cargo publish` impossible. Do not attempt to add version pins or a
-docs.rs setup — the decision is to keep this a path-dep-only internal library.
+upstream, and it depends on seven sibling path crates with no crates.io release
+(`table-rs`, `ui-tokens`, `ai-chat-core`, `editmark-mermaid`, `editmark-core`,
+`pixelproof-web`, `pixelproof-style-audit`), which makes `cargo publish`
+impossible. Do not attempt to add version pins or a docs.rs setup — the decision
+is to keep this a path-dep-only internal library.
 
 ### Development Dependencies
 
@@ -525,14 +534,16 @@ docs.rs setup — the decision is to keep this a path-dep-only internal library.
 - **Long-term Goal**: Switch back to official crates.io version once PRs are merged
 
 **Setup Requirements**:
-- Clone the table-rs fork to `C:\Development\table-rs` (sibling directory)
+- Clone the table-rs fork to `C:\dev\table-rs` (sibling directory)
 - The fork includes security fixes, stability improvements, and functionality enhancements
 - Changes in table-rs will be immediately reflected when rebuilding leptos-daisyui-rs
 
 ## Known Limitations
 
 - Currently assumes CSR usage only
-- CSS classes must be manually added to `input.css` (no automatic purge-safe class inclusion yet)
+- Each consumer must scan this crate's Rust source and import
+  `styles/tokens.css` in its own `input.css`; class and token delivery is not
+  automatic across a Rust path dependency
 - Some components cannot be used with alternative HTML elements (e.g., button styles on `<a>` tags) - workaround is creating wrapper components that add classes to children
 
 ## Documentation

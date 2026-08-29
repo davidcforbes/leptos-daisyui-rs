@@ -5,7 +5,7 @@ no hosted CI. This follows the org guiding principle
 (`~/.claude/rust-ci-cd-build-strategy.md`): all CI/CD is executed and controlled
 locally, so the local runner **is** the pipeline. The model mirrors the sibling
 Rust-DeskApp repo's `docs/ci-cd.md`, adapted for this repo's shape — a single
-CSR library crate plus a separate demo crate, six sibling path-deps, and
+CSR library crate plus a separate demo crate, seven sibling path-deps, and
 `publish = false`.
 
 ## Two layers, never conflated
@@ -90,7 +90,7 @@ Each step is scoped per-crate; that scoping **is** the xtask's logic.
 | `clippy-xtask` | `cargo clippy -p xtask --all-targets -- -D warnings` | The gate must lint the crate that **is** the gate. Its absence let a `needless_borrows_for_generic_args` sit in `xtask/src/main.rs` from 2026-07-26 to 2026-08-10 while `verify` reported a clean 13/13 — `test-xtask` was running its tests all along, so only the lint was missing (ldui-mpm). |
 | `build` | `cargo build -p leptos-daisyui-rs` | **Library only.** The CSR demo is not natively built here — a native `cargo build` of a wasm/CSR binary can link-fail on `web-sys` host stubs; the demo is *checked* instead (next row) and *really* built by `trunk` (see `verify-full`). |
 | `check-demo` | `cargo check -p leptos-daisyui-showcase` | Fast native check of the demo — catches ~all compile breakage without npm/trunk. |
-| `test-lib` | `cargo test -p leptos-daisyui-rs --lib --features test-mode` | The library's unit-test suite (~2045 tests). Non-`#[ignore]`d tests only. `--features test-mode` for the same reason as `clippy-lib`: without it the 7 `test_mode` tests silently do not run, and that module is what the browser suites' freeze/oracle bridge is built on. |
+| `test-lib` | `cargo test -p leptos-daisyui-rs --lib --features test-mode` | The library's 2,380-test suite. Non-`#[ignore]`d tests only. `--features test-mode` for the same reason as `clippy-lib`: without it the 7 `test_mode` tests silently do not run, and that module is what the browser suites' freeze/oracle bridge is built on. |
 | `test-xtask` | `cargo test -p xtask` | The xtask's own pure-function tests (SemVer bump, the sibling-token parser, the gate's own argument vectors). |
 | `test-audit` | `cargo test -p ldui-audit --lib` | The audit crate's browser-free tests: the generated sweep JS (rule ids, the per-family cap, the percentage-radius conversion) and the drift/engine report merge. |
 | `test-daisyui5` | `cargo test -p leptos-daisyui-rs --test no_dead_daisyui4_classes` | Source scan (no browser) guarding against `.form-control` / `.label-text` / `.label-text-alt` coming back — removed in daisyUI 5, so they are silently inert. |
@@ -549,6 +549,6 @@ checkpoint engine.
 
 Per the org mandate, CI/CD is local-only: the siblings this repo path-depends on
 already sit alongside it under `C:\dev`, so a hosted runner would have to
-check out six sibling repos via PATs to reproduce what a local `cargo xtask
+check out seven sibling repos via PATs to reproduce what a local `cargo xtask
 verify` does for free. The local runner is the source of truth; the optional
 pre-push hook is the only automation surface, and it is advisory.

@@ -1,5 +1,11 @@
 # Testing Documentation
 
+> **Historical material:** The files in this directory predate the xtask and
+> PixelProof gates. Use [`../ci-cd.md`](../ci-cd.md) for current commands and
+> policy. In particular, the 32-check real-browser reactivity lane is selective:
+> it runs through `cargo xtask test-reactivity` or `verify-full`, never as part
+> of an ordinary `cargo xtask verify` rebuild.
+
 This directory contains comprehensive testing documentation for leptos-daisyui-rs components.
 
 ## Documentation Files

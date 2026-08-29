@@ -1,9 +1,9 @@
-> **SUPERSEDED (2026-07-06, ldui-49w):** The manual drive-Chrome-DevTools procedure
-> in this document is superseded by the automated PixelProof suite:
-> `tests/visual_smoke.rs` + `tests/reactivity_smoke.rs`, run end-to-end via
-> `cargo make test-visual` (committed baselines: `tests/visual/baselines/`).
-> This file is kept for its component-state checklists only — do not follow it
-> as a testing procedure.
+> **HISTORICAL:** Do not follow this file as a testing procedure. The current
+> source of truth is [`doc/ci-cd.md`](doc/ci-cd.md): `cargo xtask verify` is the
+> 14-step native gate; the exactly 32-check real-browser reactivity lane runs
+> only when requested through `cargo xtask test-reactivity` or `verify-full`;
+> `cargo make test-visual` is the manual screenshot workflow. This file is kept
+> only for its old component-state examples.
 
 # Demo App Testing Guide
 ## Complete Validation of 96 daisyUI Components

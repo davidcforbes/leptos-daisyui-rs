@@ -1,5 +1,10 @@
 # Chrome DevTools MCP Testing Guide
 
+> **Historical manual guide:** Use [`../ci-cd.md`](../ci-cd.md) for current
+> automated entry points. `cargo xtask test-reactivity` is the selective
+> 32-check browser lane, `cargo xtask verify-full` is the 19-step release gate,
+> and `cargo make test-visual` is the manual screenshot workflow.
+
 This guide explains how to use the Chrome DevTools MCP server to test leptos-daisyui-rs components visually and functionally.
 
 ## Prerequisites

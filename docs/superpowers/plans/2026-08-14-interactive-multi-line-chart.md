@@ -803,7 +803,8 @@ real `/components/charts` page:
    not load axe from the network at test time. Keep axe out of `demo/`, Trunk,
    and non-dev dependencies.
 
-3. Add an auto-gated test to `tests/reactivity_smoke.rs`:
+3. Add an opt-in browser-gated test to `tests/reactivity_smoke.rs`. It runs via
+   `cargo xtask test-reactivity` and `verify-full`, not ordinary `verify`:
 
    ```rust
    let axe = pixelproof_web::a11y::Axe::from_path(

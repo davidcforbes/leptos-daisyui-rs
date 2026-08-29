@@ -76,7 +76,12 @@ Rerun `cargo xtask test-reactivity`. Then temporarily remove the button from the
 
 - [x] **Step 5: Document, commit, push, and close**
 
-Completed in pushed commit `b470ab9`. Focused reactivity passed 27/27, style 7/7, `cargo xtask verify` 14/14, and clean `cargo xtask verify-full` 18/18 before `ldui-w1e` closed.
+Completed in pushed commit `b470ab9`. At that revision, focused reactivity
+passed 27/27, style 7/7, `cargo xtask verify` 14/14, and the then-current
+`cargo xtask verify-full` passed 18/18 before `ldui-w1e` closed. The gate later
+expanded to 19 steps and the independently selectable reactivity lane to 32
+checks; this line preserves the historical result rather than describing the
+current gate.
 
 ---
 

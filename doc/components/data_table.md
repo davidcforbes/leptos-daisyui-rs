@@ -25,6 +25,19 @@ preference-ownership path.
 
 For server-side pagination (the parent owns the page and fetches each slice), use [ServerDataTable](#serverdatatable) below.
 
+### Opinionated visual hierarchy and stable geometry
+
+The shared client and server renderers emit the framework's semantic table
+contract directly: a `#004578` header band with white content, a `#e5f1fb`
+aligned filter band with dark content, and a faint `#e0e0e0` border around every
+header, filter, body, empty, loading, and detail cell. Zebra striping remains an
+explicit opt-in.
+
+Both variants use a fixed table layout and a declared `colgroup`. Sort markers
+occupy a reserved slot and mounted header/filter nodes remain keyed by column,
+so sorting changes row order and accessible sort state without repainting the
+shell, changing column widths, or moving the scroll origin.
+
 ### Row identity and absolute indices
 
 Sorting reorders an **index permutation**, never `data` itself. Every index the component hands you — `selected_rows`, `on_row_activate`, `cell_renderers`, `row_class_fn` — is an **absolute index into `data`**, so it survives pagination and sorting. A row on page 5 of a descending sort reports the same index it had on page 1 unsorted.
@@ -430,7 +443,23 @@ All pure and independently usable:
 | `handle_row_click(...)` / `row_click_kind(ctrl, shift, has_activate)` | Selection/activation state machine |
 | `cell_text` / `row_text` / `row_with_headers_text` | Clipboard export (tab-separated) |
 
-## Add to `input.css`
+## Consumer `input.css`
+
+A Rust dependency does not deliver compiled CSS. The consuming application
+must import the generated token sheet and make Tailwind scan this crate's Rust
+source. For sibling checkouts, adjust these paths relative to the consumer's
+stylesheet:
+
+```css
+@import "../leptos-daisyui-rs/styles/tokens.css";
+@source "../leptos-daisyui-rs/src/**/*.rs";
+```
+
+Do not copy the palette into app-local CSS or rely on the library demo output.
+The component source emits the semantic classes; the generated token import
+defines their shared values. The following inline sources are needed only when
+the consumer does not already scan the library source or for classes assembled
+dynamically:
 
 ```css
 @source inline("table table-zebra table-pin-rows table-pin-cols table-xs table-sm table-md table-lg");
@@ -452,7 +481,12 @@ All pure and independently usable:
 ## Accessibility
 
 - Headers are `role="columnheader"` with `aria-sort` reflecting the current state (`ascending` / `descending` / `none`).
-- Resize handles are `role="separator"` with `aria-orientation="vertical"` and an `aria-label` naming their column.
+- Resize handles are focusable `role="separator"` controls with
+  `aria-orientation="vertical"`, a unique localized column name, and ordered
+  `aria-valuemin`/`aria-valuenow`/`aria-valuemax` plus value text. Left/Right
+  resize by 16 pixels; Home/End select the allowed bounds. Keyboard and pointer
+  paths share the same clamp logic and never activate sorting or scroll the
+  page.
 - The search box and every filter dropdown have both a localized accessible name and a real associated visually-hidden `<label>`. Placeholder text and physical column position are never the naming mechanism.
 - Sort state changes are conveyed through `aria-sort` rather than the `▲`/`▼` glyph alone.
 - **Keyboard operation.** When the table is interactive — `selected_rows` or `on_row_activate` supplied — each row is focusable (`tabindex=0`) and carries `aria-selected`. **Enter** and **Space** do exactly what a plain click does (activate, or select); **Ctrl/Cmd** and **Shift** with Enter/Space toggle and range-extend selection, mirroring the mouse. Space suppresses its default page-scroll. A plain display table (neither prop) adds no tab stops.
@@ -469,4 +503,6 @@ All pure and independently usable:
 6. **Re-check selection after mutating `data`.** It's cleared on data and sort changes by design.
 7. **Prefer `typed_cells` over `cell_renderers`** for badges and icons; reach for a full renderer only when you need arbitrary views.
 8. **Use `paginate=false` for small fixed tables**, not `page_size=1000`.
-9. Add the classes above to `input.css` — Tailwind can't see class names built at runtime.
+9. Import the generated tokens and scan the library source in `input.css`; add
+   inline sources only for classes Tailwind cannot see because they are built at
+   runtime.

@@ -92,6 +92,20 @@ Keep global search and controls that do not map to one column in the utility
 there; it does not duplicate column controls above the table. See
 [`client-snapshot-list.md`](../patterns/client-snapshot-list.md).
 
+## Visual hierarchy and shell stability
+
+`EntityTable` emits the canonical `#004578` header with white content, the
+aligned `#e5f1fb` filter band with dark content, and a collapsed faint `#e0e0e0`
+grid across every table cell. Zebra striping is off unless requested. Its fixed
+layout and declared `colgroup` keep column tracks stable; sorting updates rows,
+markers, and accessibility state in place without replacing the table/header
+nodes or moving the shell.
+
+These are generated semantic utilities, not demo-only CSS. Every consuming
+Tailwind build must import `leptos-daisyui-rs/styles/tokens.css` and scan
+`leptos-daisyui-rs/src/**/*.rs`, with paths resolved from its own `input.css`.
+See the [DataTable consumer CSS setup](./data_table.md#consumer-inputcss).
+
 ## Row-action focus recovery
 
 Wrap repeatable action controls in `EntityRowAction action_id="..."`. When a

@@ -2,7 +2,7 @@
 
 This crate is a daisyUI 5 components library for Leptos, providing type-safe, reactive wrappers for daisyUI 5 components with an advanced runtime theming system.
 
-""At present, it is assumed to be used for CSR.""
+The library currently targets client-side rendering (CSR).
 
 > 🚧 **Work in Progress**
 > This project is currently under active development.
@@ -22,11 +22,12 @@ Why it is not on crates.io:
 
 - The crate name `leptos-daisyui-rs` (currently `0.0.3`) is **owned upstream**,
   so we cannot publish under the same name.
-- The fork pulls in **five sibling path dependencies** that have no crates.io
+- The fork pulls in **seven sibling path dependencies** that have no crates.io
   release of their own — `table-rs`, `ui-tokens`, `ai-chat-core`,
-  `editmark-mermaid`, and `editmark-core` — so `cargo publish` (which requires
-  every dependency to carry a version requirement) cannot succeed and there is
-  no docs.rs story to maintain.
+  `editmark-mermaid`, `editmark-core`, `pixelproof-web`, and
+  `pixelproof-style-audit` — so `cargo publish` (which requires every dependency
+  to carry a version requirement) cannot succeed and there is no docs.rs story
+  to maintain.
 
 Consumers depend on it via a path, not `cargo add`:
 
@@ -37,7 +38,7 @@ leptos-daisyui-rs = { path = "../leptos-daisyui-rs" }
 
 ## Features
 
-- ✅ **109 components** — full daisyUI 5 coverage plus custom app-shell/data/scheduling/motion components
+- ✅ **113 components** — full daisyUI 5 coverage plus custom app-shell/data/scheduling/motion components
 - 🎨 **Advanced Runtime Theming** with customizer UI
 - 🎭 **32 Built-in Themes** from daisyUI
 - 🌈 **Oklahoma LCH Color Space** for perceptual color accuracy
@@ -82,21 +83,27 @@ fn Demo () -> impl IntoView {
 }
 ```
 
-### CSS Install
+### CSS installation
 
-As a note at build time, since the class names included in daisyUI are included in the crate, please refer to each component you use inline as follows.
+Each consuming application builds its own Tailwind stylesheet. It must scan the
+library's Rust source so Tailwind sees the literal component classes, and it
+must import the generated semantic tokens used by opinionated components. This
+example assumes the application and this checkout are sibling directories;
+adjust the paths relative to the consuming `input.css`:
 
-```css input.css
+```css
 @import "tailwindcss";
-@import "../styles/tokens.css";   /* see "Design tokens" below */
+@import "../leptos-daisyui-rs/styles/tokens.css";
 @plugin "daisyui";
 @source "../src/**/*.rs";
+@source "../leptos-daisyui-rs/src/**/*.rs";
 
 /* Accordion */
 @source inline("collapse collapse-title collapse-content collapse-arrow collapse-plus collapse-open collapse-close");
 ```
 
-If you want to include everything first [daisyui-components.css](. /stytles/daisyui-components.css).
+See [`demo/input.css`](demo/input.css) for the library showcase's complete
+source configuration and each component guide for any dynamic inline classes.
 
 #### Design tokens
 
@@ -105,10 +112,11 @@ the `ui-tokens` crate, which this fork shares with the Direct2D desktop face in
 `Rust-DeskApp`, so both render from one spacing scale, stroke family, corner-radius
 set and type ramp instead of two dialects that happen to agree.
 
-Importing it is optional but recommended: without it Tailwind's defaults still
-apply and nothing breaks, but your spacing is then a coincidence rather than a
-contract. It is deliberately behaviour-preserving — compiling `input.css` with
-and without the import produces zero semantically different theme values.
+Importing it is required for opinionated framework components and recommended
+for every consumer. In particular, the table hierarchy utilities resolve from
+these tokens: header `#004578` with white content, aligned filter row `#e5f1fb`
+with dark content, and faint grid `#e0e0e0`. The component emits the semantic
+classes, but a consumer that omits this import has no definitions for them.
 
 Regenerate with `cargo xtask gen-tokens` after changing a token upstream; never
 edit the file by hand. `cargo xtask verify` fails if it has drifted.
@@ -380,7 +388,7 @@ pub fn FullWrapperButton(children: Children) -> impl IntoView {
 | Tooltip | ✅ | [src](src/components/tooltip/) | [docs](https://daisyui.com/components/tooltip/) |
 | Validator | ✅ | [src](src/components/validator/) | [docs](https://daisyui.com/components/validator/) |
 
-**Progress: 109 components implemented** (all of daisyUI 5, plus custom additions — this table is illustrative, not exhaustive) 🎉
+**Progress: 113 components implemented** (all of daisyUI 5, plus custom additions — this table is illustrative, not exhaustive) 🎉
 
 
 ## Known Issues & Workarounds
@@ -481,18 +489,14 @@ See [`demo/custom-components.css`](demo/custom-components.css#L376-L400) for the
 
 ## Testing
 
-- **Unit tests**: `cargo test --lib` (1899 tests over the component library).
-- **Visual regression**: `cargo make test-visual` runs the PixelProof smoke suites (`tests/visual_smoke.rs`, `tests/reactivity_smoke.rs`) — headless Chrome drives the demo app, screenshots are SSIM-compared against committed baselines in `tests/visual/baselines/`, and interaction state is asserted through the demo's `window.__APP_DEBUG__` oracle (enabled by `?pp-freeze=1`).
+- **Default gate**: `cargo xtask verify` runs 14 native-only checks, including the 2,380-test library suite with `test-mode`; it does not build Wasm or invoke Chrome.
+- **Selective reactivity**: `cargo xtask test-reactivity` runs exactly 32 real-browser DOM/interaction checks. It is opt-in and is not required for an ordinary rebuild.
+- **Full release evidence**: `cargo xtask verify-full` runs the 14 native checks plus five browser/Wasm lanes and reports 19 steps. Use it when browser, CSS, Wasm, or release behavior needs proof.
+- **Visual regression**: `cargo make test-visual` runs the manual PixelProof visual/reactivity smoke workflow — headless Chrome drives the demo app, screenshots are SSIM-compared against committed baselines in `tests/visual/baselines/`, and interaction state is asserted through the demo's `window.__APP_DEBUG__` oracle (enabled by `?pp-freeze=1`).
 - **Refresh baselines** after an intentional visual change: `VISUAL_TEST_MODE=capture cargo make test-visual`, then review and commit the changed PNGs.
 
-## TODO utility
-- utility hooks
-    - [ ] toggle
-    - [ ] validator
-    - [ ] modal
-    - [ ] popover
-    - etc ...
-- utility provder
-    - [ ] Theme controller
-    - [ ] Toast Manager
-    - etc ...
+## Future work
+
+All planned work and defects are tracked in the repository's Beads database.
+Use `bd ready --json` from the repository root for the current runnable queue;
+historical Markdown checklists are not the issue tracker.
