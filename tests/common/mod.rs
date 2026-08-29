@@ -124,16 +124,16 @@ pub async fn harness_at(path: &str) -> Harness {
     h
 }
 
-/// Bring a component-region screenshot target into the active viewport and
-/// prove that the resulting CDP clip can contain painted pixels.
+/// Prepare a component-region screenshot target inside a nested page scroller,
+/// then prove it is fully contained before asking PixelProof to clip it.
 ///
-/// PixelProof's component helper clips with viewport-relative
-/// `getBoundingClientRect()` coordinates and does not scroll first. A target
-/// below the fold can therefore produce a valid all-white PNG while capture
-/// mode reports success. Focused visual tests call this before
-/// `capture_and_compare_region` so an off-screen target cannot become an
-/// accepted baseline.
-pub fn region_intersects_viewport(
+/// PixelProof reads viewport-relative bounding rectangles, while Chrome
+/// consumes the screenshot clip in page coordinates. Scrolling between those
+/// operations displaces the rendered component by scrollY and clips its
+/// bottom. This helper may scroll a nested content container, but restores the
+/// browser window to the page origin before measuring. A partial/off-screen
+/// target then fails instead of producing a shifted or blank baseline.
+pub fn region_fits_viewport(
     x: f64,
     y: f64,
     width: f64,
@@ -146,19 +146,20 @@ pub fn region_intersects_viewport(
         && height.is_finite()
         && width > 0.0
         && height > 0.0
-        && x < f64::from(viewport.width)
-        && y < f64::from(viewport.height)
-        && x + width > 0.0
-        && y + height > 0.0
+        && x >= 0.0
+        && y >= 0.0
+        && x + width <= f64::from(viewport.width)
+        && y + height <= f64::from(viewport.height)
 }
 
-pub async fn scroll_region_into_view(h: &Harness, selector: &str, viewport: ViewportSize) {
+pub async fn prepare_region_capture(h: &Harness, selector: &str, viewport: ViewportSize) {
     let selector_json = serde_json::to_string(selector).expect("serialize region selector");
     let script = format!(
         r#"(() => {{
           const element = document.querySelector({selector_json});
           if (!element) return false;
           element.scrollIntoView({{ block: 'center', inline: 'nearest' }});
+          window.scrollTo(0, 0);
           return true;
         }})()"#
     );
@@ -166,19 +167,33 @@ pub async fn scroll_region_into_view(h: &Harness, selector: &str, viewport: View
         .page()
         .evaluate(script)
         .await
-        .expect("scroll visual region into view")
+        .expect("prepare visual region")
         .into_value()
-        .expect("region-scroll result is boolean");
-    assert!(found, "visual region `{selector}` does not exist");
+        .expect("region preparation result is boolean");
+    assert!(found, "visual region '{selector}' does not exist");
 
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    let window_scroll: [f64; 2] = h
+        .page()
+        .evaluate("(() => [window.scrollX, window.scrollY])()")
+        .await
+        .expect("read window scroll position")
+        .into_value()
+        .expect("window scroll position is numeric");
+    assert!(
+        window_scroll[0].abs() <= 0.5 && window_scroll[1].abs() <= 0.5,
+        "visual region '{selector}' left the browser window scrolled at ({}, {})",
+        window_scroll[0],
+        window_scroll[1],
+    );
+
     let bounds = h
         .element_box(selector)
         .await
-        .unwrap_or_else(|e| panic!("read visual region `{selector}` bounds: {e}"));
+        .unwrap_or_else(|e| panic!("read visual region '{selector}' bounds: {e}"));
     assert!(
-        region_intersects_viewport(bounds.x, bounds.y, bounds.width, bounds.height, viewport,),
-        "visual region `{selector}` remains outside the {}x{} viewport after scrolling: \
+        region_fits_viewport(bounds.x, bounds.y, bounds.width, bounds.height, viewport,),
+        "visual region '{selector}' does not fit inside the {}x{} viewport after nested scrolling: \
          x={}, y={}, width={}, height={}",
         viewport.width,
         viewport.height,

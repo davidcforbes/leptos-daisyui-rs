@@ -35,14 +35,23 @@ use common::{harness_at, state};
 fn component_capture_region_requires_painted_area_inside_the_viewport() {
     let viewport = pixelproof_web::ViewportSize::new(1280, 800);
 
-    assert!(common::region_intersects_viewport(
+    assert!(common::region_fits_viewport(
         100.0, 100.0, 320.0, 180.0, viewport
     ));
-    assert!(!common::region_intersects_viewport(
+    assert!(common::region_fits_viewport(
+        0.0, 0.0, 1280.0, 800.0, viewport
+    ));
+    assert!(!common::region_fits_viewport(
         100.0, 100.0, 0.0, 180.0, viewport
     ));
-    assert!(!common::region_intersects_viewport(
+    assert!(!common::region_fits_viewport(
         100.0, 100.0, 320.0, 0.0, viewport
+    ));
+    assert!(!common::region_fits_viewport(
+        -1.0, 100.0, 320.0, 180.0, viewport
+    ));
+    assert!(!common::region_fits_viewport(
+        100.0, 750.0, 320.0, 100.0, viewport
     ));
 }
 
@@ -129,7 +138,7 @@ async fn data_table_sorted_matches_baseline() {
 #[ignore = "requires demo dev server (cargo make test-visual)"]
 async fn data_table_filter_row_matches_baseline() {
     let h = harness_at("/components/data-table").await;
-    common::scroll_region_into_view(&h, "#filter-row-table", common::VIEWPORT).await;
+    common::prepare_region_capture(&h, "#filter-row-table", common::VIEWPORT).await;
     let r = h
         .capture_and_compare_region(
             "data_table",
@@ -154,7 +163,7 @@ async fn data_table_filter_row_narrow_matches_baseline() {
         .await
         .expect("narrow table viewport");
     tokio::time::sleep(std::time::Duration::from_millis(600)).await;
-    common::scroll_region_into_view(&h, "#filter-row-table", viewport).await;
+    common::prepare_region_capture(&h, "#filter-row-table", viewport).await;
     let r = h
         .capture_and_compare_region(
             "data_table",
