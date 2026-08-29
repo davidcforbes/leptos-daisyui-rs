@@ -1,5 +1,6 @@
 use crate::components::data_table::auto_page::{
     DEFAULT_AUTO_MIN_ROWS, FALLBACK_HEADER_HEIGHT, FALLBACK_ROW_HEIGHT, auto_page_size_for_height,
+    max_row_height,
 };
 use crate::components::data_table::body::{DataTableBody, DataTableBodyClick, DataTableBodyRow};
 use crate::components::data_table::chooser::{
@@ -821,6 +822,10 @@ pub fn DataTable(
     // depends on the daisyUI table size, theme and cell content. The constants
     // are only fallbacks for when there is nothing to measure (empty table, or
     // the first paint before rows exist).
+    // The pending belt-and-braces overflow-check timer (ldui-89rp), kept so
+    // unmount can cancel it -- same rationale and pattern as `measure_handle`
+    // below and the search debounce's handle (ldui-d54).
+    let overflow_handle: StoredValue<Option<TimeoutHandle>> = StoredValue::new(None);
     let measure_rows = move || {
         // Late-firing guard (ldui-d54): this runs from a zero-delay macrotask,
         // so a router navigation scheduled-then-navigated in one task disposes
@@ -859,7 +864,24 @@ pub fn DataTable(
         // depends only on the layout context and the fixed point is unique.
         let viewport = wrapper.offset_height() as f64;
         let header_height = measure("thead", FALLBACK_HEADER_HEIGHT);
-        let row_height = measure("tbody tr", FALLBACK_ROW_HEIGHT);
+
+        // The MAX across every currently rendered `<tbody> <tr>`, not just the
+        // first (ldui-89rp): with variable-height rows -- a wrapped cell, a
+        // multi-line badge stack -- a short first row derives a page size
+        // that fits the short row and overflows a taller one further down
+        // the page. `max_row_height` is the pure, unit-tested reduction; this
+        // is only the DOM-side gathering of what to feed it.
+        let row_height = wrapper
+            .query_selector_all("tbody tr")
+            .map(|rows| {
+                let heights: Vec<f64> = (0..rows.length())
+                    .filter_map(|i| rows.item(i))
+                    .filter_map(|node| node.dyn_into::<web_sys::HtmlElement>().ok())
+                    .map(|el| el.offset_height() as f64)
+                    .collect();
+                max_row_height(&heights, FALLBACK_ROW_HEIGHT)
+            })
+            .unwrap_or(FALLBACK_ROW_HEIGHT);
 
         let configured_page_size = configured_page_size
             .try_get_untracked()
@@ -884,6 +906,47 @@ pub fn DataTable(
         // and the try_set below is then a no-op.
         if auto_rows.try_get_untracked() != Some(Some(rows)) {
             let _ = auto_rows.try_set(Some(rows));
+        }
+
+        // Belt-and-braces (ldui-89rp): even the max of the currently
+        // rendered rows can miss growth that only appears once the derived
+        // count actually renders (e.g. a taller row that wasn't part of the
+        // previous page's set). Check once more, on the next frame, whether
+        // the wrapper still overflows its own allocated box; if so, drop the
+        // count by exactly one row and stop -- deliberately no loop, so a
+        // table that genuinely cannot fit still shows *a* page rather than
+        // shrinking toward nothing.
+        if let Some(handle) = overflow_handle.try_get_value().flatten() {
+            handle.clear();
+        }
+        let tolerance = row_height;
+        let check_overflow = move || {
+            // Same late-firing guard as `measure_rows` above: the
+            // `auto_page_size` try-read doubles as the disposed-owner check,
+            // so `table_wrapper_ref`/`auto_rows` are safe to read/write
+            // (still via try-forms, belt-and-braces) past this point.
+            if !auto_page_size.try_get_untracked().unwrap_or(false) {
+                return;
+            }
+            let Some(wrapper) = table_wrapper_ref.get_untracked() else {
+                return;
+            };
+            let scroll_height = wrapper.scroll_height() as f64;
+            let offset_height = wrapper.offset_height() as f64;
+            if scroll_height > offset_height + tolerance
+                && let Some(Some(current)) = auto_rows.try_get_untracked()
+                && current > 1
+            {
+                let _ = auto_rows.try_set(Some(current - 1));
+            }
+        };
+        match set_timeout_with_handle(check_overflow, std::time::Duration::ZERO) {
+            Ok(handle) => {
+                overflow_handle.try_update_value(|slot| *slot = Some(handle));
+            }
+            // No `window` to schedule against: checking now is better than
+            // not at all.
+            Err(_) => check_overflow(),
         }
     };
 
@@ -918,6 +981,11 @@ pub fn DataTable(
     // transition, which had to pace navigations 150 ms apart to dodge it).
     on_cleanup(move || {
         if let Some(handle) = measure_handle.try_get_value().flatten() {
+            handle.clear();
+        }
+        // Same rationale, for the belt-and-braces overflow-check timer
+        // (ldui-89rp): it must not outlive the reactive owner either.
+        if let Some(handle) = overflow_handle.try_get_value().flatten() {
             handle.clear();
         }
     });

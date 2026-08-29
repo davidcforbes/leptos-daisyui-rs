@@ -723,6 +723,45 @@ async fn auto_page_size_keeps_a_usable_page_and_scrolls_short_viewports() {
     );
 }
 
+/// Regression guard for ldui-89rp: a short first `<tbody>` row must not
+/// derive an `auto_page_size` count that overflows once a genuinely tall row
+/// further down the page is accounted for. The fix measures the MAX
+/// `offset_height` across every currently rendered row (not just the first),
+/// plus a bounded next-frame belt-and-braces check.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn auto_page_size_does_not_overflow_with_a_tall_variable_height_row() {
+    let h = harness_at("/components/data-table").await;
+
+    // Let the ResizeObserver's settle pass and the belt-and-braces
+    // next-frame check both finish.
+    tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+
+    let snapshot = eval_json(
+        &h,
+        r#"(() => {
+            const root = document.querySelector('#auto-page-variable-height-table');
+            const viewport = root.querySelector(':scope > .overflow-x-auto');
+            return {
+                rows: root.querySelectorAll('tbody tr').length,
+                viewportHeight: viewport.clientHeight,
+                scrollHeight: viewport.scrollHeight,
+            };
+        })()"#,
+    )
+    .await;
+
+    assert!(
+        snapshot["rows"].as_u64().unwrap_or(0) > 0,
+        "expected at least one rendered row: {snapshot}"
+    );
+    assert!(
+        snapshot["scrollHeight"].as_u64() <= snapshot["viewportHeight"].as_u64(),
+        "auto_page_size overflowed its own scroll wrapper with a tall variable-height row \
+         in the rendered set (pagination + scrollbar together): {snapshot}"
+    );
+}
+
 /// Text content of the element with the given `data-testid`.
 async fn testid_text(h: &pixelproof_web::Harness, testid: &str) -> String {
     let sel = format!("[data-testid=\"{testid}\"]");

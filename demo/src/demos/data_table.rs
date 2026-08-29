@@ -206,6 +206,32 @@ pub fn DataTableDemo() -> impl IntoView {
         Column::new("role", "Role"),
     ]);
 
+    // Variable-height auto_page_size regression guard (ldui-89rp): the first
+    // rendered row is short, but one row further down wraps to roughly three
+    // lines. Measuring only the first row (or averaging) derives a page size
+    // that fits the short row and overflows once the tall one renders --
+    // `auto_page_size` must measure the MAX across every rendered row.
+    let variable_height_data = RwSignal::new(generate_users(12));
+    let variable_height_columns = RwSignal::new(vec![
+        Column::new("id", "ID"),
+        Column::new("name", "Name"),
+        Column::new_non_sortable("notes", "Notes").with_renderer(0),
+    ]);
+    let tall_row_renderer: CellRenderer = Callback::new(
+        move |(_idx, row): (usize, HashMap<&'static str, String>)| {
+            if row.get("id").map(String::as_str) == Some("003") {
+                view! {
+                    <div style="min-height: 108px; display: flex; align-items: center;">
+                        "Deliberately tall wrapped content (ldui-89rp): the auto_page_size measurement must catch this row's real height even though the first rendered row is short."
+                    </div>
+                }
+                .into_any()
+            } else {
+                view! { <span>"short"</span> }.into_any()
+            }
+        },
+    );
+
     // Row-activation state. Its own `selected_rows` so this demo's selection is
     // independent of the multi-select demo above -- the point here is that a
     // plain click does NOT land in this set.
@@ -1041,6 +1067,27 @@ pub fn DataTableDemo() -> impl IntoView {
                         auto_page_size=true
                         max_height="100%"
                         attr:id="auto-page-table"
+                    />
+                </div>
+            </Section>
+
+            // Regression guard for ldui-89rp
+            <Section title="Responsive Page Size — Variable-Height Rows">
+                <p class="text-sm opacity-70 mb-4">
+                    "A regression guard for " <code>"ldui-89rp"</code>
+                    ": the third row wraps to roughly three lines while every other row "
+                    "stays short. " <code>"auto_page_size"</code>
+                    " must measure the tallest currently rendered row rather than just the "
+                    "first, so the derived page never overflows its own scroll wrapper."
+                </p>
+                <div class="resize-y overflow-auto border border-base-300 rounded-lg p-3 h-96 min-h-32">
+                    <DataTable
+                        data=variable_height_data
+                        columns=variable_height_columns
+                        cell_renderers=vec![tall_row_renderer]
+                        auto_page_size=true
+                        max_height="100%"
+                        attr:id="auto-page-variable-height-table"
                     />
                 </div>
             </Section>

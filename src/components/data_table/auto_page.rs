@@ -9,9 +9,12 @@
 //! The desktop uses fixed `HEADER_HEIGHT`/`ROW_HEIGHT` constants because it
 //! draws its own rows. On the web a row's height depends on the daisyUI table
 //! size (`table-xs` .. `table-lg`), theme, and cell content, so the component
-//! *measures* the rendered header and first data row and passes them in. The
-//! constants here are only fallbacks for when there is nothing to measure yet
-//! (first paint, or an empty table).
+//! *measures* the rendered header and the MAX height across every currently
+//! rendered data row (not just the first -- ldui-89rp: a short first row must
+//! not derive a count that overflows once a taller row further down the page
+//! is accounted for) and passes that in. The constants here are only
+//! fallbacks for when there is nothing to measure yet (first paint, or an
+//! empty table).
 
 /// Fallback data-row height (px) used when no rendered `<tbody> <tr>` is
 /// available to measure (empty table, or the very first paint). Matches
@@ -71,6 +74,33 @@ pub fn rows_per_page_for_height(
     // `f64 as usize` saturates (never UB / never wraps) since Rust 1.45, so an
     // absurd viewport height clamps to usize::MAX instead of misbehaving.
     ((available / row_height).floor() as usize).max(1)
+}
+
+/// Reduces a set of measured `<tbody> <tr>` heights (px) to the single row
+/// height [`rows_per_page_for_height`] divides by. Uses the MAX, not the
+/// first or an average: with variable-height rows (e.g. a wrapped cell), a
+/// short first row and a taller later row are both "the row height" in some
+/// sense, but only the max keeps every rendered row inside the derived page
+/// from overflowing the wrapper (ldui-89rp). Non-finite/non-positive heights
+/// are ignored (unmeasurable or not-yet-laid-out elements), mirroring
+/// `rows_per_page_for_height`'s own fallback-on-invalid contract; an empty or
+/// all-invalid slice yields `fallback`.
+///
+/// ```
+/// use leptos_daisyui_rs::components::max_row_height;
+///
+/// // A short first row (24px) and a taller wrapped row (76px) later on the
+/// // page: the max is what must drive the division, not the first value.
+/// assert_eq!(max_row_height(&[24.0, 76.0, 40.0], 40.0), 76.0);
+/// assert_eq!(max_row_height(&[], 40.0), 40.0, "nothing measured -> fallback");
+/// ```
+pub fn max_row_height(heights: &[f64], fallback: f64) -> f64 {
+    heights
+        .iter()
+        .copied()
+        .filter(|h| h.is_finite() && *h > 0.0)
+        .fold(None::<f64>, |acc, h| Some(acc.map_or(h, |m| m.max(h))))
+        .unwrap_or(fallback)
 }
 
 /// Resolves the effective responsive page size for a measured table viewport.
@@ -214,5 +244,75 @@ mod tests {
     fn a_measured_fit_at_the_minimum_remains_responsive() {
         // 77px header + five 76px rows.
         assert_eq!(auto_page_size_for_height(457.0, 77.0, 76.0, 10, 5), 5);
+    }
+
+    // ── max_row_height (ldui-89rp) ──
+
+    #[test]
+    fn max_row_height_picks_the_tallest_not_the_first() {
+        assert_eq!(
+            max_row_height(&[24.0, 76.0, 40.0], FALLBACK_ROW_HEIGHT),
+            76.0
+        );
+    }
+
+    #[test]
+    fn max_row_height_of_a_single_reading_is_that_reading() {
+        assert_eq!(max_row_height(&[52.0], FALLBACK_ROW_HEIGHT), 52.0);
+    }
+
+    #[test]
+    fn max_row_height_of_nothing_measured_falls_back() {
+        assert_eq!(
+            max_row_height(&[], FALLBACK_ROW_HEIGHT),
+            FALLBACK_ROW_HEIGHT
+        );
+    }
+
+    #[test]
+    fn max_row_height_ignores_invalid_readings_around_a_valid_max() {
+        // 0 (not yet laid out), a negative stray, and NaN must not win, hide,
+        // or poison the fold; the one valid reading is still found.
+        assert_eq!(
+            max_row_height(&[0.0, -5.0, f64::NAN, 48.0], FALLBACK_ROW_HEIGHT),
+            48.0
+        );
+    }
+
+    #[test]
+    fn max_row_height_of_all_invalid_readings_falls_back() {
+        assert_eq!(
+            max_row_height(&[0.0, -5.0, f64::NAN, f64::INFINITY], FALLBACK_ROW_HEIGHT),
+            FALLBACK_ROW_HEIGHT
+        );
+    }
+
+    #[test]
+    fn feeding_the_max_row_height_avoids_the_short_first_row_overflow_trap() {
+        // ldui-89rp production repro: the first rendered row is a short 24px,
+        // but a later row on the same page wraps to 76px. A page size derived
+        // from just the first row (or an average) overflows once the tall row
+        // renders; feeding rows_per_page_for_height the MAX of the rendered
+        // set instead derives a count every one of those rows actually fits
+        // in.
+        let heights = [24.0, 76.0, 40.0, 24.0];
+        let fed_first = heights[0];
+        let fed_max = max_row_height(&heights, FALLBACK_ROW_HEIGHT);
+        assert_eq!(fed_max, 76.0);
+
+        let viewport = 400.0;
+        let header = 36.0;
+        let rows_from_first = rows_per_page_for_height(viewport, header, fed_first);
+        let rows_from_max = rows_per_page_for_height(viewport, header, fed_max);
+
+        assert!(
+            rows_from_max < rows_from_first,
+            "the max-fed count ({rows_from_max}) must be strictly smaller than the \
+             first-row-fed count ({rows_from_first}) or this scenario doesn't \
+             exercise the bug"
+        );
+        // 400 - 36 = 364px available; 364 / 76 = 4.78 -> 4 whole rows, every
+        // one of which is tall enough to actually fit.
+        assert_eq!(rows_from_max, 4);
     }
 }
