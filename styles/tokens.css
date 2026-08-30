@@ -36,8 +36,9 @@
   /* Opinionated table hierarchy, from ui_tokens::color::table —
      the dedicated semantic module shared with the Direct2D desktop
      face, rather than the generic status-color aliases it derives
-     from. This decouples the table role from STATUS_BLUE_*/TEXT_PRIMARY/
-     CONTROL_BORDER drifting for unrelated reasons. */
+     from. This decouples the table role from the generic STATUS_BLUE,
+     TEXT_PRIMARY and CONTROL_BORDER aliases drifting for unrelated
+     reasons. */
   --color-table-header: #004578;
   --color-table-header-content: #ffffff;
   --color-table-filter: #e5f1fb;

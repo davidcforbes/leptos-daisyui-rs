@@ -1201,8 +1201,9 @@ fn tokens_css() -> String {
     css.push_str("\n  /* Opinionated table hierarchy, from ui_tokens::color::table —\n");
     css.push_str("     the dedicated semantic module shared with the Direct2D desktop\n");
     css.push_str("     face, rather than the generic status-color aliases it derives\n");
-    css.push_str("     from. This decouples the table role from STATUS_BLUE_*/TEXT_PRIMARY/\n");
-    css.push_str("     CONTROL_BORDER drifting for unrelated reasons. */\n");
+    css.push_str("     from. This decouples the table role from the generic STATUS_BLUE,\n");
+    css.push_str("     TEXT_PRIMARY and CONTROL_BORDER aliases drifting for unrelated\n");
+    css.push_str("     reasons. */\n");
     for (name, value) in [
         ("table-header", color::table::HEADER),
         ("table-header-content", color::table::HEADER_CONTENT),
@@ -2520,6 +2521,62 @@ mod gen_tokens_tests {
                 "expected {want:?} derived from ui_tokens::color::table::{} to appear in generated css:\n{css}",
                 name.to_ascii_uppercase().replace('-', "_")
             );
+        }
+    }
+
+    #[test]
+    fn generated_css_never_leaks_comment_text_outside_a_comment() {
+        // Regression guard (ldui-gp34 fix-forward): a stray `*/` INSIDE a
+        // comment body (e.g. an alias name written as `STATUS_BLUE_*/`)
+        // closes that comment early. Everything after it, up to the next
+        // `/*`, then reads as bare prose inside the `@theme` block —
+        // Tailwind v4 rejects that with "`@theme` blocks must only contain
+        // custom properties or `@keyframes`", failing every browser lane
+        // that builds the demo stylesheet.
+        //
+        // Walk the generated css the way a CSS tokenizer would, splitting it
+        // into comment / non-comment segments on `/*` and `*/`, and assert
+        // every non-comment segment is only ever blank lines, the `@theme`
+        // block braces, or a `--custom-property: value;` declaration.
+        let css = tokens_css();
+
+        fn assert_segment_is_only_declarations_or_structure(segment: &str, css: &str) {
+            for line in segment.lines() {
+                let trimmed = line.trim();
+                if trimmed.is_empty() || trimmed == "@theme {" || trimmed == "}" {
+                    continue;
+                }
+                assert!(
+                    trimmed.starts_with("--") && trimmed.ends_with(';'),
+                    "non-comment content in generated css is not a custom-property \
+                     declaration, which Tailwind's @theme grammar rejects \
+                     (a comment likely closed early via a stray `*/`): \
+                     {trimmed:?}\nfull css:\n{css}"
+                );
+            }
+        }
+
+        let mut rest = css.as_str();
+        let mut in_comment = false;
+        loop {
+            let marker = if in_comment { "*/" } else { "/*" };
+            match rest.find(marker) {
+                Some(i) => {
+                    if !in_comment {
+                        assert_segment_is_only_declarations_or_structure(&rest[..i], &css);
+                    }
+                    rest = &rest[i + marker.len()..];
+                    in_comment = !in_comment;
+                }
+                None => {
+                    assert!(
+                        !in_comment,
+                        "generated css ends with an unterminated /* comment:\n{css}"
+                    );
+                    assert_segment_is_only_declarations_or_structure(rest, &css);
+                    break;
+                }
+            }
         }
     }
 
