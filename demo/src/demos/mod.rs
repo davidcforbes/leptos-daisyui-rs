@@ -1,4 +1,5 @@
 pub mod accordion;
+pub mod admin_workbench;
 pub mod ai_chat;
 pub mod alert;
 pub mod app_shell;
@@ -106,6 +107,7 @@ pub mod vertical_steps;
 pub mod week_view;
 
 pub use accordion::*;
+pub use admin_workbench::*;
 pub use ai_chat::*;
 pub use alert::*;
 pub use app_shell::*;

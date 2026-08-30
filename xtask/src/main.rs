@@ -443,6 +443,26 @@ fn page_quick_actions_step() -> Step {
     }
 }
 
+/// Focused browser proof for the admin-workbench composition reference
+/// (ldui-ynmd.3): one standard `AppShellTopBar`, one borderless base-page
+/// `PageHeader` with seven icon quick actions, eight independent `KpiStrip`
+/// cards, an `EntityTable` with its own aligned filter row (no external
+/// `FilterBar` duplicating it), and a right-docked `FilterSidebar` assistant
+/// whose collapse widens the table; plus a compact-viewport check for
+/// horizontal overflow and quick-action wrapping. Lives on the general demo
+/// app (`html_target: None`, like [`page_quick_actions_step`]) rather than a
+/// dedicated test-host page, and stays in its own file/step for the same
+/// reason as [`page_quick_actions_step`].
+fn admin_workbench_step() -> Step {
+    Step {
+        name: "test-admin-workbench",
+        run: Run::BrowserSuite {
+            test: "admin_workbench_smoke",
+            html_target: None,
+        },
+    }
+}
+
 /// The full release gate. The catalog browser suites are deliberately
 /// consecutive: [`run_steps`] reuses one verified release server for adjacent
 /// suites targeting the same HTML entry point.
@@ -459,6 +479,7 @@ fn full_steps() -> Vec<Step> {
     steps.push(section_heading_step());
     steps.push(search_picker_dialog_step());
     steps.push(page_quick_actions_step());
+    steps.push(admin_workbench_step());
     steps
 }
 
@@ -1894,6 +1915,7 @@ fn main() -> ExitCode {
         "test-section-heading" => run_steps(&[section_heading_step()]),
         "test-search-picker-dialog" => run_steps(&[search_picker_dialog_step()]),
         "test-page-quick-actions" => run_steps(&[page_quick_actions_step()]),
+        "test-admin-workbench" => run_steps(&[admin_workbench_step()]),
         "test-snapshot-table-delta" => run_steps(&[snapshot_table_delta_step()]),
         "test-snapshot-table-page-controls" => run_steps(&[snapshot_table_page_controls_step()]),
         "gen-tokens" => {
@@ -2316,6 +2338,29 @@ pub fn r() -> f32 { radius::CARD }
             full_steps()
                 .iter()
                 .any(|s| s.name == "test-page-quick-actions")
+        );
+    }
+
+    #[test]
+    fn admin_workbench_step_is_in_process_and_full_only() {
+        let step = admin_workbench_step();
+        assert_eq!(step.name, "test-admin-workbench");
+        assert!(matches!(
+            step.run,
+            Run::BrowserSuite {
+                test: "admin_workbench_smoke",
+                html_target: None
+            }
+        ));
+        assert!(
+            !gate_steps()
+                .iter()
+                .any(|s| s.name == "test-admin-workbench")
+        );
+        assert!(
+            full_steps()
+                .iter()
+                .any(|s| s.name == "test-admin-workbench")
         );
     }
 

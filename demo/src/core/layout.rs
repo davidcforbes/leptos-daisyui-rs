@@ -684,6 +684,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
             title: "Layout",
             items: vec![
                 ComponentItem {
+                    name: "Admin Workbench (Composition Reference)",
+                    href: "/components/admin_workbench",
+                    value: "admin_workbench",
+                },
+                ComponentItem {
                     name: "AppShell",
                     href: "/components/app-shell",
                     value: "app-shell",
