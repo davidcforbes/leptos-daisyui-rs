@@ -1871,10 +1871,16 @@ async fn client_snapshot_list_contract_works_end_to_end() {
     let ceilings = [
         Ceiling::new(family::TYPOGRAPHY, 0),
         Ceiling::new(family::SHAPE, 0),
-        // daisyUI's five input/select shadows use oklab/oklch colours, which
-        // the current engine parser cannot decode. Exact measured debt; no
-        // slack. Lower this when that parser gap is fixed.
-        Ceiling::new(family::DEPTH, 5),
+        // daisyUI's input/select shadows use oklab/oklch colours, which the
+        // current engine parser cannot decode -- the same documented gap
+        // commit 2fb75d3 raised /components/data-table's ceiling for.
+        // Was 5 (dataset selector, search input, page-size select, status
+        // filter, case filter); the hybrid column-filters wave added the
+        // `client` column filter (an `input.input`) and the entity table's
+        // own internal rows-per-page `select.select`, two more instances of
+        // the identical stock inset box-shadow, not two new defects. Exact
+        // measured debt; no slack. Lower this when that parser gap is fixed.
+        Ceiling::new(family::DEPTH, 7),
         Ceiling::new(family::GRID, 0),
         Ceiling::new(family::INTERNAL, 0),
         Ceiling::new(family::COMPONENT_DRIFT, 0),
@@ -1977,8 +1983,15 @@ async fn hybrid_filters_localization_defaults_and_focus_recovery_are_framework_o
                 caseCell: table.querySelector('#entity-case-filter')?.closest('th')?.dataset.entityColumn,
                 clientCell: table.querySelector('#entity-client-filter')?.closest('th')?.dataset.entityColumn,
                 detachedStatus: document.querySelectorAll('[data-filter-bar] #entity-status-filter').length,
-                resets: document.querySelectorAll('[data-filter-reset]').length,
-                saves: document.querySelectorAll('[data-filter-save-default]').length,
+                // ldui-3br added two more standalone `FilterBar` fixtures
+                // further down this same page (`filter-bar-actions-only`,
+                // `filter-bar-columns-only`) for the reactivity suite's own
+                // coverage; the actions-only one supplies `on_reset` and so
+                // renders its own Reset button. Scope to the primary
+                // FilterBar this test is about, excluding those siblings,
+                // rather than counting every Reset/Save button on the page.
+                resets: document.querySelectorAll('[data-filter-reset]:not([data-testid="filter-bar-actions-only"] *, [data-testid="filter-bar-columns-only"] *)').length,
+                saves: document.querySelectorAll('[data-filter-save-default]:not([data-testid="filter-bar-actions-only"] *, [data-testid="filter-bar-columns-only"] *)').length,
                 generation: Number(document.querySelector('[data-entity-focus-region]').dataset.entityColumnGeneration),
             };
         })()"#,
@@ -2397,6 +2410,14 @@ async fn hybrid_filters_localization_defaults_and_focus_recovery_are_framework_o
         .expect("restore wide viewport");
     tokio::time::sleep(Duration::from_millis(150)).await;
 
+    // Restoring: re-checking `case_type`'s chooser item unhides it even
+    // though its filter is still active ("Family", set while it was hidden
+    // via the responsive fallback panel above). `EntityColumnFilter`'s
+    // `disabled` guard is one-directional -- it blocks HIDING a visible,
+    // actively-filtered column (see the `status` column's `active_hide`
+    // assertions earlier in this test), never SHOWING an already-hidden
+    // one; otherwise a column filtered while hidden could never be restored
+    // without first clearing its filter.
     click(&harness, "[data-entity-column-chooser]").await;
     click(&harness, "[role='menu'] [data-entity-column='case_type']").await;
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -2683,10 +2704,16 @@ async fn entity_table_selection_drives_master_detail_and_survives_removal() {
 
     // A plain click on a row-action control must neither select nor
     // activate the row it sits in (`event_origin_is_action` / the action
-    // cell's own stop-propagation).
+    // cell's own stop-propagation). Wide and compact share one `<tr>`, so
+    // this `data-testid` exists twice at this viewport -- once in the
+    // (visible) wide `<td>`, once in the compact `<td class="lg:hidden">`
+    // that precedes it in document order. Scope to the wide `<td>`,
+    // matching how the rest of this test scopes to
+    // `td[data-entity-column='client']`, so the click lands on the visible
+    // node rather than chromiumoxide's document-order-first (hidden) match.
     click(
         &harness,
-        "#entity-selection-table tbody tr[data-entity-row-key='office-mx-1'] [data-testid='entity-selection-row-action']",
+        "#entity-selection-table tbody tr[data-entity-row-key='office-mx-1'] td[data-entity-column='view'] [data-testid='entity-selection-row-action']",
     )
     .await;
     assert_eq!(
@@ -2895,8 +2922,17 @@ async fn inspect_contact_presentation(
     compact: bool,
 ) -> Value {
     let selector = if compact {
+        // `td.lg\:hidden` needs the class-name colon CSS-escaped, but this
+        // string is spliced into a double-quoted JS string literal by
+        // `eval_json` below: a single backslash there is an unrecognized JS
+        // string escape, so JS drops it and the browser never sees the
+        // escape at all (`SyntaxError: ... is not a valid selector`).
+        // `[class~='lg:hidden']` matches the same single class token without
+        // any CSS escaping, so it survives the JS string round-trip intact.
+        // (Single-quoted, not double: the whole selector is itself spliced
+        // into a double-quoted JS string literal below.)
         format!(
-            "#entity-table-presentation-fixture [data-entity-row-key='{row_key}'] td.lg\\:hidden [data-entity-column='contact']"
+            "#entity-table-presentation-fixture [data-entity-row-key='{row_key}'] td[class~='lg:hidden'] [data-entity-column='contact']"
         )
     } else {
         format!(
@@ -3120,31 +3156,55 @@ async fn entity_column_primary_secondary_composes_two_accessible_lines() {
         .set_viewport(ViewportSize::new(1280, 800))
         .await
         .expect("restore wide viewport before hiding the contact column");
+    // Settle after the viewport change before the next CDP click, matching
+    // the established pattern elsewhere in this file (see the identical
+    // restore-then-click sequence above): without it the click's box model
+    // can be computed against the pre-reflow (compact) layout and land on
+    // the wrong coordinates, so the column chooser never opens and the
+    // subsequent menu-item click is a no-op.
+    tokio::time::sleep(Duration::from_millis(150)).await;
 
     // Hiding: the column chooser removing `contact` drops both the header
     // and every row's presentation from the wide DOM.
     click(&harness, "[data-entity-column-chooser]").await;
     click(&harness, "[role='menu'] [data-entity-column='contact']").await;
     tokio::time::sleep(Duration::from_millis(100)).await;
+    // Nested in an object rather than asserted as the eval's own bare
+    // top-level result: chromiumoxide's `EvaluationResult::into_value`
+    // deserializes `RemoteObject.value` through `Option<serde_json::Value>`,
+    // and serde's blanket `Option<T>` impl collapses a JSON `null` into
+    // `None` -- so a query that legitimately evaluates to `null` at the top
+    // level surfaces as "No value found" instead of `Value::Null`. Every
+    // other `Value::Null` assertion in this file already nests inside an
+    // object for exactly this reason; this pair didn't, and had never
+    // actually run (blocked by an unrelated selector bug) until now.
+    // `r##"..."##`, not `r#"..."#`: the id selector's literal `"#entity...`
+    // contains the `"#` sequence, which would otherwise close the raw
+    // string early (same trap as a `"#e05654"` colour code).
+    let removed = eval_json(
+        &harness,
+        r##"(() => ({
+            header: document.querySelector("#entity-table-presentation-fixture th[data-entity-column='contact']"),
+            cell: document.querySelector("#entity-table-presentation-fixture td[data-entity-column='contact']"),
+        }))()"##,
+    )
+    .await;
     assert_eq!(
-        eval_json(
-            &harness,
-            "document.querySelector(\"#entity-table-presentation-fixture th[data-entity-column='contact']\")",
-        )
-        .await,
+        removed["header"],
         Value::Null,
         "hiding the contact column must remove its header"
     );
     assert_eq!(
-        eval_json(
-            &harness,
-            "document.querySelector(\"#entity-table-presentation-fixture td[data-entity-column='contact']\")",
-        )
-        .await,
+        removed["cell"],
         Value::Null,
         "hiding the contact column must remove its cells"
     );
-    click(&harness, "[data-entity-column-chooser]").await;
+    // The chooser dropdown is still open from the hide click above --
+    // toggling a `MenuCheckItem` only updates `preferences`, it never
+    // touches `column_chooser_open` -- so no second trigger click is needed
+    // (and would in fact TOGGLE THE DROPDOWN CLOSED, since the trigger's own
+    // click handler flips `column_chooser_open` unconditionally, making the
+    // very next item click land on a hidden `[role='menu']`).
     click(&harness, "[role='menu'] [data-entity-column='contact']").await;
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert!(

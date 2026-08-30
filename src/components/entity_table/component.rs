@@ -1101,6 +1101,15 @@ where
                 <div
                     class="dropdown dropdown-end dropdown-bottom"
                     class:dropdown-open=move || column_chooser_open.get()
+                    // daisyUI also shows `.dropdown-content` on `:focus-within`,
+                    // and Escape deliberately returns focus to the trigger
+                    // button (still inside this container) so keyboard users
+                    // don't lose their place. Without `.dropdown-close` that
+                    // `:focus-within` match alone would keep the menu visible
+                    // even after `column_chooser_open` goes false (ldui-vn81
+                    // follow-up); `.dropdown-close` unconditionally overrides
+                    // `:focus-within` in daisyUI's own selector.
+                    class:dropdown-close=move || !column_chooser_open.get()
                     data-entity-column-chooser-open=move || column_chooser_open.get().then_some("true")
                     on:focusout=move |event: web_sys::FocusEvent| {
                         let remains_inside = event
@@ -1139,9 +1148,17 @@ where
                         aria-haspopup="menu"
                         aria-expanded=move || column_chooser_open.get().to_string()
                         aria-controls=column_chooser_controls_id
+                        // `gap-0`: a flex/grid item's computed `display` is
+                        // "blockified" per spec, so the single `<span>` child
+                        // below counts as a layout child even though there is
+                        // only ever one of them -- leaving daisyUI's stock
+                        // `.btn` `gap: .375rem` (6px, off the canonical
+                        // spacing scale) "declared" with no visual effect.
+                        // Pin it to the canonical 0 explicitly rather than
+                        // leave dead, off-scale CSS for the audit to flag.
                         class=move || match column_chooser_trigger.get() {
-                            EntityColumnChooserTrigger::Text => "btn btn-ghost btn-sm",
-                            EntityColumnChooserTrigger::Icon => "btn btn-ghost btn-sm btn-square forced-colors:border forced-colors:border-[ButtonText] forced-colors:text-[ButtonText]",
+                            EntityColumnChooserTrigger::Text => "btn btn-ghost btn-sm gap-0",
+                            EntityColumnChooserTrigger::Icon => "btn btn-ghost btn-sm btn-square gap-0 forced-colors:border forced-colors:border-[ButtonText] forced-colors:text-[ButtonText]",
                         }
                         on:click=move |_| column_chooser_open.update(|open| *open = !*open)
                     >
@@ -1150,7 +1167,9 @@ where
                                 <span>{texts.with(|texts| texts.choose_columns.clone())}</span>
                             }.into_any(),
                             EntityColumnChooserTrigger::Icon => view! {
-                                <span aria-hidden="true" class="text-lg leading-none">"⚙"</span>
+                                // `text-base` (16px) is on the type ramp;
+                                // `text-lg` (18px) is not.
+                                <span aria-hidden="true" class="text-base leading-none">"⚙"</span>
                             }.into_any(),
                         }}
                     </button>
@@ -1187,10 +1206,23 @@ where
                                                 });
                                             });
                                         });
+                                        // `EntityTableTexts::filter_active`'s own doc says this
+                                        // item "cannot be hidden" -- a one-directional guard.
+                                        // Gating on `active_filter` alone also disabled SHOWING
+                                        // an already-hidden column once its filter went active
+                                        // (e.g. set from the responsive fallback panel while
+                                        // hidden), permanently trapping it there with no way to
+                                        // restore it short of first clearing the filter. Disable
+                                        // only the hide direction: a visible, actively-filtered
+                                        // column can't be unchecked; a hidden one can always be
+                                        // rechecked.
+                                        let disabled = Signal::derive(move || {
+                                            checked.get() && active_filter.get()
+                                        });
                                         view! {
                                             <MenuCheckItem
                                                 checked=checked
-                                                disabled=active_filter
+                                                disabled=disabled
                                                 on_toggle=on_toggle
                                                 attr:data-entity-column=column_id
                                                 attr:data-entity-active-filter=move || active_filter.get().then_some("true")
