@@ -11,7 +11,7 @@
 //! (`context_scope` module) prove the owner-scoping mechanism directly --
 //! this crate has no native DOM/SSR renderer, so they cannot read a rendered
 //! `id` attribute back. This suite is the real-DOM half of the same
-//! contract, against the dedicated `/field-context-scope` fixture
+//! contract, against the dedicated `/components/field-context-scope` fixture
 //! (`demo/src/demos/field_context_scope.rs`).
 //!
 //! Kept in its own file/xtask step rather than folded into
@@ -37,7 +37,12 @@ mod common;
 use common::{assert_no_browser_errors, begin_browser_error_capture, harness_at};
 use serde_json::{Value, json};
 
-const PAGE: &str = "/field-context-scope";
+// The fixture route is declared inside the demo's `ParentRoute path="/components"`
+// group (demo/src/main.rs), so it resolves at `/components/field-context-scope`.
+// Navigating to the bare `/field-context-scope` matches no route, and the app
+// never renders `<main>` there, which reads as a mount timeout rather than a
+// wrong URL.
+const PAGE: &str = "/components/field-context-scope";
 
 async fn eval_json(h: &pixelproof_web::Harness, expr: &str) -> Value {
     h.page()
