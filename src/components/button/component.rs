@@ -95,13 +95,18 @@ pub(crate) fn resolve_native_disabled(disabled: bool, loading: bool) -> bool {
 /// ## Precedence vs a spread `attr:type`
 ///
 /// `Button` always emits its own `type` attribute (driven by `button_type`).
-/// Spreading a duplicate — `<Button attr:type="submit" .../>` — is
+/// Spreading a duplicate — `<Button attr:r#type="submit" .../>` (`type` is a
+/// Rust keyword, so the spread needs the raw-identifier escape) — is
 /// redundant and its result should not be relied upon, but concretely: on
 /// this crate's CSR-only rendering path, spread attributes are applied
 /// *after* the component's own view is built, so `set_attribute` runs last
-/// and **the spread `attr:type` wins**, silently overriding `button_type`
-/// (same mechanism already documented on [`Progress`](crate::components::progress::Progress)'s
-/// `attr:max`). Use `button_type`, not `attr:type`.
+/// and **the spread `attr:r#type` wins**, silently overriding
+/// `button_type` — verified directly by the demo's
+/// `#button-type-precedence-probe` fixture and
+/// `spread_attr_type_overrides_the_button_type_prop` in
+/// `tests/reactivity_smoke.rs` (ldui-9vs), same mechanism already documented
+/// on [`Progress`](crate::components::progress::Progress)'s `attr:max`. Use
+/// `button_type`, not a spread `type`.
 ///
 /// ### Add to `input.css`
 /// ```css

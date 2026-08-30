@@ -3959,3 +3959,29 @@ async fn reset_button_restores_native_defaults() {
     );
     assert_no_browser_errors(&h, "reset button native behavior").await;
 }
+
+/// A duplicate spread `attr:type` beats the component's own `button_type`.
+/// `#button-type-precedence-probe` sets `button_type=ButtonType::Reset`
+/// *and* spreads `attr:type="submit"`; on this crate's CSR-only rendering
+/// path the spread attribute is applied to the root element after the
+/// component's own view is built, so `set_attribute` runs last and the
+/// spread wins. This is the concrete verification behind Button's doc
+/// comment "Precedence vs a spread `attr:type`" (ldui-9vs) — never rely on
+/// this in real code, use `button_type` alone.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn spread_attr_type_overrides_the_button_type_prop() {
+    let h = harness_at("/components/button").await;
+
+    let emitted_type = eval_json(
+        &h,
+        "document.querySelector('#button-type-precedence-probe').getAttribute('type')",
+    )
+    .await;
+    assert_eq!(
+        emitted_type,
+        json!("submit"),
+        "a later spread attr:type overrides button_type on the CSR path: {emitted_type}"
+    );
+    assert_no_browser_errors(&h, "attr:type precedence probe").await;
+}

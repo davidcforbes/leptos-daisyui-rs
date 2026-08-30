@@ -213,6 +213,18 @@ pub fn ButtonDemo() -> impl IntoView {
                             "type=submit, loading"
                         </Button>
                     </div>
+                    // Precedence probe (ldui-9vs): button_type=Reset plus a
+                    // duplicate spread attr:type="submit". Never clicked —
+                    // this only exists so a browser fixture can read which
+                    // one the DOM actually carries. See Button's doc comment
+                    // "Precedence vs a spread attr:type".
+                    <Button
+                        attr:id="button-type-precedence-probe"
+                        button_type=ButtonType::Reset
+                        attr:r#type="submit"
+                    >
+                        "precedence probe (not for clicking)"
+                    </Button>
                 </form>
                 <p class="text-sm opacity-70">
                     "Submits: " {form_submit_count} " · Resets: " {form_reset_count}
