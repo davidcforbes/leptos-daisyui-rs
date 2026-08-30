@@ -1198,14 +1198,17 @@ fn tokens_css() -> String {
         css.push_str(&format!("  --border-width-{}: {};\n", name, px(dips)));
     }
 
-    css.push_str("\n  /* Opinionated table hierarchy. Semantic aliases keep\n");
-    css.push_str("     consumers on the shared Fluent palette without literals. */\n");
+    css.push_str("\n  /* Opinionated table hierarchy, from ui_tokens::color::table —\n");
+    css.push_str("     the dedicated semantic module shared with the Direct2D desktop\n");
+    css.push_str("     face, rather than the generic status-color aliases it derives\n");
+    css.push_str("     from. This decouples the table role from STATUS_BLUE_*/TEXT_PRIMARY/\n");
+    css.push_str("     CONTROL_BORDER drifting for unrelated reasons. */\n");
     for (name, value) in [
-        ("table-header", color::STATUS_BLUE_FG),
-        ("table-header-content", color::ACCENT_TEXT),
-        ("table-filter", color::STATUS_BLUE_BG),
-        ("table-filter-content", color::TEXT_PRIMARY),
-        ("table-grid", color::CONTROL_BORDER),
+        ("table-header", color::table::HEADER),
+        ("table-header-content", color::table::HEADER_CONTENT),
+        ("table-filter", color::table::FILTER),
+        ("table-filter-content", color::table::FILTER_CONTENT),
+        ("table-grid", color::table::GRID),
     ] {
         css.push_str(&format!(
             "  --color-{name}: {};\n",
@@ -2490,6 +2493,32 @@ mod gen_tokens_tests {
             assert!(
                 css.to_ascii_lowercase().contains(declaration),
                 "missing semantic table declaration {declaration}:\n{css}"
+            );
+        }
+    }
+
+    #[test]
+    fn opinionated_table_colors_are_sourced_from_ui_tokens_color_table() {
+        // ldui-gp34: the five --color-table-* values must be *derived* from
+        // ui_tokens::color::table, not hand-copied literals that happen to
+        // agree today. Computing the expected declarations from the live
+        // constants means a sibling change to the `table` module is caught
+        // here (and by `tokens-fresh`) instead of silently drifting.
+        use ui_tokens::color::{table, to_css_hex};
+
+        let css = tokens_css();
+        for (name, value) in [
+            ("header", table::HEADER),
+            ("header-content", table::HEADER_CONTENT),
+            ("filter", table::FILTER),
+            ("filter-content", table::FILTER_CONTENT),
+            ("grid", table::GRID),
+        ] {
+            let want = format!("  --color-table-{name}: {};\n", to_css_hex(value));
+            assert!(
+                css.contains(&want),
+                "expected {want:?} derived from ui_tokens::color::table::{} to appear in generated css:\n{css}",
+                name.to_ascii_uppercase().replace('-', "_")
             );
         }
     }

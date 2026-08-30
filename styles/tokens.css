@@ -33,8 +33,11 @@
   --border-width-accent: 3px;
   --border-width-emphasis: 4px;
 
-  /* Opinionated table hierarchy. Semantic aliases keep
-     consumers on the shared Fluent palette without literals. */
+  /* Opinionated table hierarchy, from ui_tokens::color::table —
+     the dedicated semantic module shared with the Direct2D desktop
+     face, rather than the generic status-color aliases it derives
+     from. This decouples the table role from STATUS_BLUE_*/TEXT_PRIMARY/
+     CONTROL_BORDER drifting for unrelated reasons. */
   --color-table-header: #004578;
   --color-table-header-content: #ffffff;
   --color-table-filter: #e5f1fb;
