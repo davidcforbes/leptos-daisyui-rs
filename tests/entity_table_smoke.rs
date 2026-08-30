@@ -3160,3 +3160,212 @@ async fn entity_column_primary_secondary_composes_two_accessible_lines() {
 
     assert_no_browser_errors(&harness, "EntityColumn primary/secondary presentation").await;
 }
+
+/// Typed summary-row emphasis (ldui-mqb): a caller classifies each row into
+/// a narrow, framework-owned `EntityRowEmphasis` -- never a class-string
+/// hook -- without touching any column renderer. Proves classification is
+/// keyed to a row's identity rather than its rendered position (a sort that
+/// moves the totals row must not move its classification), reads
+/// identically in the compact single-cell presentation (they share one
+/// `<tr>`), and composes with -- rather than fights -- the selected-row
+/// background painted independently by `selection`.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
+async fn entity_table_row_emphasis_survives_sort_and_composes_with_selection() {
+    let harness = harness_at("/components/entity-table-emphasis").await;
+    begin_browser_error_capture(&harness).await;
+    wait_for_selector(
+        &harness,
+        "#entity-emphasis-table tbody tr[data-entity-row-key]",
+    )
+    .await;
+
+    // Initial classification: one row per variant, resolved purely from row
+    // content. `data-entity-row-emphasis` and the framework-owned classes
+    // land on the shared `<tr>`; no variant sets a background, so nothing
+    // here would race the `bg-base-200` selection composes with later.
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => {
+                const rows = Array.from(document.querySelectorAll('#entity-emphasis-table tbody tr[data-entity-row-key]'));
+                const byKey = {};
+                for (const row of rows) {
+                    byKey[row.dataset.entityRowKey] = {
+                        emphasis: row.dataset.entityRowEmphasis,
+                        bold: row.classList.contains('font-semibold'),
+                        warning: row.classList.contains('text-warning'),
+                        muted: row.classList.contains('text-base-content/75'),
+                        background: row.classList.contains('bg-base-200'),
+                    };
+                }
+                return byKey;
+            })()"#,
+        )
+        .await,
+        json!({
+            "emphasis-1": { "emphasis": "standard", "bold": false, "warning": false, "muted": false, "background": false },
+            "emphasis-2": { "emphasis": "muted", "bold": false, "warning": false, "muted": true, "background": false },
+            "emphasis-3": { "emphasis": "attention", "bold": true, "warning": true, "muted": false, "background": false },
+            "emphasis-4": { "emphasis": "standard", "bold": false, "warning": false, "muted": false, "background": false },
+            "emphasis-total": { "emphasis": "summary", "bold": true, "warning": false, "muted": false, "background": false },
+        }),
+        "each row must carry exactly the classification its own content implies"
+    );
+
+    // The Summary row's wide `<td>` cells all carry the framework's top-rule
+    // accent border; a Standard row's cells do not.
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => {
+                const ruled = cellSelector => Array.from(
+                    document.querySelectorAll(cellSelector)
+                ).every(cell => cell.classList.contains('border-t-(--border-width-accent)')
+                    && cell.classList.contains('border-t-base-content'));
+                return {
+                    totalRuled: ruled('#entity-emphasis-table tbody tr[data-entity-row-key="emphasis-total"] td[data-entity-column]'),
+                    standardRuled: ruled('#entity-emphasis-table tbody tr[data-entity-row-key="emphasis-1"] td[data-entity-column]'),
+                };
+            })()"#,
+        )
+        .await,
+        json!({ "totalRuled": true, "standardRuled": false }),
+        "only the Summary row's wide cells carry the totals top rule"
+    );
+
+    // A sort on `amount` (the totals row holds the largest value) actually
+    // moves the row: ascending puts it last, descending puts it first. Its
+    // classification -- keyed by `row_key`, not index -- must follow it.
+    click(&harness, "[data-entity-sort-column='amount']").await;
+    let ascending_order = eval_json(
+        &harness,
+        "Array.from(document.querySelectorAll('#entity-emphasis-table tbody tr[data-entity-row-key]')).map(row => row.dataset.entityRowKey)",
+    )
+    .await;
+    assert_eq!(
+        ascending_order,
+        json!([
+            "emphasis-3",
+            "emphasis-1",
+            "emphasis-2",
+            "emphasis-4",
+            "emphasis-total"
+        ]),
+        "ascending amount must put the totals row last"
+    );
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"document.querySelector('#entity-emphasis-table tbody tr[data-entity-row-key="emphasis-total"]').dataset.entityRowEmphasis"#,
+        )
+        .await,
+        json!("summary"),
+        "the totals row must stay classified Summary after moving to the last position"
+    );
+
+    click(&harness, "[data-entity-sort-column='amount']").await;
+    let descending_order = eval_json(
+        &harness,
+        "Array.from(document.querySelectorAll('#entity-emphasis-table tbody tr[data-entity-row-key]')).map(row => row.dataset.entityRowKey)",
+    )
+    .await;
+    assert_eq!(
+        descending_order,
+        json!([
+            "emphasis-total",
+            "emphasis-4",
+            "emphasis-2",
+            "emphasis-1",
+            "emphasis-3"
+        ]),
+        "descending amount must put the totals row first"
+    );
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"document.querySelector('#entity-emphasis-table tbody tr[data-entity-row-key="emphasis-total"]').dataset.entityRowEmphasis"#,
+        )
+        .await,
+        json!("summary"),
+        "the totals row must stay classified Summary after moving to the first position"
+    );
+
+    // Compact presentation: they are one shared `<tr>`, so shrinking below
+    // the `lg:` breakpoint swaps which `<td>` is visible but the totals
+    // row's compact wrapper cell must carry the same top-rule accent.
+    harness
+        .set_viewport(ViewportSize::TABLET)
+        .await
+        .expect("shrink to a compact-layout viewport");
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => {
+                const row = document.querySelector('#entity-emphasis-table tbody tr[data-entity-row-key="emphasis-total"]');
+                const compactCell = row.querySelector('td.lg\\:hidden');
+                const wideCell = row.querySelector('td[data-entity-column="client"]');
+                return {
+                    compactVisible: getComputedStyle(compactCell).display !== 'none',
+                    wideHidden: getComputedStyle(wideCell).display === 'none',
+                    compactRuled: compactCell.classList.contains('border-t-(--border-width-accent)')
+                        && compactCell.classList.contains('border-t-base-content'),
+                    rowStillSummary: row.dataset.entityRowEmphasis === 'summary',
+                    rowStillBold: row.classList.contains('font-semibold'),
+                };
+            })()"#,
+        )
+        .await,
+        json!({
+            "compactVisible": true,
+            "wideHidden": true,
+            "compactRuled": true,
+            "rowStillSummary": true,
+            "rowStillBold": true,
+        }),
+        "the compact summary row must carry the same emphasis treatment as the wide row"
+    );
+    harness
+        .set_viewport(ViewportSize::SMALL)
+        .await
+        .expect("restore the wide-layout viewport");
+
+    // Selection composes with emphasis rather than fighting it: selecting
+    // the totals row paints the selected background alongside the emphasis
+    // classes already asserted above, and neither ejects the other.
+    click(
+        &harness,
+        "#entity-emphasis-table tbody tr[data-entity-row-key='emphasis-total'] td[data-entity-column='client']",
+    )
+    .await;
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => {
+                const row = document.querySelector('#entity-emphasis-table tbody tr[data-entity-row-key="emphasis-total"]');
+                return {
+                    ariaSelected: row.getAttribute('aria-selected'),
+                    selectedBackground: row.classList.contains('bg-base-200'),
+                    stillBold: row.classList.contains('font-semibold'),
+                    stillSummaryAttribute: row.dataset.entityRowEmphasis === 'summary',
+                };
+            })()"#,
+        )
+        .await,
+        json!({
+            "ariaSelected": "true",
+            "selectedBackground": true,
+            "stillBold": true,
+            "stillSummaryAttribute": true,
+        }),
+        "selecting the totals row must add the selected background without disturbing its emphasis"
+    );
+
+    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
+        .expect("load vendored axe-core");
+    let report = axe.run(harness.page()).await.expect("run axe-core");
+    report
+        .assert_no_blocking("entity table row emphasis")
+        .unwrap_or_else(|error| panic!("{error}; {}", report.summary()));
+    assert_no_browser_errors(&harness, "entity table row emphasis").await;
+}

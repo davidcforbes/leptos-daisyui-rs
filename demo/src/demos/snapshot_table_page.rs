@@ -1,7 +1,7 @@
 use leptos::prelude::*;
 use leptos_daisyui_rs::components::{
     BadgeColor, Button, EntityBadgePresentation, EntityColumn, EntityColumnFilter, EntityIconColor,
-    EntityIconPresentation, EntityNullOrder, EntityRowAction, EntityTable,
+    EntityIconPresentation, EntityNullOrder, EntityRowAction, EntityRowEmphasis, EntityTable,
     EntityTablePreferenceOwnership, EntityTablePreferencePersistence, EntityTableSelection,
     EntityTableTexts, EntityTableViewportFit,
 };
@@ -951,6 +951,112 @@ pub fn EntityTableSelectionFixture() -> impl IntoView {
                     }),
                 )
                 attr:id="entity-selection-table"
+            />
+        </section>
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct EmphasisRow {
+    id: String,
+    client: String,
+    amount: i64,
+    status: String,
+}
+
+fn emphasis_rows() -> Rc<Vec<EmphasisRow>> {
+    Rc::new(vec![
+        EmphasisRow {
+            id: "emphasis-1".to_owned(),
+            client: "Ledger row 1".to_owned(),
+            amount: 120,
+            status: "Ready".to_owned(),
+        },
+        EmphasisRow {
+            id: "emphasis-2".to_owned(),
+            client: "Ledger row 2".to_owned(),
+            amount: 340,
+            status: "Archived".to_owned(),
+        },
+        EmphasisRow {
+            id: "emphasis-3".to_owned(),
+            client: "Ledger row 3".to_owned(),
+            amount: 60,
+            status: "Overdue".to_owned(),
+        },
+        EmphasisRow {
+            id: "emphasis-4".to_owned(),
+            client: "Ledger row 4".to_owned(),
+            amount: 480,
+            status: "Ready".to_owned(),
+        },
+        // The largest amount, so an ascending sort by amount puts this row
+        // last and a descending sort puts it first -- a real change of
+        // rendered position for the browser fixture to prove classification
+        // survives.
+        EmphasisRow {
+            id: "emphasis-total".to_owned(),
+            client: "Total".to_owned(),
+            amount: 1000,
+            status: "Total".to_owned(),
+        },
+    ])
+}
+
+fn emphasis_columns() -> Vec<EntityColumn<EmphasisRow>> {
+    vec![
+        EntityColumn::text("client", "Client", |row: &EmphasisRow| row.client.clone())
+            .required()
+            .with_min_width(200),
+        EntityColumn::text("status", "Status", |row: &EmphasisRow| row.status.clone())
+            .with_min_width(120),
+        EntityColumn::new("amount", "Amount", |row: &EmphasisRow| {
+            row.amount.to_string()
+        })
+        .sortable_by_key(|row: &EmphasisRow| row.amount)
+        .align_end()
+        .tabular_numbers()
+        .with_width(140),
+    ]
+}
+
+/// Focused browser fixture for `EntityTable` typed row emphasis (ldui-mqb):
+/// one row of each `EntityRowEmphasis` variant, plus a totals row classified
+/// `Summary` whose classification must survive a sort that moves it (the
+/// `amount` column is sortable) and must read identically in the compact
+/// single-cell presentation. `selection` is also wired so the fixture can
+/// prove emphasis composes with, rather than fights, the selected-row
+/// background.
+#[component]
+pub fn EntityTableEmphasisFixture() -> impl IntoView {
+    let data = RwSignal::new_local(emphasis_rows());
+    let selected_key = RwSignal::new(Option::<String>::None);
+
+    view! {
+        <section
+            id="entity-table-emphasis-fixture"
+            class="mx-auto max-w-3xl space-y-3 bg-base-100 p-4"
+        >
+            <h1 class="ld-text-display font-semibold">"Entity table row emphasis"</h1>
+            <p class="text-sm text-base-content/70">
+                "One row of each EntityRowEmphasis variant classified purely from row content, plus a totals row that stays classified Summary after sorting moves it."
+            </p>
+            <EntityTable
+                data=data
+                columns=emphasis_columns()
+                row_key=Rc::new(|row: &EmphasisRow| row.id.clone())
+                dataset_identity="entity-table-emphasis-fixture"
+                row_emphasis=Rc::new(|row: &EmphasisRow| match row.status.as_str() {
+                    "Total" => EntityRowEmphasis::Summary,
+                    "Archived" => EntityRowEmphasis::Muted,
+                    "Overdue" => EntityRowEmphasis::Attention,
+                    _ => EntityRowEmphasis::Standard,
+                })
+                selection=EntityTableSelection::controlled(
+                    selected_key.into(),
+                    Callback::new(move |proposed: Option<String>| selected_key.set(proposed)),
+                )
+                attr:id="entity-emphasis-table"
             />
         </section>
     }

@@ -1657,3 +1657,82 @@ fn page_size_default_ids_are_non_empty_and_unique() {
     assert!(a.starts_with("ldui-entity-page-size-"));
     assert!(b.starts_with("ldui-entity-page-size-"));
 }
+
+// ldui-mqb: typed summary-row emphasis. `EntityRowEmphasis` and its pure
+// class/lookup functions live in `emphasis.rs` and carry their own focused
+// unit tests; these two exercise the acceptance criterion this repo's
+// `entity_table` fixture files are set up to prove directly -- that
+// classification is keyed to a row's identity (via the table's mandatory
+// `row_key`), not to whichever index a sort happens to put it at.
+
+#[test]
+fn row_classification_survives_a_sort_that_moves_the_row() {
+    let rows = rows();
+    let columns = columns();
+    // `r1` is rank 2 (the other two rows are rank 1), so ascending and
+    // descending sorts by `rank` put it at opposite ends -- a real change of
+    // rendered position, not a no-op sort.
+    let classifier: EntityRowEmphasisClassifier<Row> = Rc::new(|row: &Row| {
+        if row.id == "r1" {
+            EntityRowEmphasis::Summary
+        } else {
+            EntityRowEmphasis::Standard
+        }
+    });
+
+    let ascending = sorted_indices(&rows, &columns, &EntitySort::ascending("rank"));
+    let descending = sorted_indices(&rows, &columns, &EntitySort::descending("rank"));
+    let ascending_position = ascending
+        .iter()
+        .position(|&index| rows[index].id == "r1")
+        .expect("r1 must still be present after an ascending sort");
+    let descending_position = descending
+        .iter()
+        .position(|&index| rows[index].id == "r1")
+        .expect("r1 must still be present after a descending sort");
+    assert_ne!(
+        ascending_position, descending_position,
+        "the fixture must actually move r1 between sorts, or this test proves nothing"
+    );
+
+    // Wherever r1 lands, it classifies Summary; every other row classifies
+    // Standard -- in both sort orders, at every index.
+    for indices in [&ascending, &descending] {
+        for &index in indices {
+            let row = &rows[index];
+            let expected = if row.id == "r1" {
+                EntityRowEmphasis::Summary
+            } else {
+                EntityRowEmphasis::Standard
+            };
+            assert_eq!(
+                entity_row_emphasis_for(Some(&classifier), Some(row)),
+                expected,
+                "classification must follow row identity at index {index}, not rendered position"
+            );
+        }
+    }
+}
+
+#[test]
+fn no_row_emphasis_classifier_renders_every_row_identically_to_a_table_without_the_prop() {
+    // Proven at the pure-function level, composed exactly as
+    // `render_keyed_row`/`render_row_cells` use it: with no classifier at
+    // all, every row resolves to `Standard`, which in turn contributes the
+    // empty string to both the `<tr>` class and every `<td>` class -- the
+    // same DOM a table predating `row_emphasis` renders.
+    for row in rows() {
+        assert_eq!(
+            entity_row_emphasis_for::<Row>(None, Some(&row)),
+            EntityRowEmphasis::Standard
+        );
+    }
+    assert_eq!(
+        entity_row_emphasis_row_class(EntityRowEmphasis::Standard),
+        ""
+    );
+    assert_eq!(
+        entity_row_emphasis_cell_class(EntityRowEmphasis::Standard),
+        ""
+    );
+}

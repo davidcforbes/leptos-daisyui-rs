@@ -1,5 +1,9 @@
 //! Reactive renderer for the typed client-side table model.
 
+use super::emphasis::{
+    EntityRowEmphasis, EntityRowEmphasisClassifier, entity_row_emphasis_cell_class,
+    entity_row_emphasis_for, entity_row_emphasis_row_class,
+};
 use super::model::{
     ENTITY_PAGE_SIZE_CHOICES, EntityColumnMove, EntityFocusRecord, EntityFocusTarget,
     SortedIndexCache, emit_normalized_preference_change,
@@ -507,6 +511,27 @@ pub fn EntityTable<T>(
     /// and `aria-selected="false"` on every row would wrongly claim it does.
     #[prop(optional)]
     selection: Option<EntityTableSelection>,
+    /// Optional per-row semantic classification into a narrow,
+    /// framework-owned [`EntityRowEmphasis`] -- `Standard`, `Summary`,
+    /// `Muted`, or `Attention` -- never an unrestricted class-string hook.
+    /// `EntityTable` owns every token, stroke width, and forced-colors rule
+    /// a variant applies, identically in the wide and compact presentations
+    /// (they share one `<tr>`); the caller owns only the classification
+    /// predicate, so no per-column renderer needs to change.
+    ///
+    /// Presentation-only: classification never changes row keys, ordering,
+    /// accessible names, action eligibility, sort values, selection, or
+    /// source data. It is a pure function of the row's own content, so it
+    /// automatically follows a row across sorting, filtering, and paging
+    /// rather than pinning a look to a rendered position. Every variant's
+    /// tokens are text/border only -- never `background-color` -- so
+    /// emphasis composes with, rather than fights, the selected-row
+    /// background painted independently when `selection` is also supplied,
+    /// and with `zebra` striping. Omitting this prop renders identically to
+    /// a table that predates it: no extra class, no
+    /// `data-entity-row-emphasis` attribute on any row.
+    #[prop(optional)]
+    row_emphasis: Option<EntityRowEmphasisClassifier<T>>,
     /// Preference namespace appended to the framework storage prefix.
     ///
     /// This compatibility prop selects `LegacyLocalStorage` when
@@ -570,6 +595,7 @@ where
     let initial_widths = column_store
         .with_value(|columns| rendered_column_widths(&preferences.get_untracked(), columns));
     let row_key = StoredValue::new_local(row_key);
+    let row_emphasis = StoredValue::new_local(row_emphasis);
     let compact_row = CompactRowStore::new(compact_row);
     let column_filters = column_filter_signal(column_filters);
     let compact_filter_layout = compact_filter_layout_signal();
@@ -1759,6 +1785,7 @@ where
                                     compact_row,
                                     on_row_activate,
                                     selection,
+                                    row_emphasis,
                                 },
                             ),
                         )}
@@ -1879,6 +1906,7 @@ struct KeyedRowContext<T: 'static> {
     compact_row: CompactRowStore<T>,
     on_row_activate: Option<Callback<String>>,
     selection: Option<EntityTableSelection>,
+    row_emphasis: StoredValue<Option<EntityRowEmphasisClassifier<T>>, LocalStorage>,
 }
 
 fn render_keyed_row<T: Clone + 'static>(
@@ -1894,6 +1922,7 @@ fn render_keyed_row<T: Clone + 'static>(
         compact_row,
         on_row_activate,
         selection,
+        row_emphasis,
     } = context;
     // A table with only `selection` (no `on_row_activate`) is still
     // keyboard-operable, mirroring `data_table::row_is_interactive`.
@@ -1906,11 +1935,18 @@ fn render_keyed_row<T: Clone + 'static>(
     // every existing `on_row_activate`-only caller's DOM byte-for-byte
     // unchanged.
     let has_selection = selection.is_some();
+    // Mirrors `has_selection`'s gating: with no `row_emphasis` classifier at
+    // all, no row emits a `data-entity-row-emphasis` attribute or any
+    // emphasis class, restoring the exact DOM of a table that predates this
+    // prop.
+    let has_row_emphasis = row_emphasis.with_value(Option::is_some);
     let click_key = key.clone();
     let keydown_key = key.clone();
     let rendered_key = key.clone();
     let selected_class_key = key.clone();
     let selected_aria_key = key.clone();
+    let emphasis_class_key = key.clone();
+    let emphasis_attr_key = key.clone();
 
     // Focus and selection are deliberately distinct: Tab/roving focus never
     // proposes or paints selection by itself -- only a click or Enter/Space
@@ -1918,6 +1954,20 @@ fn render_keyed_row<T: Clone + 'static>(
     let is_row_selected = move |current_key: &str| {
         selection.is_some_and(|selection| {
             entity_row_is_selected(current_key, selection.selected_key().get().as_deref())
+        })
+    };
+
+    // Classification is a pure function of a row's own content, resolved
+    // through the same stable key selection and focus recovery use -- so it
+    // follows a row across sorting, filtering, and paging rather than
+    // pinning a look to a rendered position, and fails safe to `Standard`
+    // for a key that no longer matches any row.
+    let current_emphasis = move |current_key: &str| -> EntityRowEmphasis {
+        row_emphasis.with_value(|classifier| {
+            let rows = data.get();
+            let row_key_fn = row_key.get_value();
+            let row = rows.iter().find(|row| row_key_fn(row) == current_key);
+            entity_row_emphasis_for(classifier.as_ref(), row)
         })
     };
 
@@ -1929,9 +1979,13 @@ fn render_keyed_row<T: Clone + 'static>(
             tabindex=interactive.then_some(0)
             class=move || merge_classes!(
                 if interactive { "cursor-pointer ld-focus-ring" } else { "" },
-                if has_selection && is_row_selected(&selected_class_key) { "bg-base-200" } else { "" }
+                if has_selection && is_row_selected(&selected_class_key) { "bg-base-200" } else { "" },
+                entity_row_emphasis_row_class(current_emphasis(&emphasis_class_key))
             )
             aria-selected=move || entity_row_aria_selected(has_selection, is_row_selected(&selected_aria_key))
+            data-entity-row-emphasis=move || {
+                has_row_emphasis.then(|| current_emphasis(&emphasis_attr_key).as_str())
+            }
             on:click=move |event: web_sys::MouseEvent| {
                 if event_origin_is_action(event.target()) {
                     return;
@@ -1989,6 +2043,9 @@ fn render_keyed_row<T: Clone + 'static>(
                 else {
                     return ().into_any();
                 };
+                let emphasis = row_emphasis.with_value(|classifier| {
+                    entity_row_emphasis_for(classifier.as_ref(), Some(&row))
+                });
                 let preferences_value = preferences.get();
                 let columns = column_store.with_value(|columns| {
                     ordered_columns(&preferences_value, columns)
@@ -1998,7 +2055,7 @@ fn render_keyed_row<T: Clone + 'static>(
                         })
                         .collect::<Vec<_>>()
                 });
-                render_row_cells(row, columns, compact_row.get_value())
+                render_row_cells(row, columns, compact_row.get_value(), emphasis)
             }}
         </tr>
     }
@@ -2008,10 +2065,15 @@ fn render_row_cells<T: Clone + 'static>(
     row: T,
     columns: Vec<EntityColumn<T>>,
     compact_row: Option<EntityRowRenderer<T>>,
+    emphasis: EntityRowEmphasis,
 ) -> AnyView {
     let compact_view = compact_row
         .map(|renderer| renderer(&row))
         .unwrap_or_else(|| render_default_compact_row(&row, &columns));
+    // Applied identically to every wide-layout cell and to the compact
+    // single-cell wrapper below, so a totals rule reads the same in both
+    // presentations -- they share one `<tr>`; only the cells differ.
+    let emphasis_cell_class = entity_row_emphasis_cell_class(emphasis);
     let wide_cells = columns
         .iter()
         .cloned()
@@ -2024,7 +2086,8 @@ fn render_row_cells<T: Clone + 'static>(
                     class=move || merge_classes!(
                         "hidden border border-table-grid forced-colors:border-[CanvasText] lg:table-cell",
                         entity_alignment_class(alignment),
-                        if tabular_numbers { "tabular-nums" } else { "" }
+                        if tabular_numbers { "tabular-nums" } else { "" },
+                        emphasis_cell_class
                     )
                     data-entity-column=column.id
                     data-entity-action=column.is_action.then_some("true")
@@ -2050,7 +2113,10 @@ fn render_row_cells<T: Clone + 'static>(
     view! {
         <td
             colspan=columns.len().max(1)
-            class="border border-table-grid p-0 forced-colors:border-[CanvasText] lg:hidden"
+            class=merge_classes!(
+                "border border-table-grid p-0 forced-colors:border-[CanvasText] lg:hidden",
+                emphasis_cell_class
+            )
         >
             <div class="p-3">{compact_view}</div>
         </td>

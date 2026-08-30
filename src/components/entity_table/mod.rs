@@ -1,11 +1,13 @@
 //! Generic, typed client-side table for complete dataset snapshots.
 
 mod component;
+mod emphasis;
 mod model;
 mod selection;
 mod storage;
 mod types;
 
+pub use emphasis::{EntityRowEmphasis, EntityRowEmphasisClassifier};
 pub use model::{
     ENTITY_PAGE_SIZE_CHOICES, EntityColumnMove, EntityFocusRecord, EntityFocusTarget,
     entity_table_display_projection, focus_target, move_column, next_sort, next_sort_additive,
@@ -28,6 +30,10 @@ pub use types::{
     EntityTableTexts, EntityTableViewportFit, EntityTextOverflow,
 };
 
+#[cfg(test)]
+pub(crate) use emphasis::{
+    entity_row_emphasis_cell_class, entity_row_emphasis_for, entity_row_emphasis_row_class,
+};
 #[cfg(test)]
 pub(crate) use types::{
     entity_alignment_class, entity_header_justify_class, entity_text_overflow_style,
