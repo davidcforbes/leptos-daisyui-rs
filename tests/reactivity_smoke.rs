@@ -3849,7 +3849,24 @@ async fn filter_sidebar_search_accessible_name_covers_every_variant() {
     );
     assert_eq!(before["value"], json!("acme"));
 
-    click(&h, "#filter-sidebar-locale-toggle").await;
+    // A real CDP mouse click here (the shared `click()` helper) would focus
+    // the toggle button itself as part of its own default mousedown
+    // behavior -- exactly like any other button a real user clicks -- and
+    // that focus move is what the assertion below would actually be
+    // catching, not a defect in how `FilterSidebar` reacts to `search_label`.
+    // A synthetic `.click()` fires the same Leptos `on:click` handler
+    // (flipping the locale signal) without that unrelated side effect, so
+    // this isolates the thing the acceptance clause actually cares about:
+    // the reactive label update alone must not disturb focus, caret, or the
+    // typed value.
+    eval_json(
+        &h,
+        r#"(() => {
+            document.getElementById('filter-sidebar-locale-toggle').click();
+            return true;
+        })()"#,
+    )
+    .await;
     tokio::time::sleep(std::time::Duration::from_millis(250)).await;
 
     let localized = eval_json(&h, &describe("fs-interactive-left")).await;

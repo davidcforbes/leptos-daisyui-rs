@@ -42,7 +42,21 @@ fn dialog_selector(instance: &str) -> String {
 }
 
 async fn open_dialog(h: &pixelproof_web::Harness, instance: &str) {
-    let script = format!(r#"document.querySelector('[data-testid="{instance}-trigger"]').click()"#);
+    // `.focus()` before `.click()`: a real mouse click focuses a clickable
+    // button as part of its default mousedown behavior *before* the click
+    // event fires, which is what lets the dialog's native `previously
+    // focused element` bookkeeping (and therefore its native close-time
+    // focus restoration) land on the trigger. `Element.click()` alone is a
+    // synthetic click that does not synthesize that mousedown-driven focus
+    // step, so without this the trigger is never actually focused and the
+    // dialog silently records `<body>` as the element to restore focus to.
+    let script = format!(
+        r#"(() => {{
+            const trigger = document.querySelector('[data-testid="{instance}-trigger"]');
+            trigger.focus();
+            trigger.click();
+        }})()"#
+    );
     let _ = h.page().evaluate(script.as_str()).await;
     settle(150).await;
 }
