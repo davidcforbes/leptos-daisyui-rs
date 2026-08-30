@@ -724,6 +724,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     value: "mask",
                 },
                 ComponentItem {
+                    name: "Section Heading",
+                    href: "/components/section_heading",
+                    value: "section_heading",
+                },
+                ComponentItem {
                     name: "Stack",
                     href: "/components/stack",
                     value: "stack",
