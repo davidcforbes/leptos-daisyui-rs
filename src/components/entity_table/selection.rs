@@ -70,6 +70,18 @@ pub(super) fn entity_row_is_selected(rendered_key: &str, selected_key: Option<&s
     selected_key == Some(rendered_key)
 }
 
+/// The `aria-selected` attribute value for a row, gated on `has_selection`
+/// (whether the table was given a `selection` prop at all) rather than on
+/// general row interactivity. An `on_row_activate`-only table (no
+/// `selection`) has no selection concept to report, so it must emit `None`
+/// -- no `aria-selected` attribute on any row -- rather than
+/// `aria-selected="false"`, which would wrongly tell assistive tech the row
+/// is selectable. Only a table with `selection` configured emits `Some`
+/// on every row, `"true"` or `"false"`.
+pub(super) fn entity_row_aria_selected(has_selection: bool, is_selected: bool) -> Option<String> {
+    has_selection.then(|| is_selected.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -127,6 +139,29 @@ mod tests {
             page_keys
                 .iter()
                 .all(|key| !entity_row_is_selected(key, Some("matter-1")))
+        );
+    }
+
+    // ── entity_row_aria_selected ──
+
+    #[test]
+    fn an_activate_only_table_emits_no_aria_selected_attribute() {
+        // No `selection` configured (whether or not `on_row_activate` is):
+        // no `aria-selected` attribute at all, on any row -- restoring the
+        // exact DOM of a table that predates this prop.
+        assert_eq!(entity_row_aria_selected(false, false), None);
+        assert_eq!(entity_row_aria_selected(false, true), None);
+    }
+
+    #[test]
+    fn a_selection_configured_table_emits_aria_selected_on_every_row() {
+        assert_eq!(
+            entity_row_aria_selected(true, true),
+            Some("true".to_owned())
+        );
+        assert_eq!(
+            entity_row_aria_selected(true, false),
+            Some("false".to_owned())
         );
     }
 }

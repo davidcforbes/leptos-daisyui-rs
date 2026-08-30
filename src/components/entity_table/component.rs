@@ -8,7 +8,10 @@ use super::model::{
     page_after_row_delta, reset_columns, reset_sort, set_preferred_width, sorted_indices,
     toggle_hidden_column,
 };
-use super::selection::{EntityTableSelection, entity_row_is_selected, entity_selection_proposal};
+use super::selection::{
+    EntityTableSelection, entity_row_aria_selected, entity_row_is_selected,
+    entity_selection_proposal,
+};
 use super::storage::{load_preferences, save_preferences};
 use super::types::{
     EntityCellPresentation, EntityColumn, EntityColumnAlignment, EntityColumnChooserTrigger,
@@ -491,9 +494,16 @@ pub fn EntityTable<T>(
     /// filtering, paging, a dataset swap, or the selected row's removal all
     /// simply stop matching any rendered row (no row paints selected, and no
     /// positional fallback can alias a different entity) until the caller
-    /// supplies a key that is visible again. Omitting this prop leaves rows
-    /// fully non-interactive exactly as before (source-compatible), unless
-    /// `on_row_activate` alone already made them so.
+    /// supplies a key that is visible again. `EntityTable` has no per-row
+    /// disabled concept, so there is no separate disabled-row fail-safe case
+    /// to represent here.
+    ///
+    /// `aria-selected` and selected styling are gated on this prop being
+    /// supplied at all, not on general row interactivity: an
+    /// `on_row_activate`-only table (no `selection`) renders no
+    /// `aria-selected` attribute and no selected class on any row, exactly
+    /// as before this prop existed -- it has no selection concept to report,
+    /// and `aria-selected="false"` on every row would wrongly claim it does.
     #[prop(optional)]
     selection: Option<EntityTableSelection>,
     /// Preference namespace appended to the framework storage prefix.
@@ -1887,6 +1897,14 @@ fn render_keyed_row<T: Clone + 'static>(
     // A table with only `selection` (no `on_row_activate`) is still
     // keyboard-operable, mirroring `data_table::row_is_interactive`.
     let interactive = on_row_activate.is_some() || selection.is_some();
+    // `aria-selected` and selected styling are gated on `selection` alone,
+    // not `interactive`: an activate-only table (no `selection` supplied)
+    // has no selection concept at all, so it must emit no `aria-selected`
+    // attribute -- painting `aria-selected="false"` there would tell
+    // assistive tech the row is selectable when it never was. This keeps
+    // every existing `on_row_activate`-only caller's DOM byte-for-byte
+    // unchanged.
+    let has_selection = selection.is_some();
     let click_key = key.clone();
     let keydown_key = key.clone();
     let rendered_key = key.clone();
@@ -1910,9 +1928,9 @@ fn render_keyed_row<T: Clone + 'static>(
             tabindex=interactive.then_some(0)
             class=move || merge_classes!(
                 if interactive { "cursor-pointer ld-focus-ring" } else { "" },
-                if is_row_selected(&selected_class_key) { "bg-base-200" } else { "" }
+                if has_selection && is_row_selected(&selected_class_key) { "bg-base-200" } else { "" }
             )
-            aria-selected=move || interactive.then(|| is_row_selected(&selected_aria_key).to_string())
+            aria-selected=move || entity_row_aria_selected(has_selection, is_row_selected(&selected_aria_key))
             on:click=move |event: web_sys::MouseEvent| {
                 if event_origin_is_action(event.target()) {
                     return;
