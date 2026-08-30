@@ -4,14 +4,18 @@
 //! all forwarded through `SnapshotTablePage`'s internally owned `EntityTable`
 //! without granting rows, dataset identity, revision, or generation.
 //!
-//! Compile-only pending a gate run on this machine (the demo trunk build
-//! cannot currently publish `dist`/snippets here -- see the sibling
-//! `snapshot_table_delta_smoke.rs`, landed the same way for `ldui-vn81` /
-//! `ldui-cb29`). The typed builder/forwarding evidence in
+//! Run live and GREEN. The typed builder/forwarding evidence in
 //! `src/patterns/snapshot_table_page.rs`'s own test module
 //! (`behavior_only_builders_forward_to_typed_fields`) is the primary native
-//! evidence; this file is the DOM-level companion proof once a browser
-//! suite run is available.
+//! evidence; this file is the DOM-level companion proof. Its first live run
+//! caught a fixture defect, not a library one: the original 160px
+//! `viewport_fit` budget left the scrollable region shorter than one real
+//! measured row at the 1280x800 smoke viewport, so
+//! `auto_page_size_for_height` legitimately took its documented
+//! below-`min_rows` branch and retained the full configured page size (25)
+//! instead of a fitted count -- the library forwarded and applied
+//! `viewport_fit` correctly throughout. The fixture now budgets 300px,
+//! which measures to a genuine below-8 fitted page size.
 
 mod common;
 
@@ -78,7 +82,7 @@ async fn behavior_only_passthroughs_forward_without_identity_drift() {
     begin_browser_error_capture(&harness).await;
 
     let initial = controls_snapshot(&harness).await;
-    // `with_viewport_fit(EntityTableViewportFit::max_height("160px"))`
+    // `with_viewport_fit(EntityTableViewportFit::max_height("300px"))`
     // forwarded onto the internally owned `EntityTable`.
     assert_eq!(initial["viewportFitEnabled"], json!("true"));
     // 8 rows and a short height budget: the table starts short of showing

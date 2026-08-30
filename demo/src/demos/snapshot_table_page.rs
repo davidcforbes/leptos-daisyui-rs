@@ -590,7 +590,19 @@ pub fn SnapshotTablePageControlsFixture() -> impl IntoView {
         EntityTablePreferenceOwnership::uncontrolled(EntityTablePreferencePersistence::Disabled),
     )
     .with_page_reset_key(page_reset_key)
-    .with_viewport_fit(EntityTableViewportFit::max_height("160px").with_min_rows(2))
+    // 300px, not the original 160px: at the 1280x800 smoke viewport the
+    // rows-per-page row, the sr-only live region, and the pagination footer
+    // already consume ~95px of any budget before the scrollable region gets
+    // a share, and a real measured row here is ~35px with a ~44px header.
+    // 160px left the region only ~64px tall -- less than one row -- so
+    // `auto_page_size_for_height` legitimately took its documented
+    // below-`min_rows` branch and retained the full configured page size
+    // (25) instead of a fitted count. That is the library behaving exactly
+    // as designed (see `auto_page_size_for_height`'s doc comment); the fix
+    // is a fixture budget that actually clears `min_rows` while still
+    // paging before all 8 rows. 300px measures to 4 rows here, comfortably
+    // between `min_rows(2)` and 8.
+    .with_viewport_fit(EntityTableViewportFit::max_height("300px").with_min_rows(2))
     .with_toolbar_actions(move || {
         view! {
             <Button attr:data-testid="controls-export" on_click=export_rows>
