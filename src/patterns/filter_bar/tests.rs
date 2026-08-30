@@ -113,6 +113,39 @@ fn filter_bar_builds_the_ordinary_search_configuration_with_every_framework_acti
     });
 }
 
+// `ldui-1v18`: the `children` slot previously rendered its flex wrapper
+// unconditionally, so an absent/empty slot could still contribute an empty
+// flex item for `flex-wrap` to strand on its own row-gap line at narrow
+// widths -- unlike the sibling `search`/`active_binding`/`result` slots,
+// which were already `Option`-gated. `filter_bar_children_wrapper` isolates
+// that decision as a plain `Option<impl IntoView>`, so its `is_none()`/
+// `is_some()` shape is pinned directly here without needing a DOM/SSR
+// renderer (this crate has none -- see the module doc comment above).
+#[test]
+fn children_wrapper_is_absent_when_no_children_are_supplied() {
+    let owner = Owner::new();
+    owner.with(|| {
+        assert!(
+            filter_bar_children_wrapper(None).is_none(),
+            "an absent children slot must emit no wrapper node at all"
+        );
+    });
+}
+
+#[test]
+fn children_wrapper_is_present_and_carries_the_growth_class_when_children_are_supplied() {
+    let owner = Owner::new();
+    owner.with(|| {
+        assert!(
+            filter_bar_children_wrapper(Some(ToChildren::to_children(
+                || view! { "status select" }
+            )))
+            .is_some(),
+            "a supplied children slot must still emit its flex-[3_1_28rem] wrapper"
+        );
+    });
+}
+
 #[test]
 fn save_presentation_enables_only_explicit_dirty_or_retryable_states() {
     let texts = FilterBarTexts::default();

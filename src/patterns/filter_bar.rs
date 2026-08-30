@@ -207,6 +207,25 @@ pub fn filter_result_summary(summary: FilterResultSummary, texts: &FilterBarText
         .replace("{total}", &summary.total.to_string())
 }
 
+/// Builds the utility filter row's `children` wrapper, or emits nothing at
+/// all when no children are supplied (`ldui-1v18`). Follows the same
+/// `Option`-gated idiom as the `search`, `active_binding`, and `result`
+/// slots below: an unconditionally-rendered wrapper is a phantom flex item
+/// that `flex-wrap` can strand on its own row-gap line at narrow widths even
+/// when it carries no visible content.
+fn filter_bar_children_wrapper(children: Option<Children>) -> Option<impl IntoView> {
+    children.map(|children| {
+        view! {
+            <div
+                class="flex min-w-0 flex-[3_1_28rem] flex-wrap items-end gap-3"
+                data-filter-children="true"
+            >
+                {children()}
+            </div>
+        }
+    })
+}
+
 /// Search-first, actions-last row for local filters.
 ///
 /// The historical layout-only `search`/`actions`/`children` shape remains
@@ -252,7 +271,10 @@ pub fn FilterBar(
     /// Additional classes.
     #[prop(optional, into)]
     class: &'static str,
-    /// Selects and other utility-only local filter controls.
+    /// Selects and other utility-only local filter controls. When absent,
+    /// the wrapper div is not rendered at all — an unconditionally-rendered
+    /// empty wrapper is a phantom flex item that `flex-wrap` can strand on
+    /// its own row-gap line at narrow widths (`ldui-1v18`).
     #[prop(optional)]
     children: Option<Children>,
 ) -> impl IntoView {
@@ -285,9 +307,7 @@ pub fn FilterBar(
                     {search()}
                 </div>
             })}
-            <div class="flex min-w-0 flex-[3_1_28rem] flex-wrap items-end gap-3">
-                {children.map(|children| children())}
-            </div>
+            {filter_bar_children_wrapper(children)}
             {active_binding.map(|(chips, on_remove)| view! {
                 <div class="basis-full" data-filter-summary="true">
                     <ActiveFilterChips chips=chips on_remove=on_remove texts=active_texts />

@@ -167,6 +167,52 @@ tabular-number metadata still live on the surrounding cell, but the rich
 renderer owns all inner markup. This keeps existing custom cells compatible
 while making the common badge/icon path auditable and consistent.
 
+## Primary and secondary text presentation
+
+Use `.primary_secondary(primary, secondary)` for an opinionated two-line
+cell -- a primary line with an optional muted caption beneath it -- in place
+of one plain canonical-text line. Like `.badge_with` and `.icon_with`, this
+only changes visual presentation: the column's canonical `text` callback
+(from `EntityColumn::new`/`text`) remains the sole accessible name, sort
+input (unless overridden with `.sortable_by_key`/`.sortable_by`), and future
+export value.
+
+The canonical value stays complete and is never spoken twice: the primary
+and secondary lines render inside an `aria-hidden` wrapper, and a single
+`sr-only` span beside it carries the complete canonical text once for
+assistive technology, title-on-hover truncation, and any future display
+projection. Write the canonical `text` callback as a complete value on its
+own -- for example folding role/status into one string -- even though the
+primary/secondary split only shows part of it visually.
+
+```rust,no_run
+use leptos_daisyui_rs::components::EntityColumn;
+# struct Row { name: String, role: Option<String> }
+let column = EntityColumn::text("contact", "Contact", |row: &Row| {
+    match row.role.as_deref().map(str::trim).filter(|role| !role.is_empty()) {
+        Some(role) => format!("{} (Role: {role})", row.name),
+        None => row.name.clone(),
+    }
+})
+.primary_secondary(
+    |row: &Row| row.name.clone(),
+    |row: &Row| {
+        row.role
+            .as_deref()
+            .map(str::trim)
+            .filter(|role| !role.is_empty())
+            .map(|role| format!("Role: {role}"))
+    },
+);
+```
+
+`secondary` returns `Option<String>`; `None`, or an empty or
+whitespace-only value, renders no secondary line at all -- no stray spacing
+or punctuation left behind for an absent second line. Both lines follow the
+column's existing `EntityTextOverflow` policy (wrap/ellipsis/line-clamp),
+and sorting is untouched by this call. A `render_with` renderer always wins
+over `primary_secondary`, exactly as it wins over badge/icon.
+
 ## Display and export projection
 
 Bind `on_display_projection` to caller-owned state when a toolbar action must
@@ -280,6 +326,93 @@ access-generation changes clear recovery without cross-focusing. A declined
 or failed action that leaves the row present retains native focus, and focus
 already moved by the user is never stolen. Consumers must not reproduce this
 with DOM queries or source-order guesses.
+
+## Controlled single-row selection
+
+`selection` wires one proposal-first, single-row selection to `EntityTable`,
+keyed by the table's mandatory `row_key`. It mirrors `ServerTableSelection`'s
+shape (`ldui-4lp`): the caller supplies the accepted key through
+`selected_key`, and a plain click or keyboard Enter/Space on a row emits one
+proposed replacement key without changing what is rendered. `EntityTable`
+never optimistically paints a proposed key -- a rejected or delayed proposal
+leaves `aria-selected` and the selected-row background aligned with
+whatever key the caller currently supplies. Ctrl/Meta/Shift gestures
+neither propose nor activate; selection is deliberately single-select, not
+a range or toggle.
+
+```rust,no_run
+use leptos::prelude::*;
+use leptos_daisyui_rs::components::EntityTableSelection;
+
+let selected_key = RwSignal::new(Option::<String>::None);
+let selection = EntityTableSelection::controlled(
+    selected_key.into(),
+    Callback::new(move |proposed: Option<String>| selected_key.set(proposed)),
+);
+// Pass `selection` through EntityTable's `selection` prop.
+```
+
+`selection` is independent of `on_row_activate`; both may be supplied
+together, and a plain click or Enter/Space fires both in that case.
+
+`aria-selected` is emitted only when `selection` is configured at all --
+never based on general row interactivity. An `on_row_activate`-only table
+(no `selection`) renders no `aria-selected` attribute and no selected
+background on any row, exactly as it did before this prop existed: it has
+no selection concept to report, and stamping `aria-selected="false"` on
+every row would wrongly claim it does. A table with `selection` configured
+emits `aria-selected` on every row, `"true"` or `"false"`.
+
+Matching is exact stable-key equality against `row_key`, with no positional
+fallback. A selected key with no matching row on the current page --
+because sorting, filtering, paging, a dataset swap, or removal moved or
+deleted it -- simply selects nothing until the caller supplies a key that is
+visible again; `EntityTable` never falls back to selecting whatever renders
+in the same position. `row_emphasis` below uses the same fail-safe shape.
+
+## Typed summary-row emphasis
+
+`row_emphasis` classifies each row into `EntityRowEmphasis` -- `Standard`,
+`Summary`, `Muted`, or `Attention` -- a narrow, framework-owned enum, never
+an unrestricted class-string hook. `EntityTable` owns every token, stroke
+width, and forced-colors rule a variant applies, identically across the
+wide and compact presentations that share one `<tr>`; the caller supplies
+only the classification predicate, so no per-column renderer needs to
+change.
+
+```rust,no_run
+use std::rc::Rc;
+use leptos_daisyui_rs::components::EntityRowEmphasis;
+# struct Row { status: String }
+let row_emphasis = Rc::new(|row: &Row| match row.status.as_str() {
+    "Total" => EntityRowEmphasis::Summary,
+    "Archived" => EntityRowEmphasis::Muted,
+    "Overdue" => EntityRowEmphasis::Attention,
+    _ => EntityRowEmphasis::Standard,
+});
+// Pass `row_emphasis` through EntityTable's `row_emphasis` prop.
+```
+
+Every variant is presentation-only and text/border only -- `Summary` adds
+bold weight plus a top rule, `Muted` holds text at the framework's
+AA-audited `text-base-content/75` (never a lower, axe-failing opacity), and
+`Attention` adds warning-toned bold text. **No variant sets
+`background-color`.** That is deliberate: `selection` paints `bg-base-200`
+on a selected `<tr>` independently, and `zebra` paints alternating row
+backgrounds via `table-zebra` on the ancestor `<table>`. Because emphasis
+never touches background, all three compose freely instead of racing for
+the same CSS property -- a selected `Summary` row keeps its selected
+background alongside its bold text and top rule, and a zebra-striped
+`Muted` row keeps its stripe alongside its reduced-contrast text.
+
+Classification is a pure function of the row's own content, computed fresh
+for whatever row is currently rendered at a position -- so it automatically
+follows a row across sorting, filtering, and paging rather than pinning a
+look to a position. `Standard` (the default when a table has no
+`row_emphasis` classifier at all, or when the row being classified is
+absent -- the same fail-safe as selection above) renders identically to a
+table that predates this prop: no extra class, no
+`data-entity-row-emphasis` attribute on any row.
 
 ## Preference ownership
 
