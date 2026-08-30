@@ -2797,6 +2797,14 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
     // Labels are reactive presentation while the stable value remains query
     // truth. If metadata temporarily omits the accepted value, the framework
     // retains a removable fallback option instead of blanking the select.
+    //
+    // `[data-testid='cursor-filter-locale']` drives the SAME page-wide
+    // `locale_es` signal as `#locale-toggle` (demo/src/demos/data_table.rs) -
+    // this whole test already clicked `#locale-toggle` once, above, which
+    // left the page in Spanish. This click is therefore the *second* flip
+    // and returns the page to English, so the reactive relabel this
+    // assertion proves is Spanish -> English ("Analista" -> "Analyst"), not
+    // the other direction.
     assert_eq!(
         {
             click(h, "[data-testid='cursor-filter-locale']").await;
@@ -2813,7 +2821,7 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
             )
             .await
         },
-        json!({ "value": "role.analyst", "label": "Analista" })
+        json!({ "value": "role.analyst", "label": "Analyst" })
     );
     click(h, "[data-testid='cursor-filter-active-option']").await;
     assert_eq!(
@@ -2827,6 +2835,8 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
         .await,
         json!({ "value": "role.analyst", "label": "role.analyst" })
     );
+    // Re-adding the metadata option restores its live label - still English,
+    // since nothing toggled `locale_es` again since the assertion above.
     click(h, "[data-testid='cursor-filter-active-option']").await;
     assert_eq!(
         eval_json(
@@ -2837,7 +2847,7 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
             })()"#,
         )
         .await,
-        json!({ "value": "role.analyst", "label": "Analista" })
+        json!({ "value": "role.analyst", "label": "Analyst" })
     );
 
     assert_eq!(

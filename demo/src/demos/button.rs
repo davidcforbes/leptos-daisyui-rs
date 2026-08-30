@@ -175,11 +175,15 @@ pub fn ButtonDemo() -> impl IntoView {
                     class="flex flex-col gap-4"
                 >
                     <label class="flex items-center gap-2">
-                        <input
-                            id="button-type-form-checkbox"
-                            type="checkbox"
-                            class="checkbox"
-                        />
+                        // Plain, unstyled native checkbox (ldui-d2hg): the
+                        // fixture only proves native `reset` restores its
+                        // `checked` state (tests/reactivity_smoke.rs), which
+                        // is true of any `<input type="checkbox">` — no
+                        // daisyUI styling needed. daisyUI's `.checkbox`
+                        // class paints an inset box-shadow via an oklch
+                        // color outside the page's declared shadow set,
+                        // which pushed this page over its DEPTH ceiling.
+                        <input id="button-type-form-checkbox" type="checkbox" />
                         "Toggled by hand, restored by native reset"
                     </label>
                     <div class="flex items-center gap-2">

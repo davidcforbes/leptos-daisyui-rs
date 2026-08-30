@@ -378,7 +378,11 @@ pub fn Tabs(
 /// - `node_ref` - References the anchor element ([HTMLAnchorElement](https://developer.mozilla.org/en-US/docs/Web/API/HTMLAnchorElement))
 #[component]
 pub fn Tab(
-    /// Stable key. Required inside a controlled [`TabSet`].
+    /// Stable key. Required inside a controlled [`TabSet`]; a `Tab` that
+    /// sees a `TabSet` context but has no `tab_key` (including one seen
+    /// via context leaking to a later sibling on the same page, a known
+    /// Leptos non-island-component quirk) renders as an uncontrolled tab
+    /// instead of panicking.
     #[prop(optional, into)]
     tab_key: Option<String>,
 
@@ -401,15 +405,37 @@ pub fn Tab(
     /// Tab label content
     children: Children,
 ) -> impl IntoView {
+    // `use_context` walks the reactive owner chain, and a plain
+    // (non-island) `#[component]` never opens an owner boundary of its
+    // own (leptos_macro only inserts one for islands) - so a `TabSet`
+    // higher up the page can leave its `TabSetContext` visible to every
+    // *sibling* rendered later in the same synchronous pass, not just to
+    // its own children. A `Tab` with no `tab_key` sitting anywhere after
+    // an unrelated `TabSet` on the same page therefore sees `Some`
+    // context despite never being nested inside one (ldui-d2hg). Treat
+    // that combination as "not actually controlled" rather than a
+    // programmer error: crashing the whole wasm app over an ambient
+    // context leak is worse than silently rendering an uncontrolled tab.
+    // A `tab_key` with no enclosing `TabSet` gets the same graceful
+    // treatment for the same reason - defense in depth against an assert
+    // ever taking down the app again.
     let context = use_context::<TabSetContext>();
-    assert!(
-        context.is_none() || tab_key.is_some(),
-        "Tab inside TabSet requires a stable tab_key"
-    );
-    assert!(
-        context.is_some() || tab_key.is_none(),
-        "tab_key requires an enclosing TabSet"
-    );
+    let (context, tab_key) = match (context, tab_key) {
+        (Some(context), Some(key)) => (Some(context), Some(key)),
+        (Some(_), None) => {
+            leptos::logging::warn!(
+                "Tab: an ambient TabSet context is visible but no tab_key was supplied; rendering as an uncontrolled tab instead of panicking (ldui-d2hg)."
+            );
+            (None, None)
+        }
+        (None, Some(_)) => {
+            leptos::logging::warn!(
+                "Tab: tab_key was supplied but no enclosing TabSet was found; the key will be ignored (ldui-d2hg)."
+            );
+            (None, None)
+        }
+        (None, None) => (None, None),
+    };
     let tab_key = tab_key.map(StoredValue::new);
     let tab_id = context
         .zip(tab_key)
