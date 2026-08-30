@@ -462,6 +462,15 @@ required DataTable-only features have typed equivalents. Existing server-owned
 pages migrate directly to `ServerDataTable`; they must not pass one fetched page
 through either client table.
 
+A page-local raw `EntityTable` kept only to reach `page_reset_key`,
+`viewport_fit`, `toolbar_actions`, `on_display_projection`/
+`projection_action_columns`, or `column_chooser_trigger` -- because
+`SnapshotTablePage` did not yet expose them -- should migrate back onto
+`SnapshotTablePage` and `SnapshotEntityTableConfig`'s typed builders for the
+same names (`ldui-myhh` / `ldui-5ano`). See
+[`doc/patterns/client-snapshot-list.md`](../patterns/client-snapshot-list.md#behavior-only-entitytable-passthroughs)
+for the full builder table and a worked example.
+
 ## Verification
 
 The focused inner and browser lanes are:

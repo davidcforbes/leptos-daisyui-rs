@@ -1,15 +1,16 @@
 use leptos::prelude::*;
 use leptos_daisyui_rs::components::{
-    BadgeColor, Button, EntityBadgePresentation, EntityColumn, EntityColumnFilter, EntityIconColor,
-    EntityIconPresentation, EntityNullOrder, EntityRowAction, EntityRowEmphasis, EntityTable,
-    EntityTablePreferenceOwnership, EntityTablePreferencePersistence, EntityTableSelection,
+    BadgeColor, Button, EntityBadgePresentation, EntityColumn, EntityColumnChooserTrigger,
+    EntityColumnFilter, EntityIconColor, EntityIconPresentation, EntityNullOrder, EntityRowAction,
+    EntityRowEmphasis, EntityTable, EntityTableDisplayProjection, EntityTablePreferenceOwnership,
+    EntityTablePreferencePersistence, EntityTableProjectionScope, EntityTableSelection,
     EntityTableTexts, EntityTableViewportFit,
 };
 use leptos_daisyui_rs::patterns::{
     ActionFeedbackContent, ActionFeedbackState, PageHeader, PageHeaderNavigationLayout,
     SnapshotData, SnapshotDatasetOption, SnapshotDatasetSelectorConfig, SnapshotDeltaDisposition,
     SnapshotDeltaHandle, SnapshotEntityTableConfig, SnapshotLocalRowProjection,
-    SnapshotRequestHandle, SnapshotTablePage, SnapshotTableState,
+    SnapshotRequestHandle, SnapshotTablePage, SnapshotTableState, SnapshotTransitionDisposition,
 };
 use std::rc::Rc;
 use std::sync::Arc;
@@ -456,6 +457,199 @@ pub fn SnapshotTablePageFixture() -> impl IntoView {
             on_retry=retry
             action_key_label=Rc::new(|key: &String| key.clone())
         />
+    }
+}
+
+fn controls_fixture_rows(dataset: &str) -> Rc<Vec<FixtureRow>> {
+    let office = if dataset == "office-in" {
+        "New Delhi"
+    } else {
+        "Mexico City"
+    };
+    Rc::new(
+        (1..=8)
+            .map(|index| FixtureRow {
+                id: format!("{dataset}-controls-{index}"),
+                client: format!("{office} Client {index}"),
+                status: if index == 1 { "Urgent" } else { "Ready" }.to_owned(),
+            })
+            .collect(),
+    )
+}
+
+fn controls_fixture_snapshot(
+    dataset: &str,
+    revision: &str,
+) -> SnapshotData<FixtureRow, String, ()> {
+    let rows = controls_fixture_rows(dataset);
+    SnapshotData::new(
+        dataset.to_owned(),
+        Rc::clone(&rows),
+        revision,
+        rows.len(),
+        Some(()),
+    )
+    .expect("controls fixture snapshot is complete")
+}
+
+/// Focused browser fixture for the `SnapshotEntityTableConfig` behavior-only
+/// passthroughs (`ldui-myhh` / `ldui-5ano`): local-filter page reset from a
+/// later page (`page_reset_key`), framework-measured adaptive height
+/// (`viewport_fit`), the icon column-chooser presentation
+/// (`column_chooser_trigger`), and the display-projection callback driving a
+/// caller-owned Export action (`with_toolbar_actions` /
+/// `on_display_projection`) -- all forwarded through `SnapshotTablePage`'s
+/// internally owned `EntityTable` without granting rows, dataset identity,
+/// revision, or generation. Eight rows per dataset keep the table on a
+/// second page at the short `viewport_fit` budget below, so the filter-reset
+/// proof exercises a real later-page starting point instead of an
+/// already-page-one table.
+#[component]
+pub fn SnapshotTablePageControlsFixture() -> impl IntoView {
+    type State = SnapshotTableState<FixtureRow, String, String, (), String>;
+
+    let mut initial = State::new();
+    let request = initial
+        .start_request("office-mx".to_owned())
+        .expect("initial controls-fixture request");
+    assert_eq!(
+        initial.complete(request, controls_fixture_snapshot("office-mx", "mx-r1")),
+        SnapshotTransitionDisposition::Applied
+    );
+
+    let state = RwSignal::new_local(initial);
+    let filter_mode = RwSignal::new("all");
+    let local_rows = RwSignal::new_local(Option::<SnapshotLocalRowProjection<FixtureRow>>::None);
+
+    Effect::new(move |_| {
+        let mode = filter_mode.get();
+        let projection = state.with(|state| {
+            let displayed = state.view(None).displayed()?;
+            let rows = displayed
+                .rows()
+                .iter()
+                .filter(|row| match mode {
+                    "urgent" => row.status == "Urgent",
+                    _ => true,
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            state.local_row_projection(Rc::new(rows))
+        });
+        local_rows.set(projection);
+    });
+
+    // Single-dataset selector: dataset switching itself is proven by
+    // `SnapshotTablePageFixture` above, so this fixture keeps the selector
+    // minimal and spends its surface on the new behavior-only passthroughs.
+    let request_dataset = Callback::new(move |dataset: String| {
+        let mut next = None;
+        state.update(|state| next = state.start_request(dataset.clone()).ok());
+        if let Some(handle) = next {
+            state.update(|state| {
+                state.complete(handle, controls_fixture_snapshot(&dataset, "mx-r2"));
+            });
+        }
+    });
+    let selector = SnapshotDatasetSelectorConfig::new(
+        "Office",
+        Signal::stored(vec![SnapshotDatasetOption::new(
+            "office-mx".to_owned(),
+            "Mexico City",
+        )]),
+        Arc::new(|value: &String| value.clone()),
+        request_dataset,
+    );
+
+    let display_projection = RwSignal::new_local(Option::<EntityTableDisplayProjection>::None);
+    let export_output = RwSignal::new(String::new());
+    let export_clicks = RwSignal::new(0_u32);
+
+    let export_rows = Callback::new(move |_| {
+        export_clicks.update(|count| *count += 1);
+        let text = display_projection.with(|projection| {
+            projection
+                .as_ref()
+                .map(|projection| {
+                    projection
+                        .rows(EntityTableProjectionScope::AllFiltered)
+                        .iter()
+                        .map(|row| row.cells.join(","))
+                        .collect::<Vec<_>>()
+                        .join(";")
+                })
+                .unwrap_or_default()
+        });
+        export_output.set(text);
+    });
+
+    let page_reset_key = Signal::derive(move || filter_mode.get().to_owned());
+    let table = SnapshotEntityTableConfig::new(
+        columns(),
+        Rc::new(|row: &FixtureRow| row.id.clone()),
+        EntityTablePreferenceOwnership::uncontrolled(EntityTablePreferencePersistence::Disabled),
+    )
+    .with_page_reset_key(page_reset_key)
+    .with_viewport_fit(EntityTableViewportFit::max_height("160px").with_min_rows(2))
+    .with_toolbar_actions(move || {
+        view! {
+            <Button attr:data-testid="controls-export" on_click=export_rows>
+                "Export"
+            </Button>
+        }
+        .into_any()
+    })
+    .on_display_projection(Callback::new(
+        move |projection: EntityTableDisplayProjection| {
+            display_projection.set(Some(projection));
+        },
+    ))
+    .with_column_chooser_trigger(EntityColumnChooserTrigger::Icon);
+
+    view! {
+        <section id="snapshot-controls-fixture" class="space-y-3">
+            <SnapshotTablePage
+                contract_id="snapshot-controls"
+                state=state.into()
+                local_rows=local_rows.into()
+                header=Box::new(|| view! {
+                    <PageHeader
+                        title="Snapshot table controls fixture"
+                        subtitle="Behavior-only EntityTable passthroughs: page reset, viewport fit, toolbar export, icon chooser."
+                    />
+                }.into_any())
+                dataset_selector=selector
+                filters=Box::new(move || view! {
+                    <div class="flex flex-wrap gap-2" aria-label="Controls fixture filters">
+                        <Button
+                            attr:data-testid="controls-filter-all"
+                            attr:aria-pressed=move || (filter_mode.get() == "all").to_string()
+                            on_click=Callback::new(move |_| filter_mode.set("all"))
+                        >
+                            "All rows"
+                        </Button>
+                        <Button
+                            attr:data-testid="controls-filter-urgent"
+                            attr:aria-pressed=move || (filter_mode.get() == "urgent").to_string()
+                            on_click=Callback::new(move |_| filter_mode.set("urgent"))
+                        >
+                            "Urgent only"
+                        </Button>
+                    </div>
+                }.into_any())
+                entity_table=table
+                action_key_label=Rc::new(|key: &String| key.clone())
+            />
+            <div class="flex flex-wrap items-center gap-3 text-sm">
+                <span>
+                    "Export clicks: "
+                    <code data-testid="controls-export-clicks">
+                        {move || export_clicks.get().to_string()}
+                    </code>
+                </span>
+            </div>
+            <pre data-testid="controls-export-output" class="text-xs">{move || export_output.get()}</pre>
+        </section>
     }
 }
 

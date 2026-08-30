@@ -6,8 +6,9 @@ use super::{
     SnapshotLocalRowProjection, SnapshotTablePhase, SnapshotTableState,
 };
 use crate::components::{
-    EntityColumnFilters, EntityColumns, EntityCompactRow, EntityRowKey, EntityTable,
-    EntityTablePreferenceOwnership, EntityTableTexts,
+    EntityColumnChooserTrigger, EntityColumnFilters, EntityColumns, EntityCompactRow, EntityRowKey,
+    EntityTable, EntityTableActionColumnPolicy, EntityTableDisplayProjection,
+    EntityTablePreferenceOwnership, EntityTableTexts, EntityTableViewportFit,
 };
 use leptos::prelude::*;
 use std::rc::Rc;
@@ -91,6 +92,14 @@ impl<V: Send + Sync + 'static> SnapshotDatasetSelectorConfig<V> {
 /// EntityTable mechanics that deliberately omit rows, dataset identity,
 /// revision, authoritative count, and generation. The page injects all of
 /// those identity-critical bindings from the same state view as the selector.
+///
+/// Everything else the internally owned `EntityTable` can express as pure
+/// behavior -- local-filter page reset, viewport-fit paging, a caller
+/// toolbar, the display-projection callback/action-column policy, and
+/// chooser presentation -- is a typed passthrough here (`ldui-myhh`,
+/// `ldui-5ano`). None of these can carry rows, dataset identity, revision,
+/// count, or generation: their types simply have no such field, so a caller
+/// cannot smuggle identity through them even by accident.
 pub struct SnapshotEntityTableConfig<R: 'static> {
     columns: EntityColumns<R>,
     row_key: EntityRowKey<R>,
@@ -101,6 +110,12 @@ pub struct SnapshotEntityTableConfig<R: 'static> {
     on_row_activate: Option<Callback<String>>,
     texts: Signal<EntityTableTexts>,
     show_reset_actions: bool,
+    page_reset_key: Option<Signal<String>>,
+    viewport_fit: Option<EntityTableViewportFit>,
+    toolbar_actions: Option<ChildrenFn>,
+    on_display_projection: Option<Callback<EntityTableDisplayProjection>>,
+    projection_action_columns: EntityTableActionColumnPolicy,
+    column_chooser_trigger: Signal<EntityColumnChooserTrigger>,
     zebra: Signal<bool>,
     class: &'static str,
 }
@@ -122,6 +137,12 @@ impl<R: 'static> SnapshotEntityTableConfig<R> {
             on_row_activate: None,
             texts: Signal::stored(EntityTableTexts::default()),
             show_reset_actions: false,
+            page_reset_key: None,
+            viewport_fit: None,
+            toolbar_actions: None,
+            on_display_projection: None,
+            projection_action_columns: EntityTableActionColumnPolicy::default(),
+            column_chooser_trigger: Signal::stored(EntityColumnChooserTrigger::default()),
             zebra: Signal::stored(false),
             class: "",
         }
@@ -160,6 +181,76 @@ impl<R: 'static> SnapshotEntityTableConfig<R> {
     /// Shows explicit reset-sort and reset-columns actions.
     pub const fn show_reset_actions(mut self, show: bool) -> Self {
         self.show_reset_actions = show;
+        self
+    }
+
+    /// Supplies a caller-owned view-state identity distinct from dataset
+    /// identity and generation, which the page continues to inject itself.
+    /// Changing it resets pagination while preserving dataset-independent
+    /// filters, sort, page size, and columns -- for example hashing local
+    /// filter values so a filter change made from a later page returns the
+    /// table to page one without disturbing the dataset/access generation
+    /// this page already binds to `dataset_identity`/`focus_scope`.
+    pub fn with_page_reset_key(mut self, key: impl Into<Signal<String>>) -> Self {
+        self.page_reset_key = Some(key.into());
+        self
+    }
+
+    /// Opts the internally owned `EntityTable` into framework-measured
+    /// viewport-fit paging. Presentation-only: the measured row capacity
+    /// never changes persisted table preferences, rows, or dataset identity.
+    pub fn with_viewport_fit(mut self, viewport_fit: EntityTableViewportFit) -> Self {
+        self.viewport_fit = Some(viewport_fit);
+        self
+    }
+
+    /// Supplies caller-rendered table toolbar content, such as Export or
+    /// Refresh. The table owns placement (after page size, before the
+    /// framework-owned column chooser) and wrapping; the caller owns all
+    /// behavior. Never a route to identity: the renderer receives no rows,
+    /// dataset, revision, or generation from this config.
+    pub fn with_toolbar_actions(
+        mut self,
+        render: impl Fn() -> AnyView + Send + Sync + 'static,
+    ) -> Self {
+        self.toolbar_actions = Some(Arc::new(render));
+        self
+    }
+
+    /// Supplies the atomic read-only display-projection callback. It fires
+    /// whenever displayed rows, columns, ordering, paging, or canonical text
+    /// change; the caller owns storage, export encoding, authorization, and
+    /// download behavior. The projection is a read-only copy of what is
+    /// already rendered -- it carries no dataset identity, revision, or
+    /// generation of its own.
+    pub fn on_display_projection(
+        mut self,
+        callback: Callback<EntityTableDisplayProjection>,
+    ) -> Self {
+        self.on_display_projection = Some(callback);
+        self
+    }
+
+    /// Sets the action-column policy applied to `on_display_projection`
+    /// snapshots. Defaults to excluding action columns, since their canonical
+    /// copy normally describes UI rather than exported domain data.
+    pub const fn with_projection_action_columns(
+        mut self,
+        policy: EntityTableActionColumnPolicy,
+    ) -> Self {
+        self.projection_action_columns = policy;
+        self
+    }
+
+    /// Sets the framework-owned column-chooser trigger presentation (the
+    /// localized text label by default, or a compact icon glyph). Both
+    /// presentations keep the same accessible semantics; this never changes
+    /// what the chooser controls.
+    pub fn with_column_chooser_trigger(
+        mut self,
+        trigger: impl Into<Signal<EntityColumnChooserTrigger>>,
+    ) -> Self {
+        self.column_chooser_trigger = trigger.into();
         self
     }
 
@@ -440,25 +531,42 @@ where
                         })
                     })
                 >
-                    {entity_table.with_value(|config| view! {
-                        <EntityTable
-                            data=table_rows
-                            source_data=authoritative_rows
-                            columns=config.columns.clone()
-                            row_key=Rc::clone(&config.row_key)
-                            dataset_identity=generation_marker
-                            focus_scope=generation_marker
-                            compact_row=config.compact_row.clone()
-                            column_filters=config.column_filters.clone()
-                            nostrip:on_row_activate=config.on_row_activate
-                            preference_ownership=config.preference_ownership.clone()
-                            preference_version=config.preference_version
-                            texts=config.texts
-                            page_size_control_id=format!("{contract_id}-rows-per-page")
-                            show_reset_actions=config.show_reset_actions
-                            zebra=config.zebra
-                            class=config.class
-                        />
+                    {entity_table.with_value(|config| {
+                        // `ChildrenFn` is reusable (`Arc<dyn Fn() -> AnyView>`)
+                        // because this whole block can re-run whenever `Show`
+                        // remounts the table, but `EntityTable::toolbar_actions`
+                        // wants one single-shot `Children` per instance -- so a
+                        // fresh box is built from the stored renderer every time.
+                        let toolbar_actions = config
+                            .toolbar_actions
+                            .clone()
+                            .map(|render| Box::new(move || render()) as Children);
+                        view! {
+                            <EntityTable
+                                data=table_rows
+                                source_data=authoritative_rows
+                                columns=config.columns.clone()
+                                row_key=Rc::clone(&config.row_key)
+                                dataset_identity=generation_marker
+                                nostrip:page_reset_key=config.page_reset_key
+                                nostrip:viewport_fit=config.viewport_fit.clone()
+                                focus_scope=generation_marker
+                                compact_row=config.compact_row.clone()
+                                column_filters=config.column_filters.clone()
+                                nostrip:on_row_activate=config.on_row_activate
+                                preference_ownership=config.preference_ownership.clone()
+                                preference_version=config.preference_version
+                                texts=config.texts
+                                page_size_control_id=format!("{contract_id}-rows-per-page")
+                                show_reset_actions=config.show_reset_actions
+                                nostrip:toolbar_actions=toolbar_actions
+                                nostrip:on_display_projection=config.on_display_projection
+                                projection_action_columns=config.projection_action_columns
+                                column_chooser_trigger=config.column_chooser_trigger
+                                zebra=config.zebra
+                                class=config.class
+                            />
+                        }
                     })}
                 </Show>
             </div>
@@ -495,5 +603,73 @@ mod tests {
         );
         assert_eq!(table.preference_version, 1);
         assert!(!table.show_reset_actions);
+        assert!(table.page_reset_key.is_none());
+        assert!(table.viewport_fit.is_none());
+        assert!(table.toolbar_actions.is_none());
+        assert!(table.on_display_projection.is_none());
+        assert_eq!(
+            table.projection_action_columns,
+            EntityTableActionColumnPolicy::Exclude
+        );
+        assert_eq!(
+            table.column_chooser_trigger.get_untracked(),
+            EntityColumnChooserTrigger::Text
+        );
+    }
+
+    fn base_table_config() -> SnapshotEntityTableConfig<Row> {
+        let preferences = RwSignal::new(EntityTablePreferences::new(1));
+        SnapshotEntityTableConfig::<Row>::new(
+            Vec::new(),
+            Rc::new(|_: &Row| "row".to_owned()),
+            EntityTablePreferenceOwnership::controlled(
+                preferences.into(),
+                Callback::new(move |next| preferences.set(next)),
+            ),
+        )
+    }
+
+    /// `ldui-myhh` / `ldui-5ano`: every typed behavior-only builder actually
+    /// lands on the config's private field, and each field's type structurally
+    /// forbids carrying rows, dataset identity, revision, count, or
+    /// generation -- there is no setter that could smuggle one through.
+    #[test]
+    fn behavior_only_builders_forward_to_typed_fields() {
+        let key = RwSignal::new("filters:urgent".to_owned());
+        let trigger = RwSignal::new(EntityColumnChooserTrigger::Icon);
+        let projection_calls = RwSignal::new(0_u32);
+        let table = base_table_config()
+            .with_page_reset_key(key)
+            .with_viewport_fit(EntityTableViewportFit::fill_parent().with_min_rows(4))
+            .with_toolbar_actions(|| view! { <button>"Export"</button> }.into_any())
+            .on_display_projection(Callback::new(move |_: EntityTableDisplayProjection| {
+                projection_calls.update(|count| *count += 1);
+            }))
+            .with_projection_action_columns(EntityTableActionColumnPolicy::Include)
+            .with_column_chooser_trigger(trigger);
+
+        assert_eq!(
+            table
+                .page_reset_key
+                .expect("page_reset_key was set")
+                .get_untracked(),
+            "filters:urgent"
+        );
+        let viewport_fit = table.viewport_fit.expect("viewport_fit was set");
+        assert_eq!(viewport_fit.min_rows(), 4);
+        assert!(table.toolbar_actions.is_some());
+        let on_display_projection = table
+            .on_display_projection
+            .expect("on_display_projection was set");
+        on_display_projection.run(EntityTableDisplayProjection::default());
+        assert_eq!(projection_calls.get_untracked(), 1);
+        assert_eq!(
+            table.projection_action_columns,
+            EntityTableActionColumnPolicy::Include
+        );
+        assert_eq!(
+            table.column_chooser_trigger.get_untracked(),
+            EntityColumnChooserTrigger::Icon
+        );
     }
 }

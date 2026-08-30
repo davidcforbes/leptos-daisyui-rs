@@ -18,7 +18,8 @@ use leptos_daisyui_rs::test_mode;
 use leptos_daisyui_rs::tokens::{UiAnimationsPreamble, UiTokensPreamble};
 use snapshot_table_page::{
     EntityTableEmphasisFixture, EntityTablePageSizeIdentityFixture, EntityTablePresentationFixture,
-    EntityTableSelectionFixture, EntityTableViewportFitFixture, SnapshotTablePageFixture,
+    EntityTableSelectionFixture, EntityTableViewportFitFixture, SnapshotTablePageControlsFixture,
+    SnapshotTablePageFixture,
 };
 
 fn main() {
@@ -43,6 +44,9 @@ fn main() {
         let snapshot_fixture = web_sys::window()
             .and_then(|window| window.location().pathname().ok())
             .is_some_and(|path| path.ends_with("/snapshot-table-page"));
+        let snapshot_controls_fixture = web_sys::window()
+            .and_then(|window| window.location().pathname().ok())
+            .is_some_and(|path| path.ends_with("/snapshot-table-page-controls"));
         let viewport_fit_fixture = web_sys::window()
             .and_then(|window| window.location().pathname().ok())
             .is_some_and(|path| path.ends_with("/entity-table-viewport-fit"));
@@ -72,6 +76,8 @@ fn main() {
                     view! { <EntityTablePresentationFixture /> }.into_any()
                 } else if viewport_fit_fixture {
                     view! { <EntityTableViewportFitFixture /> }.into_any()
+                } else if snapshot_controls_fixture {
+                    view! { <SnapshotTablePageControlsFixture /> }.into_any()
                 } else if snapshot_fixture {
                     view! { <SnapshotTablePageFixture /> }.into_any()
                 } else {

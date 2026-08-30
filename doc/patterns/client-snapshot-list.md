@@ -167,6 +167,47 @@ view! {
 }
 ```
 
+## Behavior-only EntityTable passthroughs
+
+`SnapshotEntityTableConfig` owns the internally rendered `EntityTable`'s
+identity-critical bindings (rows, `dataset_identity`, `focus_scope`) itself,
+sourced from the same private state view as the dataset selector -- a caller
+cannot supply those through the config. Everything the underlying table can
+express as pure behavior is a typed builder instead (`ldui-myhh` /
+`ldui-5ano`), so a consumer that previously had to drop to a page-local raw
+`EntityTable` for these can now stay on the canonical page:
+
+| Builder | Forwards to | Purpose |
+|---|---|---|
+| `with_page_reset_key` | `EntityTable::page_reset_key` | Resets pagination on a caller-owned local-filter identity, distinct from the page's own dataset/access generation. |
+| `with_viewport_fit` | `EntityTable::viewport_fit` | Framework-measured adaptive row capacity from a definite parent or CSS height budget. |
+| `with_toolbar_actions` | `EntityTable::toolbar_actions` | Caller-rendered table utilities (Export, Refresh) placed after page size and before the column chooser. |
+| `on_display_projection` / `with_projection_action_columns` | `EntityTable::on_display_projection` / `projection_action_columns` | Atomic read-only display projection for caller-owned export encoding, plus its action-column policy. |
+| `with_column_chooser_trigger` | `EntityTable::column_chooser_trigger` | Text (default) or compact icon presentation of the framework-owned chooser; both keep identical accessible semantics. |
+
+```rust,no_run
+let table = SnapshotEntityTableConfig::new(columns(), row_key, preference_ownership)
+    .with_page_reset_key(Signal::derive(move || local_filter_hash.get()))
+    .with_viewport_fit(EntityTableViewportFit::fill_parent().with_min_rows(5))
+    .with_toolbar_actions(move || view! {
+        <Button on_click=export_csv>"Export CSV"</Button>
+    }.into_any())
+    .on_display_projection(Callback::new(move |projection| export_projection.set(projection)))
+    .with_column_chooser_trigger(EntityColumnChooserTrigger::Icon);
+```
+
+None of these can carry rows, dataset identity, revision, count, or
+generation -- their types have no such field, so a caller cannot smuggle
+identity through them even by accident. A consumer already using the raw
+`EntityTable` escape hatch purely for these behaviors (Office No-Hires: local
+filter reset from a later page, fill-parent row capacity, an icon chooser,
+and CSV export adjacent to table utilities) should migrate the call site back
+onto `SnapshotTablePage` with these builders rather than keep a page-local
+duplicate table. See `doc/components/entity_table.md`'s Core inputs table for
+each underlying prop's full contract, and
+`demo/src/demos/snapshot_table_page.rs::SnapshotTablePageControlsFixture` for
+a complete reference fixture.
+
 ## Default-view boundary
 
 Build the save payload only with `FilterSchema::project_defaults`. The result,
@@ -211,3 +252,11 @@ state, locale updates without preference reset, latest column semantics,
 same-scope row-removal focus, hide/scope/user-moved negative cases, compact
 copy, distinct stable selector IDs, controlled projection/no-results behavior,
 axe, and stable table/header geometry.
+
+The behavior-only passthroughs above have their own focused fixture and
+browser proof: `demo/src/demos/snapshot_table_page.rs`'s
+`SnapshotTablePageControlsFixture` (route `/components/snapshot-table-page-controls`)
+and `tests/snapshot_table_page_controls_smoke.rs`, covering local-filter page
+reset from a later page, adaptive height, the icon chooser opening visibly,
+export receiving the authoritative rendered projection, and no storage I/O or
+dataset-identity drift across the whole sequence.
