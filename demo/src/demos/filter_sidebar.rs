@@ -70,7 +70,11 @@ fn Workspace(
                 active_count=active_count
                 title=title
                 search=search
-                search_placeholder="Search filters"
+                // Deliberately NOT the same text as any `search_label` value
+                // below (ldui-g66e): the placeholder and the accessible name
+                // are two different things, and identical strings would let
+                // a fixture asserting their independence pass by accident.
+                search_placeholder="Type to filter…"
                 search_label=search_label
                 toggle_label="Toggle the panel"
             >
