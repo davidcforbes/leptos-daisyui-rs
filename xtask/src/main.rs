@@ -376,6 +376,25 @@ fn section_heading_step() -> Step {
     }
 }
 
+/// Focused browser proof for `SearchPickerDialog` (ldui-i95p): opening
+/// focuses the search field, Escape/Cancel closes and restores focus, typed
+/// activation resolves the current keyed payload, async replacement/stale
+/// responses never activate an old payload, and two independent dialog
+/// instances don't collide. Lives on the general demo app (`html_target:
+/// None`, like [`reactivity_step`]/[`layout_step`]/[`style_step`]/
+/// [`result_list_step`]/[`section_heading_step`]) rather than a dedicated
+/// test-host page, and stays in its own file/step for the same reason as
+/// [`result_list_step`]/[`section_heading_step`].
+fn search_picker_dialog_step() -> Step {
+    Step {
+        name: "test-search-picker-dialog",
+        run: Run::BrowserSuite {
+            test: "search_picker_dialog_smoke",
+            html_target: None,
+        },
+    }
+}
+
 /// The full release gate. The catalog browser suites are deliberately
 /// consecutive: [`run_steps`] reuses one verified release server for adjacent
 /// suites targeting the same HTML entry point.
@@ -388,6 +407,7 @@ fn full_steps() -> Vec<Step> {
     steps.push(style_step());
     steps.push(result_list_step());
     steps.push(section_heading_step());
+    steps.push(search_picker_dialog_step());
     steps
 }
 
@@ -1821,6 +1841,7 @@ fn main() -> ExitCode {
         "test-style" => run_steps(&[style_step()]),
         "test-keyed-result-list" => run_steps(&[result_list_step()]),
         "test-section-heading" => run_steps(&[section_heading_step()]),
+        "test-search-picker-dialog" => run_steps(&[search_picker_dialog_step()]),
         "gen-tokens" => {
             let check = std::env::args().any(|a| a == "--check");
             gen_tokens(check)
@@ -1834,7 +1855,7 @@ fn main() -> ExitCode {
         other => {
             eprintln!("xtask: unknown subcommand {other:?}");
             eprintln!(
-                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-section-heading|gen-tokens|check-sibling-tokens|bump>"
+                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-section-heading|test-search-picker-dialog|gen-tokens|check-sibling-tokens|bump>"
             );
             ExitCode::from(2)
         }
@@ -2218,6 +2239,29 @@ pub fn r() -> f32 { radius::CARD }
             full_steps()
                 .iter()
                 .any(|s| s.name == "test-section-heading")
+        );
+    }
+
+    #[test]
+    fn search_picker_dialog_step_is_in_process_and_full_only() {
+        let step = search_picker_dialog_step();
+        assert_eq!(step.name, "test-search-picker-dialog");
+        assert!(matches!(
+            step.run,
+            Run::BrowserSuite {
+                test: "search_picker_dialog_smoke",
+                html_target: None
+            }
+        ));
+        assert!(
+            !gate_steps()
+                .iter()
+                .any(|s| s.name == "test-search-picker-dialog")
+        );
+        assert!(
+            full_steps()
+                .iter()
+                .any(|s| s.name == "test-search-picker-dialog")
         );
     }
 

@@ -10,6 +10,7 @@ mod list_page;
 mod macros;
 mod page_header;
 mod page_state_panel;
+mod search_picker_dialog;
 mod section_heading;
 mod server_cursor_history;
 mod snapshot_table;
@@ -48,6 +49,10 @@ pub use filter_bar::{
 pub use list_page::{LIST_PAGE_BASE_CLASS, ListPage, list_page_class};
 pub use page_header::{PageHeader, PageHeaderNavigationLayout};
 pub use page_state_panel::{PageStatePanel, PageStatePanelTexts};
+pub use search_picker_dialog::{
+    SearchPickerDialog, SearchPickerDialogTexts, SearchPickerRenderDecision, SearchPickerStatus,
+    search_picker_render_decision,
+};
 pub use section_heading::{HeadingLevel, SectionHeading};
 pub use server_cursor_history::{
     ServerCursorHistory, ServerCursorHistoryDisposition, ServerCursorHistoryError,

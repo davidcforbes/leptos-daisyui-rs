@@ -218,27 +218,30 @@ page-scoped browser lanes, then builds the full catalog once in release mode and
 reuses that same verified server for the 34-check reactivity/DOM-oracle suite
 (`test-reactivity`), layout audit (`test-layout`, below), style audit
 (`test-style`, below), the focused `KeyedResultList` browser proof
-(`test-keyed-result-list`, ldui-r1z), and the focused `SectionHeading`
-browser proof (`test-section-heading`, ldui-lwu). That catalog server is the real
-`wasm32-unknown-unknown` release build, so a second standalone
-`trunk build --release` would only repeat the same pipeline and is intentionally
-absent. It is a **separate task**, not part of the default gate, because it needs
-`npm` + `trunk` + `tailwindcss` + Chrome installed and takes minutes — keeping
-`verify` fast and zero-tooling. Run `verify-full` before a release or when
-touching wasm-only / CSS-affecting code.
+(`test-keyed-result-list`, ldui-r1z), the focused `SectionHeading`
+browser proof (`test-section-heading`, ldui-lwu), and the focused
+`SearchPickerDialog` browser proof (`test-search-picker-dialog`, ldui-i95p).
+That catalog server is the real `wasm32-unknown-unknown` release build, so a
+second standalone `trunk build --release` would only repeat the same pipeline
+and is intentionally absent. It is a **separate task**, not part of the
+default gate, because it needs `npm` + `trunk` + `tailwindcss` + Chrome
+installed and takes minutes — keeping `verify` fast and zero-tooling. Run
+`verify-full` before a release or when touching wasm-only / CSS-affecting
+code.
 
 The page-scoped host and catalog are two distinct HTML/Wasm targets and therefore
 require two server builds. Consecutive suites for the same target share one
 server. In measured warm runs, Cargo's catalog compile was under one second but
 Trunk's Wasm optimization took roughly two minutes per invocation; sharing the
-catalog server across its five suites (reactivity, layout, style, the
-focused `KeyedResultList` proof, and the focused `SectionHeading` proof)
-removes four redundant optimization passes from `verify-full`.
+catalog server across its six suites (reactivity, layout, style, the
+focused `KeyedResultList` proof, the focused `SectionHeading` proof, and the
+focused `SearchPickerDialog` proof) removes five redundant optimization passes
+from `verify-full`.
 
 ### Gate cadence during a live Beads drain
 
 `cargo xtask verify` is the 14-step native gate listed in the table above.
-`cargo xtask verify-full` adds seven browser/Wasm checks and reports 21 steps.
+`cargo xtask verify-full` adds eight browser/Wasm checks and reports 22 steps.
 Say which command is running before starting it; "the verification gate" is
 ambiguous because the two commands have materially different cost and coverage.
 
@@ -350,10 +353,11 @@ gate.
 
 When these catalog suites are adjacent inside `verify-full`, steps 1-3 and 5
 wrap the group once: reactivity, layout, style, the focused
-`KeyedResultList` proof (`test-keyed-result-list`), and the focused
-`SectionHeading` proof (`test-section-heading`) all use the same current
-release server. Their standalone subcommands continue to own an isolated server
-so they remain independently reproducible.
+`KeyedResultList` proof (`test-keyed-result-list`), the focused
+`SectionHeading` proof (`test-section-heading`), and the focused
+`SearchPickerDialog` proof (`test-search-picker-dialog`) all use the same
+current release server. Their standalone subcommands continue to own an
+isolated server so they remain independently reproducible.
 
 The suite keeps its `#[ignore]` attributes (the gate passes `--ignored`
 explicitly) so that a bare `cargo test` with no server running still passes.

@@ -649,6 +649,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     value: "result-list",
                 },
                 ComponentItem {
+                    name: "Search Picker Dialog",
+                    href: "/components/search_picker_dialog",
+                    value: "search_picker_dialog",
+                },
+                ComponentItem {
                     name: "Select",
                     href: "/components/select",
                     value: "select",
