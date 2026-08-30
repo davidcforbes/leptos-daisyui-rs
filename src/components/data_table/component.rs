@@ -1,6 +1,6 @@
 use crate::components::data_table::auto_page::{
     DEFAULT_AUTO_MIN_ROWS, FALLBACK_HEADER_HEIGHT, FALLBACK_ROW_HEIGHT, RowHeightEra,
-    auto_page_size_for_height, max_row_height,
+    auto_page_size_for_height, max_row_height, overflow_check_floor, rows_per_page_for_height,
 };
 use crate::components::data_table::body::{DataTableBody, DataTableBodyClick, DataTableBodyRow};
 use crate::components::data_table::chooser::{
@@ -961,13 +961,13 @@ pub fn DataTable(
             handle.clear();
         }
         let tolerance = row_height;
-        // Floored at `min_rows` (never below 1): `auto_page.rs`'s own docs on
-        // `auto_page_size_for_height` say a fit below `min_rows` "retained
-        // [the configured page size]... and the bounded table viewport
-        // scrolls" -- residual overflow at the floor is that documented
-        // scroll case, not a bug this belt-and-braces step should paper over
-        // by shrinking the page toward unusability.
-        let floor = min_rows.max(1);
+        // See `overflow_check_floor`'s own docs (ldui-89rp regression, caught
+        // by `auto_page_size_keeps_a_usable_page_and_scrolls_short_viewports`):
+        // below `min_rows`, `rows` above is the retained configured page
+        // size, not a responsive fit, and the floor must be `rows` itself so
+        // this belt-and-braces check can never shave a row off it.
+        let measured_rows = rows_per_page_for_height(viewport, header_height, row_height);
+        let floor = overflow_check_floor(measured_rows, min_rows, rows);
         let check_overflow = move || {
             // Same late-firing guard as `measure_rows` above: the
             // `auto_page_size` try-read doubles as the disposed-owner check,

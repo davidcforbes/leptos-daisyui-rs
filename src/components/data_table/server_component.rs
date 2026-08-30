@@ -2008,9 +2008,21 @@ pub fn ServerDataTable(
         if let Some(handle) = viewport_fit_measure_handle.try_get_value().flatten() {
             handle.clear();
         }
+        // `ViewportFitEpoch::next` takes `self` by value (it's `Copy`), so
+        // `epoch.next()` on the `&mut ViewportFitEpoch` that `try_update_value`
+        // hands in COMPUTES the advanced epoch WITHOUT writing it back --
+        // the stored epoch never actually moved past `Self(0)`, so every
+        // later `is_current(stamp)` check compared a freshly-minted stamp
+        // against a value frozen at its initial state and always found it
+        // stale. That silently discarded every viewport-fit measurement
+        // pass forever (bug: no proposal ever applied). Assign the advanced
+        // epoch back into `*epoch` explicitly before returning its stamp.
         let stamp = viewport_fit_epoch
-            .try_update_value(|epoch| epoch.next())
-            .map(|(_, stamp)| stamp)
+            .try_update_value(|epoch| {
+                let (next, stamp) = epoch.next();
+                *epoch = next;
+                stamp
+            })
             .unwrap_or(0);
         match set_timeout_with_handle(
             move || measure_viewport_fit(stamp),

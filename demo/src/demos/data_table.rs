@@ -1145,8 +1145,10 @@ pub fn DataTableDemo() -> impl IntoView {
             // Per-column filter row
             <Section title="Per-Column Filter Row">
                 <p class="text-sm opacity-70 mb-4">
-                    <code>"Column::filterable()"</code> " gives low-cardinality columns an exact "
-                    "dropdown; " <code>"Column::filterable_text()"</code> " gives high-cardinality "
+                    <code class="font-sans">"Column::filterable()"</code>
+                    " gives low-cardinality columns an exact "
+                    "dropdown; " <code class="font-sans">"Column::filterable_text()"</code>
+                    " gives high-cardinality "
                     "columns a debounced substring box in the same aligned row. Filters combine with "
                     "each other and the table search (all must match)."
                 </p>
@@ -1214,10 +1216,11 @@ pub fn DataTableDemo() -> impl IntoView {
             // Regression guard for ldui-89rp
             <Section title="Responsive Page Size — Variable-Height Rows">
                 <p class="text-sm opacity-70 mb-4">
-                    "A regression guard for " <code>"ldui-89rp"</code>
+                    "A regression guard for " <code class="font-sans">"ldui-89rp"</code>
                     ": row 13 of 20 wraps to roughly three lines while every other row stays "
                     "short, and it sits past the default page size so it only shows up once a "
-                    "measurement pass grows the page. " <code>"auto_page_size"</code>
+                    "measurement pass grows the page. "
+                    <code class="font-sans">"auto_page_size"</code>
                     " must measure the tallest currently rendered row rather than just the "
                     "first, never forget it once seen, and settle instead of oscillating -- "
                     "so the derived page never overflows its own scroll wrapper."
@@ -1719,7 +1722,7 @@ pub fn DataTableDemo() -> impl IntoView {
                     </Button>
                     <span class="text-xs">
                         "Proposals: "
-                        <code data-testid="server-query-proposals">
+                        <code class="font-sans" data-testid="server-query-proposals">
                             {move || server_proposal_count.get().to_string()}
                         </code>
                     </span>
@@ -1764,15 +1767,15 @@ pub fn DataTableDemo() -> impl IntoView {
                 </p>
                 <p class="text-xs opacity-60 mb-3">
                     "Last query: "
-                    <code data-testid="cursor-last-query">
+                    <code class="font-sans" data-testid="cursor-last-query">
                         {move || cursor_last_request.get()}
                     </code>
                     " · Proposals: "
-                    <code data-testid="cursor-query-proposals">
+                    <code class="font-sans" data-testid="cursor-query-proposals">
                         {move || cursor_proposal_count.get().to_string()}
                     </code>
                     " · Keyed activation: "
-                    <code data-testid="cursor-keyed-activation">
+                    <code class="font-sans" data-testid="cursor-keyed-activation">
                         {move || cursor_keyed_activation.get().map_or_else(
                             || "(none)".to_owned(),
                             |action| format!(
@@ -1784,7 +1787,7 @@ pub fn DataTableDemo() -> impl IntoView {
                         )}
                     </code>
                     " · Keyed inspection: "
-                    <code data-testid="cursor-keyed-inspection">
+                    <code class="font-sans" data-testid="cursor-keyed-inspection">
                         {move || cursor_keyed_inspection.get().map_or_else(
                             || "(none)".to_owned(),
                             |action| format!(
@@ -1796,15 +1799,15 @@ pub fn DataTableDemo() -> impl IntoView {
                         )}
                     </code>
                     " · Selected: "
-                    <code data-testid="cursor-selected-key">
+                    <code class="font-sans" data-testid="cursor-selected-key">
                         {move || cursor_selected_key.get().unwrap_or_else(|| "(none)".to_owned())}
                     </code>
                     " · Selection proposals: "
-                    <code data-testid="cursor-selection-proposals">
+                    <code class="font-sans" data-testid="cursor-selection-proposals">
                         {move || cursor_selection_proposals.get().to_string()}
                     </code>
                     " · Last selection proposal: "
-                    <code data-testid="cursor-last-selection-proposal">
+                    <code class="font-sans" data-testid="cursor-last-selection-proposal">
                         {move || cursor_last_selection_proposal.get().unwrap_or_else(|| "(none)".to_owned())}
                     </code>
                 </p>
@@ -1964,7 +1967,7 @@ pub fn DataTableDemo() -> impl IntoView {
                         <h3 class="font-semibold">"Fixed-slice navigation only"</h3>
                         <p class="text-xs opacity-60">
                             "Proposals: "
-                            <code data-testid="cursor-navigation-only-proposals">
+                            <code class="font-sans" data-testid="cursor-navigation-only-proposals">
                                 {move || navigation_only_proposals.get().to_string()}
                             </code>
                         </p>
@@ -1980,7 +1983,7 @@ pub fn DataTableDemo() -> impl IntoView {
                         <h3 class="font-semibold">"Mixed: search and sort"</h3>
                         <p class="text-xs opacity-60">
                             "Proposals: "
-                            <code data-testid="cursor-mixed-capability-proposals">
+                            <code class="font-sans" data-testid="cursor-mixed-capability-proposals">
                                 {move || mixed_capability_proposals.get().to_string()}
                             </code>
                         </p>
@@ -2043,13 +2046,14 @@ pub fn DataTableDemo() -> impl IntoView {
 
             <Section title="Viewport-Fit Query Sizing (Server)">
                 <p class="text-sm opacity-70 mb-4">
-                    "With " <code>"viewport_fit=true"</code> " a "
-                    <code>"ServerDataTable"</code>
+                    "With " <code class="font-sans">"viewport_fit=true"</code> " a "
+                    <code class="font-sans">"ServerDataTable"</code>
                     " measures its rendered height exactly like "
-                    <code>"DataTable"</code>"'s " <code>"auto_page_size"</code>
+                    <code class="font-sans">"DataTable"</code>"'s "
+                    <code class="font-sans">"auto_page_size"</code>
                     ", but PROPOSES a page-size query change instead of slicing rows "
                     "locally: offset queries reset to page one, cursor queries reset "
-                    "to " <code>"First"</code>
+                    "to " <code class="font-sans">"First"</code>
                     " (an existing previous/next token was minted for the old size "
                     "and is never replayed against a new one)."
                 </p>
@@ -2063,11 +2067,11 @@ pub fn DataTableDemo() -> impl IntoView {
                 </div>
                 <p class="text-xs opacity-60 mb-3">
                     "Offset -- last query: "
-                    <code data-testid="viewport-fit-last-query">
+                    <code class="font-sans" data-testid="viewport-fit-last-query">
                         {move || viewport_fit_last_query.get()}
                     </code>
                     " · Proposals: "
-                    <code data-testid="viewport-fit-proposals">
+                    <code class="font-sans" data-testid="viewport-fit-proposals">
                         {move || viewport_fit_proposals.get().to_string()}
                     </code>
                 </p>
@@ -2108,11 +2112,11 @@ pub fn DataTableDemo() -> impl IntoView {
 
                 <p class="text-xs opacity-60 mb-3 mt-6">
                     "Cursor -- last query: "
-                    <code data-testid="viewport-fit-cursor-last-query">
+                    <code class="font-sans" data-testid="viewport-fit-cursor-last-query">
                         {move || viewport_fit_cursor_last_request.get()}
                     </code>
                     " · Proposals: "
-                    <code data-testid="viewport-fit-cursor-proposals">
+                    <code class="font-sans" data-testid="viewport-fit-cursor-proposals">
                         {move || viewport_fit_cursor_proposals.get().to_string()}
                     </code>
                 </p>

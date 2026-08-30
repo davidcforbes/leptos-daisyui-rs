@@ -90,7 +90,8 @@ pub mod types;
 
 pub use auto_page::{
     DEFAULT_AUTO_MIN_ROWS, FALLBACK_HEADER_HEIGHT, FALLBACK_ROW_HEIGHT, RowHeightEra,
-    RowHeightEraKey, auto_page_size_for_height, max_row_height, rows_per_page_for_height,
+    RowHeightEraKey, auto_page_size_for_height, max_row_height, overflow_check_floor,
+    rows_per_page_for_height,
 };
 pub use chooser::DataTableColumnChooser;
 pub(crate) use chooser::{ColumnVisibilityAction, column_visibility_action};

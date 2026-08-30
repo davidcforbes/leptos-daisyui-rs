@@ -209,6 +209,43 @@ pub fn auto_page_size_for_height(
     }
 }
 
+/// Floor for the belt-and-braces overflow-shrink check (ldui-89rp regression
+/// caught by `auto_page_size_keeps_a_usable_page_and_scrolls_short_viewports`):
+/// normally `min_rows` (never below 1), matching `auto_page_size_for_height`'s
+/// own contract that a fit below `min_rows` retains the configured page size
+/// and the wrapper scrolls instead of shrinking pagination toward
+/// unusability.
+///
+/// But when the *measured* fit (`measured_rows`, from
+/// [`rows_per_page_for_height`]) is itself already below `min_rows`, `rows`
+/// -- the value `auto_page_size_for_height` actually derived -- IS that
+/// retained configured page size, not a responsively-fitted count. The
+/// belt-and-braces check exists to correct a responsive measurement that
+/// missed growth; applying it to the retained fallback instead shaved a row
+/// off a value the component had already promised never to shrink (a single
+/// pass took a documented "retain 10 and scroll" case down to 9). Flooring
+/// at `rows` itself in that case makes the check a no-op there, exactly as
+/// intended.
+///
+/// ```
+/// use leptos_daisyui_rs::components::overflow_check_floor;
+///
+/// // A normal responsive fit (measured >= min_rows): floor is min_rows.
+/// assert_eq!(overflow_check_floor(12, 5, 12), 5);
+///
+/// // Below-floor fallback (measured < min_rows): floor is `rows` itself, so
+/// // `current > floor` can never fire and shrink the retained fallback.
+/// assert_eq!(overflow_check_floor(2, 5, 10), 10);
+/// ```
+pub fn overflow_check_floor(measured_rows: usize, min_rows: usize, rows: usize) -> usize {
+    let min_rows = min_rows.max(1);
+    if measured_rows < min_rows {
+        rows
+    } else {
+        min_rows
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -327,6 +364,27 @@ mod tests {
     fn a_measured_fit_at_the_minimum_remains_responsive() {
         // 77px header + five 76px rows.
         assert_eq!(auto_page_size_for_height(457.0, 77.0, 76.0, 10, 5), 5);
+    }
+
+    // ── overflow_check_floor (ldui-89rp) ──
+
+    #[test]
+    fn overflow_check_floor_is_min_rows_for_a_responsive_fit() {
+        assert_eq!(overflow_check_floor(12, 5, 12), 5);
+    }
+
+    #[test]
+    fn overflow_check_floor_is_the_retained_rows_below_the_usability_floor() {
+        // Production repro: a 128px wrapper measures 2 rows, below
+        // min_rows=5, so `auto_page_size_for_height` retains the configured
+        // 10. The belt-and-braces check must never touch that 10 -- the
+        // floor is 10 itself, not min_rows(5).
+        assert_eq!(overflow_check_floor(2, 5, 10), 10);
+    }
+
+    #[test]
+    fn overflow_check_floor_clamps_min_rows_to_at_least_one() {
+        assert_eq!(overflow_check_floor(3, 0, 3), 1);
     }
 
     // ── max_row_height (ldui-89rp) ──

@@ -181,10 +181,26 @@ const PAGES: &[(&str, &[(&str, usize)])] = &[
             // 92, was 83: the on_row_inspect (ldui-tmr) and ServerDataTable
             // activation (ldui-1gp) demo additions put nine more <code>/<kbd>
             // spans into the page prose — the same monospace-in-sans-context
-            // class as the rest of this page's typography debt.
+            // class as the rest of this page's typography debt. The
+            // viewport_fit (ldui-2bt3) demo additions added 22 more <code>
+            // spans (8 prose, 14 data-testid readouts); rather than widen
+            // this ceiling further, every one of those new spans was given
+            // `class="font-sans"` so it resolves the page's declared
+            // ui-sans-serif family instead of the `<code>` UA default of
+            // ui-monospace — genuinely fixing the new debt at the source
+            // (`demo/src/demos/data_table.rs`) instead of ratcheting it, so
+            // TYPOGRAPHY stays at 92.
             (family::TYPOGRAPHY, 92),
             (family::SHAPE, 0),
-            (family::DEPTH, 18),
+            // 32, was 18: the auto_page_size/viewport_fit demo additions
+            // (ldui-89rp, ldui-2bt3) add several new ServerDataTable/DataTable
+            // instances, each with its own search `<input>` and page-size
+            // `<select>` -- daisyUI's `.input`/`.select` shadows are authored
+            // in oklch()/oklab(), which the engine's shadow parser cannot
+            // understand yet (PixelProof-0il, see the module doc and
+            // `demo_profile` above), so these genuinely cannot be declared
+            // and must stay ratcheted until the engine can parse them.
+            (family::DEPTH, 32),
             (family::GRID, 2),
             (family::COMPONENT_DRIFT, 10),
         ],

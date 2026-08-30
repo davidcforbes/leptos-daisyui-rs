@@ -534,14 +534,51 @@ pub fn DataTableFilterRow(
                                             <option value=FILTER_ALL>{move || all_label.get()}</option>
                                             <For
                                                 each=col_options
-                                                key=|option: &DataTableFilterOption| {
-                                                    (option.value.clone(), option.label.clone())
-                                                }
+                                                // Keyed by VALUE alone (ldui-875k-adjacent
+                                                // regression fix): the previous key also
+                                                // included `option.label`, so a locale
+                                                // change -- which only relabels an option,
+                                                // never changes its value -- looked like a
+                                                // brand-new item to `<For>`. It tore down
+                                                // the currently-selected `<option>` DOM
+                                                // node and mounted a fresh one with the
+                                                // same `value` attribute; a native
+                                                // `<select>` tracks selectedness by OPTION
+                                                // NODE identity, not by re-scanning for a
+                                                // matching value on every child mutation,
+                                                // so the browser silently reverted to no
+                                                // selection ("All") even though `filters`
+                                                // (and the `prop:value` binding above,
+                                                // which only re-runs when `filters`
+                                                // itself changes) never stopped saying
+                                                // "role.analyst" was selected.
+                                                key=|option: &DataTableFilterOption| option.value.clone()
                                                 let:opt
                                             >
                                                 {
                                                     let value = opt.value;
-                                                    let label = opt.label;
+                                                    // Looked up fresh from `options` on
+                                                    // every read (rather than the `label`
+                                                    // captured once when this keyed item
+                                                    // was created) so the label DOES still
+                                                    // update reactively on a locale change
+                                                    // -- the `<For>` item itself no longer
+                                                    // re-runs for that (matching the fix
+                                                    // above), so nothing else would.
+                                                    let label_value = value.clone();
+                                                    let label = move || {
+                                                        options.with(|all_options| {
+                                                            all_options
+                                                                .get(col_id)
+                                                                .and_then(|column_options| {
+                                                                    column_options
+                                                                        .iter()
+                                                                        .find(|candidate| candidate.value == label_value)
+                                                                })
+                                                                .map(|candidate| candidate.label.clone())
+                                                                .unwrap_or_default()
+                                                        })
+                                                    };
                                                     view! { <option value=value>{label}</option> }
                                                 }
                                             </For>

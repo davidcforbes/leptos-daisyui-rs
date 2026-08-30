@@ -190,14 +190,20 @@ async fn data_table_sort_is_keyboard_operable_for_client_and_server_tables() {
         json!(1),
         "server sort control: {structure}"
     );
+    // The button's raw `textContent` includes the always-visible idle sort
+    // glyph (ldui-875k: "a quiet bidirectional affordance", `header.rs`'s
+    // `sort_indicator_symbol`) alongside the column label -- that glyph is
+    // `aria-hidden="true"` and the button carries its own `aria-label`
+    // (asserted below as `client`/`serverAccessibleName`), so it is never
+    // announced; only the raw DOM text picks it up.
     assert_eq!(
         structure["clientName"],
-        json!("Name"),
+        json!("Name\u{21c5}"),
         "client name: {structure}"
     );
     assert_eq!(
         structure["serverName"],
-        json!("Name"),
+        json!("Name\u{21c5}"),
         "server name: {structure}"
     );
     assert_eq!(
@@ -2355,7 +2361,7 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
             "missing": {
                 "vocabulary": "invalid",
                 "role": "alert",
-                "message": "ServerDataTable filterable columns require authoritative filter_options or an explicit current-slice vocabulary",
+                "message": "ServerDataTable exact filter columns require authoritative filter_options or an explicit current-slice vocabulary",
                 "filterRows": 0,
             },
         })
@@ -2402,22 +2408,67 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
         })
     );
 
+    // Two separate `evaluate()` round trips (rather than one script doing
+    // both the insert-click and the remove-click back to back), each
+    // followed by a short settle: Leptos flushes a reactive DOM patch on a
+    // microtask, not synchronously inside the click handler's own call
+    // stack, so reading `document.querySelector` in the SAME synchronous
+    // script as the click that triggers the insert observes the DOM from
+    // BEFORE the patch every time (confirmed 100% reproducible, not a
+    // flake). Splitting into separate scripts -- and, belt-and-braces, a
+    // short sleep -- lets the intervening microtask/reactive flush actually
+    // run before the read.
+    //
+    // The click is still `element.click()` INSIDE the script (never the
+    // `click()` test helper's real CDP mouse events): a genuine synthesized
+    // pointer click legitimately moves keyboard focus to the button it
+    // lands on (confirmed empirically), which is real browser behaviour,
+    // not a bug -- and would make this section assert something false. The
+    // module comment above ("clicking a separate control does not itself
+    // steal focus") is specifically about the JS `.click()` method, which
+    // does not.
+    eval_json(
+        h,
+        r#"(() => { document.querySelector('[data-testid="cursor-insert-row"]').click(); return true; })()"#,
+    )
+    .await;
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     assert_eq!(
         eval_json(
             h,
             r#"(() => {
-                document.querySelector('[data-testid="cursor-insert-row"]').click();
                 const inserted = document.querySelector('#cursor-server-table tbody tr[data-row-key="inserted"]');
                 const stable = document.querySelector('#cursor-server-table tbody tr[data-row-key="001"]');
-                const afterInsert = {
+                return {
                     inserted: !!inserted,
                     probe: stable.__lduiIdentityProbe ?? null,
                     index: Number(stable.dataset.rowIndex),
                     focused: document.activeElement === stable,
                 };
-                document.querySelector('[data-testid="cursor-remove-inserted-row"]').click();
+            })()"#,
+        )
+        .await,
+        json!({
+            "inserted": true,
+            "probe": "row-001",
+            "index": 4,
+            "focused": true,
+        }),
+        "row_key insert must keep the stable row's identity and focus"
+    );
+
+    eval_json(
+        h,
+        r#"(() => { document.querySelector('[data-testid="cursor-remove-inserted-row"]').click(); return true; })()"#,
+    )
+    .await;
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    assert_eq!(
+        eval_json(
+            h,
+            r#"(() => {
+                const stable = document.querySelector('#cursor-server-table tbody tr[data-row-key="001"]');
                 return {
-                    afterInsert,
                     insertedAfterRemove: !!document.querySelector('#cursor-server-table tbody tr[data-row-key="inserted"]'),
                     indexAfterRemove: Number(stable.dataset.rowIndex),
                     probeAfterRemove: stable.__lduiIdentityProbe ?? null,
@@ -2427,17 +2478,12 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
         )
         .await,
         json!({
-            "afterInsert": {
-                "inserted": true,
-                "probe": "row-001",
-                "index": 4,
-                "focused": true,
-            },
             "insertedAfterRemove": false,
             "indexAfterRemove": 3,
             "probeAfterRemove": "row-001",
             "focusedAfterRemove": true,
-        })
+        }),
+        "row_key remove must keep the stable row's identity and focus"
     );
 
     click(
@@ -2484,19 +2530,34 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
     // exactly one proposed key, while the accepted key and aria-selected row
     // remain 001. Re-enable acceptance and prove keyboard Space uses the same
     // controlled path.
+    //
+    // Split into two scripts with a settle between (same rationale as the
+    // insert/remove split above): the accept-toggle click and the very next
+    // row click, back to back in one synchronous script with no yield,
+    // observably raced the reactive flush -- the row click's own handler
+    // never fired in that shape (proposals stayed at 1, not 2), 100%
+    // reproducible.
+    eval_json(
+        h,
+        r#"(() => { document.querySelector('[data-testid="cursor-selection-accept"]').click(); return true; })()"#,
+    )
+    .await;
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    eval_json(
+        h,
+        r#"(() => { document.querySelector('#cursor-server-table tbody tr[data-row-key="002"]').click(); return true; })()"#,
+    )
+    .await;
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     assert_eq!(
         eval_json(
             h,
-            r#"(() => {
-                document.querySelector('[data-testid="cursor-selection-accept"]').click();
-                document.querySelector('#cursor-server-table tbody tr[data-row-key="002"]').click();
-                return {
-                    accepted: document.querySelector('[data-testid="cursor-selected-key"]').textContent.trim(),
-                    proposed: document.querySelector('[data-testid="cursor-last-selection-proposal"]').textContent.trim(),
-                    proposals: Number(document.querySelector('[data-testid="cursor-selection-proposals"]').textContent),
-                    selected: Array.from(document.querySelectorAll('#cursor-server-table tbody tr[aria-selected="true"]')).map(row => row.dataset.rowKey),
-                };
-            })()"#,
+            r#"(() => ({
+                accepted: document.querySelector('[data-testid="cursor-selected-key"]').textContent.trim(),
+                proposed: document.querySelector('[data-testid="cursor-last-selection-proposal"]').textContent.trim(),
+                proposals: Number(document.querySelector('[data-testid="cursor-selection-proposals"]').textContent),
+                selected: Array.from(document.querySelectorAll('#cursor-server-table tbody tr[aria-selected="true"]')).map(row => row.dataset.rowKey),
+            }))()"#,
         )
         .await,
         json!({
@@ -2536,11 +2597,20 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
 
     // Duplicate keys fail closed: only an explicit alert row renders. Restore
     // the accepted server slice before continuing the cursor journey.
+    //
+    // The real CDP `click()` helper (rather than a JS `.click()` immediately
+    // followed by a same-script read) both triggers the click AND settles
+    // before returning -- see the module comment above the insert/remove
+    // split earlier in this test for why a click and an immediately
+    // following read of its reactive effect, in one synchronous script,
+    // observably races Leptos's DOM patch. Focus semantics do not matter for
+    // these two buttons (nothing here asserts on `document.activeElement`),
+    // so the real click's focus-stealing is harmless.
+    click(h, "[data-testid='cursor-duplicate-row-key']").await;
     assert_eq!(
         eval_json(
             h,
             r#"(() => {
-                document.querySelector('[data-testid="cursor-duplicate-row-key"]').click();
                 const table = document.querySelector('#cursor-server-table');
                 return {
                     dataRows: table.querySelectorAll('tbody tr[data-row-key]').length,
@@ -2556,13 +2626,11 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
             "message": "DataTable row_key returned duplicate key \"004\" for page rows 0 and 4",
         })
     );
+    click(h, "[data-testid='cursor-restore-rows']").await;
     assert_eq!(
         eval_json(
             h,
-            r#"(() => {
-                document.querySelector('[data-testid="cursor-restore-rows"]').click();
-                return Array.from(document.querySelectorAll('#cursor-server-table tbody tr[data-row-key]')).map(row => row.dataset.rowKey);
-            })()"#,
+            r#"Array.from(document.querySelectorAll('#cursor-server-table tbody tr[data-row-key]')).map(row => row.dataset.rowKey)"#,
         )
         .await,
         json!(["001", "002", "003", "004"])
@@ -2570,14 +2638,26 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
 
     // A cursor replacement must not recycle the focused row-001 node for the
     // different entity that takes page position zero.
+    eval_json(
+        h,
+        r#"(() => {
+            const old = document.querySelector('#cursor-server-table tbody tr[data-row-key="001"]');
+            old.__lduiOldPageProbe = true;
+            old.focus();
+            return true;
+        })()"#,
+    )
+    .await;
+    // Real CDP click, not a same-script JS `.click()`+immediate-read (see
+    // the module comment on the insert/remove split above): it moves the
+    // browser's focus to the button itself, which is fine here since the
+    // assertion only cares whether focus landed on the NEW row (it must
+    // not), not on the button.
+    click(h, "#cursor-server-table [data-server-cursor-action='next']").await;
     assert_eq!(
         eval_json(
             h,
             r#"(() => {
-                const old = document.querySelector('#cursor-server-table tbody tr[data-row-key="001"]');
-                old.__lduiOldPageProbe = true;
-                old.focus();
-                document.querySelector('#cursor-server-table [data-server-cursor-action="next"]').click();
                 const next = document.querySelector('#cursor-server-table tbody tr[data-row-key="005"]');
                 return {
                     nextExists: !!next,
@@ -2718,18 +2798,21 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
     // truth. If metadata temporarily omits the accepted value, the framework
     // retains a removable fallback option instead of blanking the select.
     assert_eq!(
-        eval_json(
-            h,
-            r#"(() => {
-                document.querySelector('[data-testid="cursor-filter-locale"]').click();
-                const select = document.querySelector('#cursor-server-table [data-table-filter-column="role"] select');
-                return {
-                    value: select.value,
-                    label: select.selectedOptions[0].textContent.trim(),
-                };
-            })()"#,
-        )
-        .await,
+        {
+            click(h, "[data-testid='cursor-filter-locale']").await;
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            eval_json(
+                h,
+                r#"(() => {
+                    const select = document.querySelector('#cursor-server-table [data-table-filter-column="role"] select');
+                    return {
+                        value: select.value,
+                        label: select.selectedOptions[0].textContent.trim(),
+                    };
+                })()"#,
+            )
+            .await
+        },
         json!({ "value": "role.analyst", "label": "Analista" })
     );
     click(h, "[data-testid='cursor-filter-active-option']").await;
@@ -3087,9 +3170,19 @@ async fn viewport_fit_offset_proposes_growth_and_retains_below_the_floor_while_s
     tokio::time::sleep(std::time::Duration::from_millis(700)).await;
     let settled = eval_json(&h, snapshot_expr).await;
     let settled_rows = settled["rows"].as_u64().unwrap_or(0);
+    // Not ">= the configured page_size(5)": this fixture's default `h-96`
+    // container leaves a genuinely shorter scroll wrapper than five 46px
+    // rows under a 53px header actually needs, so a real (post-ldui-2bt3
+    // epoch-fix) viewport-fit pass legitimately measures and accepts 4 on
+    // first settle -- a correct responsive fit, not a bug, since 4 is still
+    // >= this table's `viewport_fit_min_rows(3)` usability floor. The prior
+    // ">= 5" expectation only ever passed because a `ViewportFitEpoch`
+    // bug (fixed alongside this test) discarded every measurement pass, so
+    // the accepted size silently stayed frozen at the initial query's
+    // page_size regardless of what the container actually fit.
     assert!(
-        settled_rows >= 5,
-        "initial settle should show at least the configured page size: {settled}"
+        settled_rows >= 3,
+        "initial settle should show at least this table's usability floor: {settled}"
     );
 
     // Grow the container: the measured fit must widen the accepted page

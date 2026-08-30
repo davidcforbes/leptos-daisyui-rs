@@ -8,6 +8,7 @@ use crate::merge_classes;
 use leptos::prelude::*;
 use std::collections::{BTreeSet, HashMap};
 use std::fmt;
+use web_sys::wasm_bindgen::JsCast;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum StableRowKeyError {
@@ -107,6 +108,45 @@ fn resolve_body_rows(
             })
             .collect(),
     )
+}
+
+/// Re-focuses the `<tbody>` row whose `data-row-key` equals `key`, but only
+/// when focus is currently STRANDED on `<body>` -- the symptom left behind
+/// by a native `insertBefore`-based keyed-row move (see the call site's own
+/// doc comment for the full story). Never steals focus the user
+/// legitimately moved elsewhere: if `document.activeElement` is anything
+/// other than `<body>`, this is a deliberate no-op.
+fn restore_stranded_focus(tbody_ref: NodeRef<leptos::html::Tbody>, key: &str) {
+    // Late-firing guard (ldui-d54): a router navigation between scheduling
+    // this and it firing may have disposed this table's reactive owner;
+    // try-forms degrade to a no-op rather than panicking the whole wasm app.
+    let Some(tbody) = tbody_ref.try_get_untracked().flatten() else {
+        return;
+    };
+    let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+        return;
+    };
+    let stranded = document
+        .active_element()
+        .is_none_or(|active| active.tag_name().eq_ignore_ascii_case("body"));
+    if !stranded {
+        return;
+    }
+    let Ok(rows) = tbody.query_selector_all("tr[data-row-key]") else {
+        return;
+    };
+    for i in 0..rows.length() {
+        let Some(node) = rows.item(i) else { continue };
+        let Some(element) = node.dyn_ref::<web_sys::Element>() else {
+            continue;
+        };
+        if element.get_attribute("data-row-key").as_deref() == Some(key)
+            && let Some(html_element) = node.dyn_ref::<web_sys::HtmlElement>()
+        {
+            let _ = html_element.focus();
+            return;
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -236,8 +276,104 @@ pub fn DataTableBody(
     let cell_renderers = StoredValue::new(cell_renderers);
     let typed_cells = StoredValue::new(typed_cells);
 
+    // ── Focus-preserving reorder ──
+    //
+    // `<For>`'s keyed reconciliation moves an existing row's DOM node via a
+    // native `insertBefore` when its position changes -- the whole point of
+    // keying by `row_key` is that it is the SAME node afterward (proven: its
+    // `isConnected` never flips false). But Chromium blurs a currently
+    // focused element to `<body>` during that move regardless, even though
+    // the node stays connected throughout -- reusing the node is not enough
+    // to keep it focused. `focused_stable_key` remembers which row was under
+    // keyboard focus (a delegated `focusin`/`focusout` pair on the `<tbody>`,
+    // since plain `focus`/`blur` do not bubble) and the effect below
+    // re-focuses that key's row -- via a FRESH query, never a stale
+    // reference -- whenever a rows change left focus stranded on `<body>`.
+    let focused_stable_key: StoredValue<Option<String>> = StoredValue::new(None);
+    let tbody_ref = NodeRef::<leptos::html::Tbody>::new();
+    let restore_focus_handle: StoredValue<Option<TimeoutHandle>> = StoredValue::new(None);
+    on_cleanup(move || {
+        if let Some(handle) = restore_focus_handle.try_get_value().flatten() {
+            handle.clear();
+        }
+    });
+    Effect::new(move |ran_before: Option<()>| {
+        let _ = resolved_rows.get();
+        // Skip the initial mount pass: there is nothing to restore yet, and
+        // `document.activeElement` may legitimately be `<body>` before the
+        // user has interacted with the table at all.
+        if ran_before.is_none() {
+            return;
+        }
+        let Some(key) = focused_stable_key.get_value() else {
+            return;
+        };
+        if let Some(handle) = restore_focus_handle.try_get_value().flatten() {
+            handle.clear();
+        }
+        // Deferred to a fresh macrotask (same rationale as `DataTable`'s own
+        // `schedule_measure`/`overflow_handle`, ldui-89rp/ldui-d54): this
+        // effect and `<For>`'s own reconciliation both react to the same
+        // `resolved_rows` signal with no ordering guarantee between them, so
+        // checking `document.activeElement` synchronously here could run
+        // before the DOM move has actually happened. A macrotask runs after
+        // every synchronous DOM mutation from this reactive flush settles.
+        //
+        // Two independently-owned closures (rather than one reused across
+        // the `Ok`/`Err` arms below, as `DataTable`'s own `check_overflow`
+        // does): that pattern relies on the closure's whole capture set
+        // being `Copy` so calling it does not consume it, which holds for
+        // `check_overflow`'s all-`Copy` captures but not here -- `key` is an
+        // owned `String`. Cloning it into each arm keeps both closures
+        // independently callable without fighting a move.
+        let scheduled_key = key.clone();
+        match set_timeout_with_handle(
+            move || restore_stranded_focus(tbody_ref, &scheduled_key),
+            std::time::Duration::ZERO,
+        ) {
+            Ok(handle) => {
+                restore_focus_handle.try_update_value(|slot| *slot = Some(handle));
+            }
+            // No `window` to schedule against: checking now is better than
+            // not at all.
+            Err(_) => restore_stranded_focus(tbody_ref, &key),
+        }
+    });
+
     view! {
-        <tbody>
+        <tbody
+            node_ref=tbody_ref
+            on:focusin=move |event: web_sys::FocusEvent| {
+                if let Some(target) = event.target()
+                    && let Ok(element) = target.dyn_into::<web_sys::Element>()
+                    && let Ok(Some(row)) = element.closest("tr[data-row-key]")
+                    && let Some(key) = row.get_attribute("data-row-key")
+                {
+                    focused_stable_key.set_value(Some(key));
+                }
+            }
+            on:focusout=move |event: web_sys::FocusEvent| {
+                // A `None` `related_target` is the ambiguous case a
+                // reconciliation-induced blur-to-body produces (focus does
+                // not move to any genuinely focused element) -- keep the
+                // remembered key so the effect above can correct it. Clear
+                // it only when focus demonstrably moved to something outside
+                // any row (a deliberate user action), so a later unrelated
+                // reorder never steals focus back from where the user
+                // actually put it.
+                let moved_to_non_row = match event.related_target() {
+                    Some(related) => related
+                        .dyn_into::<web_sys::Element>()
+                        .ok()
+                        .and_then(|element| element.closest("tr[data-row-key]").ok().flatten())
+                        .is_none(),
+                    None => false,
+                };
+                if moved_to_non_row {
+                    focused_stable_key.set_value(None);
+                }
+            }
+        >
             <Show when=move || loading.get()>
                 <tr class=loading_row_class>
                     <td
