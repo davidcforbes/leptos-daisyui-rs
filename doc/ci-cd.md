@@ -241,7 +241,7 @@ from `verify-full`.
 ### Gate cadence during a live Beads drain
 
 `cargo xtask verify` is the 14-step native gate listed in the table above.
-`cargo xtask verify-full` adds eight browser/Wasm checks and reports 22 steps.
+`cargo xtask verify-full` adds ten browser/Wasm checks and reports 24 steps.
 Say which command is running before starting it; "the verification gate" is
 ambiguous because the two commands have materially different cost and coverage.
 

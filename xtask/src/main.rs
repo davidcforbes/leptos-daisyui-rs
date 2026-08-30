@@ -294,6 +294,33 @@ fn snapshot_table_step() -> Step {
     }
 }
 
+/// Focused browser proof for generation-bound displayed-snapshot deltas
+/// (ldui-vn81 / ldui-cb29): own-claim removal, another-user SSE removal,
+/// duplicate and stale replay, and a delta arriving during a replacement.
+fn snapshot_table_delta_step() -> Step {
+    Step {
+        name: "test-snapshot-table-delta",
+        run: Run::BrowserSuite {
+            test: "snapshot_table_delta_smoke",
+            html_target: Some("client-snapshot-test-host.html"),
+        },
+    }
+}
+
+/// Focused browser proof for the EntityTable controls forwarded through
+/// `SnapshotEntityTableConfig` (ldui-myhh / ldui-5ano): local filter reset from
+/// a later page, adaptive height, the chooser opening, and export receiving the
+/// authoritative rendered projection.
+fn snapshot_table_page_controls_step() -> Step {
+    Step {
+        name: "test-snapshot-table-page-controls",
+        run: Run::BrowserSuite {
+            test: "snapshot_table_page_controls_smoke",
+            html_target: Some("client-snapshot-test-host.html"),
+        },
+    }
+}
+
 fn pattern_steps(pattern: &str, lane: PatternLane) -> Result<Vec<Step>, String> {
     pattern_checks::checks_for(pattern, lane)?
         .iter()
@@ -402,6 +429,8 @@ fn full_steps() -> Vec<Step> {
     let mut steps = gate_steps();
     steps.push(client_snapshot_step());
     steps.push(snapshot_table_step());
+    steps.push(snapshot_table_delta_step());
+    steps.push(snapshot_table_page_controls_step());
     steps.push(reactivity_step());
     steps.push(layout_step());
     steps.push(style_step());
@@ -1842,6 +1871,8 @@ fn main() -> ExitCode {
         "test-keyed-result-list" => run_steps(&[result_list_step()]),
         "test-section-heading" => run_steps(&[section_heading_step()]),
         "test-search-picker-dialog" => run_steps(&[search_picker_dialog_step()]),
+        "test-snapshot-table-delta" => run_steps(&[snapshot_table_delta_step()]),
+        "test-snapshot-table-page-controls" => run_steps(&[snapshot_table_page_controls_step()]),
         "gen-tokens" => {
             let check = std::env::args().any(|a| a == "--check");
             gen_tokens(check)

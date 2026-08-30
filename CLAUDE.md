@@ -44,7 +44,7 @@ just delegates. Run the gate before committing:
 ```bash
 cargo xtask verify        # 14 native-only checks; no Wasm/Chrome/reactivity lane
 cargo make verify         # same, via cargo-make
-cargo xtask verify-full   # 22 steps: verify + eight browser/Wasm lanes (needs npm/trunk/Chrome)
+cargo xtask verify-full   # 24 steps: verify + ten browser/Wasm lanes (needs npm/trunk/Chrome)
 cargo xtask test-reactivity          # opt-in 51-check DOM/interaction lane; never implicit in verify
 cargo xtask test-layout              # layout audit: overlap/grid/internal<=external over the real DOM
 cargo xtask test-style               # style audit: typography/shape/depth + daisyUI component-drift, ratcheted per page
