@@ -235,3 +235,89 @@ fn the_search_affordance_is_not_mirrored() {
         "the filter-search magnifier stays on the left on BOTH sides"
     );
 }
+
+// ── search accessible name (ldui-g66e) ──────────────────────────────────────
+//
+// The search box previously carried only a `placeholder` -- placeholder text
+// is not an accessible name (it disappears once the field is focused or
+// filled, and many screen readers never announce it at all). These guard the
+// fix the same way `data_table`'s `search_label`/`search_input_id` pattern
+// does: a real `<label>` associated by `id`/`for`, reactive so it can trail a
+// locale switch, and never emitted when `search` is omitted.
+
+#[test]
+fn search_label_prop_is_reactive_with_a_documented_fallback() {
+    assert!(
+        VIEW_SRC.contains("search_label: Signal<String>"),
+        "the accessible label must be a reactive Signal<String>, matching \
+         `title`/`toggle_label`, so it can trail a locale switch"
+    );
+    assert!(
+        VIEW_SRC.contains("Signal::stored(String::from(\"Search filters\"))"),
+        "existing callers that do not supply `search_label` must still get a \
+         real, documented accessible name rather than none"
+    );
+}
+
+#[test]
+fn search_input_has_an_associated_label_independent_of_placeholder_and_value() {
+    let search_block = VIEW_SRC
+        .split(".map(|s| {")
+        .nth(1)
+        .expect("the optional search box must map over `search: Option<RwSignal<String>>`");
+
+    assert!(
+        search_block.contains("<label class=\"sr-only\""),
+        "the search input needs a visually-hidden, screen-reader-only label"
+    );
+    assert!(
+        search_block.contains("r#for="),
+        "the label must be associated to the input via `for`/`id`, not merely \
+         placed nearby"
+    );
+    assert!(
+        search_block.contains("aria-label=move || search_label.get()"),
+        "the accessible name must come from `search_label`, not `search_placeholder`"
+    );
+    assert!(
+        !search_block.contains("aria-label=move || search_placeholder.get()"),
+        "the accessible name must be independent of the placeholder text"
+    );
+    // The `aria-label` line must not read the search VALUE signal `s` --
+    // the name must not change as the user types.
+    let aria_label_line = search_block
+        .lines()
+        .find(|line| line.contains("aria-label="))
+        .expect("an aria-label attribute must exist on the search input");
+    assert!(
+        !aria_label_line.contains("s.get()"),
+        "the accessible name must be independent of the typed value: {aria_label_line}"
+    );
+}
+
+#[test]
+fn search_input_id_is_generated_per_instance() {
+    assert!(
+        VIEW_SRC.contains("next_filter_sidebar_search_id"),
+        "each FilterSidebar instance needs its own id so multiple panels on \
+         one page stay independently named -- a hardcoded id would collide"
+    );
+    assert!(
+        VIEW_SRC.contains("AtomicU64"),
+        "the id generator must be a process-wide counter, mirroring \
+         DataTable's `next_data_table_search_id`"
+    );
+}
+
+#[test]
+fn no_hidden_label_is_emitted_when_search_is_omitted() {
+    // The label markup must live ONLY inside the `search.map(...)` branch --
+    // there must be exactly one occurrence of the sr-only search label in the
+    // source, and it must not exist as a sibling emitted unconditionally.
+    assert_eq!(
+        VIEW_SRC.matches("<label class=\"sr-only\"").count(),
+        1,
+        "the sr-only search label must be emitted exactly once, inside the \
+         `search.map` branch -- never unconditionally"
+    );
+}

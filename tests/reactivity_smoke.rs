@@ -3334,6 +3334,170 @@ async fn data_table_control_names_relocalize_without_resetting_state() {
     assert_no_browser_errors(&h, "localized DataTable control state").await;
 }
 
+/// FilterSidebar's optional search input (ldui-g66e): a real accessible name
+/// independent of placeholder and typed value, reactive to a locale switch
+/// without resetting the search signal/caret/focus/typed text, correct
+/// regardless of collapsed/expanded state, and independently named per panel
+/// -- including the right-docked orientation. `search` omission (no hidden
+/// label emitted) is a structural, compile-time property of the source and
+/// is proven natively in `filter_sidebar::tests` instead, since this fixed
+/// demo page cannot itself omit the prop and still exercise the other five
+/// variants.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn filter_sidebar_search_accessible_name_covers_every_variant() {
+    let h = harness_at("/components/filter-sidebar").await;
+    begin_browser_error_capture(&h).await;
+
+    let describe = |panel_id: &'static str| {
+        format!(
+            r#"(() => {{
+                const root = document.getElementById('{panel_id}');
+                const input = root ? root.querySelector('input[type="text"]') : null;
+                if (!input) return null;
+                const labelText = Array.from(input.labels || []).map(label =>
+                    (label.matches('.sr-only') ? label : label.querySelector('.sr-only'))
+                        ?.textContent.trim() ?? ''
+                );
+                return {{
+                    aria: input.getAttribute('aria-label'),
+                    labels: labelText,
+                    placeholder: input.placeholder,
+                    value: input.value,
+                }};
+            }})()"#
+        )
+    };
+
+    // ── empty: a real, nonempty accessible name, independent of placeholder ──
+    let left = eval_json(&h, &describe("fs-interactive-left")).await;
+    assert_eq!(left["value"], json!(""));
+    assert_eq!(left["aria"], json!("Search filters"));
+    assert_eq!(left["labels"], json!(["Search filters"]));
+    assert_ne!(
+        left["aria"], left["placeholder"],
+        "the accessible name must not merely echo the placeholder text"
+    );
+
+    // ── right-side: independently named from the left panel ──
+    let right = eval_json(&h, &describe("fs-interactive-right")).await;
+    assert_eq!(right["aria"], json!("Search the assistant"));
+    assert_eq!(right["labels"], json!(["Search the assistant"]));
+    assert_ne!(
+        left["aria"], right["aria"],
+        "multiple FilterSidebars on one page must stay independently named"
+    );
+
+    // ── typed: the accessible name does not change while the user types ──
+    let typed_aria = eval_json(
+        &h,
+        r#"(() => {
+            const input = document.getElementById('fs-interactive-left').querySelector('input[type="text"]');
+            input.value = 'acme';
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            return input.getAttribute('aria-label');
+        })()"#,
+    )
+    .await;
+    assert_eq!(
+        typed_aria,
+        json!("Search filters"),
+        "typing must not change the accessible name"
+    );
+
+    // ── localized: the label reacts to a locale switch WITHOUT resetting the
+    //    search signal, caret, or focus ──
+    let before = eval_json(
+        &h,
+        r#"(() => {
+            const input = document.getElementById('fs-interactive-left').querySelector('input[type="text"]');
+            input.focus();
+            input.setSelectionRange(2, 2);
+            return {
+                active: document.activeElement === input,
+                start: input.selectionStart,
+                end: input.selectionEnd,
+                value: input.value,
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(
+        before["active"],
+        json!(true),
+        "the search input must be focusable"
+    );
+    assert_eq!(before["value"], json!("acme"));
+
+    click(&h, "#filter-sidebar-locale-toggle").await;
+    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+
+    let localized = eval_json(&h, &describe("fs-interactive-left")).await;
+    assert_eq!(localized["aria"], json!("Buscar filtros"));
+    assert_eq!(localized["labels"], json!(["Buscar filtros"]));
+    assert_eq!(
+        localized["value"],
+        json!("acme"),
+        "a locale switch must not clear the typed search value"
+    );
+
+    let after = eval_json(
+        &h,
+        r#"(() => {
+            const input = document.getElementById('fs-interactive-left').querySelector('input[type="text"]');
+            return {
+                active: document.activeElement === input,
+                start: input.selectionStart,
+                end: input.selectionEnd,
+                value: input.value,
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(
+        after, before,
+        "a locale switch must not disturb focus, caret position, or the typed value"
+    );
+
+    // ── collapsed / expanded: the label is present and correct regardless of
+    //    collapsed state -- collapsing hides content in place, it is never
+    //    unmounted (see the component's own doc comments) ──
+    let collapsed = eval_json(&h, &describe("fs-collapsed-left")).await;
+    assert_eq!(collapsed["aria"], json!("Search filters (collapsed)"));
+    assert_eq!(collapsed["labels"], json!(["Search filters (collapsed)"]));
+
+    let expanded = eval_json(&h, &describe("fs-expanded-left")).await;
+    assert_eq!(expanded["aria"], json!("Search filters (expanded)"));
+    assert_eq!(expanded["labels"], json!(["Search filters (expanded)"]));
+
+    // ── the input-outside-field audit no longer reports this control ──
+    let font = common::body_font_family(&h).await;
+    let profile = ldui_audit::from_ui_tokens(font);
+    let report = ldui_audit::audit_page(&h, &profile, &Default::default())
+        .await
+        .expect("audit_page");
+    let outstanding: Vec<_> = report
+        .families
+        .iter()
+        .filter(|f| f.family == ldui_audit::family::COMPONENT_DRIFT)
+        .flat_map(|f| f.violations.iter())
+        .filter(|v| v.detail.contains("input-outside-field"))
+        .collect();
+    assert!(
+        outstanding.is_empty(),
+        "input-outside-field still reports on the filter-sidebar page: {outstanding:?}"
+    );
+
+    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
+        .expect("load vendored axe-core");
+    let axe_report = axe.run(h.page()).await.expect("run axe-core");
+    axe_report
+        .assert_no_blocking("FilterSidebar search accessible name")
+        .unwrap_or_else(|error| panic!("{error}; {}", axe_report.summary()));
+
+    assert_no_browser_errors(&h, "FilterSidebar search accessible name").await;
+}
+
 /// Tabs: controlled selection, roving focus, relationships, localization,
 /// overflow, orientation, disabled skipping, and removal recovery stay coherent.
 #[tokio::test(flavor = "multi_thread")]

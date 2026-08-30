@@ -1,6 +1,19 @@
 use super::style::{SidebarSide, join_side_class};
 use crate::components::icon::{Icon, IconSize};
 use leptos::{html::Aside, prelude::*};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Process-wide sequence for the search input's `id`/`label[for]` pairing, so
+/// multiple `FilterSidebar` instances on one page stay independently named.
+/// Mirrors `data_table`'s `next_data_table_search_id`.
+static FILTER_SIDEBAR_SEARCH_ID: AtomicU64 = AtomicU64::new(0);
+
+fn next_filter_sidebar_search_id() -> String {
+    format!(
+        "ldui-filter-sidebar-search-{}",
+        FILTER_SIDEBAR_SEARCH_ID.fetch_add(1, Ordering::Relaxed)
+    )
+}
 
 /// # FilterSidebar
 ///
@@ -86,6 +99,19 @@ pub fn FilterSidebar(
     /// Placeholder for that search box.
     #[prop(optional, into)]
     search_placeholder: Signal<String>,
+    /// Accessible name for the search box, wired via a visually-hidden
+    /// `<label>` associated by `id`/`for` (and an `aria-label` for belt and
+    /// braces, matching `data_table`'s search input). Independent of
+    /// `search_placeholder` and of the typed value: placeholder text is not
+    /// an accessible name -- it vanishes once the field has a value, and many
+    /// screen readers never announce it at all. Reactive, so it can trail a
+    /// locale switch without touching the search signal, caret, focus, or
+    /// typed text. Defaults to `"Search filters"` when omitted, so every
+    /// existing call site compiles unchanged and gains a real accessible name
+    /// rather than none. Ignored when `search` is `None` -- no label is
+    /// emitted for a search box that does not exist.
+    #[prop(into, default = Signal::stored(String::from("Search filters")))]
+    search_label: Signal<String>,
     /// Accessible label for the toggle button. Localise it; the button is
     /// icon-only, so this is the only thing a screen reader announces.
     #[prop(into)]
@@ -128,6 +154,10 @@ pub fn FilterSidebar(
             "opacity-100"
         }
     };
+    // Computed unconditionally, exactly like `data_table`'s
+    // `search_input_id` -- cheap, and it means the id assignment does not
+    // itself depend on whether `search` happens to be `Some` this call.
+    let search_input_id = next_filter_sidebar_search_id();
 
     view! {
         <aside
@@ -207,6 +237,8 @@ pub fn FilterSidebar(
             >
                 {search
                     .map(|s| {
+                        let label_target = search_input_id.clone();
+                        let control_id = search_input_id.clone();
                         view! {
                             // NOT mirrored, on purpose: the magnifier's
                             // `left-2.5` and the input's `pl-[30px]` are
@@ -215,15 +247,26 @@ pub fn FilterSidebar(
                             // screen it sits near, and flipping it would put
                             // the icon where the caret goes.
                             <div class="relative mb-3">
+                                // Visually hidden, but the input's REAL
+                                // accessible name -- independent of the
+                                // placeholder (which vanishes once the field
+                                // has a value) and of the typed value itself.
+                                // `aria-label` below is belt and braces, same
+                                // as `data_table`'s search input.
+                                <label class="sr-only" r#for=label_target>
+                                    {move || search_label.get()}
+                                </label>
                                 <span class="pointer-events-none absolute left-2.5 top-1/2 \
                                              -translate-y-1/2 text-[13px] text-base-content/45">
                                     <Icon name="search" size=IconSize::XSmall />
                                 </span>
                                 <input
+                                    id=control_id
                                     type="text"
                                     class="w-full rounded-md border border-black/20 py-1.5 \
                                            pl-[30px] pr-2.5 text-[13px]"
                                     placeholder=move || search_placeholder.get()
+                                    aria-label=move || search_label.get()
                                     prop:value=move || s.get()
                                     on:input=move |ev| s.set(event_target_value(&ev))
                                 />

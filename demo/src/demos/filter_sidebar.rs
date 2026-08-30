@@ -40,6 +40,21 @@ fn Workspace(
     #[prop(into)] active_count: Signal<usize>,
     #[prop(into)] body: Signal<String>,
     search: RwSignal<String>,
+    /// Accessible name for this panel's search input (ldui-g66e). Given
+    /// explicitly and distinctly per panel below so the browser fixture can
+    /// prove multiple `FilterSidebar`s stay independently named -- the
+    /// library's own documented "Search filters" fallback (used when a
+    /// caller omits the prop entirely) is covered by the native tests in
+    /// `filter_sidebar::tests` instead, since that is a compile-time default
+    /// this fixed demo layout cannot itself vary.
+    #[prop(into)]
+    search_label: Signal<String>,
+    /// A stable id on the panel's root `<aside>`, via the spread-attribute
+    /// forwarding every component here gets for free -- so the reactivity
+    /// fixture can select one specific panel among the several this page
+    /// renders.
+    #[prop(into)]
+    panel_id: &'static str,
 ) -> impl IntoView {
     // `side` is read twice below and `SidebarSide` is `Copy`, so this is a
     // read, not a clone of anything expensive.
@@ -48,6 +63,7 @@ fn Workspace(
     let panel = move || {
         view! {
             <FilterSidebar
+                attr:id=panel_id
                 side=side
                 collapsed=collapsed
                 on_toggle=on_toggle
@@ -55,6 +71,7 @@ fn Workspace(
                 title=title
                 search=search
                 search_placeholder="Search filters"
+                search_label=search_label
                 toggle_label="Toggle the panel"
             >
                 <ExampleFilters />
@@ -94,6 +111,20 @@ pub fn FilterSidebarDemo() -> impl IntoView {
     let always_collapsed = Signal::derive(|| true);
     let noop = Callback::new(|()| {});
 
+    // ldui-g66e: the search box's accessible name is reactive, so a locale
+    // switch relabels it live -- without touching `left_search`'s value,
+    // caret, or focus. Scoped to the one interactive left panel; the other
+    // panels below each get their own fixed, distinct label so the browser
+    // fixture can also prove multiple sidebars stay independently named.
+    let filter_sidebar_locale_is_es = RwSignal::new(false);
+    let interactive_left_search_label = Signal::derive(move || {
+        if filter_sidebar_locale_is_es.get() {
+            "Buscar filtros".to_string()
+        } else {
+            "Search filters".to_string()
+        }
+    });
+
     view! {
         <ContentLayout
             title="Filter Sidebar"
@@ -103,6 +134,23 @@ pub fn FilterSidebarDemo() -> impl IntoView {
                 <p class="text-sm opacity-60">
                     "Collapse each panel and watch the four mirrored details: the hairline border sits on the inner edge, the chevron points the way the panel would move, the toggle button stays beside the content it reveals, and the collapsed rail's vertical title reads bottom-to-top on the left and top-to-bottom on the right."
                 </p>
+                <p class="text-sm opacity-60">
+                    "The left panel's search box carries a reactive, localizable accessible name (ldui-g66e) - independent of its placeholder and of the value typed into it. Toggle the locale and watch the name relabel live without touching what is typed."
+                </p>
+                <Button
+                    attr:id="filter-sidebar-locale-toggle"
+                    size=ButtonSize::Sm
+                    style=ButtonStyle::Outline
+                    on:click=move |_| filter_sidebar_locale_is_es.update(|es| *es = !*es)
+                >
+                    {move || {
+                        if filter_sidebar_locale_is_es.get() {
+                            "Switch search label to English"
+                        } else {
+                            "Switch search label to Spanish"
+                        }
+                    }}
+                </Button>
                 <div class="flex flex-wrap gap-4">
                     <div class="flex min-w-0 flex-1 flex-col gap-2">
                         <Button
@@ -121,6 +169,8 @@ pub fn FilterSidebarDemo() -> impl IntoView {
                             active_count=3usize
                             body="A left-docked filter panel, the default and the only thing this component could do before ldui-vh6."
                             search=left_search
+                            search_label=interactive_left_search_label
+                            panel_id="fs-interactive-left"
                         />
                     </div>
                     <div class="flex min-w-0 flex-1 flex-col gap-2">
@@ -140,6 +190,8 @@ pub fn FilterSidebarDemo() -> impl IntoView {
                             active_count=3usize
                             body="A right-docked panel - 4iiz-Office's Client Coordinator Assistant, the request behind the side prop."
                             search=right_search
+                            search_label="Search the assistant"
+                            panel_id="fs-interactive-right"
                         />
                     </div>
                 </div>
@@ -159,6 +211,8 @@ pub fn FilterSidebarDemo() -> impl IntoView {
                             active_count=2usize
                             body="Left, pinned expanded."
                             search=expanded_left_search
+                            search_label="Search filters (expanded)"
+                            panel_id="fs-expanded-left"
                         />
                     </div>
                     <div class="min-w-0 flex-1">
@@ -170,6 +224,8 @@ pub fn FilterSidebarDemo() -> impl IntoView {
                             active_count=2usize
                             body="Right, pinned expanded."
                             search=expanded_right_search
+                            search_label="Search the assistant (expanded)"
+                            panel_id="fs-expanded-right"
                         />
                     </div>
                 </div>
@@ -189,6 +245,8 @@ pub fn FilterSidebarDemo() -> impl IntoView {
                             active_count=4usize
                             body="Left, pinned collapsed."
                             search=mirror_left_search
+                            search_label="Search filters (collapsed)"
+                            panel_id="fs-collapsed-left"
                         />
                     </div>
                     <div class="min-w-0 flex-1">
@@ -200,6 +258,8 @@ pub fn FilterSidebarDemo() -> impl IntoView {
                             active_count=4usize
                             body="Right, pinned collapsed."
                             search=mirror_right_search
+                            search_label="Search the assistant (collapsed)"
+                            panel_id="fs-collapsed-right"
                         />
                     </div>
                 </div>
@@ -219,6 +279,8 @@ pub fn FilterSidebarDemo() -> impl IntoView {
                             active_count=0usize
                             body="Left, nothing applied."
                             search=RwSignal::new(String::new())
+                            search_label="Search filters (no active filters)"
+                            panel_id="fs-empty-left"
                         />
                     </div>
                     <div class="min-w-0 flex-1">
@@ -230,6 +292,8 @@ pub fn FilterSidebarDemo() -> impl IntoView {
                             active_count=0usize
                             body="Right, nothing applied."
                             search=RwSignal::new(String::new())
+                            search_label="Search the assistant (no active filters)"
+                            panel_id="fs-empty-right"
                         />
                     </div>
                 </div>
