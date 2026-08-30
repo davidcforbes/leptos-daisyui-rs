@@ -41,16 +41,43 @@ impl ActionFeedbackState {
     }
 }
 
+/// Optional caller-supplied plain-text content for one keyed action outcome
+/// (for example a conflict reason, a partial-success count, or a retryable
+/// transport detail). Both fields are attempt-specific and render as literal
+/// text nodes — never `inner_html` — so no HTML injection is possible. A
+/// missing field (or a missing [`ActionFeedbackContent`] entirely) falls back
+/// to the framework's localized default copy for the outcome.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ActionFeedbackContent {
+    /// Overrides the localized default primary sentence when present.
+    pub primary: Option<String>,
+    /// Attempt-specific detail appended after the primary sentence.
+    pub detail: Option<String>,
+}
+
+impl ActionFeedbackContent {
+    /// Whether neither field is set, so the framework default fully applies.
+    pub const fn is_empty(&self) -> bool {
+        self.primary.is_none() && self.detail.is_none()
+    }
+}
+
 /// Current state for one stable action key.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ActionFeedbackEntry {
     state: ActionFeedbackState,
+    content: ActionFeedbackContent,
 }
 
 impl ActionFeedbackEntry {
     /// Returns the action's current outcome.
     pub const fn state(&self) -> ActionFeedbackState {
         self.state
+    }
+
+    /// Returns this attempt's optional caller-supplied content.
+    pub const fn content(&self) -> &ActionFeedbackContent {
+        &self.content
     }
 
     /// Whether this entry may expose Retry.
@@ -70,6 +97,7 @@ pub struct ActionAnnouncement<K> {
     sequence: u64,
     key: K,
     state: ActionFeedbackState,
+    content: ActionFeedbackContent,
 }
 
 impl<K> ActionAnnouncement<K> {
@@ -86,6 +114,11 @@ impl<K> ActionAnnouncement<K> {
     /// Outcome produced by the transition.
     pub const fn state(&self) -> ActionFeedbackState {
         self.state
+    }
+
+    /// This transition's optional caller-supplied content.
+    pub const fn content(&self) -> &ActionFeedbackContent {
+        &self.content
     }
 }
 
@@ -182,11 +215,25 @@ impl<K: Eq> ActionFeedbackModel<K> {
 }
 
 impl<K: Clone + Eq> ActionFeedbackModel<K> {
-    /// Replaces only `key` and records it as the latest transition.
+    /// Replaces only `key` and records it as the latest transition. Content
+    /// defaults to empty, so the localized framework default text applies.
     pub fn set(
         &mut self,
         key: K,
         state: ActionFeedbackState,
+    ) -> Result<u64, ActionTransitionError> {
+        self.set_with_content(key, state, ActionFeedbackContent::default())
+    }
+
+    /// Replaces only `key`, attaching this attempt's optional caller-supplied
+    /// content, and records it as the latest transition. Content always
+    /// replaces (never merges with) whatever the key previously carried, so a
+    /// new attempt cannot inherit a prior attempt's stale detail.
+    pub fn set_with_content(
+        &mut self,
+        key: K,
+        state: ActionFeedbackState,
+        content: ActionFeedbackContent,
     ) -> Result<u64, ActionTransitionError> {
         let sequence = self
             .next_sequence
@@ -200,14 +247,21 @@ impl<K: Clone + Eq> ActionFeedbackModel<K> {
             .find(|(candidate, _)| candidate == &key)
         {
             entry.state = state;
+            entry.content = content.clone();
         } else {
-            self.entries
-                .push((key.clone(), ActionFeedbackEntry { state }));
+            self.entries.push((
+                key.clone(),
+                ActionFeedbackEntry {
+                    state,
+                    content: content.clone(),
+                },
+            ));
         }
         self.latest_announcement = Some(ActionAnnouncement {
             sequence,
             key,
             state,
+            content,
         });
         Ok(sequence)
     }
@@ -281,12 +335,41 @@ fn state_text(texts: &ActionFeedbackTexts, state: ActionFeedbackState) -> String
     }
 }
 
+/// Composes one entry's rendered sentence: the caller-supplied primary text
+/// when present, else the localized framework default; the caller-supplied
+/// detail, when present and non-empty, is appended after it. Both pieces are
+/// plain strings destined for a text node, never `inner_html`.
+fn content_text(
+    texts: &ActionFeedbackTexts,
+    state: ActionFeedbackState,
+    content: &ActionFeedbackContent,
+) -> String {
+    let primary = content
+        .primary
+        .clone()
+        .unwrap_or_else(|| state_text(texts, state));
+    match content.detail.as_deref() {
+        Some(detail) if !detail.is_empty() => format!("{primary} {detail}"),
+        _ => primary,
+    }
+}
+
+fn keyed_entry_text(
+    texts: &ActionFeedbackTexts,
+    key_label: &str,
+    state: ActionFeedbackState,
+    content: &ActionFeedbackContent,
+) -> String {
+    format!("{key_label}: {}", content_text(texts, state, content))
+}
+
+#[cfg(test)]
 fn keyed_state_text(
     texts: &ActionFeedbackTexts,
     key_label: &str,
     state: ActionFeedbackState,
 ) -> String {
-    format!("{key_label}: {}", state_text(texts, state))
+    keyed_entry_text(texts, key_label, state, &ActionFeedbackContent::default())
 }
 
 fn state_class(state: ActionFeedbackState) -> &'static str {
@@ -333,7 +416,7 @@ where
                         let key = key.clone();
                         let state = entry.state();
                         let label = key_label.with_value(|label| label(&key));
-                        let message = keyed_state_text(&texts, &label, state);
+                        let message = keyed_entry_text(&texts, &label, state, entry.content());
                         let retry_key = key.clone();
                         let dismiss_key = key.clone();
                         let retry_text = texts.retry.clone();
@@ -377,7 +460,7 @@ where
                     model.latest_announcement().map(|announcement| {
                         let label = key_label.with_value(|label| label(announcement.key()));
                         texts.with(|texts| {
-                            keyed_state_text(texts, &label, announcement.state())
+                            keyed_entry_text(texts, &label, announcement.state(), announcement.content())
                         })
                     }).unwrap_or_default()
                 })}
@@ -407,5 +490,135 @@ mod tests {
             assert!(keyed_state_text(&texts, "row-1", state).starts_with("row-1: "));
             assert!(state_class(state).starts_with("alert-"));
         }
+    }
+
+    #[test]
+    fn missing_content_falls_back_to_the_localized_default() {
+        let texts = ActionFeedbackTexts::default();
+        let content = ActionFeedbackContent::default();
+        assert!(content.is_empty());
+        assert_eq!(
+            content_text(&texts, ActionFeedbackState::RetryableFailure, &content),
+            texts.retryable_failure
+        );
+    }
+
+    #[test]
+    fn caller_primary_overrides_default_and_detail_is_appended() {
+        let texts = ActionFeedbackTexts::default();
+
+        // Detail only: default primary, appended detail (partial-success count).
+        let partial = ActionFeedbackContent {
+            primary: None,
+            detail: Some("3 of 5 items updated.".to_owned()),
+        };
+        assert_eq!(
+            content_text(&texts, ActionFeedbackState::PartialSuccess, &partial),
+            format!("{} 3 of 5 items updated.", texts.partial_success)
+        );
+
+        // Primary override with no detail (conflict reason as the whole sentence).
+        let conflict = ActionFeedbackContent {
+            primary: Some("Another editor changed this record 2 minutes ago.".to_owned()),
+            detail: None,
+        };
+        assert_eq!(
+            content_text(&texts, ActionFeedbackState::RecoverableConflict, &conflict),
+            "Another editor changed this record 2 minutes ago."
+        );
+
+        // Empty-string detail is treated as absent, not a trailing space.
+        let empty_detail = ActionFeedbackContent {
+            primary: None,
+            detail: Some(String::new()),
+        };
+        assert_eq!(
+            content_text(&texts, ActionFeedbackState::Success, &empty_detail),
+            texts.success
+        );
+    }
+
+    #[test]
+    fn content_never_reaches_a_raw_html_sink() {
+        // Attempt-specific text is caller-controlled (a transport error message,
+        // say) and must render as a literal text node. This crate has no
+        // `inner_html`/`dangerously_set_inner_html` path for ActionFeedback, so
+        // the composed sentence is guaranteed to be plain text; assert the
+        // composition itself does not strip or re-interpret markup-like input,
+        // which would only be a risk if something downstream ever did parse it.
+        let texts = ActionFeedbackTexts::default();
+        let hostile = ActionFeedbackContent {
+            primary: Some("<script>alert(1)</script>".to_owned()),
+            detail: Some("<b>bold</b> & \"quoted\"".to_owned()),
+        };
+        let message = content_text(&texts, ActionFeedbackState::TerminalFailure, &hostile);
+        assert_eq!(
+            message,
+            "<script>alert(1)</script> <b>bold</b> & \"quoted\""
+        );
+    }
+
+    #[test]
+    fn set_with_content_replaces_rather_than_merges_prior_content() {
+        let mut model = ActionFeedbackModel::new();
+        model
+            .set_with_content(
+                "row-1",
+                ActionFeedbackState::Pending,
+                ActionFeedbackContent {
+                    primary: None,
+                    detail: Some("First attempt detail.".to_owned()),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            model.entry(&"row-1").unwrap().content().detail.as_deref(),
+            Some("First attempt detail.")
+        );
+
+        // A retry that supplies no content must not inherit the prior detail.
+        model.set("row-1", ActionFeedbackState::Pending).unwrap();
+        assert!(model.entry(&"row-1").unwrap().content().is_empty());
+    }
+
+    #[test]
+    fn concurrent_keys_retain_independent_content_and_the_announcement_matches_latest() {
+        let mut model = ActionFeedbackModel::new();
+        model
+            .set_with_content(
+                "row-1",
+                ActionFeedbackState::RecoverableConflict,
+                ActionFeedbackContent {
+                    primary: None,
+                    detail: Some("Conflict on row 1.".to_owned()),
+                },
+            )
+            .unwrap();
+        model
+            .set_with_content(
+                "row-2",
+                ActionFeedbackState::PartialSuccess,
+                ActionFeedbackContent {
+                    primary: None,
+                    detail: Some("2 of 4 items on row 2.".to_owned()),
+                },
+            )
+            .unwrap();
+
+        assert_eq!(
+            model.entry(&"row-1").unwrap().content().detail.as_deref(),
+            Some("Conflict on row 1.")
+        );
+        assert_eq!(
+            model.entry(&"row-2").unwrap().content().detail.as_deref(),
+            Some("2 of 4 items on row 2.")
+        );
+
+        let announcement = model.latest_announcement().unwrap();
+        assert_eq!(announcement.key(), &"row-2");
+        assert_eq!(
+            announcement.content().detail.as_deref(),
+            Some("2 of 4 items on row 2.")
+        );
     }
 }

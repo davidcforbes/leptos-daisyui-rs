@@ -1,6 +1,8 @@
 //! Atomic runtime state for opinionated client-snapshot table pages.
 
-use super::{ActionFeedbackModel, ActionFeedbackState, ActionTransitionError};
+use super::{
+    ActionFeedbackContent, ActionFeedbackModel, ActionFeedbackState, ActionTransitionError,
+};
 use std::rc::Rc;
 
 /// Opaque dataset/access generation shared by page, selector, table, focus,
@@ -561,9 +563,24 @@ impl<R, V: Clone + PartialEq, E, M, K> SnapshotTableState<R, V, E, M, K> {
 impl<R, V, E, M, K: Clone + Eq> SnapshotTableState<R, V, E, M, K> {
     /// Starts one action against the current displayed generation, records its
     /// Pending state, and supersedes only an older action with the same key.
+    /// Carries no attempt-specific content; see
+    /// [`Self::start_action_with_content`] to attach some.
     pub fn start_action(
         &mut self,
         key: K,
+    ) -> Result<SnapshotActionHandle<K>, SnapshotActionStartError> {
+        self.start_action_with_content(key, ActionFeedbackContent::default())
+    }
+
+    /// Starts one action against the current displayed generation, records its
+    /// Pending state with optional caller-supplied content, and supersedes
+    /// only an older action with the same key. The superseded handle can no
+    /// longer complete successfully (see [`Self::finish_action_with_content`]),
+    /// so its content can never be attached after this call.
+    pub fn start_action_with_content(
+        &mut self,
+        key: K,
+        content: ActionFeedbackContent,
     ) -> Result<SnapshotActionHandle<K>, SnapshotActionStartError> {
         if self.access != SnapshotAccess::Allowed {
             return Err(SnapshotActionStartError::AccessUnavailable(self.access));
@@ -573,7 +590,7 @@ impl<R, V, E, M, K: Clone + Eq> SnapshotTableState<R, V, E, M, K> {
         }
         let sequence = self
             .actions
-            .set(key.clone(), ActionFeedbackState::Pending)
+            .set_with_content(key.clone(), ActionFeedbackState::Pending, content)
             .map_err(|_| SnapshotActionStartError::SequenceExhausted)?;
         let handle = SnapshotActionHandle {
             generation: self.generation,
@@ -588,11 +605,29 @@ impl<R, V, E, M, K: Clone + Eq> SnapshotTableState<R, V, E, M, K> {
 
     /// Records a terminal outcome only for the still-active matching action
     /// handle. Pending transitions must mint a new handle through
-    /// [`Self::start_action`].
+    /// [`Self::start_action`]. Carries no attempt-specific content; see
+    /// [`Self::finish_action_with_content`] to attach some.
     pub fn finish_action(
         &mut self,
         handle: SnapshotActionHandle<K>,
         state: ActionFeedbackState,
+    ) -> Result<SnapshotActionDisposition, ActionTransitionError> {
+        self.finish_action_with_content(handle, state, ActionFeedbackContent::default())
+    }
+
+    /// Records a terminal outcome, with optional caller-supplied content, only
+    /// for the still-active matching action handle. A stale or duplicate
+    /// handle (superseded by a newer [`Self::start_action_with_content`] call,
+    /// consumed by an earlier completion, or invalidated by a generation
+    /// change) is rejected before the content ever reaches the model, so a
+    /// stale attempt's text can never be attached over a newer attempt's.
+    /// Pending transitions must mint a new handle through
+    /// [`Self::start_action_with_content`].
+    pub fn finish_action_with_content(
+        &mut self,
+        handle: SnapshotActionHandle<K>,
+        state: ActionFeedbackState,
+        content: ActionFeedbackContent,
     ) -> Result<SnapshotActionDisposition, ActionTransitionError> {
         if handle.generation != self.generation
             || self.access != SnapshotAccess::Allowed
@@ -615,7 +650,7 @@ impl<R, V, E, M, K: Clone + Eq> SnapshotTableState<R, V, E, M, K> {
         if state == ActionFeedbackState::Pending {
             return Err(ActionTransitionError::PendingRequiresStart);
         }
-        self.actions.set(handle.key, state)?;
+        self.actions.set_with_content(handle.key, state, content)?;
         self.active_actions.remove(index);
         Ok(SnapshotActionDisposition::Applied)
     }

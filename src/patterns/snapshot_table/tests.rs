@@ -1,5 +1,5 @@
 use super::*;
-use crate::patterns::{ActionFeedbackModel, ActionFeedbackState};
+use crate::patterns::{ActionFeedbackContent, ActionFeedbackModel, ActionFeedbackState};
 use std::rc::Rc;
 
 fn data(
@@ -401,4 +401,254 @@ fn request_and_action_sequences_fail_closed_instead_of_wrapping() {
     );
     assert!(actions.is_empty());
     assert!(actions.latest_announcement().is_none());
+}
+
+fn content(detail: &str) -> ActionFeedbackContent {
+    ActionFeedbackContent {
+        primary: None,
+        detail: Some(detail.to_owned()),
+    }
+}
+
+/// A superseded handle's completion is ignored before its content ever
+/// reaches the model, so a stale attempt's text can never overwrite a newer
+/// attempt's still-pending content (ldui-baz4).
+#[test]
+fn stale_completion_content_cannot_replace_a_newer_attempts_message() {
+    let mut state = SnapshotTableState::<u32, &'static str, &'static str, (), &'static str>::new();
+    let request = state.start_request("mx").unwrap();
+    state.complete(request, data("mx", "r1", &[1]));
+
+    let stale = state
+        .start_action_with_content("claim", content("First attempt detail."))
+        .unwrap();
+    let fresh = state
+        .start_action_with_content("claim", content("Second attempt in progress."))
+        .unwrap();
+    assert_eq!(
+        state.actions().entry(&"claim").unwrap().content().detail,
+        Some("Second attempt in progress.".to_owned()),
+        "the newer Pending attempt's own content must be visible"
+    );
+
+    assert_eq!(
+        state
+            .finish_action_with_content(
+                stale,
+                ActionFeedbackState::Success,
+                content("STALE COMPLETION — must never display."),
+            )
+            .unwrap(),
+        SnapshotActionDisposition::IgnoredStale
+    );
+    assert_eq!(
+        state.actions().entry(&"claim").unwrap().state(),
+        ActionFeedbackState::Pending,
+        "the stale completion must not have touched the still-pending entry"
+    );
+    assert_eq!(
+        state.actions().entry(&"claim").unwrap().content().detail,
+        Some("Second attempt in progress.".to_owned()),
+        "the stale attempt's content must never have been attached"
+    );
+
+    assert_eq!(
+        state
+            .finish_action_with_content(
+                fresh,
+                ActionFeedbackState::RetryableFailure,
+                content("Timed out contacting the service; retry."),
+            )
+            .unwrap(),
+        SnapshotActionDisposition::Applied
+    );
+    assert_eq!(
+        state.actions().entry(&"claim").unwrap().content().detail,
+        Some("Timed out contacting the service; retry.".to_owned())
+    );
+}
+
+/// A second completion of an already-consumed handle is rejected, so its
+/// content cannot overwrite the content the first completion recorded.
+#[test]
+fn duplicate_completion_content_is_rejected_after_the_handle_is_consumed() {
+    let mut state = SnapshotTableState::<u32, &'static str, &'static str, (), &'static str>::new();
+    let request = state.start_request("mx").unwrap();
+    state.complete(request, data("mx", "r1", &[1]));
+
+    let action = state.start_action("claim").unwrap();
+    let duplicate = action.clone();
+    assert_eq!(
+        state
+            .finish_action_with_content(
+                action,
+                ActionFeedbackState::PartialSuccess,
+                content("3 of 5 items updated."),
+            )
+            .unwrap(),
+        SnapshotActionDisposition::Applied
+    );
+    assert_eq!(
+        state
+            .finish_action_with_content(
+                duplicate,
+                ActionFeedbackState::Success,
+                content("DUPLICATE — must never display."),
+            )
+            .unwrap(),
+        SnapshotActionDisposition::IgnoredConsumed
+    );
+    assert_eq!(
+        state.actions().entry(&"claim").unwrap().content().detail,
+        Some("3 of 5 items updated.".to_owned())
+    );
+}
+
+/// Atomic dataset replacement invalidates the prior action's handle before
+/// content can attach, and the cleared model carries none of it forward.
+#[test]
+fn dataset_replacement_invalidates_old_actions_content() {
+    let mut state = SnapshotTableState::<u32, &'static str, &'static str, (), &'static str>::new();
+    let initial = state.start_request("mx").unwrap();
+    state.complete(initial, data("mx", "r1", &[1]));
+    let old_action = state
+        .start_action_with_content("delete-1", content("Deleting row 1…"))
+        .unwrap();
+
+    let replacement = state.start_request("in").unwrap();
+    state.complete(replacement, data("in", "r2", &[2]));
+    assert!(state.actions().is_empty());
+
+    assert_eq!(
+        state
+            .finish_action_with_content(
+                old_action,
+                ActionFeedbackState::Success,
+                content("STALE — must never display."),
+            )
+            .unwrap(),
+        SnapshotActionDisposition::IgnoredStale
+    );
+    assert!(
+        state.actions().is_empty(),
+        "the invalidated action must not resurrect with stale content"
+    );
+}
+
+/// Returning to Allowed after an access replacement starts from a clean
+/// action model, so a generation reset cannot leak an old attempt's content.
+#[test]
+fn access_replacement_clears_pending_action_content() {
+    let mut state = SnapshotTableState::<u32, &'static str, &'static str, (), &'static str>::new();
+    let request = state.start_request("mx").unwrap();
+    state.complete(request, data("mx", "r1", &[1]));
+    state
+        .start_action_with_content("claim", content("In-flight detail before reset."))
+        .unwrap();
+    assert!(!state.actions().is_empty());
+
+    state.replace_access(SnapshotAccess::Forbidden);
+    assert!(state.actions().is_empty());
+
+    state.replace_access(SnapshotAccess::Allowed);
+    assert!(state.actions().is_empty());
+    let request = state.start_request("mx").unwrap();
+    state.complete(request, data("mx", "r1", &[1]));
+    state.start_action("claim").unwrap();
+    assert!(
+        state
+            .actions()
+            .entry(&"claim")
+            .unwrap()
+            .content()
+            .is_empty(),
+        "a fresh action after generation reset must not inherit the earlier attempt's content"
+    );
+}
+
+/// A retry that supplies no content must not inherit the prior attempt's
+/// detail — content always replaces, it never merges across attempts.
+#[test]
+fn retry_does_not_inherit_a_prior_attempts_content() {
+    let mut state = SnapshotTableState::<u32, &'static str, &'static str, (), &'static str>::new();
+    let request = state.start_request("mx").unwrap();
+    state.complete(request, data("mx", "r1", &[1]));
+
+    let action = state
+        .start_action_with_content("claim", content("First attempt detail."))
+        .unwrap();
+    state
+        .finish_action_with_content(
+            action,
+            ActionFeedbackState::RetryableFailure,
+            content("Timed out; retry."),
+        )
+        .unwrap();
+
+    // Consumer-driven retry mints a fresh handle with no content supplied.
+    state.start_action("claim").unwrap();
+    assert!(
+        state
+            .actions()
+            .entry(&"claim")
+            .unwrap()
+            .content()
+            .is_empty(),
+        "retry must not carry the failed attempt's detail forward"
+    );
+}
+
+/// Distinct concurrent action keys keep independent content, and the single
+/// live-region announcement always reflects only the latest transition's
+/// content — never a mix of two attempts.
+#[test]
+fn concurrent_actions_retain_independent_content_and_one_coherent_announcement() {
+    let mut state = SnapshotTableState::<u32, &'static str, &'static str, (), &'static str>::new();
+    let request = state.start_request("mx").unwrap();
+    state.complete(request, data("mx", "r1", &[1]));
+
+    let claim_a = state
+        .start_action_with_content("row-a", content("Saving row A…"))
+        .unwrap();
+    let claim_b = state
+        .start_action_with_content("row-b", content("Saving row B…"))
+        .unwrap();
+
+    state
+        .finish_action_with_content(
+            claim_a,
+            ActionFeedbackState::RecoverableConflict,
+            content("Row A changed by another editor."),
+        )
+        .unwrap();
+    assert_eq!(
+        state.actions().entry(&"row-b").unwrap().content().detail,
+        Some("Saving row B…".to_owned()),
+        "row-b's content must be unaffected by row-a's completion"
+    );
+    let announcement = state.actions().latest_announcement().unwrap();
+    assert_eq!(announcement.key(), &"row-a");
+    assert_eq!(
+        announcement.content().detail,
+        Some("Row A changed by another editor.".to_owned())
+    );
+
+    state
+        .finish_action_with_content(
+            claim_b,
+            ActionFeedbackState::PartialSuccess,
+            content("2 of 4 items on row B."),
+        )
+        .unwrap();
+    assert_eq!(
+        state.actions().entry(&"row-a").unwrap().content().detail,
+        Some("Row A changed by another editor.".to_owned()),
+        "row-a's content must be unaffected by row-b's later completion"
+    );
+    let announcement = state.actions().latest_announcement().unwrap();
+    assert_eq!(announcement.key(), &"row-b");
+    assert_eq!(
+        announcement.content().detail,
+        Some("2 of 4 items on row B.".to_owned())
+    );
 }

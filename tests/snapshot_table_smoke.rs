@@ -346,3 +346,122 @@ async fn typed_snapshot_page_preserves_order_identity_and_retained_table_node() 
 
     assert_no_browser_errors(&harness, "typed snapshot-table retained transitions").await;
 }
+
+async fn action_feedback_snapshot(harness: &pixelproof_web::Harness) -> Value {
+    eval_json(
+        harness,
+        r#"(() => {
+            const feedback = document.getElementById('snapshot-page-feedback');
+            const entry = (key) => {
+                const el = feedback?.querySelector(`[data-action-feedback-key="${key}"]`);
+                if (!el) { return null; }
+                return {
+                    state: el.dataset.actionFeedbackState,
+                    text: el.querySelector('p')?.textContent ?? null,
+                };
+            };
+            return {
+                rowOne: entry('row-1'),
+                rowTwo: entry('row-2'),
+                rowThree: entry('row-3'),
+                announcement: feedback?.querySelector('[data-action-announcement]')?.textContent ?? null,
+            };
+        })()"#,
+    )
+    .await
+}
+
+/// ldui-baz4: caller-supplied attempt-specific text (conflict reason,
+/// partial-success count, retryable transport detail) renders alongside the
+/// framework default, concurrent keys keep independent content, a stale
+/// completion's content can never attach over a newer attempt's, and the
+/// single live-region announcement always mirrors only the latest transition.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
+async fn action_feedback_attaches_attempt_specific_content_and_rejects_stale_completions() {
+    let harness = harness_at("/components/snapshot-table-page").await;
+    wait_for_selector(
+        &harness,
+        "#snapshot-page-table [data-entity-table-grid] tbody tr",
+    )
+    .await;
+    begin_browser_error_capture(&harness).await;
+
+    // Conflict reason: caller detail appended after the localized default.
+    click(&harness, "[data-testid='action-conflict']").await;
+    let after_conflict = action_feedback_snapshot(&harness).await;
+    assert_eq!(
+        after_conflict["rowOne"]["state"],
+        json!("recoverable-conflict")
+    );
+    assert_eq!(
+        after_conflict["rowOne"]["text"],
+        json!(
+            "row-1: The record changed; review and retry. Another editor changed this record 2 minutes ago."
+        )
+    );
+
+    // Partial-success count.
+    click(&harness, "[data-testid='action-partial']").await;
+    let after_partial = action_feedback_snapshot(&harness).await;
+    assert_eq!(after_partial["rowOne"]["state"], json!("partial-success"));
+    assert_eq!(
+        after_partial["rowOne"]["text"],
+        json!("row-1: The action completed only partially. 3 of 5 items updated.")
+    );
+
+    // Retryable transport detail.
+    click(&harness, "[data-testid='action-retryable']").await;
+    let after_retryable = action_feedback_snapshot(&harness).await;
+    assert_eq!(
+        after_retryable["rowOne"]["state"],
+        json!("retryable-failure")
+    );
+    assert_eq!(
+        after_retryable["rowOne"]["text"],
+        json!(
+            "row-1: The action failed and may be retried. Timed out contacting the service; retry."
+        )
+    );
+
+    // Concurrent actions: row-1 completes while row-2 is independently Pending.
+    click(&harness, "[data-testid='action-concurrent']").await;
+    let concurrent = action_feedback_snapshot(&harness).await;
+    assert_eq!(concurrent["rowOne"]["state"], json!("success"));
+    assert_eq!(
+        concurrent["rowOne"]["text"],
+        json!("row-1: Action completed. Row 1 saved.")
+    );
+    assert_eq!(concurrent["rowTwo"]["state"], json!("pending"));
+    assert_eq!(
+        concurrent["rowTwo"]["text"],
+        json!("row-2: Action in progress. Saving row 2\u{2026}")
+    );
+
+    // Stale completion: the superseded attempt's content must never render,
+    // and the one live-region announcement must mirror only the latest
+    // (row-3) transition.
+    click(&harness, "[data-testid='action-stale']").await;
+    let stale = action_feedback_snapshot(&harness).await;
+    assert_eq!(stale["rowThree"]["state"], json!("retryable-failure"));
+    let row_three_text = stale["rowThree"]["text"].as_str().expect("row-3 text");
+    assert!(
+        row_three_text.contains("Timed out contacting the service; retry."),
+        "row-3 must show the fresh attempt's content: {row_three_text}"
+    );
+    assert!(
+        !row_three_text.contains("STALE COMPLETION") && !row_three_text.contains("First attempt"),
+        "row-3 must never show the superseded attempt's content: {row_three_text}"
+    );
+    let announcement = stale["announcement"].as_str().expect("announcement text");
+    assert!(
+        announcement.starts_with("row-3:") && announcement.contains("Timed out contacting"),
+        "the live-region announcement must mirror only the latest (row-3) transition: {announcement}"
+    );
+    assert!(
+        !announcement.contains("STALE COMPLETION") && !announcement.contains("First attempt"),
+        "the announcement must never carry a superseded attempt's content: {announcement}"
+    );
+
+    assert_no_browser_errors(&harness, "ActionFeedback attempt-specific content").await;
+}

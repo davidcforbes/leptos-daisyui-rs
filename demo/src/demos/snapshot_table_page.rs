@@ -5,9 +5,9 @@ use leptos_daisyui_rs::components::{
     EntityTablePreferencePersistence, EntityTableTexts, EntityTableViewportFit,
 };
 use leptos_daisyui_rs::patterns::{
-    PageHeader, PageHeaderNavigationLayout, SnapshotData, SnapshotDatasetOption,
-    SnapshotDatasetSelectorConfig, SnapshotEntityTableConfig, SnapshotLocalRowProjection,
-    SnapshotRequestHandle, SnapshotTablePage, SnapshotTableState,
+    ActionFeedbackContent, ActionFeedbackState, PageHeader, PageHeaderNavigationLayout,
+    SnapshotData, SnapshotDatasetOption, SnapshotDatasetSelectorConfig, SnapshotEntityTableConfig,
+    SnapshotLocalRowProjection, SnapshotRequestHandle, SnapshotTablePage, SnapshotTableState,
 };
 use std::rc::Rc;
 use std::sync::Arc;
@@ -137,6 +137,126 @@ pub fn SnapshotTablePageFixture() -> impl IntoView {
     });
     let retry = Callback::new(move |_| request_dataset.run("office-in".to_owned()));
 
+    // ldui-baz4: per-action message detail fixtures. Each button drives the
+    // typed `start_action_with_content`/`finish_action_with_content` API
+    // directly against the same private-field state the table renders from,
+    // so the resulting `ActionFeedback` copy is exactly what a real consumer
+    // (conflict reason, partial-success count, retryable transport detail)
+    // would see.
+    let action_conflict = Callback::new(move |_| {
+        state.update(|state| {
+            if let Ok(handle) = state.start_action("row-1".to_owned()) {
+                let _ = state.finish_action_with_content(
+                    handle,
+                    ActionFeedbackState::RecoverableConflict,
+                    ActionFeedbackContent {
+                        primary: None,
+                        detail: Some(
+                            "Another editor changed this record 2 minutes ago.".to_owned(),
+                        ),
+                    },
+                );
+            }
+        });
+    });
+    let action_partial = Callback::new(move |_| {
+        state.update(|state| {
+            if let Ok(handle) = state.start_action("row-1".to_owned()) {
+                let _ = state.finish_action_with_content(
+                    handle,
+                    ActionFeedbackState::PartialSuccess,
+                    ActionFeedbackContent {
+                        primary: None,
+                        detail: Some("3 of 5 items updated.".to_owned()),
+                    },
+                );
+            }
+        });
+    });
+    let action_retryable = Callback::new(move |_| {
+        state.update(|state| {
+            if let Ok(handle) = state.start_action("row-1".to_owned()) {
+                let _ = state.finish_action_with_content(
+                    handle,
+                    ActionFeedbackState::RetryableFailure,
+                    ActionFeedbackContent {
+                        primary: None,
+                        detail: Some("Timed out contacting the service; retry.".to_owned()),
+                    },
+                );
+            }
+        });
+    });
+    let action_concurrent = Callback::new(move |_| {
+        state.update(|state| {
+            if let Ok(handle) = state.start_action_with_content(
+                "row-1".to_owned(),
+                ActionFeedbackContent {
+                    primary: None,
+                    detail: Some("Saving row 1…".to_owned()),
+                },
+            ) {
+                let _ = state.finish_action_with_content(
+                    handle,
+                    ActionFeedbackState::Success,
+                    ActionFeedbackContent {
+                        primary: None,
+                        detail: Some("Row 1 saved.".to_owned()),
+                    },
+                );
+            }
+            // row-2 is left Pending so both keys are visible at once, proving
+            // concurrent keys retain independent content.
+            let _ = state.start_action_with_content(
+                "row-2".to_owned(),
+                ActionFeedbackContent {
+                    primary: None,
+                    detail: Some("Saving row 2…".to_owned()),
+                },
+            );
+        });
+    });
+    let action_stale = Callback::new(move |_| {
+        state.update(|state| {
+            let Ok(stale_handle) = state.start_action_with_content(
+                "row-3".to_owned(),
+                ActionFeedbackContent {
+                    primary: None,
+                    detail: Some("First attempt detail — must never display.".to_owned()),
+                },
+            ) else {
+                return;
+            };
+            let Ok(fresh_handle) = state.start_action_with_content(
+                "row-3".to_owned(),
+                ActionFeedbackContent {
+                    primary: None,
+                    detail: Some("Second attempt in progress.".to_owned()),
+                },
+            ) else {
+                return;
+            };
+            // The superseded handle's completion must be ignored, and its
+            // hostile content must never reach the model.
+            let _ = state.finish_action_with_content(
+                stale_handle,
+                ActionFeedbackState::Success,
+                ActionFeedbackContent {
+                    primary: None,
+                    detail: Some("STALE COMPLETION — must never display.".to_owned()),
+                },
+            );
+            let _ = state.finish_action_with_content(
+                fresh_handle,
+                ActionFeedbackState::RetryableFailure,
+                ActionFeedbackContent {
+                    primary: None,
+                    detail: Some("Timed out contacting the service; retry.".to_owned()),
+                },
+            );
+        });
+    });
+
     view! {
         <SnapshotTablePage
             contract_id="snapshot-page"
@@ -208,6 +328,21 @@ pub fn SnapshotTablePageFixture() -> impl IntoView {
                         on_click=complete_replacement
                     >
                         "Complete replacement"
+                    </Button>
+                    <Button attr:data-testid="action-conflict" on_click=action_conflict>
+                        "Trigger conflict"
+                    </Button>
+                    <Button attr:data-testid="action-partial" on_click=action_partial>
+                        "Trigger partial success"
+                    </Button>
+                    <Button attr:data-testid="action-retryable" on_click=action_retryable>
+                        "Trigger retryable failure"
+                    </Button>
+                    <Button attr:data-testid="action-concurrent" on_click=action_concurrent>
+                        "Trigger concurrent actions"
+                    </Button>
+                    <Button attr:data-testid="action-stale" on_click=action_stale>
+                        "Trigger stale completion"
                     </Button>
                 </div>
             }.into_any())

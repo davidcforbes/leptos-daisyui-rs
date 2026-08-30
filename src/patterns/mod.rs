@@ -15,8 +15,8 @@ mod snapshot_table_page;
 
 pub use crate::{entity_columns, filter_schema, page_contract};
 pub use action_feedback::{
-    ActionAnnouncement, ActionFeedback, ActionFeedbackEntry, ActionFeedbackModel,
-    ActionFeedbackState, ActionFeedbackTexts, ActionTransitionError,
+    ActionAnnouncement, ActionFeedback, ActionFeedbackContent, ActionFeedbackEntry,
+    ActionFeedbackModel, ActionFeedbackState, ActionFeedbackTexts, ActionTransitionError,
 };
 pub use active_filter_chips::{
     ActiveFilterChip, ActiveFilterChips, ActiveFilterTexts, active_filter_summary,
