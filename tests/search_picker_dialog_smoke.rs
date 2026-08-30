@@ -133,6 +133,44 @@ async fn opening_focuses_search_and_escape_closes_and_restores_focus() {
     assert_no_browser_errors(&h, "search-picker-dialog focus/escape journey").await;
 }
 
+/// The Cancel button closes the dialog and returns focus to the trigger,
+/// exactly like `Escape` -- proving the acceptance clause's "Escape/Cancel"
+/// pairing rather than only its keyboard half.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-search-picker-dialog)"]
+async fn cancel_button_closes_and_restores_focus() {
+    let h = harness_at(PAGE).await;
+    begin_browser_error_capture(&h).await;
+
+    open_dialog(&h, "dialog-a").await;
+    let opened = snapshot(&h, "dialog-a").await;
+    assert_eq!(
+        opened["dialogOpen"],
+        json!(true),
+        "dialog is open: {opened}"
+    );
+
+    let cancel_script = format!(
+        r#"document.querySelector('{} [data-search-picker-dialog-cancel="true"]').click()"#,
+        dialog_selector("dialog-a")
+    );
+    let _ = h.page().evaluate(cancel_script.as_str()).await;
+    settle(200).await;
+    let closed = snapshot(&h, "dialog-a").await;
+    assert_eq!(
+        closed["dialogOpen"],
+        json!(false),
+        "Cancel closes: {closed}"
+    );
+    assert_eq!(
+        closed["activeIsTrigger"],
+        json!(true),
+        "focus returns to the element that opened the dialog: {closed}"
+    );
+
+    assert_no_browser_errors(&h, "search-picker-dialog Cancel-button journey").await;
+}
+
 /// `case-a` and `case-b` both render the display title "Alex Morgan".
 /// Arrowing to the second row and activating it must return `case-b`'s own
 /// payload, resolved fresh against the current items -- never the first

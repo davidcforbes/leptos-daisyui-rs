@@ -30,7 +30,6 @@ use crate::components::{
     ModalSearchRow, ResultListItem,
 };
 use leptos::{
-    ev,
     html::{Dialog, Div, Input as HtmlInput},
     prelude::*,
 };
@@ -322,16 +321,19 @@ where
         search_picker_render_decision(status.get(), !items.with(Vec::is_empty))
     });
 
-    // Escape is intercepted here (rather than relying on the dialog's native
-    // `cancel`/`close` default action) so the caller's controlled `open`
-    // signal -- the single source of truth Modal itself reads -- is always
-    // what closes the dialog. `preventDefault` on the key event suppresses
-    // the browser's own close-on-Escape default action.
-    let handle_dialog_keydown = move |event: ev::KeyboardEvent| {
-        if event.key() == "Escape" {
-            event.prevent_default();
-            request_close();
-        }
+    // The browser's own default action for Escape on an open modal dialog
+    // is to fire a cancelable `cancel` event and, unless it is prevented, to
+    // close the dialog itself -- see MDN's `HTMLDialogElement`: "cancel"
+    // event. `preventDefault` here (not on the key event -- a keydown
+    // `preventDefault` does NOT suppress this; only the dialog's own
+    // `cancel` event does) stops that native close, so the caller's
+    // controlled `open` signal -- the single source of truth `Modal` itself
+    // reads -- is always what actually closes the dialog, keeping `open`
+    // from desyncing from the DOM and leaving room for a future
+    // confirm-before-close policy to veto the close entirely.
+    let handle_dialog_cancel = move |event: web_sys::Event| {
+        event.prevent_default();
+        request_close();
     };
 
     // Forwards Arrow/Home/End/Enter from the focused search field to the
@@ -365,7 +367,7 @@ where
             labelled_by=heading_id
             node_ref=node_ref
             class=class
-            on:keydown=handle_dialog_keydown
+            on:cancel=handle_dialog_cancel
         >
             <ModalBox attr:data-search-picker-dialog="true" class="w-full max-w-2xl">
                 <h3 id=title_heading_id class="text-lg font-bold">
@@ -423,7 +425,11 @@ where
                 }}
 
                 <ModalAction>
-                    <Button style=ButtonStyle::Outline on:click=move |_| request_close()>
+                    <Button
+                        style=ButtonStyle::Outline
+                        attr:data-search-picker-dialog-cancel="true"
+                        on:click=move |_| request_close()
+                    >
                         {move || texts.with(|t| t.cancel.clone())}
                     </Button>
                 </ModalAction>
@@ -500,6 +506,18 @@ mod tests {
     #[test]
     fn refreshing_with_no_retained_items_still_mounts_the_list() {
         let decision = search_picker_render_decision(SearchPickerStatus::Refreshing, false);
+        assert!(decision.list_mounted());
+    }
+
+    /// Same reasoning as [`refreshing_with_no_retained_items_still_mounts_the_list`]
+    /// for the failed-refresh branch: `has_items` alone decides list
+    /// mounting, so a `RefreshError` that started from zero retained rows
+    /// still mounts the (empty) list under the retained-error notice rather
+    /// than falling back to a replacement panel.
+    #[test]
+    fn refresh_error_with_no_retained_items_still_mounts_the_list() {
+        let decision = search_picker_render_decision(SearchPickerStatus::RefreshError, false);
+        assert_eq!(decision.panel(), Some(PageStatePanelKind::RetainedError));
         assert!(decision.list_mounted());
     }
 
