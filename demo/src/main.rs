@@ -121,6 +121,7 @@ fn AppInner() -> impl IntoView {
                     <Route path=path!("/dropdown") view=DropdownDemo />
                     <Route path=path!("/empty_state") view=EmptyStateDemo />
                     <Route path=path!("/fab") view=FabDemo />
+                    <Route path=path!("/field-context-scope") view=FieldContextScopeDemo />
                     <Route path=path!("/fieldset") view=FieldsetDemo />
                     <Route path=path!("/file_input") view=FileInputDemo />
                     <Route path=path!("/filter") view=FilterDemo />

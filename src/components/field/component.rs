@@ -1,6 +1,7 @@
 use super::context::{FieldContext, FieldLineKind, field_line, next_field_id};
 use super::style::FieldState;
 use crate::merge_classes;
+use leptos::tachys::reactive_graph::OwnedView;
 use leptos::{html::Div, prelude::*};
 
 /// # Field Component
@@ -83,8 +84,22 @@ pub fn Field(
     });
 
     // Provide the association contract BEFORE `children()` runs, so the
-    // wrapped Input/Select/Textarea sees it when it is created.
-    {
+    // wrapped Input/Select/Textarea sees it when it is created — but scoped
+    // to a fresh child `Owner` rather than whatever owner is current here.
+    // `provide_context` writes onto `Owner::current()`, and a plain
+    // component-function call (this one included) does not get its own
+    // owner: it runs inside whichever owner is already current for the
+    // surrounding view. Without a dedicated child owner, `provide_context`
+    // would land on that *shared* owner, and every later sibling built
+    // under the same owner — a standalone `Input`, `Select`, `DatasetSelector`
+    // column filter, anything rendered after this `Field` at the same level
+    // — would see the same `FieldContext` and mint the same `id` (ldui-1jxa).
+    // Building the child owner explicitly and restoring the previous owner
+    // once `children()` returns confines the context to exactly this
+    // `Field`'s own subtree, matching how `<Show>`/keyed-row scoping in this
+    // crate isolates context (see `entity_table::component::local_for_enumerate`).
+    let field_owner = Owner::new();
+    let scoped_children = field_owner.with(|| {
         let line_id = line_id.clone();
         let described_line_id = line_id.clone();
         provide_context(FieldContext {
@@ -102,7 +117,9 @@ pub fn Field(
                     .map(|_| line_id.clone())
             }),
         });
-    }
+        children()
+    });
+    let scoped_children = OwnedView::new_with_owner(scoped_children, field_owner);
 
     let label_for = input_id.clone();
     view! {
@@ -137,7 +154,7 @@ pub fn Field(
                     })
             }}
 
-            {children()}
+            {scoped_children}
 
             {move || {
                 current_line
