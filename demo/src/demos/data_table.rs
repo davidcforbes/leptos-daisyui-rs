@@ -206,12 +206,16 @@ pub fn DataTableDemo() -> impl IntoView {
         Column::new("role", "Role"),
     ]);
 
-    // Variable-height auto_page_size regression guard (ldui-89rp): the first
-    // rendered row is short, but one row further down wraps to roughly three
-    // lines. Measuring only the first row (or averaging) derives a page size
-    // that fits the short row and overflows once the tall one renders --
-    // `auto_page_size` must measure the MAX across every rendered row.
-    let variable_height_data = RwSignal::new(generate_users(12));
+    // Variable-height auto_page_size regression guard (ldui-89rp): 20 rows,
+    // every one short except the row at index 12 (id "013") -- deliberately
+    // PAST the default `page_size` of 10, so it is absent from the very
+    // first render and only shows up once a measurement pass derives a
+    // larger page. A tall row inside every plausible page (e.g. index 2)
+    // cannot exercise the multi-pass oscillation the CRITICAL fix damps
+    // (component.rs's `RowHeightEra` high-water mark): the bug is in what
+    // happens when the tall row is revealed *and then excluded again* by
+    // successive derived page sizes, not in a single measurement missing it.
+    let variable_height_data = RwSignal::new(generate_users(20));
     let variable_height_columns = RwSignal::new(vec![
         Column::new("id", "ID"),
         Column::new("name", "Name"),
@@ -219,10 +223,10 @@ pub fn DataTableDemo() -> impl IntoView {
     ]);
     let tall_row_renderer: CellRenderer = Callback::new(
         move |(_idx, row): (usize, HashMap<&'static str, String>)| {
-            if row.get("id").map(String::as_str) == Some("003") {
+            if row.get("id").map(String::as_str) == Some("013") {
                 view! {
                     <div style="min-height: 108px; display: flex; align-items: center;">
-                        "Deliberately tall wrapped content (ldui-89rp): the auto_page_size measurement must catch this row's real height even though the first rendered row is short."
+                        "Deliberately tall wrapped content (ldui-89rp): past the default page size, so auto_page_size must both catch it once revealed and never forget it once caught."
                     </div>
                 }
                 .into_any()
@@ -1075,10 +1079,12 @@ pub fn DataTableDemo() -> impl IntoView {
             <Section title="Responsive Page Size — Variable-Height Rows">
                 <p class="text-sm opacity-70 mb-4">
                     "A regression guard for " <code>"ldui-89rp"</code>
-                    ": the third row wraps to roughly three lines while every other row "
-                    "stays short. " <code>"auto_page_size"</code>
+                    ": row 13 of 20 wraps to roughly three lines while every other row stays "
+                    "short, and it sits past the default page size so it only shows up once a "
+                    "measurement pass grows the page. " <code>"auto_page_size"</code>
                     " must measure the tallest currently rendered row rather than just the "
-                    "first, so the derived page never overflows its own scroll wrapper."
+                    "first, never forget it once seen, and settle instead of oscillating -- "
+                    "so the derived page never overflows its own scroll wrapper."
                 </p>
                 <div class="resize-y overflow-auto border border-base-300 rounded-lg p-3 h-96 min-h-32">
                     <DataTable

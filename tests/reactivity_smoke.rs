@@ -733,33 +733,49 @@ async fn auto_page_size_keeps_a_usable_page_and_scrolls_short_viewports() {
 async fn auto_page_size_does_not_overflow_with_a_tall_variable_height_row() {
     let h = harness_at("/components/data-table").await;
 
-    // Let the ResizeObserver's settle pass and the belt-and-braces
-    // next-frame check both finish.
+    let snapshot_expr = r#"(() => {
+        const root = document.querySelector('#auto-page-variable-height-table');
+        const viewport = root.querySelector(':scope > .overflow-x-auto');
+        return {
+            rows: root.querySelectorAll('tbody tr').length,
+            viewportHeight: viewport.clientHeight,
+            scrollHeight: viewport.scrollHeight,
+        };
+    })()"#;
+
+    // Let the ResizeObserver's settle pass, the era-damped multi-pass
+    // self-correction, and the belt-and-braces next-frame check all finish.
     tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+    let first = eval_json(&h, snapshot_expr).await;
 
-    let snapshot = eval_json(
-        &h,
-        r#"(() => {
-            const root = document.querySelector('#auto-page-variable-height-table');
-            const viewport = root.querySelector(':scope > .overflow-x-auto');
-            return {
-                rows: root.querySelectorAll('tbody tr').length,
-                viewportHeight: viewport.clientHeight,
-                scrollHeight: viewport.scrollHeight,
-            };
-        })()"#,
-    )
-    .await;
+    // Settling, not just a reading that happens to look fine once (ldui-89rp
+    // CRITICAL fix): the demo's tall row sits past the default page size, so
+    // it is absent from the very first render and only appears once a
+    // measurement pass grows the page. Without the high-water-mark ratchet
+    // the derived row count oscillates forever between two values as that
+    // tall row is alternately revealed and excluded again. A second reading
+    // after another full settle window must see the SAME row count -- proof
+    // the derivation reached a fixed point instead of still cycling.
+    tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+    let second = eval_json(&h, snapshot_expr).await;
 
     assert!(
-        snapshot["rows"].as_u64().unwrap_or(0) > 0,
-        "expected at least one rendered row: {snapshot}"
+        first["rows"].as_u64().unwrap_or(0) > 0,
+        "expected at least one rendered row: {first}"
     );
-    assert!(
-        snapshot["scrollHeight"].as_u64() <= snapshot["viewportHeight"].as_u64(),
-        "auto_page_size overflowed its own scroll wrapper with a tall variable-height row \
-         in the rendered set (pagination + scrollbar together): {snapshot}"
+    assert_eq!(
+        first["rows"], second["rows"],
+        "auto_page_size did not settle -- the derived row count is still changing \
+         (oscillation): first={first} second={second}"
     );
+    for (label, snapshot) in [("first", &first), ("second", &second)] {
+        assert!(
+            snapshot["scrollHeight"].as_u64() <= snapshot["viewportHeight"].as_u64(),
+            "auto_page_size overflowed its own scroll wrapper with a tall variable-height \
+             row in the rendered set (pagination + scrollbar together) at the {label} \
+             reading: {snapshot}"
+        );
+    }
 }
 
 /// Text content of the element with the given `data-testid`.

@@ -1,6 +1,6 @@
 use crate::components::data_table::auto_page::{
-    DEFAULT_AUTO_MIN_ROWS, FALLBACK_HEADER_HEIGHT, FALLBACK_ROW_HEIGHT, auto_page_size_for_height,
-    max_row_height,
+    DEFAULT_AUTO_MIN_ROWS, FALLBACK_HEADER_HEIGHT, FALLBACK_ROW_HEIGHT, RowHeightEra,
+    auto_page_size_for_height, max_row_height,
 };
 use crate::components::data_table::body::{DataTableBody, DataTableBodyClick, DataTableBodyRow};
 use crate::components::data_table::chooser::{
@@ -826,6 +826,31 @@ pub fn DataTable(
     // unmount can cancel it -- same rationale and pattern as `measure_handle`
     // below and the search debounce's handle (ldui-d54).
     let overflow_handle: StoredValue<Option<TimeoutHandle>> = StoredValue::new(None);
+
+    // Row-height "era" identity (ldui-89rp CRITICAL fix): `page_size` derives
+    // from `auto_rows`, `current_page_rows` slices by `page_size`, and the
+    // Effect below re-measures whenever `page_size` changes -- so the
+    // measured row set is a function of the *previous* pass's derived count.
+    // Undamped, that loop can fail to converge (a short render derives a
+    // large count; the larger render reveals a tall row and derives a small
+    // one; the smaller render excludes the tall row again and derives the
+    // large one again -- forever, since successive measured maxes genuinely
+    // differ and the write-only-on-change guard below never sees a repeat).
+    // `RowHeightEra` ratchets the row height used for derivation so it can
+    // only grow within one era (same dataset, same container width),
+    // guaranteeing the derived count reaches a fixed point. `data_revision`
+    // bumps -- and therefore starts a fresh era -- only on a genuine `data`
+    // change, never on the `page_size`/`auto_rows` churn a measurement pass
+    // itself causes.
+    let data_revision: StoredValue<u64> = StoredValue::new(0);
+    Effect::new(move |ran_before: Option<()>| {
+        let _ = data.get();
+        if ran_before.is_some() {
+            data_revision.update_value(|revision| *revision = revision.wrapping_add(1));
+        }
+    });
+    let row_era: StoredValue<Option<RowHeightEra>> = StoredValue::new(None);
+
     let measure_rows = move || {
         // Late-firing guard (ldui-d54): this runs from a zero-delay macrotask,
         // so a router navigation scheduled-then-navigated in one task disposes
@@ -870,8 +895,10 @@ pub fn DataTable(
         // multi-line badge stack -- a short first row derives a page size
         // that fits the short row and overflows a taller one further down
         // the page. `max_row_height` is the pure, unit-tested reduction; this
-        // is only the DOM-side gathering of what to feed it.
-        let row_height = wrapper
+        // is only the DOM-side gathering of what to feed it. `0.0` (not
+        // `FALLBACK_ROW_HEIGHT`) is the "nothing measured this pass" sentinel
+        // fed to the era ratchet below, which applies its own fallback.
+        let measured_max = wrapper
             .query_selector_all("tbody tr")
             .map(|rows| {
                 let heights: Vec<f64> = (0..rows.length())
@@ -879,9 +906,23 @@ pub fn DataTable(
                     .filter_map(|node| node.dyn_into::<web_sys::HtmlElement>().ok())
                     .map(|el| el.offset_height() as f64)
                     .collect();
-                max_row_height(&heights, FALLBACK_ROW_HEIGHT)
+                max_row_height(&heights, 0.0)
             })
-            .unwrap_or(FALLBACK_ROW_HEIGHT);
+            .unwrap_or(0.0);
+
+        // Ratchet through the era (ldui-89rp CRITICAL fix -- see the comment
+        // above `row_era`'s declaration): the row height actually fed to the
+        // derivation below is the high-water mark of every measurement this
+        // pass and every prior pass in the same era, never just this pass's
+        // raw reading. `offset_width`, like `offset_height` above, is the
+        // wrapper's own border-box width, unaffected by its own scrollbar.
+        let era_key = (data_revision.get_value(), wrapper.offset_width());
+        let era = row_era
+            .get_value()
+            .unwrap_or(RowHeightEra::empty(era_key))
+            .observe(era_key, measured_max);
+        row_era.set_value(Some(era));
+        let row_height = era.effective_row_height(FALLBACK_ROW_HEIGHT);
 
         let configured_page_size = configured_page_size
             .try_get_untracked()
@@ -920,6 +961,13 @@ pub fn DataTable(
             handle.clear();
         }
         let tolerance = row_height;
+        // Floored at `min_rows` (never below 1): `auto_page.rs`'s own docs on
+        // `auto_page_size_for_height` say a fit below `min_rows` "retained
+        // [the configured page size]... and the bounded table viewport
+        // scrolls" -- residual overflow at the floor is that documented
+        // scroll case, not a bug this belt-and-braces step should paper over
+        // by shrinking the page toward unusability.
+        let floor = min_rows.max(1);
         let check_overflow = move || {
             // Same late-firing guard as `measure_rows` above: the
             // `auto_page_size` try-read doubles as the disposed-owner check,
@@ -935,7 +983,7 @@ pub fn DataTable(
             let offset_height = wrapper.offset_height() as f64;
             if scroll_height > offset_height + tolerance
                 && let Some(Some(current)) = auto_rows.try_get_untracked()
-                && current > 1
+                && current > floor
             {
                 let _ = auto_rows.try_set(Some(current - 1));
             }

@@ -103,6 +103,89 @@ pub fn max_row_height(heights: &[f64], fallback: f64) -> f64 {
         .unwrap_or(fallback)
 }
 
+/// Identifies "what's being measured" for [`RowHeightEra`]: a
+/// `(data_revision, container_width_px)` pair. The caller bumps
+/// `data_revision` whenever the underlying rows data changes; a different
+/// `container_width_px` (the scroll wrapper's own border-box width, immune
+/// to its own vertical scrollbar the same way `rows_per_page_for_height`'s
+/// viewport height is) also starts a fresh era. Two measurement passes with
+/// an equal key are considered the same era.
+pub type RowHeightEraKey = (u64, i32);
+
+/// High-water mark of measured row heights across measurement passes within
+/// one era (ldui-89rp).
+///
+/// `auto_page_size` self-corrects across passes: applying a derived count
+/// re-renders the table, which re-triggers a measurement of what actually
+/// rendered. Undamped, that loop can fail to converge with ordinary data --
+/// a short first render measures a small max and derives a large count; the
+/// larger render reveals a tall row further down the page, measures a large
+/// max, and derives a small (or `min_rows`-floored) count; the smaller
+/// render excludes the tall row again, measures a small max, and derives the
+/// large count again -- oscillating between the two forever, since the two
+/// measured maxes genuinely differ pass to pass and the caller's
+/// change-guard never sees a repeat.
+///
+/// Ratcheting the row height fed to [`rows_per_page_for_height`] so it can
+/// only *increase* within an era breaks the cycle: once any pass sees the
+/// tall row, every later pass in the same era uses at least that height,
+/// so the derived count can only shrink or hold from that point on -- a
+/// monotone (non-increasing) sequence of positive integers, which must reach
+/// a fixed point in finitely many passes.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RowHeightEra {
+    key: RowHeightEraKey,
+    high_water_mark: f64,
+}
+
+impl RowHeightEra {
+    /// A fresh era for `key` with nothing measured yet.
+    pub const fn empty(key: RowHeightEraKey) -> Self {
+        Self {
+            key,
+            high_water_mark: 0.0,
+        }
+    }
+
+    /// Feeds one measurement pass's max row height (see [`max_row_height`])
+    /// for `key`. A `key` equal to the era's own ratchets the high-water mark
+    /// up to `measured_max.max(previous_high_water_mark)`; a different `key`
+    /// starts a brand new era at `measured_max`. A non-finite or
+    /// non-positive `measured_max` (nothing measurable this pass) never
+    /// ratchets anything, and on a `key` change resets the new era's
+    /// high-water mark to 0.0 (nothing measured yet) rather than seeding it
+    /// with garbage.
+    #[must_use]
+    pub fn observe(self, key: RowHeightEraKey, measured_max: f64) -> Self {
+        let measured_max = if measured_max.is_finite() && measured_max > 0.0 {
+            measured_max
+        } else {
+            0.0
+        };
+        let high_water_mark = if key == self.key {
+            self.high_water_mark.max(measured_max)
+        } else {
+            measured_max
+        };
+        Self {
+            key,
+            high_water_mark,
+        }
+    }
+
+    /// The row height to feed [`rows_per_page_for_height`] for the *current*
+    /// pass: the era's high-water mark, or `fallback` when nothing has been
+    /// measured in this era yet (empty table, first paint -- matches
+    /// [`FALLBACK_ROW_HEIGHT`]'s existing role).
+    pub fn effective_row_height(self, fallback: f64) -> f64 {
+        if self.high_water_mark > 0.0 {
+            self.high_water_mark
+        } else {
+            fallback
+        }
+    }
+}
+
 /// Resolves the effective responsive page size for a measured table viewport.
 ///
 /// A measured fit at or above `min_rows` remains fully responsive. Below that
@@ -314,5 +397,148 @@ mod tests {
         // 400 - 36 = 364px available; 364 / 76 = 4.78 -> 4 whole rows, every
         // one of which is tall enough to actually fit.
         assert_eq!(rows_from_max, 4);
+    }
+
+    // ── RowHeightEra (ldui-89rp critical fix: damping the multi-pass loop) ──
+
+    #[test]
+    fn row_height_era_of_nothing_measured_yet_falls_back() {
+        let era = RowHeightEra::empty((1, 400));
+        assert_eq!(
+            era.effective_row_height(FALLBACK_ROW_HEIGHT),
+            FALLBACK_ROW_HEIGHT
+        );
+    }
+
+    #[test]
+    fn row_height_era_ratchets_up_and_never_decreases_within_an_era() {
+        let key = (1_u64, 400_i32);
+        let era = RowHeightEra::empty(key);
+
+        let era = era.observe(key, 24.0); // pass 1: only short rows rendered
+        assert_eq!(era.effective_row_height(FALLBACK_ROW_HEIGHT), 24.0);
+
+        let era = era.observe(key, 76.0); // pass 2: a tall row rendered too
+        assert_eq!(era.effective_row_height(FALLBACK_ROW_HEIGHT), 76.0);
+
+        // pass 3: back to only short rows (the tall row scrolled out of a
+        // smaller derived page) -- the high-water mark must NOT decrease.
+        let era = era.observe(key, 24.0);
+        assert_eq!(era.effective_row_height(FALLBACK_ROW_HEIGHT), 76.0);
+    }
+
+    #[test]
+    fn row_height_era_resets_on_a_new_key() {
+        let era = RowHeightEra::empty((1, 400)).observe((1, 400), 76.0);
+        assert_eq!(era.effective_row_height(FALLBACK_ROW_HEIGHT), 76.0);
+
+        // Dataset changed (key's first component differs) -> fresh era, the
+        // old tall reading must not carry over.
+        let era = era.observe((2, 400), 24.0);
+        assert_eq!(era.effective_row_height(FALLBACK_ROW_HEIGHT), 24.0);
+
+        // Container width changed (key's second component differs) -> also
+        // a fresh era.
+        let era = era.observe((2, 320), 60.0);
+        assert_eq!(era.effective_row_height(FALLBACK_ROW_HEIGHT), 60.0);
+    }
+
+    #[test]
+    fn row_height_era_ignores_invalid_measurements_without_resetting() {
+        let key = (1_u64, 400_i32);
+        let era = RowHeightEra::empty(key).observe(key, 76.0);
+
+        let era = era.observe(key, f64::NAN);
+        assert_eq!(era.effective_row_height(FALLBACK_ROW_HEIGHT), 76.0);
+
+        let era = era.observe(key, -5.0);
+        assert_eq!(era.effective_row_height(FALLBACK_ROW_HEIGHT), 76.0);
+
+        let era = era.observe(key, 0.0);
+        assert_eq!(era.effective_row_height(FALLBACK_ROW_HEIGHT), 76.0);
+
+        let era = era.observe(key, f64::INFINITY);
+        assert_eq!(era.effective_row_height(FALLBACK_ROW_HEIGHT), 76.0);
+    }
+
+    #[test]
+    fn row_height_era_a_fresh_era_seeded_by_an_invalid_reading_still_falls_back() {
+        // A `key` change resets the high-water mark even when the very first
+        // reading in the new era is garbage -- it must not "seed" the new
+        // era with a stale non-finite/negative value.
+        let era = RowHeightEra::empty((1, 400))
+            .observe((1, 400), 76.0)
+            .observe((2, 400), f64::NAN);
+        assert_eq!(
+            era.effective_row_height(FALLBACK_ROW_HEIGHT),
+            FALLBACK_ROW_HEIGHT
+        );
+    }
+
+    #[test]
+    fn oscillation_trace_settles_to_a_fixed_point_within_an_era() {
+        // Reproduces the reviewer's traced production shape (ldui-89rp
+        // CRITICAL fix): 20 rows, one tall row (76px) at absolute index 12
+        // (past the default page_size of 10), every other row a uniform
+        // 24px. `measured_max_of_first_n` mirrors what
+        // `query_selector_all("tbody tr")` would see when the component
+        // currently renders the unsorted top `n` rows.
+        const TALL_INDEX: usize = 12;
+        const SHORT: f64 = 24.0;
+        const TALL: f64 = 76.0;
+        let row_height_at = |i: usize| if i == TALL_INDEX { TALL } else { SHORT };
+        let measured_max_of_first_n =
+            |n: usize| -> f64 { (0..n).map(row_height_at).fold(f64::NEG_INFINITY, f64::max) };
+
+        // Chosen so a 24px-row measurement derives 15 (>= min_rows, fully
+        // responsive) and a 76px-row measurement derives 4 (< min_rows,
+        // falls back to the configured page size) -- the exact numbers from
+        // the reviewer's traced cycle.
+        let viewport = 410.0;
+        let header = 40.0;
+        let configured_page_size = 10;
+        let min_rows = 5;
+        let key = (1_u64, 400_i32);
+
+        let mut era = RowHeightEra::empty(key);
+        // The very first pass renders whatever `page_size` renders before
+        // any measurement exists (the caller's configured fallback).
+        let mut rendered_rows = configured_page_size;
+        let mut history = Vec::new();
+        for _ in 0..6 {
+            let measured = measured_max_of_first_n(rendered_rows.min(20));
+            era = era.observe(key, measured);
+            let effective = era.effective_row_height(FALLBACK_ROW_HEIGHT);
+            rendered_rows = auto_page_size_for_height(
+                viewport,
+                header,
+                effective,
+                configured_page_size,
+                min_rows,
+            );
+            history.push(rendered_rows);
+        }
+
+        // Undamped (pre-fix) this sequence is 15, 10, 15, 10, 15, 10 --
+        // forever oscillating, because pass 3's un-ratcheted measurement
+        // reverts to the short-only max once the smaller page excludes the
+        // tall row again. With the high-water-mark ratchet, once pass 2 ever
+        // sees the tall row the era never forgets it, so every pass from
+        // then on derives from 76px and the sequence settles.
+        assert_eq!(
+            history[0], 15,
+            "pass 1 sees only short rows and derives the exact-fit count: {history:?}"
+        );
+        let settled = history[1];
+        assert!(
+            history[1..].iter().all(|&r| r == settled),
+            "expected the derived count to settle to a fixed point after the tall \
+             row is first seen, got {history:?}"
+        );
+        assert_eq!(
+            settled, configured_page_size,
+            "settles at the min_rows fallback (the documented scroll case), not an \
+             oscillation back up to 15: {history:?}"
+        );
     }
 }
