@@ -6,9 +6,11 @@ mod async_data_section;
 mod contracts;
 mod dataset_selector;
 mod filter_bar;
+mod kpi_strip;
 mod list_page;
 mod macros;
 mod page_header;
+mod page_quick_actions;
 mod page_state_panel;
 mod search_picker_dialog;
 mod section_heading;
@@ -46,8 +48,12 @@ pub use filter_bar::{
     FILTER_BAR_BASE_CLASS, FilterBar, FilterBarTexts, FilterResultSummary, SnapshotDefaultSave,
     SnapshotDefaultSaveState, filter_active_summary, filter_bar_class, filter_result_summary,
 };
+pub use kpi_strip::{KpiCard, KpiItem, KpiStatus, KpiStrip, KpiStripTexts, KpiTrend};
 pub use list_page::{LIST_PAGE_BASE_CLASS, ListPage, list_page_class};
-pub use page_header::{PageHeader, PageHeaderNavigationLayout};
+pub use page_header::{PageHeader, PageHeaderDivider, PageHeaderNavigationLayout};
+pub use page_quick_actions::{
+    PageQuickActionContent, PageQuickActionLabelVisibility, PageQuickActions,
+};
 pub use page_state_panel::{PageStatePanel, PageStatePanelTexts};
 pub use search_picker_dialog::{
     SearchPickerDialog, SearchPickerDialogTexts, SearchPickerRenderDecision, SearchPickerStatus,

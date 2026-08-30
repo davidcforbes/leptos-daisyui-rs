@@ -394,6 +394,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     value: "kbd",
                 },
                 ComponentItem {
+                    name: "KPI Strip",
+                    href: "/components/kpi_strip",
+                    value: "kpi_strip",
+                },
+                ComponentItem {
                     name: "List",
                     href: "/components/list",
                     value: "list",
@@ -727,6 +732,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     name: "Mask",
                     href: "/components/mask",
                     value: "mask",
+                },
+                ComponentItem {
+                    name: "Page Quick Actions",
+                    href: "/components/page_quick_actions",
+                    value: "page_quick_actions",
                 },
                 ComponentItem {
                     name: "Section Heading",

@@ -422,6 +422,27 @@ fn search_picker_dialog_step() -> Step {
     }
 }
 
+/// Focused browser proof for `PageQuickActions`/`PageQuickActionContent`
+/// and `PageHeader`'s typed `divider` option (ldui-ynmd.2): seven actions
+/// render inside one accessibly-named group at wide width; the divider
+/// marker reflects `Shown`/`Hidden`; a compact fixture wraps the actions row
+/// onto more than one line without horizontal overflow; icon-only-collapse
+/// actions keep an `sr-only` accessible label and a matching `Tooltip`; and
+/// the localized title updates reactively without disturbing the actions
+/// row. Lives on the general demo app (`html_target: None`, like
+/// [`result_list_step`]/[`section_heading_step`]/[`search_picker_dialog_step`])
+/// rather than a dedicated test-host page, and stays in its own file/step
+/// for the same reason as those.
+fn page_quick_actions_step() -> Step {
+    Step {
+        name: "test-page-quick-actions",
+        run: Run::BrowserSuite {
+            test: "page_quick_actions_smoke",
+            html_target: None,
+        },
+    }
+}
+
 /// The full release gate. The catalog browser suites are deliberately
 /// consecutive: [`run_steps`] reuses one verified release server for adjacent
 /// suites targeting the same HTML entry point.
@@ -437,6 +458,7 @@ fn full_steps() -> Vec<Step> {
     steps.push(result_list_step());
     steps.push(section_heading_step());
     steps.push(search_picker_dialog_step());
+    steps.push(page_quick_actions_step());
     steps
 }
 
@@ -1871,6 +1893,7 @@ fn main() -> ExitCode {
         "test-keyed-result-list" => run_steps(&[result_list_step()]),
         "test-section-heading" => run_steps(&[section_heading_step()]),
         "test-search-picker-dialog" => run_steps(&[search_picker_dialog_step()]),
+        "test-page-quick-actions" => run_steps(&[page_quick_actions_step()]),
         "test-snapshot-table-delta" => run_steps(&[snapshot_table_delta_step()]),
         "test-snapshot-table-page-controls" => run_steps(&[snapshot_table_page_controls_step()]),
         "gen-tokens" => {
@@ -1886,7 +1909,7 @@ fn main() -> ExitCode {
         other => {
             eprintln!("xtask: unknown subcommand {other:?}");
             eprintln!(
-                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-section-heading|test-search-picker-dialog|gen-tokens|check-sibling-tokens|bump>"
+                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-section-heading|test-search-picker-dialog|test-page-quick-actions|gen-tokens|check-sibling-tokens|bump>"
             );
             ExitCode::from(2)
         }
@@ -2270,6 +2293,29 @@ pub fn r() -> f32 { radius::CARD }
             full_steps()
                 .iter()
                 .any(|s| s.name == "test-section-heading")
+        );
+    }
+
+    #[test]
+    fn page_quick_actions_step_is_in_process_and_full_only() {
+        let step = page_quick_actions_step();
+        assert_eq!(step.name, "test-page-quick-actions");
+        assert!(matches!(
+            step.run,
+            Run::BrowserSuite {
+                test: "page_quick_actions_smoke",
+                html_target: None
+            }
+        ));
+        assert!(
+            !gate_steps()
+                .iter()
+                .any(|s| s.name == "test-page-quick-actions")
+        );
+        assert!(
+            full_steps()
+                .iter()
+                .any(|s| s.name == "test-page-quick-actions")
         );
     }
 
