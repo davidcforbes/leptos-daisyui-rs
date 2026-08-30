@@ -105,9 +105,9 @@ use crate::components::{
 /// Opaque generation bumped by every query-shape or dataset/access reset.
 ///
 /// A generation change invalidates every handle minted before it: the
-/// active handle is cleared immediately, so an in-flight completion from the
-/// prior generation is rejected as `IgnoredConsumed` even before its
-/// sequence is compared.
+/// reset immediately mints its own first-slice handle in the new
+/// generation, so an in-flight completion from the prior generation always
+/// finds a mismatched active handle and is rejected as `IgnoredStale`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ServerCursorHistoryGeneration(u64);
 
@@ -138,8 +138,8 @@ pub enum ServerCursorHistoryDisposition {
     Applied,
     /// A superseded handle was supplied.
     IgnoredStale,
-    /// The handle was already consumed, or no proposal is active (including
-    /// one cleared by a generation reset).
+    /// The handle was already consumed by a prior completion or failure, or
+    /// no proposal is active at all.
     IgnoredConsumed,
 }
 
