@@ -2156,7 +2156,11 @@ pub fn r() -> f32 { radius::CARD }
                 html_target: None
             }
         ));
-        assert!(!gate_steps().iter().any(|s| s.name == "test-keyed-result-list"));
+        assert!(
+            !gate_steps()
+                .iter()
+                .any(|s| s.name == "test-keyed-result-list")
+        );
         assert!(
             full_steps()
                 .iter()
