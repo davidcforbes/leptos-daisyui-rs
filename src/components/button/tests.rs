@@ -212,6 +212,80 @@ fn test_button_shape_debug() {
     assert!(format!("{:?}", shape).contains("Square"));
 }
 
+// ButtonType tests (ldui-9vs) — the emitted native `type` attribute.
+#[test]
+fn test_button_type_default_is_button() {
+    let button_type = ButtonType::default();
+    assert_eq!(button_type, ButtonType::Button);
+    assert_eq!(button_type.as_str(), "button");
+}
+
+#[test]
+fn test_button_type_submit() {
+    assert_eq!(ButtonType::Submit.as_str(), "submit");
+}
+
+#[test]
+fn test_button_type_reset() {
+    assert_eq!(ButtonType::Reset.as_str(), "reset");
+}
+
+#[test]
+fn test_button_type_clone_and_copy() {
+    let t1 = ButtonType::Submit;
+    let t2 = t1; // Copy, not a move — proves the `Copy` derive is present.
+    assert_eq!(t1, t2);
+}
+
+#[test]
+fn test_button_type_debug() {
+    assert!(format!("{:?}", ButtonType::Reset).contains("Reset"));
+}
+
+#[test]
+fn test_button_type_partial_eq_distinguishes_all_variants() {
+    assert_ne!(ButtonType::Button, ButtonType::Submit);
+    assert_ne!(ButtonType::Button, ButtonType::Reset);
+    assert_ne!(ButtonType::Submit, ButtonType::Reset);
+}
+
+#[test]
+fn test_all_button_types_return_valid_type_attribute_values() {
+    let variants = vec![
+        (ButtonType::Button, "button"),
+        (ButtonType::Submit, "submit"),
+        (ButtonType::Reset, "reset"),
+    ];
+    for (variant, expected) in variants {
+        assert_eq!(variant.as_str(), expected);
+    }
+}
+
+// `resolve_native_disabled` (ldui-9vs) — the DOM `disabled` attribute a
+// submit/reset button actually gets. This is what makes "disabled and
+// loading submit buttons cannot submit" true: a native `<button disabled>`
+// dispatches no click event at all, so proving this function is `||` proves
+// both inputs independently block activation.
+#[test]
+fn test_resolve_native_disabled_false_when_neither_set() {
+    assert!(!resolve_native_disabled(false, false));
+}
+
+#[test]
+fn test_resolve_native_disabled_true_when_only_disabled() {
+    assert!(resolve_native_disabled(true, false));
+}
+
+#[test]
+fn test_resolve_native_disabled_true_when_only_loading() {
+    assert!(resolve_native_disabled(false, true));
+}
+
+#[test]
+fn test_resolve_native_disabled_true_when_both_set() {
+    assert!(resolve_native_disabled(true, true));
+}
+
 // Comprehensive enum variant coverage tests
 #[test]
 fn test_all_button_colors_return_valid_classes() {

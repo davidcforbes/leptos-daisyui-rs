@@ -16,7 +16,8 @@ The Button component provides a clean, accessible way to handle user interaction
 | `shape` | `Signal<ButtonShape>` | `ButtonShape::Default` | Shape style of the button |
 | `outline` | `Signal<bool>` | `false` | Whether button has outline style |
 | `disabled` | `Signal<bool>` | `false` | Whether button is disabled |
-| `loading` | `Signal<bool>` | `false` | Whether button shows loading state |
+| `loading` | `Signal<bool>` | `false` | Whether button shows loading state. Also disables the button at the DOM level for as long as it is `true` (ldui-9vs), on top of the explicit `disabled` prop. |
+| `button_type` | `Signal<ButtonType>` | `ButtonType::Button` | Native `type` attribute: `Button` (no form action), `Submit`, or `Reset` (ldui-9vs). Form `action`/`method`/`target` stay on the caller's `<form>` element. |
 | `wide` | `Signal<bool>` | `false` | Whether button takes full width |
 | `glass` | `Signal<bool>` | `false` | Whether button has glass effect |
 | `no_animation` | `Signal<bool>` | `false` | Whether to disable button animations |
@@ -291,6 +292,42 @@ fn InteractiveButton() -> impl IntoView {
 ```
 
 </details>
+
+### Native Form Semantics (`button_type`)
+
+<details>
+<summary>View Code</summary>
+
+```rust
+use leptos::prelude::*;
+use leptos_daisyui_rs::components::*;
+
+#[component]
+fn LaunchForm() -> impl IntoView {
+    // The <form> owns action/method/target; Button just triggers a real
+    // native submit — no on_click/on:submit JS required. Enter/Space both
+    // activate a focused submit button natively.
+    view! {
+        <form action="/office/launch" method="post" target="_blank">
+            <input type="hidden" name="doc_id" value="123" />
+            <Button button_type=ButtonType::Submit color=ButtonColor::Primary>
+                "Open in Office"
+            </Button>
+            <Button button_type=ButtonType::Reset>
+                "Reset"
+            </Button>
+        </form>
+    }
+}
+```
+
+</details>
+
+A `loading=true` or `disabled=true` submit button cannot submit its form — the
+underlying `<button>` carries the native `disabled` attribute, and a disabled
+button dispatches no `click` event at all (browser-enforced), by mouse or
+keyboard. See `Button`'s doc comment in `src/components/button/component.rs`
+for the full precedence-vs-`attr:type` and nested/form-associated notes.
 
 ## Accessibility
 

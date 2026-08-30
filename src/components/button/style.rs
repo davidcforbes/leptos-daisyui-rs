@@ -128,6 +128,45 @@ impl ButtonSize {
     }
 }
 
+/// # Button Type Variants
+///
+/// The native HTML `type` attribute of the `<button>` element, controlling
+/// how the button participates in its containing `<form>`. This is separate
+/// from [`ButtonColor`]/[`ButtonStyle`]/[`ButtonSize`]/[`ButtonShape`], which
+/// are purely presentational — `ButtonType` changes browser *behavior*.
+///
+/// See [`Button`](super::Button)'s doc comment for the full precedence and
+/// disabled/loading-interaction contract (ldui-9vs).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum ButtonType {
+    /// No default form action. Use for actions handled entirely via
+    /// `on_click` (the pre-existing, and still default, behavior).
+    #[default]
+    Button,
+
+    /// Submits the containing `<form>` using that form's own `action`/
+    /// `method`/`target` — a real native browser submission, not a JS shim.
+    /// `Button` does not own or infer form action/method/target; the
+    /// consumer's `<form>` element does.
+    Submit,
+
+    /// Resets the containing `<form>`'s fields to their initial
+    /// (`defaultValue`/`defaultChecked`) values, per native `<form>` reset
+    /// behavior. `Button` adds no JS for this — the browser does it.
+    Reset,
+}
+
+impl ButtonType {
+    /// The literal `type` attribute value emitted on the `<button>` element.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ButtonType::Button => "button",
+            ButtonType::Submit => "submit",
+            ButtonType::Reset => "reset",
+        }
+    }
+}
+
 /// # Button Shape Variants
 ///
 /// Style enum for daisyUI button shape/layout classes that control the geometry

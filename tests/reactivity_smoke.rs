@@ -3798,3 +3798,164 @@ async fn theme_switch_via_oracle() {
         .expect("data-theme is a string");
     assert_eq!(dom_theme, "cupcake", "html[data-theme] should be cupcake");
 }
+
+// ── Button native form semantics (ldui-9vs) ──────────────────────────────
+//
+// The "Native Form Semantics" section of /components/button wires
+// `ButtonType::{Button,Submit,Reset}` into `#button-type-form`, whose
+// `on:submit`/`on:reset` handlers `prevent_default()` (no real navigation in
+// a headless test) and count activations via the debug oracle at
+// `button.form_submit_count` / `button.form_reset_count`.
+
+/// Each `button_type` variant emits the matching native `type` attribute,
+/// and the default (`ButtonType::Button`, no prop passed) stays "button" —
+/// existing callers render unchanged.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn button_type_variants_emit_the_matching_type_attribute() {
+    let h = harness_at("/components/button").await;
+
+    let types = eval_json(
+        &h,
+        r#"(() => ({
+            default: document.querySelector('#button-type-default').getAttribute('type'),
+            submit: document.querySelector('#button-type-submit').getAttribute('type'),
+            reset: document.querySelector('#button-type-reset').getAttribute('type'),
+        }))()"#,
+    )
+    .await;
+    assert_eq!(
+        types,
+        json!({ "default": "button", "submit": "submit", "reset": "reset" }),
+        "emitted type attribute per ButtonType variant: {types}"
+    );
+    assert_no_browser_errors(&h, "Button type attribute variants").await;
+}
+
+/// A `ButtonType::Submit` button activates its containing form exactly once
+/// per mouse click and once per keyboard activation (Enter, then Space) —
+/// native `<button type="submit">` behavior, no JS in the component.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn submit_button_activates_form_once_per_click_and_per_key() {
+    let h = harness_at("/components/button").await;
+
+    let before = oracle(&h).await;
+    assert_eq!(
+        before["state"]["button.form_submit_count"],
+        serde_json::Value::Null,
+        "precondition: no submit yet: {before}"
+    );
+
+    click(&h, "#button-type-submit").await;
+    let after_click = oracle(&h).await;
+    assert_eq!(
+        after_click["state"]["button.form_submit_count"],
+        json!(1),
+        "one click => exactly one submit: {after_click}"
+    );
+
+    h.page()
+        .find_element("#button-type-submit")
+        .await
+        .expect("find submit button")
+        .focus()
+        .await
+        .expect("focus submit button");
+    h.press_key_sequence(&[Key::Enter])
+        .await
+        .expect("Enter on submit button");
+    settle(&h).await;
+    let after_enter = oracle(&h).await;
+    assert_eq!(
+        after_enter["state"]["button.form_submit_count"],
+        json!(2),
+        "one Enter => exactly one more submit: {after_enter}"
+    );
+
+    h.press_key_sequence(&[Key::Space])
+        .await
+        .expect("Space on submit button");
+    settle(&h).await;
+    let after_space = oracle(&h).await;
+    assert_eq!(
+        after_space["state"]["button.form_submit_count"],
+        json!(3),
+        "one Space => exactly one more submit: {after_space}"
+    );
+    assert_no_browser_errors(&h, "submit button click/Enter/Space").await;
+}
+
+/// Both the explicitly `disabled` and the `loading` submit buttons cannot
+/// submit the form: a native `disabled` button dispatches no `click` at all,
+/// so neither mouse click nor keyboard activation moves the counter.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn disabled_and_loading_submit_buttons_cannot_submit() {
+    let h = harness_at("/components/button").await;
+
+    let disabled_native = eval_json(
+        &h,
+        r#"(() => ({
+            disabled: document.querySelector('#button-type-submit-disabled').disabled,
+            loading: document.querySelector('#button-type-submit-loading').disabled,
+        }))()"#,
+    )
+    .await;
+    assert_eq!(
+        disabled_native,
+        json!({ "disabled": true, "loading": true }),
+        "both must carry the native disabled DOM property: {disabled_native}"
+    );
+
+    click(&h, "#button-type-submit-disabled").await;
+    click(&h, "#button-type-submit-loading").await;
+    let after = oracle(&h).await;
+    assert_eq!(
+        after["state"]["button.form_submit_count"],
+        serde_json::Value::Null,
+        "disabled/loading submit clicks must not reach the form: {after}"
+    );
+    assert_no_browser_errors(&h, "disabled/loading submit buttons").await;
+}
+
+/// A `ButtonType::Reset` button restores the form's fields to their native
+/// defaults (`defaultChecked`), not to any reactive signal value — no
+/// `on_click` wiring exists on the Reset button in the fixture, so this is
+/// entirely native `<form>` behavior.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn reset_button_restores_native_defaults() {
+    let h = harness_at("/components/button").await;
+
+    click(&h, "#button-type-form-checkbox").await;
+    let checked_after_toggle = eval_json(
+        &h,
+        "document.querySelector('#button-type-form-checkbox').checked",
+    )
+    .await;
+    assert_eq!(
+        checked_after_toggle,
+        json!(true),
+        "checkbox must be checked before reset"
+    );
+
+    click(&h, "#button-type-reset").await;
+    let checked_after_reset = eval_json(
+        &h,
+        "document.querySelector('#button-type-form-checkbox').checked",
+    )
+    .await;
+    assert_eq!(
+        checked_after_reset,
+        json!(false),
+        "native reset must restore defaultChecked (false)"
+    );
+    let after = oracle(&h).await;
+    assert_eq!(
+        after["state"]["button.form_reset_count"],
+        json!(1),
+        "reset fires the form's on:reset exactly once: {after}"
+    );
+    assert_no_browser_errors(&h, "reset button native behavior").await;
+}

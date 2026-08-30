@@ -2097,12 +2097,12 @@ pub fn r() -> f32 { radius::CARD }
     }
 
     #[test]
-    fn reactivity_lane_has_exactly_34_browser_checks() {
+    fn reactivity_lane_has_exactly_38_browser_checks() {
         let source = include_str!("../../tests/reactivity_smoke.rs");
         assert_eq!(
             source.matches("#[tokio::test").count(),
-            34,
-            "the explicitly requested reactivity lane must keep its 34 checks"
+            38,
+            "the explicitly requested reactivity lane must keep its 38 checks"
         );
     }
 

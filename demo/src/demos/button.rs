@@ -8,6 +8,15 @@ pub fn ButtonDemo() -> impl IntoView {
     let (loading, set_loading) = signal(false);
     let (active_color, set_active_color) = signal(ButtonColor::Primary);
 
+    // Native form semantics fixture (ldui-9vs). `submit_count` proves a
+    // ButtonType::Submit button activates the containing form exactly once
+    // per click/keyboard activation; the disabled/loading submit buttons
+    // wire to the *same* form + counter so a browser fixture can prove they
+    // never move it. PixelProof oracle: window.__APP_DEBUG__.state()
+    // .state["button.form_submit_count"] / ["button.form_reset_count"].
+    let (form_submit_count, set_form_submit_count) = signal(0);
+    let (form_reset_count, set_form_reset_count) = signal(0);
+
     view! {
         <ContentLayout
             title="Button"
@@ -144,6 +153,70 @@ pub fn ButtonDemo() -> impl IntoView {
                         </Button>
                     </div>
                 </div>
+            </Section>
+
+            <Section title="Native Form Semantics">
+                <p class="text-sm opacity-70">
+                    "button_type drives the native type attribute; form action/method stay on the <form> element (ldui-9vs)."
+                </p>
+                <form
+                    id="button-type-form"
+                    on:submit=move |ev| {
+                        ev.prevent_default();
+                        let next = form_submit_count.get_untracked() + 1;
+                        set_form_submit_count.set(next);
+                        crate::debug_state::set("button.form_submit_count", next);
+                    }
+                    on:reset=move |_| {
+                        let next = form_reset_count.get_untracked() + 1;
+                        set_form_reset_count.set(next);
+                        crate::debug_state::set("button.form_reset_count", next);
+                    }
+                    class="flex flex-col gap-4"
+                >
+                    <label class="flex items-center gap-2">
+                        <input
+                            id="button-type-form-checkbox"
+                            type="checkbox"
+                            class="checkbox"
+                        />
+                        "Toggled by hand, restored by native reset"
+                    </label>
+                    <div class="flex items-center gap-2">
+                        <Button attr:id="button-type-default" button_type=ButtonType::Button>
+                            "type=button (default, no form action)"
+                        </Button>
+                        <Button
+                            attr:id="button-type-submit"
+                            button_type=ButtonType::Submit
+                            color=ButtonColor::Primary
+                        >
+                            "type=submit"
+                        </Button>
+                        <Button attr:id="button-type-reset" button_type=ButtonType::Reset>
+                            "type=reset"
+                        </Button>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <Button
+                            attr:id="button-type-submit-disabled"
+                            button_type=ButtonType::Submit
+                            disabled=true
+                        >
+                            "type=submit, disabled"
+                        </Button>
+                        <Button
+                            attr:id="button-type-submit-loading"
+                            button_type=ButtonType::Submit
+                            loading=true
+                        >
+                            "type=submit, loading"
+                        </Button>
+                    </div>
+                </form>
+                <p class="text-sm opacity-70">
+                    "Submits: " {form_submit_count} " · Resets: " {form_reset_count}
+                </p>
             </Section>
 
             <Section title="Link Button">
