@@ -1,8 +1,9 @@
 use leptos::prelude::*;
 use leptos_daisyui_rs::components::{
     BadgeColor, Button, EntityBadgePresentation, EntityColumn, EntityColumnFilter, EntityIconColor,
-    EntityIconPresentation, EntityNullOrder, EntityTable, EntityTablePreferenceOwnership,
-    EntityTablePreferencePersistence, EntityTableTexts, EntityTableViewportFit,
+    EntityIconPresentation, EntityNullOrder, EntityRowAction, EntityTable,
+    EntityTablePreferenceOwnership, EntityTablePreferencePersistence, EntityTableSelection,
+    EntityTableTexts, EntityTableViewportFit,
 };
 use leptos_daisyui_rs::patterns::{
     ActionFeedbackContent, ActionFeedbackState, PageHeader, PageHeaderNavigationLayout,
@@ -719,6 +720,160 @@ pub fn EntityTablePageSizeIdentityFixture() -> impl IntoView {
                     page_size_control_id="page-size-identity-explicit-override"
                 />
             </div>
+        </section>
+    }
+}
+
+/// Focused browser fixture for `EntityTable` controlled single-row selection
+/// (ldui-sh3), mirroring `ServerTableSelection`'s cursor-table fixture. The
+/// detail panel is a master-detail readout driven purely by the caller's
+/// accepted `selected_key` -- proving the same signal that paints
+/// `aria-selected`/styling also identifies "which row" for a consumer.
+/// `entity-selection-remove-selected` exercises the fail-safe when the
+/// accepted key stops matching any row in `data`: no crash, and no row
+/// renders selected until the caller supplies a key that matches again.
+#[component]
+pub fn EntityTableSelectionFixture() -> impl IntoView {
+    let data = RwSignal::new_local(rows("office-mx"));
+    let selected_key = RwSignal::new(Option::<String>::None);
+    let accept_proposals = RwSignal::new(true);
+    let proposal_count = RwSignal::new(0_u32);
+    let last_proposal = RwSignal::new(Option::<String>::None);
+    let activation_count = RwSignal::new(0_u32);
+
+    let remove_selected = move |_: web_sys::MouseEvent| {
+        let Some(key) = selected_key.get_untracked() else {
+            return;
+        };
+        data.update(|rows| {
+            let mut replacement = rows.as_ref().clone();
+            replacement.retain(|row| row.id != key);
+            *rows = Rc::new(replacement);
+        });
+    };
+    let action_clicks = RwSignal::new(0_u32);
+    let mut selection_columns = columns();
+    // A row-action control must neither select nor activate the row it sits
+    // in -- `EntityColumn::action` marks the cell `data-entity-action`, which
+    // the row's click/keydown handlers stop-propagate past before either
+    // selection or activation ever sees the event.
+    selection_columns.push(
+        EntityColumn::action("view", "Action", |_row: &FixtureRow| String::new()).render_with(
+            move |row: &FixtureRow| {
+                let id = row.id.clone();
+                view! {
+                    <EntityRowAction action_id="view">
+                        <Button
+                            attr:data-testid="entity-selection-row-action"
+                            attr:data-entity-row-action-id=id
+                            on:click=move |_| action_clicks.update(|count| *count += 1)
+                        >
+                            "View"
+                        </Button>
+                    </EntityRowAction>
+                }
+                .into_any()
+            },
+        ),
+    );
+
+    view! {
+        <section
+            id="entity-table-selection-fixture"
+            class="mx-auto max-w-3xl space-y-3 bg-base-100 p-4"
+        >
+            <h1 class="ld-text-display font-semibold">"Entity table selection"</h1>
+            <div class="flex flex-wrap items-center gap-3 text-sm">
+                <span>
+                    "Selected: "
+                    <code data-testid="entity-selection-selected-key">
+                        {move || selected_key.get().unwrap_or_else(|| "(none)".to_owned())}
+                    </code>
+                </span>
+                <span>
+                    "Proposals: "
+                    <code data-testid="entity-selection-proposals">
+                        {move || proposal_count.get().to_string()}
+                    </code>
+                </span>
+                <span>
+                    "Last proposal: "
+                    <code data-testid="entity-selection-last-proposal">
+                        {move || last_proposal.get().unwrap_or_else(|| "(none)".to_owned())}
+                    </code>
+                </span>
+                <span>
+                    "Activations: "
+                    <code data-testid="entity-selection-activations">
+                        {move || activation_count.get().to_string()}
+                    </code>
+                </span>
+                <span>
+                    "Action clicks: "
+                    <code data-testid="entity-selection-action-clicks">
+                        {move || action_clicks.get().to_string()}
+                    </code>
+                </span>
+            </div>
+            <div
+                class="rounded border border-base-300 p-3 text-sm"
+                data-testid="entity-selection-detail"
+            >
+                {move || {
+                    let key = selected_key.get();
+                    let detail = key.as_ref().and_then(|key| {
+                        data.with(|rows| rows.iter().find(|row| &row.id == key).cloned())
+                    });
+                    match detail {
+                        Some(row) => format!("{} — {}", row.client, row.status),
+                        None => "(no row selected)".to_owned(),
+                    }
+                }}
+            </div>
+            <div class="flex flex-wrap gap-2">
+                <Button
+                    on:click=move |_| accept_proposals.update(|accept| *accept = !*accept)
+                    attr:data-testid="entity-selection-accept"
+                >
+                    {move || if accept_proposals.get() {
+                        "Reject selection proposals"
+                    } else {
+                        "Accept selection proposals"
+                    }}
+                </Button>
+                <Button
+                    on:click=move |_| selected_key.set(None)
+                    attr:data-testid="entity-selection-clear"
+                >
+                    "Clear selection"
+                </Button>
+                <Button
+                    on:click=remove_selected
+                    attr:data-testid="entity-selection-remove-selected"
+                >
+                    "Remove selected row"
+                </Button>
+            </div>
+            <EntityTable
+                data=data
+                columns=selection_columns
+                row_key=Rc::new(|row: &FixtureRow| row.id.clone())
+                dataset_identity="entity-selection-fixture"
+                on_row_activate=Callback::new(move |_key: String| {
+                    activation_count.update(|count| *count += 1);
+                })
+                selection=EntityTableSelection::controlled(
+                    selected_key.into(),
+                    Callback::new(move |proposed: Option<String>| {
+                        proposal_count.update(|count| *count += 1);
+                        last_proposal.set(proposed.clone());
+                        if accept_proposals.get_untracked() {
+                            selected_key.set(proposed);
+                        }
+                    }),
+                )
+                attr:id="entity-selection-table"
+            />
         </section>
     }
 }

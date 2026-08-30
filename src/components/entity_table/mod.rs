@@ -2,6 +2,7 @@
 
 mod component;
 mod model;
+mod selection;
 mod storage;
 mod types;
 
@@ -12,6 +13,7 @@ pub use model::{
     reset_columns, reset_sort, set_preferred_width, sorted_indices, toggle_hidden_column,
     valid_page_size,
 };
+pub use selection::EntityTableSelection;
 pub use storage::{decode_preferences, encode_preferences};
 pub use types::{
     EntityBadgeCell, EntityBadgePresentation, EntityCellPresentation, EntityCellRenderer,

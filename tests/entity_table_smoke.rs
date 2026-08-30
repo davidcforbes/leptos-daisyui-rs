@@ -2647,3 +2647,241 @@ async fn hybrid_filters_localization_defaults_and_focus_recovery_are_framework_o
         .unwrap_or_else(|error| panic!("{error}; {}", report.summary()));
     assert_no_browser_errors(&harness, "hybrid EntityTable foundation").await;
 }
+
+/// Controlled single-row selection (ldui-sh3): a caller-owned `selected_key`
+/// drives both `aria-selected`/styling and a separate master-detail readout,
+/// proposal-first (a rejected proposal never paints), coherent across the
+/// wide and compact presentations (they are one shared `<tr>`), keyboard
+/// Space works identically to a click, a row-action control neither selects
+/// nor activates, and removing the accepted key's row leaves the table with
+/// no selected row instead of aliasing a different one.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
+async fn entity_table_selection_drives_master_detail_and_survives_removal() {
+    let harness = harness_at("/components/entity-table-selection").await;
+    begin_browser_error_capture(&harness).await;
+    wait_for_selector(
+        &harness,
+        "#entity-selection-table tbody tr[data-entity-row-key]",
+    )
+    .await;
+
+    // Nothing selected yet: no row carries `aria-selected="true"`, and the
+    // master-detail panel -- driven purely by the same accepted key -- shows
+    // no row.
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => ({
+                selected: Array.from(document.querySelectorAll('#entity-selection-table tbody tr[aria-selected="true"]')).map(row => row.dataset.entityRowKey),
+                detail: document.querySelector('[data-testid="entity-selection-detail"]').textContent.trim(),
+            }))()"#,
+        )
+        .await,
+        json!({ "selected": [], "detail": "(no row selected)" })
+    );
+
+    // A plain click on a row-action control must neither select nor
+    // activate the row it sits in (`event_origin_is_action` / the action
+    // cell's own stop-propagation).
+    click(
+        &harness,
+        "#entity-selection-table tbody tr[data-entity-row-key='office-mx-1'] [data-testid='entity-selection-row-action']",
+    )
+    .await;
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => ({
+                actionClicks: Number(document.querySelector('[data-testid="entity-selection-action-clicks"]').textContent),
+                activations: Number(document.querySelector('[data-testid="entity-selection-activations"]').textContent),
+                proposals: Number(document.querySelector('[data-testid="entity-selection-proposals"]').textContent),
+                selected: Array.from(document.querySelectorAll('#entity-selection-table tbody tr[aria-selected="true"]')).map(row => row.dataset.entityRowKey),
+            }))()"#,
+        )
+        .await,
+        json!({ "actionClicks": 1, "activations": 0, "proposals": 0, "selected": [] }),
+        "a row-action click must not select or activate the row"
+    );
+
+    // A plain click elsewhere on the row proposes and (proposals accepted by
+    // default) becomes the accepted selection: one proposal, one activation
+    // (they coexist), `aria-selected` + the selected class land on the row's
+    // single shared `<tr>`, and the master-detail panel reflects the same
+    // accepted key.
+    click(
+        &harness,
+        "#entity-selection-table tbody tr[data-entity-row-key='office-mx-1'] td[data-entity-column='client']",
+    )
+    .await;
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => {
+                const row = document.querySelector('#entity-selection-table tbody tr[data-entity-row-key="office-mx-1"]');
+                return {
+                    acceptedKey: document.querySelector('[data-testid="entity-selection-selected-key"]').textContent.trim(),
+                    proposals: Number(document.querySelector('[data-testid="entity-selection-proposals"]').textContent),
+                    activations: Number(document.querySelector('[data-testid="entity-selection-activations"]').textContent),
+                    selected: Array.from(document.querySelectorAll('#entity-selection-table tbody tr[aria-selected="true"]')).map(row => row.dataset.entityRowKey),
+                    selectedClass: row.classList.contains('bg-base-200'),
+                    detail: document.querySelector('[data-testid="entity-selection-detail"]').textContent.trim(),
+                };
+            })()"#,
+        )
+        .await,
+        json!({
+            "acceptedKey": "office-mx-1",
+            "proposals": 1,
+            "activations": 1,
+            "selected": ["office-mx-1"],
+            "selectedClass": true,
+            "detail": "Mexico City Client 1 — Urgent",
+        })
+    );
+
+    // Coherent across wide and compact presentations: they are one shared
+    // `<tr>`, so shrinking below the `lg:` breakpoint swaps which `<td>` is
+    // visible but must not disturb the row's `aria-selected`/selected class.
+    harness
+        .set_viewport(ViewportSize::TABLET)
+        .await
+        .expect("shrink to a compact-layout viewport");
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => {
+                const row = document.querySelector('#entity-selection-table tbody tr[data-entity-row-key="office-mx-1"]');
+                const wideCell = row.querySelector('td[data-entity-column="client"]');
+                const compactCell = row.querySelector('td.lg\\:hidden');
+                return {
+                    ariaSelected: row.getAttribute('aria-selected'),
+                    selectedClass: row.classList.contains('bg-base-200'),
+                    wideHidden: getComputedStyle(wideCell).display === 'none',
+                    compactVisible: getComputedStyle(compactCell).display !== 'none',
+                };
+            })()"#,
+        )
+        .await,
+        json!({
+            "ariaSelected": "true",
+            "selectedClass": true,
+            "wideHidden": true,
+            "compactVisible": true,
+        }),
+        "selected styling/aria-selected must hold on the same <tr> in the compact layout"
+    );
+    harness
+        .set_viewport(ViewportSize::SMALL)
+        .await
+        .expect("restore the wide-layout viewport");
+
+    // A rejected proposal never paints: the accepted key, aria-selected row,
+    // and detail panel all stay on office-mx-1 even though a new key was
+    // proposed.
+    click(&harness, "[data-testid='entity-selection-accept']").await;
+    click(
+        &harness,
+        "#entity-selection-table tbody tr[data-entity-row-key='office-mx-2'] td[data-entity-column='client']",
+    )
+    .await;
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => ({
+                acceptedKey: document.querySelector('[data-testid="entity-selection-selected-key"]').textContent.trim(),
+                lastProposal: document.querySelector('[data-testid="entity-selection-last-proposal"]').textContent.trim(),
+                proposals: Number(document.querySelector('[data-testid="entity-selection-proposals"]').textContent),
+                selected: Array.from(document.querySelectorAll('#entity-selection-table tbody tr[aria-selected="true"]')).map(row => row.dataset.entityRowKey),
+                detail: document.querySelector('[data-testid="entity-selection-detail"]').textContent.trim(),
+            }))()"#,
+        )
+        .await,
+        json!({
+            "acceptedKey": "office-mx-1",
+            "lastProposal": "office-mx-2",
+            "proposals": 2,
+            "selected": ["office-mx-1"],
+            "detail": "Mexico City Client 1 — Urgent",
+        }),
+        "a declined selection proposal must not paint or replace the accepted row"
+    );
+
+    // Re-enable acceptance; keyboard Space on a focused row proposes and
+    // selects exactly like a click. Focus and selection stay distinct --
+    // focusing the row alone (without Space/Enter/click) must not select it.
+    click(&harness, "[data-testid='entity-selection-accept']").await;
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => {
+                document.querySelector('#entity-selection-table tbody tr[data-entity-row-key="office-mx-3"]').focus();
+                return {
+                    focused: document.activeElement.dataset.entityRowKey,
+                    selected: Array.from(document.querySelectorAll('#entity-selection-table tbody tr[aria-selected="true"]')).map(row => row.dataset.entityRowKey),
+                };
+            })()"#,
+        )
+        .await,
+        json!({ "focused": "office-mx-3", "selected": ["office-mx-1"] }),
+        "focusing a row must not itself select it"
+    );
+    harness
+        .press_key_sequence(&[Key::Space])
+        .await
+        .expect("Space selects the focused entity row");
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => ({
+                acceptedKey: document.querySelector('[data-testid="entity-selection-selected-key"]').textContent.trim(),
+                proposals: Number(document.querySelector('[data-testid="entity-selection-proposals"]').textContent),
+                selected: Array.from(document.querySelectorAll('#entity-selection-table tbody tr[aria-selected="true"]')).map(row => row.dataset.entityRowKey),
+                detail: document.querySelector('[data-testid="entity-selection-detail"]').textContent.trim(),
+            }))()"#,
+        )
+        .await,
+        json!({
+            "acceptedKey": "office-mx-3",
+            "proposals": 3,
+            "selected": ["office-mx-3"],
+            "detail": "Mexico City Client 3 — Ready",
+        }),
+        "keyboard Space must select the focused row exactly like a click"
+    );
+
+    // Removing the accepted key's row (e.g. it left a live pool) is a
+    // fail-safe: the table renders the remaining rows without error, no row
+    // renders selected (there is no positional fallback to alias a
+    // different entity), and the master-detail panel -- which looks the
+    // accepted key up in the same data -- reflects that too, entirely by
+    // construction rather than special-cased removal handling.
+    click(&harness, "[data-testid='entity-selection-remove-selected']").await;
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => ({
+                acceptedKey: document.querySelector('[data-testid="entity-selection-selected-key"]').textContent.trim(),
+                remainingKeys: Array.from(document.querySelectorAll('#entity-selection-table tbody tr[data-entity-row-key]')).map(row => row.dataset.entityRowKey).sort(),
+                selected: Array.from(document.querySelectorAll('#entity-selection-table tbody tr[aria-selected="true"]')).map(row => row.dataset.entityRowKey),
+                detail: document.querySelector('[data-testid="entity-selection-detail"]').textContent.trim(),
+            }))()"#,
+        )
+        .await,
+        json!({
+            "acceptedKey": "office-mx-3",
+            "remainingKeys": ["office-mx-1", "office-mx-2"],
+            "selected": [],
+            "detail": "(no row selected)",
+        }),
+        "removing the selected row's data must leave no row selected, without crashing"
+    );
+
+    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
+        .expect("load vendored axe-core");
+    let report = axe.run(harness.page()).await.expect("run axe-core");
+    report
+        .assert_no_blocking("entity table controlled selection")
+        .unwrap_or_else(|error| panic!("{error}; {}", report.summary()));
+    assert_no_browser_errors(&harness, "entity table controlled selection").await;
+}

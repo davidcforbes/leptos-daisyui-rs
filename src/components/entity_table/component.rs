@@ -8,6 +8,7 @@ use super::model::{
     page_after_row_delta, reset_columns, reset_sort, set_preferred_width, sorted_indices,
     toggle_hidden_column,
 };
+use super::selection::{EntityTableSelection, entity_row_is_selected, entity_selection_proposal};
 use super::storage::{load_preferences, save_preferences};
 use super::types::{
     EntityCellPresentation, EntityColumn, EntityColumnAlignment, EntityColumnChooserTrigger,
@@ -477,6 +478,24 @@ pub fn EntityTable<T>(
     /// Optional callback that makes rows mouse- and keyboard-operable.
     #[prop(optional)]
     on_row_activate: Option<Callback<String>>,
+    /// Optional controlled single-row selection, keyed by the table's
+    /// mandatory `row_key`. The accepted signal drives selected styling and
+    /// `aria-selected` on both the wide and compact presentations of a row
+    /// (they share one `<tr>`); a plain click or keyboard Enter/Space emits
+    /// one replacement proposal. Ctrl/Meta/Shift gestures neither select nor
+    /// activate. Separate from `on_row_activate` -- both can be supplied
+    /// together, and a plain click/Enter/Space fires both.
+    ///
+    /// Selection is a pure per-row key comparison, so it fails safe under
+    /// every displayed-data change without special-cased handling: sorting,
+    /// filtering, paging, a dataset swap, or the selected row's removal all
+    /// simply stop matching any rendered row (no row paints selected, and no
+    /// positional fallback can alias a different entity) until the caller
+    /// supplies a key that is visible again. Omitting this prop leaves rows
+    /// fully non-interactive exactly as before (source-compatible), unless
+    /// `on_row_activate` alone already made them so.
+    #[prop(optional)]
+    selection: Option<EntityTableSelection>,
     /// Preference namespace appended to the framework storage prefix.
     ///
     /// This compatibility prop selects `LegacyLocalStorage` when
@@ -1728,6 +1747,7 @@ where
                                     row_key,
                                     compact_row,
                                     on_row_activate,
+                                    selection,
                                 },
                             ),
                         )}
@@ -1847,6 +1867,7 @@ struct KeyedRowContext<T: 'static> {
     row_key: StoredValue<EntityRowKey<T>, LocalStorage>,
     compact_row: CompactRowStore<T>,
     on_row_activate: Option<Callback<String>>,
+    selection: Option<EntityTableSelection>,
 }
 
 fn render_keyed_row<T: Clone + 'static>(
@@ -1861,11 +1882,25 @@ fn render_keyed_row<T: Clone + 'static>(
         row_key,
         compact_row,
         on_row_activate,
+        selection,
     } = context;
-    let interactive = on_row_activate.is_some();
+    // A table with only `selection` (no `on_row_activate`) is still
+    // keyboard-operable, mirroring `data_table::row_is_interactive`.
+    let interactive = on_row_activate.is_some() || selection.is_some();
     let click_key = key.clone();
     let keydown_key = key.clone();
     let rendered_key = key.clone();
+    let selected_class_key = key.clone();
+    let selected_aria_key = key.clone();
+
+    // Focus and selection are deliberately distinct: Tab/roving focus never
+    // proposes or paints selection by itself -- only a click or Enter/Space
+    // does, via the handlers below.
+    let is_row_selected = move |current_key: &str| {
+        selection.is_some_and(|selection| {
+            entity_row_is_selected(current_key, selection.selected_key().get().as_deref())
+        })
+    };
 
     view! {
         <tr
@@ -1873,19 +1908,53 @@ fn render_keyed_row<T: Clone + 'static>(
             data-entity-row-key=key
             data-entity-visible-position=move || visible_position.get()
             tabindex=interactive.then_some(0)
-            class=interactive.then_some("cursor-pointer ld-focus-ring")
+            class=move || merge_classes!(
+                if interactive { "cursor-pointer ld-focus-ring" } else { "" },
+                if is_row_selected(&selected_class_key) { "bg-base-200" } else { "" }
+            )
+            aria-selected=move || interactive.then(|| is_row_selected(&selected_aria_key).to_string())
             on:click=move |event: web_sys::MouseEvent| {
-                if !event_origin_is_action(event.target())
-                    && let Some(callback) = on_row_activate
-                {
+                if event_origin_is_action(event.target()) {
+                    return;
+                }
+                let ctrl = event.ctrl_key() || event.meta_key();
+                let shift = event.shift_key();
+                if let Some(selection) = selection {
+                    let Some(proposed) = entity_selection_proposal(&click_key, ctrl, shift) else {
+                        // Modified click with selection enabled: consumed,
+                        // neither selects nor activates.
+                        return;
+                    };
+                    selection.propose(proposed);
+                    if let Some(callback) = on_row_activate {
+                        callback.run(click_key.clone());
+                    }
+                    return;
+                }
+                if let Some(callback) = on_row_activate {
                     callback.run(click_key.clone());
                 }
             }
             on:keydown=move |event: web_sys::KeyboardEvent| {
-                if (event.key() == "Enter" || event.key() == " ")
-                    && !event_origin_is_action(event.target())
-                    && let Some(callback) = on_row_activate
+                if !(event.key() == "Enter" || event.key() == " ")
+                    || event_origin_is_action(event.target())
                 {
+                    return;
+                }
+                let ctrl = event.ctrl_key() || event.meta_key();
+                let shift = event.shift_key();
+                if let Some(selection) = selection {
+                    let Some(proposed) = entity_selection_proposal(&keydown_key, ctrl, shift) else {
+                        return;
+                    };
+                    event.prevent_default();
+                    selection.propose(proposed);
+                    if let Some(callback) = on_row_activate {
+                        callback.run(keydown_key.clone());
+                    }
+                    return;
+                }
+                if let Some(callback) = on_row_activate {
                     event.prevent_default();
                     callback.run(keydown_key.clone());
                 }
