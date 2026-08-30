@@ -590,6 +590,34 @@ pub fn DataTableDemo() -> impl IntoView {
         Column::new("email", "Email"),
         Column::new("role", "Role"),
     ]);
+    // Own-induced refetch across DIFFERING row heights (ldui-2bt3 CRITICAL
+    // fix): row "009" (0-based index 8) renders as a deliberately tall
+    // wrapped cell, same pattern as the client `auto_page_size` regression
+    // guard above. Growing the offset table's container is guaranteed to
+    // eventually accept a page size that includes it, proposing a shrink;
+    // the shrunk (short-only) page must not propose growing again forever.
+    let viewport_fit_offset_columns = RwSignal::new(vec![
+        Column::new("name", "Name"),
+        Column::new("email", "Email"),
+        Column::new_non_sortable("role", "Role").with_renderer(0),
+    ]);
+    let viewport_fit_tall_row_renderer: CellRenderer =
+        Callback::new(move |(_idx, row): (usize, HashMap<&'static str, String>)| {
+            if row.get("id").map(String::as_str) == Some("009") {
+                view! {
+                    <div style="min-height: 108px; display: flex; align-items: center;">
+                        "Deliberately tall wrapped content (ldui-2bt3): a viewport-fit \
+                         proposal's own-induced refetch must carry its row-height memory \
+                         forward instead of forgetting this row once a shrunk page \
+                         excludes it again."
+                    </div>
+                }
+                .into_any()
+            } else {
+                view! { <span>{move || row.get("role").cloned().unwrap_or_default()}</span> }
+                    .into_any()
+            }
+        });
     let run_viewport_fit_query = move |q: TableQuery| {
         let items = viewport_fit_fixture.get_value();
         viewport_fit_total.set(items.len() as i64);
@@ -2061,7 +2089,8 @@ pub fn DataTableDemo() -> impl IntoView {
                 <div class="resize-y overflow-auto border border-base-300 rounded-lg p-3 h-96 min-h-32">
                     <ServerDataTable
                         rows=viewport_fit_rows
-                        columns=viewport_fit_columns
+                        columns=viewport_fit_offset_columns
+                        cell_renderers=vec![viewport_fit_tall_row_renderer]
                         current_page=Signal::derive(move || viewport_fit_page.get())
                         total_count=Signal::derive(move || viewport_fit_total.get())
                         page_size=Signal::derive(move || viewport_fit_query.get().page_size)

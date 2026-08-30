@@ -3198,6 +3198,52 @@ async fn viewport_fit_offset_rapid_narrow_resize_settles_without_oscillation() {
     );
 }
 
+/// Own-induced refetch across DIFFERING row heights (ldui-2bt3 CRITICAL
+/// fix): the offset fixture's row "009" (0-based index 8) renders as a
+/// deliberately tall wrapped cell, mirroring the client `auto_page_size`
+/// ldui-89rp regression guard. Growing the container is guaranteed to
+/// eventually accept a page size that includes it, which then proposes
+/// shrinking back down -- and the shrunk (short-only) page must not
+/// propose growing again forever. Two readings apart with a stable
+/// proposal count is the settlement proof; without carrying the
+/// `RowHeightEra` high-water mark across an own-induced refetch, this
+/// exact shape oscillates.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn viewport_fit_offset_own_induced_refetch_settles_with_differing_row_heights() {
+    let h = harness_at("/components/data-table").await;
+
+    h.page()
+        .evaluate(
+            r#"(() => {
+                document.querySelector('#viewport-fit-offset-server-table').parentElement.style.height = '900px';
+                return true;
+            })()"#,
+        )
+        .await
+        .expect("grow the viewport-fit container so the tall row is eventually included");
+
+    let rows_expr =
+        r#"document.querySelectorAll('#viewport-fit-offset-server-table tbody tr').length"#;
+    tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+    let first_rows = eval_json(&h, rows_expr).await;
+    let first_proposals = testid_text(&h, "viewport-fit-proposals").await;
+
+    tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+    let second_rows = eval_json(&h, rows_expr).await;
+    let second_proposals = testid_text(&h, "viewport-fit-proposals").await;
+
+    assert_eq!(
+        first_rows, second_rows,
+        "an own-induced refetch across differing row heights did not settle: \
+         first={first_rows} second={second_rows}"
+    );
+    assert_eq!(
+        first_proposals, second_proposals,
+        "a settled table must stop emitting proposals once the fixed point is reached"
+    );
+}
+
 /// Declined proposals (ldui-2bt3): when the caller rejects a viewport-fit
 /// page-size proposal, the displayed accepted rows and size must be
 /// retained exactly -- a rejected proposal is not applied speculatively.

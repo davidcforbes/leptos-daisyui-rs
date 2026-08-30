@@ -956,6 +956,35 @@ pub fn viewport_fit_page_size_proposal(
     (derived != accepted_page_size).then_some(derived)
 }
 
+/// Distinguishes a `rows` change induced by `ServerDataTable`'s OWN
+/// just-sent `viewport_fit` proposal from every other cause (an external
+/// query/sort/filter/dataset change, a declined or differed proposal, or a
+/// container resize that happens to coincide with an unrelated refetch).
+///
+/// Reviewer trace (ldui-2bt3 CRITICAL fix): accepting a proposal makes the
+/// caller refetch and replace `rows`, and treating every `rows` change as a
+/// brand-new measurement era discards the tall-row high-water mark the
+/// ratchet needs to converge -- accepted=5 fits 10 short rows, propose 10;
+/// the refetched 10-row page reveals a tall row, but the fresh era forgets
+/// it and derives 5; propose 5; the refetched 5-row page is short again (the
+/// tall row falls outside a 5-row page), a fresh era forgets the tall
+/// reading yet again and derives 10; propose 10 -- forever.
+///
+/// The caller's accepted query and its `rows` are not guaranteed to update
+/// in the same reactive tick, so "own-induced" is detected retrospectively:
+/// a `rows` change is own-induced exactly when a proposal is still pending
+/// AND the accepted query's page size now equals the size that was
+/// proposed. `ServerDataTable` keeps the SAME measurement era across an
+/// own-induced change (never bumping the era's data-revision key) so the
+/// row-height high-water mark carries forward; every other `rows` change
+/// still starts a fresh era exactly as before.
+fn viewport_fit_rows_change_is_own_induced(
+    pending_proposal: Option<i64>,
+    accepted_page_size: i64,
+) -> bool {
+    pending_proposal == Some(accepted_page_size)
+}
+
 /// Guards a scheduled (macrotask-delayed) `viewport_fit` measurement pass
 /// against applying a stale result after a *newer* pass has already been
 /// scheduled -- e.g. two `ResizeObserver` callbacks fire in quick
@@ -1255,6 +1284,25 @@ pub fn ServerDataTable(
     /// silently doing nothing. Requires the same definite height as
     /// `auto_page_size`: pass `max_height` (promoted to a real `height`) or
     /// give the table a parent with a definite height.
+    ///
+    /// ## Accepted tradeoff: the row-height memory can stay conservative
+    ///
+    /// Accepting a proposal makes the caller refetch and replace `rows`, and
+    /// that refetch is itself a `rows` change. Treating every `rows` change
+    /// as a brand-new measurement era would discard the tall-row high-water
+    /// mark the ratchet needs to converge, and does not converge at all: a
+    /// short page proposes growth, the grown page reveals a tall row and
+    /// proposes shrinking back, the shrunk page is short again and proposes
+    /// growth again -- forever. `ServerDataTable` instead tracks its own
+    /// just-sent proposal and, when the accepted query's page size lands on
+    /// exactly that value, treats the resulting `rows` change as the SAME
+    /// era and carries the high-water mark forward; any other `rows` change
+    /// (a query/sort/filter/dataset change, a declined or differed
+    /// proposal) still starts a fresh era. The cost is the same one
+    /// `DataTable::auto_page_size`'s own era already accepts: once a tall
+    /// row has been seen, later pages that happen to be all-short are still
+    /// measured as if the tall row were present until something external
+    /// resets the era -- a possible under-fill rather than an oscillation.
     #[prop(optional, into)]
     viewport_fit: Signal<bool>,
 
@@ -1831,12 +1879,32 @@ pub fn ServerDataTable(
     // settling layout) ratchet the row height fed to the derivation so it
     // can only grow within the era, guaranteeing the derived count reaches a
     // fixed point instead of oscillating.
+    // Tracks the page size of the last `viewport_fit` proposal this table
+    // sent, until the resulting `rows` change (or an unrelated one) is
+    // observed and classified -- see `viewport_fit_rows_change_is_own_induced`.
+    let viewport_fit_pending_proposal: StoredValue<Option<i64>> = StoredValue::new(None);
     let viewport_fit_data_revision: StoredValue<u64> = StoredValue::new(0);
     Effect::new(move |ran_before: Option<()>| {
         let _ = rows.get();
         if ran_before.is_some() {
-            viewport_fit_data_revision
-                .update_value(|revision| *revision = revision.wrapping_add(1));
+            let accepted_page_size = query_state.get_untracked().page_size();
+            let own_induced = viewport_fit_rows_change_is_own_induced(
+                viewport_fit_pending_proposal.get_value(),
+                accepted_page_size,
+            );
+            if !own_induced {
+                // External change (a different query control, a declined or
+                // differed proposal, a dataset swap): the row-height memory
+                // from the previous era must not carry over.
+                viewport_fit_data_revision
+                    .update_value(|revision| *revision = revision.wrapping_add(1));
+            }
+            // Own-induced: deliberately do NOT bump the revision. The era
+            // key (data_revision, container_width) stays the same, so the
+            // next `RowHeightEra::observe` call in `measure_viewport_fit`
+            // merges this pass's measured max into the SAME high-water
+            // mark instead of starting over (ldui-2bt3 CRITICAL fix).
+            viewport_fit_pending_proposal.set_value(None);
         }
     });
     let viewport_fit_row_era: StoredValue<Option<RowHeightEra>> = StoredValue::new(None);
@@ -1916,6 +1984,12 @@ pub fn ServerDataTable(
             min_rows,
             accepted_page_size,
         ) {
+            // Recorded BEFORE proposing: an uncontrolled offset table
+            // applies the new size to its own internal query state
+            // synchronously inside `propose`, so the pending value must
+            // already be in place for the classification above to see it
+            // whenever `rows` changes next.
+            viewport_fit_pending_proposal.set_value(Some(next_size));
             query_state.propose(
                 query_state.get_untracked().with_page_size(next_size),
                 on_query_change,
@@ -2813,6 +2887,146 @@ mod tests {
         assert!(!epoch.is_current(first));
         assert!(!epoch.is_current(second));
         assert!(epoch.is_current(third));
+    }
+
+    // ── own-induced refetch era carry-forward (ldui-2bt3 CRITICAL fix) ──
+
+    #[test]
+    fn viewport_fit_own_induced_change_is_detected_by_matching_pending_to_accepted() {
+        assert!(viewport_fit_rows_change_is_own_induced(Some(10), 10));
+        assert!(
+            !viewport_fit_rows_change_is_own_induced(None, 10),
+            "no proposal was pending -- an unrelated rows change"
+        );
+        assert!(
+            !viewport_fit_rows_change_is_own_induced(Some(10), 5),
+            "the accepted size differs from what was proposed -- declined or superseded"
+        );
+    }
+
+    #[test]
+    fn viewport_fit_own_induced_refetch_carries_the_era_forward_and_terminates() {
+        // Reviewer trace (ldui-2bt3 CRITICAL fix): a proposal's own-induced
+        // refetch was previously treated as a brand-new `RowHeightEra`,
+        // which discarded the tall-row high-water mark the ratchet needs to
+        // converge -- accepted=5 fits 10 short rows, propose 10; the
+        // refetched 10-row page reveals a tall row at index 8, but a fresh
+        // era forgets it, deriving 5; propose 5; the refetched 5-row page
+        // is short again (index 8 is outside a 5-row page), a fresh era
+        // forgets the tall reading yet again, deriving 10; propose 10 --
+        // forever. Carrying the era forward across an own-induced refetch
+        // (never resetting the high-water mark just because `rows` changed
+        // AS A RESULT of accepting the table's own proposal) terminates
+        // the cycle.
+        const SHORT: f64 = 40.0;
+        const TALL: f64 = 80.0;
+        const TALL_ROW_INDEX: usize = 8; // absolute index in the dataset
+        const VIEWPORT: f64 = 400.0;
+        const HEADER: f64 = 0.0;
+        const MIN_ROWS: usize = 5;
+        const CONTAINER_WIDTH: i32 = 400;
+
+        // What the server would actually send for a page of `size` rows
+        // starting at 0, given one tall row sitting at `TALL_ROW_INDEX`.
+        let measured_max_for_page =
+            |size: usize| -> f64 { if size > TALL_ROW_INDEX { TALL } else { SHORT } };
+
+        let mut accepted: i64 = 5;
+        let mut pending: Option<i64> = None;
+        let key = (0_u64, CONTAINER_WIDTH);
+        let mut era = RowHeightEra::empty(key);
+        let mut proposals = Vec::new();
+
+        for _round in 0..6 {
+            if !proposals.is_empty() {
+                // A `rows` change happened: classify it exactly the way the
+                // component's Effect does.
+                let own_induced = viewport_fit_rows_change_is_own_induced(pending, accepted);
+                assert!(
+                    own_induced,
+                    "every refetch in this trace is caused by accepting the table's own \
+                     proposal -- an external change is a different scenario"
+                );
+                pending = None;
+                // Own-induced: `key` is deliberately NOT changed, so the
+                // `observe` call below merges into the SAME high-water mark
+                // instead of starting a fresh one -- the fix under test.
+            }
+
+            let measured_max = measured_max_for_page(accepted.max(0) as usize);
+            era = era.observe(key, measured_max);
+            let row_height = era.effective_row_height(FALLBACK_ROW_HEIGHT);
+
+            match viewport_fit_page_size_proposal(
+                VIEWPORT, HEADER, row_height, accepted, MIN_ROWS, accepted,
+            ) {
+                Some(next_size) => {
+                    proposals.push(next_size);
+                    pending = Some(next_size);
+                    accepted = next_size; // the caller accepts and refetches
+                }
+                None => break,
+            }
+        }
+
+        assert_eq!(
+            proposals,
+            vec![10, 5],
+            "expected exactly the reviewer's two-step trace before settling: {proposals:?}"
+        );
+        assert_eq!(
+            accepted, 5,
+            "the trace must settle back at the smaller, tall-row-aware size"
+        );
+        assert!(
+            pending.is_none(),
+            "no further proposal is pending once the cycle terminates"
+        );
+    }
+
+    #[test]
+    fn viewport_fit_without_the_own_induced_carry_forward_the_same_trace_never_settles() {
+        // Contrast for the fix above: if every `rows` change started a
+        // fresh era (the pre-fix behavior -- no own-induced distinction),
+        // the identical trace cycles between 10 and 5 forever instead of
+        // terminating. This pins the bug the fix addresses.
+        const SHORT: f64 = 40.0;
+        const TALL: f64 = 80.0;
+        const TALL_ROW_INDEX: usize = 8;
+        const VIEWPORT: f64 = 400.0;
+        const HEADER: f64 = 0.0;
+        const MIN_ROWS: usize = 5;
+
+        let measured_max_for_page =
+            |size: usize| -> f64 { if size > TALL_ROW_INDEX { TALL } else { SHORT } };
+
+        let mut accepted: i64 = 5;
+        let mut proposals = Vec::new();
+
+        for round in 0_u64..6 {
+            let measured_max = measured_max_for_page(accepted.max(0) as usize);
+            // Always a fresh era (the pre-fix behavior): a distinct key
+            // every round means `observe` can never ratchet across rounds.
+            let era = RowHeightEra::empty((round, 400)).observe((round, 400), measured_max);
+            let row_height = era.effective_row_height(FALLBACK_ROW_HEIGHT);
+
+            match viewport_fit_page_size_proposal(
+                VIEWPORT, HEADER, row_height, accepted, MIN_ROWS, accepted,
+            ) {
+                Some(next) => {
+                    proposals.push(next);
+                    accepted = next;
+                }
+                None => break,
+            }
+        }
+
+        assert_eq!(
+            proposals,
+            vec![10, 5, 10, 5, 10, 5],
+            "without the own-induced carry-forward the trace oscillates instead of \
+             settling: {proposals:?}"
+        );
     }
 
     #[test]
