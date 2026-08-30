@@ -262,28 +262,63 @@ fn test_all_button_types_return_valid_type_attribute_values() {
 }
 
 // `resolve_native_disabled` (ldui-9vs) — the DOM `disabled` attribute a
-// submit/reset button actually gets. This is what makes "disabled and
-// loading submit buttons cannot submit" true: a native `<button disabled>`
-// dispatches no click event at all, so proving this function is `||` proves
-// both inputs independently block activation.
+// button actually gets. `disabled` alone always wins, regardless of type.
+// `loading` alone only disables a Submit button (review ruling: broadly
+// disabling every loading button regressed non-submit loading buttons from
+// "spinner, still clickable/focusable" to "inert, not tab-reachable", which
+// the bead's acceptance never asked for). This is what makes "disabled and
+// loading SUBMIT buttons cannot submit" true, while a loading
+// Button/Reset button stays interactive unless `disabled` is also passed.
 #[test]
-fn test_resolve_native_disabled_false_when_neither_set() {
-    assert!(!resolve_native_disabled(false, false));
+fn test_resolve_native_disabled_false_when_nothing_set() {
+    assert!(!resolve_native_disabled(false, false, ButtonType::Submit));
+    assert!(!resolve_native_disabled(false, false, ButtonType::Button));
+    assert!(!resolve_native_disabled(false, false, ButtonType::Reset));
 }
 
 #[test]
-fn test_resolve_native_disabled_true_when_only_disabled() {
-    assert!(resolve_native_disabled(true, false));
+fn test_resolve_native_disabled_explicit_disabled_wins_regardless_of_type() {
+    assert!(resolve_native_disabled(true, false, ButtonType::Submit));
+    assert!(resolve_native_disabled(true, false, ButtonType::Button));
+    assert!(resolve_native_disabled(true, false, ButtonType::Reset));
+    // ...and stays true even loading, for every type.
+    assert!(resolve_native_disabled(true, true, ButtonType::Submit));
+    assert!(resolve_native_disabled(true, true, ButtonType::Button));
+    assert!(resolve_native_disabled(true, true, ButtonType::Reset));
 }
 
 #[test]
-fn test_resolve_native_disabled_true_when_only_loading() {
-    assert!(resolve_native_disabled(false, true));
+fn test_resolve_native_disabled_loading_alone_disables_only_submit() {
+    assert!(resolve_native_disabled(false, true, ButtonType::Submit));
 }
 
 #[test]
-fn test_resolve_native_disabled_true_when_both_set() {
-    assert!(resolve_native_disabled(true, true));
+fn test_resolve_native_disabled_loading_alone_leaves_button_and_reset_enabled() {
+    // The review-ruling fix (ldui-9vs): a loading Button/Reset must NOT be
+    // natively disabled — it keeps its historical clickable/focusable,
+    // spinner-only behavior.
+    assert!(!resolve_native_disabled(false, true, ButtonType::Button));
+    assert!(!resolve_native_disabled(false, true, ButtonType::Reset));
+}
+
+/// Full 2x2x3 matrix against the documented formula, so a future edit to
+/// `resolve_native_disabled` that drifts from `disabled || (loading &&
+/// button_type == Submit)` fails here rather than only in the targeted
+/// cases above.
+#[test]
+fn test_resolve_native_disabled_matches_the_documented_formula_for_every_combination() {
+    for &disabled in &[false, true] {
+        for &loading in &[false, true] {
+            for &button_type in &[ButtonType::Button, ButtonType::Submit, ButtonType::Reset] {
+                let expected = disabled || (loading && button_type == ButtonType::Submit);
+                assert_eq!(
+                    resolve_native_disabled(disabled, loading, button_type),
+                    expected,
+                    "disabled={disabled}, loading={loading}, button_type={button_type:?}"
+                );
+            }
+        }
+    }
 }
 
 // Comprehensive enum variant coverage tests

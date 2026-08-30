@@ -9,19 +9,28 @@ use leptos::{
 
 /// Resolves the native `disabled` attribute for the underlying `<button>`.
 ///
-/// `loading` alone does not disable a plain `type="button"` — it only shows
-/// the spinner class — but for a [`ButtonType::Submit`] button that gap is a
-/// real bug: a form would submit again on every click while a prior submit
-/// is still in flight. Rather than special-case that on `ButtonType`, every
-/// loading button is disabled at the DOM level for the duration of
-/// `loading`, in addition to the explicit `disabled` prop — this also
-/// stops `on_click`/ripple from firing mid-loading on ordinary buttons,
-/// which is the same "already working" contract users expect from a
-/// disabled control. Native `<button disabled>` semantics mean the browser
-/// itself refuses to dispatch `click`, so no extra guard is needed in the
-/// `on:click` handler below.
-pub(crate) fn resolve_native_disabled(disabled: bool, loading: bool) -> bool {
-    disabled || loading
+/// `loading` alone does not disable a plain `type="button"` or
+/// `type="reset"` — those keep their historical clickable-with-spinner
+/// semantics, still focusable and still firing `on_click`, exactly as
+/// before `button_type` existed. Only [`ButtonType::Submit`] is disabled
+/// while `loading`, because *that* gap is a real bug: a form would submit
+/// again on every click while a prior submit is still in flight. This is
+/// deliberately narrow (ldui-9vs review ruling): broadly disabling every
+/// loading button regressed downstream non-submit loading buttons from
+/// "spinner, still clickable/focusable" to "inert, not tab-reachable" —
+/// including a focus loss if a button disables itself mid-interaction — for
+/// a behavior the bead's acceptance never asked for outside submit. A
+/// caller that wants an inert loading *action* button (not a submit) still
+/// has the explicit `disabled` prop for that. Native `<button disabled>`
+/// semantics mean the browser itself refuses to dispatch `click` to a
+/// disabled submit button, so no extra guard is needed in the `on:click`
+/// handler below.
+pub(crate) fn resolve_native_disabled(
+    disabled: bool,
+    loading: bool,
+    button_type: ButtonType,
+) -> bool {
+    disabled || (loading && button_type == ButtonType::Submit)
 }
 
 /// # Button Component
@@ -60,16 +69,21 @@ pub(crate) fn resolve_native_disabled(disabled: bool, loading: bool) -> bool {
 /// in this component intercepts or duplicates that, so it fires the
 /// containing form's submit/reset exactly once per activation, never twice.
 ///
-/// ### Disabled and loading buttons cannot submit
+/// ### Disabled and loading submit buttons cannot submit
 ///
-/// `loading=true` disables the underlying `<button>` at the DOM level for
-/// as long as it is `true`, in addition to the explicit `disabled` prop —
-/// see [`resolve_native_disabled`]. A native `disabled` button dispatches no
-/// `click` at all (browser-enforced), so neither a disabled nor a loading
-/// [`ButtonType::Submit`]/[`ButtonType::Reset`] button can submit/reset its
-/// form, by mouse or keyboard. This is a small, deliberate behavior change
-/// from before ldui-9vs: `loading` used to be purely a CSS spinner and left
-/// the button fully interactive.
+/// `loading=true` disables the underlying `<button>` at the DOM level for as
+/// long as it is `true`, **but only when `button_type` is
+/// [`ButtonType::Submit`]** — see [`resolve_native_disabled`]. A native
+/// `disabled` button dispatches no `click` at all (browser-enforced), so
+/// neither an explicitly `disabled` nor a `loading` submit button can submit
+/// its form, by mouse or keyboard. A `loading` [`ButtonType::Button`]/
+/// [`ButtonType::Reset`] keeps its pre-existing behavior — clickable and
+/// focusable, spinner-only — because loading has no submission to guard
+/// against there; pass `disabled` explicitly if a non-submit loading button
+/// should also be inert. A loading submit button is natively `disabled` but
+/// deliberately **not** given the `btn-disabled` visual class — the spinner
+/// already communicates the busy state, so it does not also get the dimmed
+/// disabled look.
 ///
 /// ### Nested/form-associated edge cases
 ///
@@ -117,10 +131,15 @@ pub(crate) fn resolve_native_disabled(disabled: bool, loading: bool) -> bool {
 /// - `node_ref` - References the `<button>` element ([HTMLButtonElement](https://developer.mozilla.org/en-US/docs/Web/API/HTMLButtonElement))
 #[component]
 pub fn Button(
-    /// Shows loading spinner when true. Also disables the button at the DOM
-    /// level for as long as it is true — see [`resolve_native_disabled`] and
-    /// the component doc's "Disabled and loading buttons cannot submit"
-    /// section.
+    /// Shows loading spinner when true. When `button_type` is
+    /// [`ButtonType::Submit`], also disables the button at the DOM level for
+    /// as long as it is true — see [`resolve_native_disabled`] and the
+    /// component doc's "Disabled and loading submit buttons cannot submit"
+    /// section. A loading submit button is natively `disabled` but keeps its
+    /// ordinary (non-`btn-disabled`) visual style — the spinner alone
+    /// communicates the busy state. `Button`/`Reset` loading buttons are
+    /// unaffected: still clickable and focusable, spinner-only, exactly as
+    /// before `button_type` existed.
     #[prop(optional, into)]
     loading: Signal<bool>,
 
@@ -178,7 +197,7 @@ pub fn Button(
     view! {
         <button
             type=move || button_type.get().as_str()
-            disabled=move || resolve_native_disabled(disabled.get(), loading.get())
+            disabled=move || resolve_native_disabled(disabled.get(), loading.get(), button_type.get())
             node_ref=node_ref
             class=move || {
                 merge_classes!(

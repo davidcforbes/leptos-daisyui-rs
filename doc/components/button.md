@@ -16,7 +16,7 @@ The Button component provides a clean, accessible way to handle user interaction
 | `shape` | `Signal<ButtonShape>` | `ButtonShape::Default` | Shape style of the button |
 | `outline` | `Signal<bool>` | `false` | Whether button has outline style |
 | `disabled` | `Signal<bool>` | `false` | Whether button is disabled |
-| `loading` | `Signal<bool>` | `false` | Whether button shows loading state. Also disables the button at the DOM level for as long as it is `true` (ldui-9vs), on top of the explicit `disabled` prop. |
+| `loading` | `Signal<bool>` | `false` | Whether button shows loading state. When `button_type=ButtonType::Submit`, also disables the button at the DOM level for as long as it is `true` (ldui-9vs), on top of the explicit `disabled` prop — natively disabled but not given the dimmed `btn-disabled` look, since the spinner already shows it's busy. `Button`/`Reset` loading buttons stay clickable/focusable (spinner-only), unless `disabled` is also passed. |
 | `button_type` | `Signal<ButtonType>` | `ButtonType::Button` | Native `type` attribute: `Button` (no form action), `Submit`, or `Reset` (ldui-9vs). Form `action`/`method`/`target` stay on the caller's `<form>` element. |
 | `wide` | `Signal<bool>` | `false` | Whether button takes full width |
 | `glass` | `Signal<bool>` | `false` | Whether button has glass effect |
