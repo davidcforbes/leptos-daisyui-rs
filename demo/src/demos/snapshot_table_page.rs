@@ -1026,7 +1026,8 @@ fn emphasis_columns() -> Vec<EntityColumn<EmphasisRow>> {
 /// `amount` column is sortable) and must read identically in the compact
 /// single-cell presentation. `selection` is also wired so the fixture can
 /// prove emphasis composes with, rather than fights, the selected-row
-/// background.
+/// background, and `zebra=true` is on so the fixture can prove the same
+/// against `table-zebra`'s own alternating-row striping.
 #[component]
 pub fn EntityTableEmphasisFixture() -> impl IntoView {
     let data = RwSignal::new_local(emphasis_rows());
@@ -1039,7 +1040,7 @@ pub fn EntityTableEmphasisFixture() -> impl IntoView {
         >
             <h1 class="ld-text-display font-semibold">"Entity table row emphasis"</h1>
             <p class="text-sm text-base-content/70">
-                "One row of each EntityRowEmphasis variant classified purely from row content, plus a totals row that stays classified Summary after sorting moves it."
+                "One row of each EntityRowEmphasis variant classified purely from row content, plus a totals row that stays classified Summary after sorting moves it. Zebra striping is on, proving emphasis composes with it."
             </p>
             <EntityTable
                 data=data
@@ -1056,6 +1057,11 @@ pub fn EntityTableEmphasisFixture() -> impl IntoView {
                     selected_key.into(),
                     Callback::new(move |proposed: Option<String>| selected_key.set(proposed)),
                 )
+                // Zebra composition (ldui-mqb, task review fix): every
+                // emphasis variant is text/border only, never
+                // background-color, so it must never fight `table-zebra`'s
+                // own alternating-row background CSS.
+                zebra=true
                 attr:id="entity-emphasis-table"
             />
         </section>

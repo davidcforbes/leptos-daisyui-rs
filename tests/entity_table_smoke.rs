@@ -3234,6 +3234,29 @@ async fn entity_table_row_emphasis_survives_sort_and_composes_with_selection() {
         "only the Summary row's wide cells carry the totals top rule"
     );
 
+    // Zebra composition: the fixture's table has `zebra=true`, so
+    // `table-zebra` is painting alternating `tbody tr:nth-child` row
+    // backgrounds via CSS the whole time these assertions have been
+    // running. The Summary row's own classes/attribute -- text and border
+    // only, never `background-color` -- must survive that untouched.
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => {
+                const table = document.querySelector('#entity-emphasis-table table[data-entity-table-grid]');
+                const row = document.querySelector('#entity-emphasis-table tbody tr[data-entity-row-key="emphasis-total"]');
+                return {
+                    zebraActive: table.classList.contains('table-zebra'),
+                    emphasisAttribute: row.dataset.entityRowEmphasis,
+                    bold: row.classList.contains('font-semibold'),
+                };
+            })()"#,
+        )
+        .await,
+        json!({ "zebraActive": true, "emphasisAttribute": "summary", "bold": true }),
+        "the Summary row's emphasis must hold while table-zebra striping is active"
+    );
+
     // A sort on `amount` (the totals row holds the largest value) actually
     // moves the row: ascending puts it last, descending puts it first. Its
     // classification -- keyed by `row_key`, not index -- must follow it.

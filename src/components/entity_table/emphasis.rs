@@ -170,6 +170,28 @@ mod tests {
     }
 
     #[test]
+    fn merged_row_class_keeps_emphasis_alongside_interactive_and_selected_classes() {
+        // Structural complement to the browser fixture's zebra/selection
+        // composition proof: builds the same `merge_classes!` call
+        // `render_keyed_row` performs for an interactive, selected `Summary`
+        // row and confirms the merged string carries all three families --
+        // interactive, selected, and emphasis -- rather than one crowding
+        // out another. `table-zebra` can never appear in this string at
+        // all: it is a class on the ancestor `<table>`, never on the row,
+        // so it has nothing here to collide with regardless of how the row
+        // classes merge.
+        let merged = crate::merge_classes!(
+            "cursor-pointer ld-focus-ring",
+            "bg-base-200",
+            entity_row_emphasis_row_class(EntityRowEmphasis::Summary)
+        )
+        .to_class();
+        assert!(merged.contains("cursor-pointer"));
+        assert!(merged.contains("bg-base-200"));
+        assert!(merged.contains("font-semibold"));
+    }
+
+    #[test]
     fn as_str_is_stable_and_distinct() {
         assert_eq!(EntityRowEmphasis::Standard.as_str(), "standard");
         assert_eq!(EntityRowEmphasis::Summary.as_str(), "summary");

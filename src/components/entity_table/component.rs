@@ -1942,11 +1942,8 @@ fn render_keyed_row<T: Clone + 'static>(
     let has_row_emphasis = row_emphasis.with_value(Option::is_some);
     let click_key = key.clone();
     let keydown_key = key.clone();
-    let rendered_key = key.clone();
     let selected_class_key = key.clone();
     let selected_aria_key = key.clone();
-    let emphasis_class_key = key.clone();
-    let emphasis_attr_key = key.clone();
 
     // Focus and selection are deliberately distinct: Tab/roving focus never
     // proposes or paints selection by itself -- only a click or Enter/Space
@@ -1957,19 +1954,39 @@ fn render_keyed_row<T: Clone + 'static>(
         })
     };
 
-    // Classification is a pure function of a row's own content, resolved
-    // through the same stable key selection and focus recovery use -- so it
-    // follows a row across sorting, filtering, and paging rather than
-    // pinning a look to a rendered position, and fails safe to `Standard`
-    // for a key that no longer matches any row.
-    let current_emphasis = move |current_key: &str| -> EntityRowEmphasis {
-        row_emphasis.with_value(|classifier| {
-            let rows = data.get();
-            let row_key_fn = row_key.get_value();
-            let row = rows.iter().find(|row| row_key_fn(row) == current_key);
-            entity_row_emphasis_for(classifier.as_ref(), row)
-        })
+    // The row's own content is looked up by key once here and cached, then
+    // shared by the `<tr>` class, the `data-entity-row-emphasis` attribute,
+    // and cell rendering below -- resolving classification (a pure function
+    // of the row's own content, so it follows a row across sorting,
+    // filtering, and paging rather than pinning a look to a rendered
+    // position) exactly once per row per `data` change, instead of an
+    // independent `O(total_rows)` dataset scan at each of those three sites.
+    // The lookup effect depends only on `data`, so it never reruns for
+    // unrelated reactivity -- a selection click, in particular, previously
+    // forced a full-dataset rescan here purely because it shares the same
+    // `class` closure.
+    let lookup_key = key.clone();
+    let resolve_current_row = move |rows: &Rc<Vec<T>>| -> Option<T> {
+        let row_key_fn = row_key.get_value();
+        rows.iter()
+            .find(|row| row_key_fn(row) == lookup_key)
+            .cloned()
     };
+    let initial_row = resolve_current_row(&data.get_untracked());
+    let initial_emphasis = row_emphasis.with_value(|classifier| {
+        entity_row_emphasis_for(classifier.as_ref(), initial_row.as_ref())
+    });
+    let cached_row: RwSignal<Option<T>, LocalStorage> = RwSignal::new_local(initial_row);
+    let cached_emphasis = RwSignal::new(initial_emphasis);
+    Effect::new(move |_| {
+        let row = resolve_current_row(&data.get());
+        let emphasis = row_emphasis
+            .with_value(|classifier| entity_row_emphasis_for(classifier.as_ref(), row.as_ref()));
+        cached_row.set(row);
+        if cached_emphasis.get_untracked() != emphasis {
+            cached_emphasis.set(emphasis);
+        }
+    });
 
     view! {
         <tr
@@ -1980,11 +1997,11 @@ fn render_keyed_row<T: Clone + 'static>(
             class=move || merge_classes!(
                 if interactive { "cursor-pointer ld-focus-ring" } else { "" },
                 if has_selection && is_row_selected(&selected_class_key) { "bg-base-200" } else { "" },
-                entity_row_emphasis_row_class(current_emphasis(&emphasis_class_key))
+                entity_row_emphasis_row_class(cached_emphasis.get())
             )
             aria-selected=move || entity_row_aria_selected(has_selection, is_row_selected(&selected_aria_key))
             data-entity-row-emphasis=move || {
-                has_row_emphasis.then(|| current_emphasis(&emphasis_attr_key).as_str())
+                has_row_emphasis.then(|| cached_emphasis.get().as_str())
             }
             on:click=move |event: web_sys::MouseEvent| {
                 if event_origin_is_action(event.target()) {
@@ -2034,18 +2051,13 @@ fn render_keyed_row<T: Clone + 'static>(
             }
         >
             {move || {
-                let rows = data.get();
-                let row_key = row_key.get_value();
-                let Some(row) = rows
-                    .iter()
-                    .find(|row| row_key(row) == rendered_key)
-                    .cloned()
-                else {
+                // Reads the same cached lookup the `<tr>` class and
+                // `data-entity-row-emphasis` attribute above already read --
+                // no second dataset scan here.
+                let Some(row) = cached_row.get() else {
                     return ().into_any();
                 };
-                let emphasis = row_emphasis.with_value(|classifier| {
-                    entity_row_emphasis_for(classifier.as_ref(), Some(&row))
-                });
+                let emphasis = cached_emphasis.get();
                 let preferences_value = preferences.get();
                 let columns = column_store.with_value(|columns| {
                     ordered_columns(&preferences_value, columns)
