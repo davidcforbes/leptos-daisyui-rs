@@ -20,17 +20,18 @@ pub use types::{
     EntityColumn, EntityColumnAlignment, EntityColumnChooserTrigger, EntityColumnFilter,
     EntityColumnFilterOption, EntityColumnFilterRenderer, EntityColumnFilters, EntityColumns,
     EntityCompactRow, EntityComparator, EntityIconCell, EntityIconColor, EntityIconPresentation,
-    EntityNullOrder, EntityPreparedSortComparator, EntityRowKey, EntityRowRenderer, EntitySort,
-    EntitySortColumn, EntitySortDirection, EntitySortKey, EntitySortKeyFactory,
-    EntityTableActionColumnPolicy, EntityTableDisplayColumn, EntityTableDisplayProjection,
-    EntityTableDisplayRow, EntityTablePreferenceOwnership, EntityTablePreferencePersistence,
-    EntityTablePreferences, EntityTableProjectionScope, EntityTableTexts, EntityTableViewportFit,
-    EntityTextOverflow,
+    EntityNullOrder, EntityPreparedSortComparator, EntityPrimaryTextCell, EntityRowKey,
+    EntityRowRenderer, EntitySecondaryTextCell, EntitySort, EntitySortColumn, EntitySortDirection,
+    EntitySortKey, EntitySortKeyFactory, EntityTableActionColumnPolicy, EntityTableDisplayColumn,
+    EntityTableDisplayProjection, EntityTableDisplayRow, EntityTablePreferenceOwnership,
+    EntityTablePreferencePersistence, EntityTablePreferences, EntityTableProjectionScope,
+    EntityTableTexts, EntityTableViewportFit, EntityTextOverflow,
 };
 
 #[cfg(test)]
 pub(crate) use types::{
     entity_alignment_class, entity_header_justify_class, entity_text_overflow_style,
+    normalize_entity_secondary_text,
 };
 
 #[cfg(test)]

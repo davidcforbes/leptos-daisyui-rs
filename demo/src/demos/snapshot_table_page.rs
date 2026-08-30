@@ -463,6 +463,8 @@ pub struct EntityTablePresentationRow {
     percentage: String,
     status: String,
     icon_label: String,
+    contact_name: String,
+    contact_role: Option<String>,
 }
 
 /// Focused browser fixture for framework-owned EntityColumn presentation.
@@ -483,6 +485,8 @@ pub fn EntityTablePresentationFixture() -> impl IntoView {
             percentage: "100.00%".to_owned(),
             status: "Needs review".to_owned(),
             icon_label: "Enabled".to_owned(),
+            contact_name: "Jordan Blake".to_owned(),
+            contact_role: Some("Team lead".to_owned()),
         },
         EntityTablePresentationRow {
             id: "presentation-2".to_owned(),
@@ -496,6 +500,8 @@ pub fn EntityTablePresentationFixture() -> impl IntoView {
             percentage: "20.50%".to_owned(),
             status: "Ready".to_owned(),
             icon_label: "Attention".to_owned(),
+            contact_name: "Sam Rivera".to_owned(),
+            contact_role: Some(String::new()),
         },
         EntityTablePresentationRow {
             id: "presentation-3".to_owned(),
@@ -509,6 +515,8 @@ pub fn EntityTablePresentationFixture() -> impl IntoView {
             percentage: "-3.00%".to_owned(),
             status: "Unknown status".to_owned(),
             icon_label: "Unknown state".to_owned(),
+            contact_name: "Alex Chen".to_owned(),
+            contact_role: None,
         },
         EntityTablePresentationRow {
             id: "presentation-4".to_owned(),
@@ -522,6 +530,8 @@ pub fn EntityTablePresentationFixture() -> impl IntoView {
             percentage: "2.00%".to_owned(),
             status: String::new(),
             icon_label: String::new(),
+            contact_name: "Morgan Lee".to_owned(),
+            contact_role: Some("Reviewer".to_owned()),
         },
     ]));
     let semantic_localized = RwSignal::new(false);
@@ -537,6 +547,14 @@ pub fn EntityTablePresentationFixture() -> impl IntoView {
             }
             .to_owned();
             replacement[0].icon_label = if localized { "Habilitado" } else { "Enabled" }.to_owned();
+            replacement[0].contact_role = Some(
+                if localized {
+                    "Líder de equipo"
+                } else {
+                    "Team lead"
+                }
+                .to_owned(),
+            );
             *rows = Rc::new(replacement);
         });
     });
@@ -649,6 +667,25 @@ pub fn EntityTablePresentationFixture() -> impl IntoView {
             _ => Some(EntityIconPresentation::new("check", EntityIconColor::Info)),
         })
         .with_width(145),
+        EntityColumn::text(
+            "contact",
+            "Primary and secondary",
+            |row: &EntityTablePresentationRow| match row
+                .contact_role
+                .as_deref()
+                .map(str::trim)
+                .filter(|role| !role.is_empty())
+            {
+                Some(role) => format!("{} — {role}", row.contact_name),
+                None => row.contact_name.clone(),
+            },
+        )
+        .primary_secondary(
+            |row: &EntityTablePresentationRow| row.contact_name.clone(),
+            |row: &EntityTablePresentationRow| row.contact_role.clone(),
+        )
+        .with_min_width(140)
+        .with_width(170),
     ];
 
     view! {
@@ -658,7 +695,7 @@ pub fn EntityTablePresentationFixture() -> impl IntoView {
         >
             <h1 class="ld-text-display font-semibold">"Entity column presentation"</h1>
             <p class="text-sm text-base-content/70">
-                "Plain canonical values demonstrate ellipsis and two-line clipping; the final column proves rich-renderer precedence."
+                "Plain canonical values demonstrate ellipsis and two-line clipping; the rich column proves render_with precedence; the contact column demonstrates the opinionated primary/secondary presentation, including a row with no secondary line and a row with an empty one."
             </p>
             <Button
                 attr:data-testid="entity-presentation-locale"

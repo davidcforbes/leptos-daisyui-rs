@@ -1049,6 +1049,94 @@ fn semantic_cell_configuration_has_opinionated_defaults_and_rich_precedence() {
 }
 
 #[test]
+fn normalize_entity_secondary_text_folds_empty_and_whitespace_to_none() {
+    assert_eq!(normalize_entity_secondary_text(None), None);
+    assert_eq!(normalize_entity_secondary_text(Some(String::new())), None);
+    assert_eq!(
+        normalize_entity_secondary_text(Some("   ".to_owned())),
+        None,
+        "a whitespace-only secondary line must normalize away, leaving no line"
+    );
+    assert_eq!(
+        normalize_entity_secondary_text(Some("Team lead".to_owned())),
+        Some("Team lead".to_owned())
+    );
+}
+
+#[test]
+fn primary_secondary_builder_keeps_canonical_text_local_and_complete() {
+    let column = EntityColumn::text("who", "Who", |row: &Row| {
+        format!("{} ({})", row.name, row.id)
+    })
+    .primary_secondary(
+        |row: &Row| row.name.to_owned(),
+        |row: &Row| match row.id {
+            "r1" => Some(row.id.to_owned()),
+            "r2" => Some("   ".to_owned()),
+            _ => None,
+        },
+    );
+
+    let sample = rows();
+    // The canonical `text` callback -- the accessible/export value -- stays
+    // complete and untouched by the visual primary/secondary split.
+    assert_eq!((column.text)(&sample[0]), "Zulu (r1)");
+    assert_eq!((column.text)(&sample[1]), "Alpha (r2)");
+    assert_eq!((column.text)(&sample[2]), "Bravo (r3)");
+
+    let Some(EntityCellPresentation::PrimarySecondary { primary, secondary }) =
+        column.presentation.as_ref()
+    else {
+        panic!("expected a PrimarySecondary presentation");
+    };
+    assert_eq!(primary(&sample[0]), "Zulu");
+    assert_eq!(primary(&sample[1]), "Alpha");
+    assert_eq!(secondary(&sample[0]), Some("r1".to_owned()));
+    assert_eq!(
+        normalize_entity_secondary_text(secondary(&sample[1])),
+        None,
+        "an empty or whitespace-only secondary line renders no secondary line"
+    );
+    assert_eq!(normalize_entity_secondary_text(secondary(&sample[2])), None);
+}
+
+#[test]
+fn primary_secondary_does_not_disturb_default_or_typed_sort_keys() {
+    // The default text-based sort key survives adding a primary/secondary presentation.
+    let default_sorted = EntityColumn::text("who", "Who", |row: &Row| row.name.to_owned())
+        .primary_secondary(|row: &Row| row.name.to_owned(), |_| None);
+    assert!(default_sorted.sort_key.is_some());
+    assert!(default_sorted.comparator.is_none());
+
+    let rows = rows();
+    let columns = vec![default_sorted];
+    assert_eq!(
+        sorted_indices(&rows, &columns, &EntitySort::ascending("who")),
+        [1, 2, 0],
+        "sort must still follow the canonical text key, not the primary/secondary split"
+    );
+
+    // A typed sort key set before primary_secondary must survive it.
+    let typed = EntityColumn::text("rank", "Rank", |row: &Row| row.rank.to_string())
+        .sortable_by_key(|row: &Row| row.rank)
+        .primary_secondary(|row: &Row| row.rank.to_string(), |_| None);
+    assert!(typed.sort_key.is_some());
+    assert!(typed.comparator.is_none());
+}
+
+#[test]
+fn primary_secondary_rich_renderer_still_wins() {
+    let column = EntityColumn::text("who", "Who", |row: &Row| row.name.to_owned())
+        .primary_secondary(|row: &Row| row.name.to_owned(), |_| None)
+        .render_with(|_| ().into_any());
+    assert!(column.presentation.is_some());
+    assert!(
+        column.renderer.is_some(),
+        "render_with remains the visual winner over primary_secondary"
+    );
+}
+
+#[test]
 fn column_chooser_trigger_defaults_to_localized_text() {
     assert_eq!(
         EntityColumnChooserTrigger::default(),

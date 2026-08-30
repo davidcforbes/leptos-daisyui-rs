@@ -2885,3 +2885,212 @@ async fn entity_table_selection_drives_master_detail_and_survives_removal() {
         .unwrap_or_else(|error| panic!("{error}; {}", report.summary()));
     assert_no_browser_errors(&harness, "entity table controlled selection").await;
 }
+
+/// Reads the framework-owned primary/secondary presentation of the
+/// `contact` column, for one row, at whichever width (wide `td` or the
+/// compact `td.lg:hidden` row) is currently laid out.
+async fn inspect_contact_presentation(
+    harness: &pixelproof_web::Harness,
+    row_key: &str,
+    compact: bool,
+) -> Value {
+    let selector = if compact {
+        format!(
+            "#entity-table-presentation-fixture [data-entity-row-key='{row_key}'] td.lg\\:hidden [data-entity-column='contact']"
+        )
+    } else {
+        format!(
+            "#entity-table-presentation-fixture [data-entity-row-key='{row_key}'] td[data-entity-column='contact']"
+        )
+    };
+    eval_json(
+        harness,
+        &format!(
+            r#"(() => {{
+                const cell = document.querySelector("{selector}");
+                const wrapper = cell.querySelector('[data-entity-semantic-cell="primary-secondary"]');
+                const decorative = wrapper.querySelector(':scope > [aria-hidden="true"]');
+                const primaryLine = wrapper.querySelector('[data-entity-primary-secondary-line="primary"]');
+                const secondaryLine = wrapper.querySelector('[data-entity-primary-secondary-line="secondary"]');
+                const srOnly = wrapper.querySelector(':scope > .sr-only');
+                return {{
+                    decorativeAriaHidden: decorative?.getAttribute('aria-hidden') ?? null,
+                    decorativeContainsSrOnly: decorative ? decorative.contains(srOnly) : null,
+                    primaryText: primaryLine?.textContent ?? null,
+                    primaryForcedColors: primaryLine?.className.includes('forced-colors:text') ?? false,
+                    primaryOverflow: primaryLine?.dataset.entityTextOverflow ?? null,
+                    hasSecondary: !!secondaryLine,
+                    secondaryText: secondaryLine?.textContent ?? null,
+                    secondaryForcedColors: secondaryLine?.className.includes('forced-colors:text') ?? false,
+                    accessibleText: srOnly?.textContent ?? null,
+                    wrapperTitle: wrapper.getAttribute('title'),
+                }};
+            }})()"#
+        ),
+    )
+    .await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
+async fn entity_column_primary_secondary_composes_two_accessible_lines() {
+    let harness = harness_at("/components/entity-table-presentation").await;
+    wait_for_selector(
+        &harness,
+        "#entity-table-presentation-fixture [data-entity-row-key='presentation-1']",
+    )
+    .await;
+    begin_browser_error_capture(&harness).await;
+
+    // A row with a non-empty secondary line: two visible lines, decorative
+    // and hidden from assistive technology, plus exactly one accessible
+    // name -- the canonical, complete text -- carried by the sole `sr-only`
+    // node, so nothing is ever announced twice.
+    let with_secondary = inspect_contact_presentation(&harness, "presentation-1", false).await;
+    assert_eq!(with_secondary["decorativeAriaHidden"], json!("true"));
+    assert_eq!(with_secondary["decorativeContainsSrOnly"], json!(false));
+    assert_eq!(with_secondary["primaryText"], json!("Jordan Blake"));
+    assert_eq!(with_secondary["primaryForcedColors"], json!(true));
+    assert_eq!(with_secondary["primaryOverflow"], json!("wrap"));
+    assert_eq!(with_secondary["hasSecondary"], json!(true));
+    assert_eq!(with_secondary["secondaryText"], json!("Team lead"));
+    assert_eq!(with_secondary["secondaryForcedColors"], json!(true));
+    assert_eq!(
+        with_secondary["accessibleText"],
+        json!("Jordan Blake — Team lead"),
+        "the sr-only accessible name must be the complete canonical value"
+    );
+    assert_eq!(with_secondary["wrapperTitle"], Value::Null);
+
+    // An empty-but-present secondary value normalizes away: no secondary
+    // line, no extra spacing, no leftover punctuation, and the accessible
+    // name collapses to just the name.
+    let empty_secondary = inspect_contact_presentation(&harness, "presentation-2", false).await;
+    assert_eq!(empty_secondary["primaryText"], json!("Sam Rivera"));
+    assert_eq!(empty_secondary["hasSecondary"], json!(false));
+    assert_eq!(empty_secondary["secondaryText"], Value::Null);
+    assert_eq!(empty_secondary["accessibleText"], json!("Sam Rivera"));
+
+    // An absent (`None`) secondary value behaves identically to an empty one.
+    let absent_secondary = inspect_contact_presentation(&harness, "presentation-3", false).await;
+    assert_eq!(absent_secondary["primaryText"], json!("Alex Chen"));
+    assert_eq!(absent_secondary["hasSecondary"], json!(false));
+    assert_eq!(absent_secondary["accessibleText"], json!("Alex Chen"));
+
+    // Reactive row-data replacement re-renders both lines from the same
+    // static column, not just the primary one.
+    click(&harness, "[data-testid='entity-presentation-locale']").await;
+    let localized = inspect_contact_presentation(&harness, "presentation-1", false).await;
+    assert_eq!(localized["primaryText"], json!("Jordan Blake"));
+    assert_eq!(localized["secondaryText"], json!("Líder de equipo"));
+    assert_eq!(
+        localized["accessibleText"],
+        json!("Jordan Blake — Líder de equipo"),
+        "reactive replacement must update the accessible line alongside the visual ones"
+    );
+
+    // Resizing the column changes only geometry: both lines keep their text.
+    let contact_separator = "th[data-entity-column='contact'] [role='separator']";
+    harness
+        .page()
+        .find_element(contact_separator)
+        .await
+        .expect("find contact resize separator")
+        .focus()
+        .await
+        .expect("focus contact resize separator");
+    let before_resize = eval_json(
+        &harness,
+        &format!(
+            "Number(document.querySelector(\"{contact_separator}\").getAttribute('aria-valuenow'))"
+        ),
+    )
+    .await;
+    harness
+        .press_key_sequence(&[Key::ArrowLeft, Key::ArrowLeft])
+        .await
+        .expect("resize the contact column from the keyboard");
+    let after_resize = eval_json(
+        &harness,
+        &format!(
+            "Number(document.querySelector(\"{contact_separator}\").getAttribute('aria-valuenow'))"
+        ),
+    )
+    .await;
+    assert!(
+        after_resize.as_f64() < before_resize.as_f64(),
+        "keyboard resize must reduce the contact column width: before={before_resize}, after={after_resize}"
+    );
+    let resized = inspect_contact_presentation(&harness, "presentation-1", false).await;
+    assert_eq!(resized["primaryText"], localized["primaryText"]);
+    assert_eq!(resized["secondaryText"], localized["secondaryText"]);
+
+    // Compact width: the same primary/secondary structure renders inside
+    // the compact (label/value) row instead of the wide `<td>`.
+    harness
+        .set_viewport(ViewportSize::new(390, 844))
+        .await
+        .expect("set compact viewport for the contact column");
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    let compact = inspect_contact_presentation(&harness, "presentation-1", true).await;
+    assert_eq!(compact["primaryText"], json!("Jordan Blake"));
+    assert_eq!(compact["secondaryText"], json!("Líder de equipo"));
+    assert_eq!(
+        compact["accessibleText"],
+        json!("Jordan Blake — Líder de equipo")
+    );
+    let compact_empty = inspect_contact_presentation(&harness, "presentation-3", true).await;
+    assert_eq!(compact_empty["hasSecondary"], json!(false));
+    assert_eq!(
+        eval_json(
+            &harness,
+            "document.documentElement.scrollWidth > document.documentElement.clientWidth"
+        )
+        .await,
+        json!(false),
+        "the compact contact cell must not overflow the page"
+    );
+    harness
+        .set_viewport(ViewportSize::new(1280, 800))
+        .await
+        .expect("restore wide viewport before hiding the contact column");
+
+    // Hiding: the column chooser removing `contact` drops both the header
+    // and every row's presentation from the wide DOM.
+    click(&harness, "[data-entity-column-chooser]").await;
+    click(&harness, "[role='menu'] [data-entity-column='contact']").await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(
+        eval_json(
+            &harness,
+            "document.querySelector(\"#entity-table-presentation-fixture th[data-entity-column='contact']\")",
+        )
+        .await,
+        Value::Null,
+        "hiding the contact column must remove its header"
+    );
+    assert_eq!(
+        eval_json(
+            &harness,
+            "document.querySelector(\"#entity-table-presentation-fixture td[data-entity-column='contact']\")",
+        )
+        .await,
+        Value::Null,
+        "hiding the contact column must remove its cells"
+    );
+    click(&harness, "[data-entity-column-chooser]").await;
+    click(&harness, "[role='menu'] [data-entity-column='contact']").await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(
+        eval_json(
+            &harness,
+            "!!document.querySelector(\"#entity-table-presentation-fixture th[data-entity-column='contact']\")",
+        )
+        .await
+        .as_bool()
+        .unwrap_or(false),
+        "re-showing the contact column must restore its header"
+    );
+
+    assert_no_browser_errors(&harness, "EntityColumn primary/secondary presentation").await;
+}

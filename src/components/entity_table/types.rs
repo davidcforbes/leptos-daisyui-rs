@@ -24,12 +24,29 @@ pub type EntityBadgeCell<T> = Rc<dyn Fn(&T) -> Option<EntityBadgePresentation>>;
 /// A callback that maps a typed row to an ordinary semantic icon treatment.
 pub type EntityIconCell<T> = Rc<dyn Fn(&T) -> Option<EntityIconPresentation>>;
 
+/// A callback that renders the primary (first) line of a two-line canonical
+/// text presentation from a borrowed row.
+pub type EntityPrimaryTextCell<T> = Rc<dyn Fn(&T) -> String>;
+
+/// A callback that renders the optional secondary (second) line of a
+/// two-line canonical text presentation from a borrowed row. `None` (or an
+/// empty/whitespace-only value) omits the secondary line entirely.
+pub type EntitySecondaryTextCell<T> = Rc<dyn Fn(&T) -> Option<String>>;
+
 /// Framework-owned visual treatment for a canonical text value.
 pub enum EntityCellPresentation<T> {
     /// Render canonical text inside an LDUI badge when the mapper returns `Some`.
     Badge(EntityBadgeCell<T>),
     /// Render a decorative LDUI icon plus canonical screen-reader text.
     Icon(EntityIconCell<T>),
+    /// Render an opinionated primary line plus an optional muted secondary
+    /// line beneath it, in place of one plain canonical-text line.
+    PrimarySecondary {
+        /// Renders the primary line for a borrowed row.
+        primary: EntityPrimaryTextCell<T>,
+        /// Renders the optional secondary line for a borrowed row.
+        secondary: EntitySecondaryTextCell<T>,
+    },
 }
 
 impl<T> Clone for EntityCellPresentation<T> {
@@ -37,6 +54,10 @@ impl<T> Clone for EntityCellPresentation<T> {
         match self {
             Self::Badge(mapper) => Self::Badge(Rc::clone(mapper)),
             Self::Icon(mapper) => Self::Icon(Rc::clone(mapper)),
+            Self::PrimarySecondary { primary, secondary } => Self::PrimarySecondary {
+                primary: Rc::clone(primary),
+                secondary: Rc::clone(secondary),
+            },
         }
     }
 }
@@ -46,8 +67,18 @@ impl<T> fmt::Debug for EntityCellPresentation<T> {
         formatter.write_str(match self {
             Self::Badge(_) => "EntityCellPresentation::Badge(..)",
             Self::Icon(_) => "EntityCellPresentation::Icon(..)",
+            Self::PrimarySecondary { .. } => "EntityCellPresentation::PrimarySecondary(..)",
         })
     }
+}
+
+/// Normalizes a caller-supplied optional secondary line, folding an empty or
+/// whitespace-only value to `None`.
+///
+/// [`EntityColumn::primary_secondary`] renders no secondary line -- and
+/// therefore no extra spacing or punctuation -- when this returns `None`.
+pub(crate) fn normalize_entity_secondary_text(secondary: Option<String>) -> Option<String> {
+    secondary.filter(|value| !value.trim().is_empty())
 }
 
 /// Framework-owned badge appearance. Visible text always comes from the
@@ -1292,6 +1323,32 @@ impl<T: 'static> EntityColumn<T> {
         presentation: impl Fn(&T) -> Option<EntityIconPresentation> + 'static,
     ) -> Self {
         self.presentation = Some(EntityCellPresentation::Icon(Rc::new(presentation)));
+        self
+    }
+
+    /// Renders canonical text as an opinionated primary line plus an
+    /// optional muted secondary line beneath it, instead of one plain line.
+    ///
+    /// `primary` and `secondary` control only the visual split. The
+    /// column's canonical `text` callback (see [`Self::new`]) remains the
+    /// sole accessible name and exported value -- it must stay complete on
+    /// its own, because the framework announces it once (never the visible
+    /// primary/secondary text a second time). `secondary` returning `None`,
+    /// or an empty or whitespace-only string, renders no secondary line and
+    /// therefore no extra spacing or punctuation. Sorting is untouched by
+    /// this call: the column keeps whatever `sort_key`/comparator it already
+    /// had, defaulting to the canonical text unless overridden with
+    /// [`Self::sortable_by_key`] or [`Self::sortable_by`]. A rich
+    /// [`Self::render_with`] renderer always takes visual precedence.
+    pub fn primary_secondary(
+        mut self,
+        primary: impl Fn(&T) -> String + 'static,
+        secondary: impl Fn(&T) -> Option<String> + 'static,
+    ) -> Self {
+        self.presentation = Some(EntityCellPresentation::PrimarySecondary {
+            primary: Rc::new(primary),
+            secondary: Rc::new(secondary),
+        });
         self
     }
 

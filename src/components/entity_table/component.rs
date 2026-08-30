@@ -21,6 +21,7 @@ use super::types::{
     EntityTablePreferencePersistence, EntityTablePreferences, EntityTableTexts,
     EntityTableViewportFit, EntityTextOverflow, entity_alignment_class,
     entity_compact_alignment_class, entity_header_justify_class, entity_text_overflow_style,
+    normalize_entity_secondary_text,
 };
 use crate::components::badge::{Badge, BadgeSize};
 use crate::components::button::Button;
@@ -2348,6 +2349,7 @@ fn render_cell<T: 'static>(row: &T, column: &EntityColumn<T>) -> AnyView {
     let presentation_kind = match presentation {
         EntityCellPresentation::Badge(_) => "badge",
         EntityCellPresentation::Icon(_) => "icon",
+        EntityCellPresentation::PrimarySecondary { .. } => "primary-secondary",
     };
     if text.is_empty() {
         return view! {
@@ -2404,7 +2406,55 @@ fn render_cell<T: 'static>(row: &T, column: &EntityColumn<T>) -> AnyView {
             }
             .into_any()
         }
+        EntityCellPresentation::PrimarySecondary { primary, secondary } => {
+            let primary_text = primary(row);
+            let secondary_text = normalize_entity_secondary_text(secondary(row));
+            render_primary_secondary_cell(text, primary_text, secondary_text, column.text_overflow)
+        }
     }
+}
+
+fn render_primary_secondary_cell(
+    accessible_text: String,
+    primary: String,
+    secondary: Option<String>,
+    overflow: EntityTextOverflow,
+) -> AnyView {
+    let title = (!matches!(overflow, EntityTextOverflow::Wrap)).then(|| accessible_text.clone());
+    view! {
+        <span
+            class="inline-flex min-w-0 max-w-full flex-col"
+            title=title
+            data-entity-semantic-cell="primary-secondary"
+        >
+            <span aria-hidden="true" class="flex min-w-0 max-w-full flex-col">
+                <span
+                    class="ld-text-body block min-w-0 max-w-full forced-colors:text-[CanvasText]"
+                    style=entity_text_overflow_style(overflow)
+                    data-entity-text-overflow=overflow.as_str()
+                    data-entity-line-clamp=overflow.lines().map(|lines| lines.get())
+                    data-entity-primary-secondary-line="primary"
+                >
+                    {primary}
+                </span>
+                {secondary.map(|secondary_text| {
+                    view! {
+                        <span
+                            class="ld-text-caption block min-w-0 max-w-full text-base-content/75 forced-colors:text-[CanvasText]"
+                            style=entity_text_overflow_style(overflow)
+                            data-entity-text-overflow=overflow.as_str()
+                            data-entity-line-clamp=overflow.lines().map(|lines| lines.get())
+                            data-entity-primary-secondary-line="secondary"
+                        >
+                            {secondary_text}
+                        </span>
+                    }
+                })}
+            </span>
+            <span class="sr-only">{accessible_text}</span>
+        </span>
+    }
+    .into_any()
 }
 
 fn render_plain_cell(
