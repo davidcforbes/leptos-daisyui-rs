@@ -2953,11 +2953,11 @@ async fn entity_column_primary_secondary_composes_two_accessible_lines() {
     assert_eq!(with_secondary["primaryForcedColors"], json!(true));
     assert_eq!(with_secondary["primaryOverflow"], json!("wrap"));
     assert_eq!(with_secondary["hasSecondary"], json!(true));
-    assert_eq!(with_secondary["secondaryText"], json!("Team lead"));
+    assert_eq!(with_secondary["secondaryText"], json!("Role: Team lead"));
     assert_eq!(with_secondary["secondaryForcedColors"], json!(true));
     assert_eq!(
         with_secondary["accessibleText"],
-        json!("Jordan Blake — Team lead"),
+        json!("Jordan Blake (Role: Team lead)"),
         "the sr-only accessible name must be the complete canonical value"
     );
     assert_eq!(with_secondary["wrapperTitle"], Value::Null);
@@ -2977,17 +2977,83 @@ async fn entity_column_primary_secondary_composes_two_accessible_lines() {
     assert_eq!(absent_secondary["hasSecondary"], json!(false));
     assert_eq!(absent_secondary["accessibleText"], json!("Alex Chen"));
 
-    // Reactive row-data replacement re-renders both lines from the same
-    // static column, not just the primary one.
+    // Reactive ROW-DATA replacement is a different reactive primitive from a
+    // columns-Signal swap: the fixture's `columns` Signal only tracks
+    // `column_locale`, never the row-data toggle, so it must leave the
+    // contact column's rendered lines untouched -- proving the two
+    // mechanisms are isolated before the columns-Signal assertion below.
     click(&harness, "[data-testid='entity-presentation-locale']").await;
-    let localized = inspect_contact_presentation(&harness, "presentation-1", false).await;
-    assert_eq!(localized["primaryText"], json!("Jordan Blake"));
-    assert_eq!(localized["secondaryText"], json!("Líder de equipo"));
+    let after_row_toggle = inspect_contact_presentation(&harness, "presentation-1", false).await;
     assert_eq!(
-        localized["accessibleText"],
-        json!("Jordan Blake — Líder de equipo"),
-        "reactive replacement must update the accessible line alongside the visual ones"
+        after_row_toggle["secondaryText"], with_secondary["secondaryText"],
+        "a row-data-only toggle must not touch the columns-Signal-driven presentation"
     );
+    assert_eq!(
+        after_row_toggle["accessibleText"],
+        with_secondary["accessibleText"]
+    );
+
+    // Reactive COLUMN replacement (the established meaning in this codebase:
+    // swapping the whole `columns` prop for a new `Signal<Vec<EntityColumn<T>>>`
+    // value, see `ColumnStore::Reactive` in component.rs and the
+    // "locale-only column replacement reset surviving table preferences"
+    // case in `controlled_preferences_reorder_columns_and_compose_sort_clauses`
+    // above). The new Vec's `contact` column carries fresh primary/secondary
+    // closures -- a locale-style relabel of the secondary composition -- so
+    // this proves EntityColumn::primary_secondary re-renders both lines when
+    // the *columns list itself* is replaced, not just row data, and that the
+    // framework's column-generation marker advances accordingly.
+    let generation_before = eval_json(
+        &harness,
+        "Number(document.querySelector('[data-entity-focus-region]').dataset.entityColumnGeneration)",
+    )
+    .await;
+    click(
+        &harness,
+        "[data-testid='entity-presentation-column-locale']",
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let generation_after = eval_json(
+        &harness,
+        "Number(document.querySelector('[data-entity-focus-region]').dataset.entityColumnGeneration)",
+    )
+    .await;
+    assert!(
+        generation_after.as_f64() > generation_before.as_f64(),
+        "swapping the columns Signal must bump the column-generation marker: before={generation_before}, after={generation_after}"
+    );
+    let header_text = eval_json(
+        &harness,
+        "document.querySelector(\"#entity-table-presentation-fixture th[data-entity-column='contact']\").textContent.replace(/\\s+/g, ' ').trim()",
+    )
+    .await;
+    assert!(
+        header_text
+            .as_str()
+            .is_some_and(|text| text.contains("Principal y secundario")),
+        "the columns Signal swap must relabel the contact header: {header_text}"
+    );
+    let column_localized = inspect_contact_presentation(&harness, "presentation-1", false).await;
+    assert_eq!(
+        column_localized["primaryText"],
+        json!("Jordan Blake"),
+        "the primary line's closure is unchanged by the relabel, only the secondary's is"
+    );
+    assert_eq!(column_localized["secondaryText"], json!("Rol: Team lead"));
+    assert_eq!(
+        column_localized["accessibleText"],
+        json!("Jordan Blake (Rol: Team lead)"),
+        "the columns Signal swap must update the accessible line alongside the visual ones"
+    );
+    let column_localized_empty =
+        inspect_contact_presentation(&harness, "presentation-3", false).await;
+    assert_eq!(
+        column_localized_empty["hasSecondary"],
+        json!(false),
+        "a row with no role stays secondary-less after the columns Signal swap"
+    );
+    assert_eq!(column_localized_empty["accessibleText"], json!("Alex Chen"));
 
     // Resizing the column changes only geometry: both lines keep their text.
     let contact_separator = "th[data-entity-column='contact'] [role='separator']";
@@ -3022,8 +3088,8 @@ async fn entity_column_primary_secondary_composes_two_accessible_lines() {
         "keyboard resize must reduce the contact column width: before={before_resize}, after={after_resize}"
     );
     let resized = inspect_contact_presentation(&harness, "presentation-1", false).await;
-    assert_eq!(resized["primaryText"], localized["primaryText"]);
-    assert_eq!(resized["secondaryText"], localized["secondaryText"]);
+    assert_eq!(resized["primaryText"], column_localized["primaryText"]);
+    assert_eq!(resized["secondaryText"], column_localized["secondaryText"]);
 
     // Compact width: the same primary/secondary structure renders inside
     // the compact (label/value) row instead of the wide `<td>`.
@@ -3034,10 +3100,10 @@ async fn entity_column_primary_secondary_composes_two_accessible_lines() {
     tokio::time::sleep(Duration::from_millis(150)).await;
     let compact = inspect_contact_presentation(&harness, "presentation-1", true).await;
     assert_eq!(compact["primaryText"], json!("Jordan Blake"));
-    assert_eq!(compact["secondaryText"], json!("Líder de equipo"));
+    assert_eq!(compact["secondaryText"], json!("Rol: Team lead"));
     assert_eq!(
         compact["accessibleText"],
-        json!("Jordan Blake — Líder de equipo")
+        json!("Jordan Blake (Rol: Team lead)")
     );
     let compact_empty = inspect_contact_presentation(&harness, "presentation-3", true).await;
     assert_eq!(compact_empty["hasSecondary"], json!(false));

@@ -1,7 +1,7 @@
 use super::*;
 use crate::components::badge::{BadgeColor, BadgeStyle};
 use crate::components::data_table::{clamp_page, page_bounds, page_count};
-use leptos::prelude::{Callback, Get, IntoAny, RwSignal, Set, StoredValue};
+use leptos::prelude::{Callback, Get, IntoAny, RwSignal, Set, Signal, StoredValue};
 use leptos::reactive::owner::Owner;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -1134,6 +1134,54 @@ fn primary_secondary_rich_renderer_still_wins() {
         column.renderer.is_some(),
         "render_with remains the visual winner over primary_secondary"
     );
+}
+
+/// Builds a column whose secondary line is relabeled by `role_label`,
+/// mirroring the locale-style relabel the `entity-table-presentation` demo
+/// fixture performs when its `columns` prop is replaced.
+fn locale_labeled_column(role_label: &'static str) -> EntityColumn<Row> {
+    EntityColumn::text("who", "Who", |row: &Row| row.name.to_owned()).primary_secondary(
+        |row: &Row| row.name.to_owned(),
+        move |row: &Row| Some(format!("{role_label}: {}", row.id)),
+    )
+}
+
+#[test]
+fn primary_secondary_reflects_a_columns_signal_replacement() {
+    // The established meaning of "column replacement" in this codebase is
+    // swapping the whole `columns` prop for a new `Signal<Vec<EntityColumn<T>>>`
+    // value (`EntityColumns::Reactive`, consumed as `ColumnStore::Reactive`
+    // in component.rs) -- not mutating row data through static columns. This
+    // proves a primary_secondary presentation's closures come from whatever
+    // Vec the columns Signal currently holds, so replacing it changes both
+    // lines, exactly as `EntityColumn::text` header/text closures already do.
+    let owner = Owner::new();
+    owner.with(|| {
+        let source = RwSignal::new_local(vec![locale_labeled_column("Role")]);
+        let EntityColumns::Reactive(reactive) = EntityColumns::from(Signal::from(source)) else {
+            panic!("Signal::from(source).into() must produce EntityColumns::Reactive");
+        };
+
+        let sample = rows();
+        let read_secondary = |snapshot: &[EntityColumn<Row>]| {
+            let Some(EntityCellPresentation::PrimarySecondary { secondary, .. }) =
+                snapshot[0].presentation.as_ref()
+            else {
+                panic!("expected a PrimarySecondary presentation");
+            };
+            secondary(&sample[0])
+        };
+
+        assert_eq!(read_secondary(&reactive.get()), Some("Role: r1".to_owned()));
+
+        source.set(vec![locale_labeled_column("Rol")]);
+
+        assert_eq!(
+            read_secondary(&reactive.get()),
+            Some("Rol: r1".to_owned()),
+            "replacing the columns Signal must be reflected in the presentation's secondary closure"
+        );
+    });
 }
 
 #[test]

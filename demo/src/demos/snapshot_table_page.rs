@@ -467,98 +467,51 @@ pub struct EntityTablePresentationRow {
     contact_role: Option<String>,
 }
 
-/// Focused browser fixture for framework-owned EntityColumn presentation.
-#[component]
-pub fn EntityTablePresentationFixture() -> impl IntoView {
-    let data = RwSignal::new_local(Rc::new(vec![
-        EntityTablePresentationRow {
-            id: "presentation-1".to_owned(),
-            reference: "REFERENCE-WITH-ONE-UNBROKEN-VALUE-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-                .to_owned(),
-            narrative: "This canonical narrative is intentionally long enough to occupy more than two visual lines while remaining complete in the DOM for assistive technology and export."
-                .to_owned(),
-            rich: "Canonical rich-renderer fallback text".to_owned(),
-            number: 10,
-            date_key: (2026, 1, 2),
-            optional_rank: None,
-            currency: "-$12,345,678,901.25".to_owned(),
-            percentage: "100.00%".to_owned(),
-            status: "Needs review".to_owned(),
-            icon_label: "Enabled".to_owned(),
-            contact_name: "Jordan Blake".to_owned(),
-            contact_role: Some("Team lead".to_owned()),
+/// Builds the `contact` column's `primary_secondary` presentation.
+/// `localized` reconstructs both the header and the closures that produce
+/// the primary/secondary lines, so replacing the whole `columns` list (not
+/// just row data) with a fresh call is what changes the rendered text.
+fn presentation_contact_column(localized: bool) -> EntityColumn<EntityTablePresentationRow> {
+    let header = if localized {
+        "Principal y secundario"
+    } else {
+        "Primary and secondary"
+    };
+    let role_label = if localized { "Rol" } else { "Role" };
+    EntityColumn::text(
+        "contact",
+        header,
+        move |row: &EntityTablePresentationRow| match row
+            .contact_role
+            .as_deref()
+            .map(str::trim)
+            .filter(|role| !role.is_empty())
+        {
+            Some(role) => format!("{} ({role_label}: {role})", row.contact_name),
+            None => row.contact_name.clone(),
         },
-        EntityTablePresentationRow {
-            id: "presentation-2".to_owned(),
-            reference: "SHORT-2".to_owned(),
-            narrative: "A short narrative.".to_owned(),
-            rich: "Second rich value".to_owned(),
-            number: 2,
-            date_key: (2025, 12, 31),
-            optional_rank: Some(10),
-            currency: "$24.00".to_owned(),
-            percentage: "20.50%".to_owned(),
-            status: "Ready".to_owned(),
-            icon_label: "Attention".to_owned(),
-            contact_name: "Sam Rivera".to_owned(),
-            contact_role: Some(String::new()),
+    )
+    .primary_secondary(
+        |row: &EntityTablePresentationRow| row.contact_name.clone(),
+        move |row: &EntityTablePresentationRow| {
+            row.contact_role
+                .as_deref()
+                .map(str::trim)
+                .filter(|role| !role.is_empty())
+                .map(|role| format!("{role_label}: {role}"))
         },
-        EntityTablePresentationRow {
-            id: "presentation-3".to_owned(),
-            reference: "NEGATIVE-3".to_owned(),
-            narrative: "Signed numeric ordering fixture.".to_owned(),
-            rich: "Third rich value".to_owned(),
-            number: -3,
-            date_key: (2026, 1, 1),
-            optional_rank: Some(2),
-            currency: "-$3.00".to_owned(),
-            percentage: "-3.00%".to_owned(),
-            status: "Unknown status".to_owned(),
-            icon_label: "Unknown state".to_owned(),
-            contact_name: "Alex Chen".to_owned(),
-            contact_role: None,
-        },
-        EntityTablePresentationRow {
-            id: "presentation-4".to_owned(),
-            reference: "SECOND-TWO".to_owned(),
-            narrative: "Stable equal-key ordering fixture.".to_owned(),
-            rich: "Fourth rich value".to_owned(),
-            number: 2,
-            date_key: (2026, 2, 1),
-            optional_rank: Some(10),
-            currency: "$2.00".to_owned(),
-            percentage: "2.00%".to_owned(),
-            status: String::new(),
-            icon_label: String::new(),
-            contact_name: "Morgan Lee".to_owned(),
-            contact_role: Some("Reviewer".to_owned()),
-        },
-    ]));
-    let semantic_localized = RwSignal::new(false);
-    let toggle_semantic_locale = Callback::new(move |_| {
-        let localized = !semantic_localized.get_untracked();
-        semantic_localized.set(localized);
-        data.update(|rows| {
-            let mut replacement = rows.as_ref().clone();
-            replacement[0].status = if localized {
-                "Revisión necesaria"
-            } else {
-                "Needs review"
-            }
-            .to_owned();
-            replacement[0].icon_label = if localized { "Habilitado" } else { "Enabled" }.to_owned();
-            replacement[0].contact_role = Some(
-                if localized {
-                    "Líder de equipo"
-                } else {
-                    "Team lead"
-                }
-                .to_owned(),
-            );
-            *rows = Rc::new(replacement);
-        });
-    });
-    let columns = vec![
+    )
+    .with_min_width(140)
+    .with_width(170)
+}
+
+/// Builds every column for [`EntityTablePresentationFixture`]. Only
+/// `contact` (see [`presentation_contact_column`]) varies with `localized`;
+/// the rest are rebuilt identically on every call, matching how
+/// `client_snapshot_list.rs`'s `demo_columns` reconstructs its full column
+/// list from one locale flag.
+fn presentation_columns(localized: bool) -> Vec<EntityColumn<EntityTablePresentationRow>> {
+    vec![
         EntityColumn::text(
             "reference",
             "Reference",
@@ -667,26 +620,106 @@ pub fn EntityTablePresentationFixture() -> impl IntoView {
             _ => Some(EntityIconPresentation::new("check", EntityIconColor::Info)),
         })
         .with_width(145),
-        EntityColumn::text(
-            "contact",
-            "Primary and secondary",
-            |row: &EntityTablePresentationRow| match row
-                .contact_role
-                .as_deref()
-                .map(str::trim)
-                .filter(|role| !role.is_empty())
-            {
-                Some(role) => format!("{} — {role}", row.contact_name),
-                None => row.contact_name.clone(),
-            },
-        )
-        .primary_secondary(
-            |row: &EntityTablePresentationRow| row.contact_name.clone(),
-            |row: &EntityTablePresentationRow| row.contact_role.clone(),
-        )
-        .with_min_width(140)
-        .with_width(170),
-    ];
+        presentation_contact_column(localized),
+    ]
+}
+
+/// Focused browser fixture for framework-owned EntityColumn presentation.
+#[component]
+pub fn EntityTablePresentationFixture() -> impl IntoView {
+    let data = RwSignal::new_local(Rc::new(vec![
+        EntityTablePresentationRow {
+            id: "presentation-1".to_owned(),
+            reference: "REFERENCE-WITH-ONE-UNBROKEN-VALUE-0123456789-ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                .to_owned(),
+            narrative: "This canonical narrative is intentionally long enough to occupy more than two visual lines while remaining complete in the DOM for assistive technology and export."
+                .to_owned(),
+            rich: "Canonical rich-renderer fallback text".to_owned(),
+            number: 10,
+            date_key: (2026, 1, 2),
+            optional_rank: None,
+            currency: "-$12,345,678,901.25".to_owned(),
+            percentage: "100.00%".to_owned(),
+            status: "Needs review".to_owned(),
+            icon_label: "Enabled".to_owned(),
+            contact_name: "Jordan Blake".to_owned(),
+            contact_role: Some("Team lead".to_owned()),
+        },
+        EntityTablePresentationRow {
+            id: "presentation-2".to_owned(),
+            reference: "SHORT-2".to_owned(),
+            narrative: "A short narrative.".to_owned(),
+            rich: "Second rich value".to_owned(),
+            number: 2,
+            date_key: (2025, 12, 31),
+            optional_rank: Some(10),
+            currency: "$24.00".to_owned(),
+            percentage: "20.50%".to_owned(),
+            status: "Ready".to_owned(),
+            icon_label: "Attention".to_owned(),
+            contact_name: "Sam Rivera".to_owned(),
+            contact_role: Some(String::new()),
+        },
+        EntityTablePresentationRow {
+            id: "presentation-3".to_owned(),
+            reference: "NEGATIVE-3".to_owned(),
+            narrative: "Signed numeric ordering fixture.".to_owned(),
+            rich: "Third rich value".to_owned(),
+            number: -3,
+            date_key: (2026, 1, 1),
+            optional_rank: Some(2),
+            currency: "-$3.00".to_owned(),
+            percentage: "-3.00%".to_owned(),
+            status: "Unknown status".to_owned(),
+            icon_label: "Unknown state".to_owned(),
+            contact_name: "Alex Chen".to_owned(),
+            contact_role: None,
+        },
+        EntityTablePresentationRow {
+            id: "presentation-4".to_owned(),
+            reference: "SECOND-TWO".to_owned(),
+            narrative: "Stable equal-key ordering fixture.".to_owned(),
+            rich: "Fourth rich value".to_owned(),
+            number: 2,
+            date_key: (2026, 2, 1),
+            optional_rank: Some(10),
+            currency: "$2.00".to_owned(),
+            percentage: "2.00%".to_owned(),
+            status: String::new(),
+            icon_label: String::new(),
+            contact_name: "Morgan Lee".to_owned(),
+            contact_role: Some("Reviewer".to_owned()),
+        },
+    ]));
+    let semantic_localized = RwSignal::new(false);
+    let toggle_semantic_locale = Callback::new(move |_| {
+        let localized = !semantic_localized.get_untracked();
+        semantic_localized.set(localized);
+        data.update(|rows| {
+            let mut replacement = rows.as_ref().clone();
+            replacement[0].status = if localized {
+                "Revisión necesaria"
+            } else {
+                "Needs review"
+            }
+            .to_owned();
+            replacement[0].icon_label = if localized { "Habilitado" } else { "Enabled" }.to_owned();
+            *rows = Rc::new(replacement);
+        });
+    });
+    // Distinct from `semantic_localized` above: this toggles the `columns`
+    // *Signal itself* -- an entirely new `Vec<EntityColumn<_>>` with new
+    // primary/secondary closures for the `contact` column -- rather than
+    // mutating row data through the existing static columns. Proves
+    // EntityColumn::primary_secondary re-renders both lines when the caller
+    // replaces the columns list reactively (ldui-97v), the same reactive
+    // primitive `client_snapshot_list.rs`'s locale toggle exercises for
+    // plain-text columns.
+    let column_locale = RwSignal::new(false);
+    let toggle_column_locale = Callback::new(move |_| {
+        column_locale.update(|localized| *localized = !*localized);
+    });
+    let columns = Signal::derive_local(move || presentation_columns(column_locale.get()));
 
     view! {
         <section
@@ -697,12 +730,20 @@ pub fn EntityTablePresentationFixture() -> impl IntoView {
             <p class="text-sm text-base-content/70">
                 "Plain canonical values demonstrate ellipsis and two-line clipping; the rich column proves render_with precedence; the contact column demonstrates the opinionated primary/secondary presentation, including a row with no secondary line and a row with an empty one."
             </p>
-            <Button
-                attr:data-testid="entity-presentation-locale"
-                on_click=toggle_semantic_locale
-            >
-                "Toggle semantic cell locale"
-            </Button>
+            <div class="flex flex-wrap gap-2">
+                <Button
+                    attr:data-testid="entity-presentation-locale"
+                    on_click=toggle_semantic_locale
+                >
+                    "Toggle semantic cell locale"
+                </Button>
+                <Button
+                    attr:data-testid="entity-presentation-column-locale"
+                    on_click=toggle_column_locale
+                >
+                    "Toggle column-level locale"
+                </Button>
+            </div>
             <EntityTable
                 data=data
                 columns=columns
