@@ -213,10 +213,21 @@ pub fn filter_result_summary(summary: FilterResultSummary, texts: &FilterBarText
 /// available. Supplying the controlled optional bindings adds the canonical
 /// active summary, result count, one Reset, one Save as Default, and save
 /// feedback without taking ownership of any filter or persistence state.
+///
+/// `search` is optional (`ldui-3br`): a page composed entirely of column
+/// filters, or one whose only controls are the framework actions, omits it.
+/// When absent, the search wrapper is not rendered at all — no empty region,
+/// no hidden placeholder — and the remaining flex items (the `children`
+/// filter row, chips, result count, Reset, Save as Default, feedback) claim
+/// the freed row width via their existing `flex-grow`/`ml-auto` rules. Filter
+/// state, the active-filter schema, dataset identity, reset, persistence and
+/// localization are unaffected by whether `search` is supplied.
 #[component]
 pub fn FilterBar(
-    /// Search control rendered first and allowed to grow.
-    search: Children,
+    /// Search control rendered first and allowed to grow. Omit entirely for
+    /// a page with no free-text search — the wrapper is not rendered.
+    #[prop(optional)]
+    search: Option<Children>,
     /// Compatibility action content rendered before framework actions.
     #[prop(optional)]
     actions: Option<Children>,
@@ -269,9 +280,11 @@ pub fn FilterBar(
             data-filter-bar="local"
             aria-label=move || texts.with(|texts| texts.region_label.clone())
         >
-            <div class="min-w-56 flex-[2_1_20rem]" data-filter-search="true">
-                {search()}
-            </div>
+            {search.map(|search| view! {
+                <div class="min-w-56 flex-[2_1_20rem]" data-filter-search="true">
+                    {search()}
+                </div>
+            })}
             <div class="flex min-w-0 flex-[3_1_28rem] flex-wrap items-end gap-3">
                 {children.map(|children| children())}
             </div>

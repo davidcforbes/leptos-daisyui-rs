@@ -4089,3 +4089,151 @@ async fn spread_attr_type_overrides_the_input_type_prop() {
     );
     assert_no_browser_errors(&h, "input attr:type precedence probe").await;
 }
+
+/// FilterBar's `search` slot is optional (ldui-3br). The `actions-only`
+/// fixture (`demo/src/demos/client_snapshot_list.rs`,
+/// `data-testid="filter-bar-actions-only"`) supplies no `search` and no
+/// column-filter `children`: the bar must render no `[data-filter-search]`
+/// wrapper at all -- not an empty one -- while the framework actions row
+/// (Reset plus the caller's own compat action) still renders and works.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn filter_bar_actions_only_omits_the_search_wrapper() {
+    let h = harness_at("/components/client-snapshot-list").await;
+
+    let shape = eval_json(
+        &h,
+        r#"(() => {
+            const root = document.querySelector(
+                '[data-testid="filter-bar-actions-only"] [data-filter-bar="local"]'
+            );
+            return {
+                hasSearch: !!root.querySelector('[data-filter-search]'),
+                hasSummary: !!root.querySelector('[data-filter-summary]'),
+                hasResultCount: !!root.querySelector('[data-filter-result-count]'),
+                hasActions: !!root.querySelector('[data-filter-actions]'),
+                hasExportButton: !!root.querySelector('[data-testid="filter-bar-actions-only-export"]'),
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(shape["hasSearch"], json!(false), "{shape}");
+    assert_eq!(shape["hasSummary"], json!(false), "{shape}");
+    assert_eq!(shape["hasResultCount"], json!(false), "{shape}");
+    assert_eq!(shape["hasActions"], json!(true), "{shape}");
+    assert_eq!(shape["hasExportButton"], json!(true), "{shape}");
+
+    click(
+        &h,
+        "[data-testid=\"filter-bar-actions-only\"] [data-filter-reset]",
+    )
+    .await;
+    let reset_count =
+        eval_json(&h, "document.querySelector('[data-testid=\"filter-bar-actions-only-reset-count\"]').textContent")
+            .await;
+    assert_eq!(
+        reset_count,
+        json!("1"),
+        "Reset must still fire with no search slot present: {reset_count}"
+    );
+    assert_no_browser_errors(&h, "filter bar actions-only fixture").await;
+}
+
+/// The `columns-only` fixture (`data-testid="filter-bar-columns-only"`)
+/// supplies a column filter (`children`) plus the active-filter chip summary
+/// and result count, and no framework actions at all -- no `search`, no
+/// `on_reset`, no `default_save`. No `[data-filter-search]` or
+/// `[data-filter-actions]` wrapper should render, and the summary/result
+/// count must still react to the column filter -- omitting `search` changes
+/// none of that state wiring.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn filter_bar_columns_only_summary_omits_the_search_wrapper() {
+    let h = harness_at("/components/client-snapshot-list").await;
+
+    let before = eval_json(
+        &h,
+        r#"(() => {
+            const root = document.querySelector(
+                '[data-testid="filter-bar-columns-only"] [data-filter-bar="local"]'
+            );
+            return {
+                hasSearch: !!root.querySelector('[data-filter-search]'),
+                hasActions: !!root.querySelector('[data-filter-actions]'),
+                hasPrioritySelect: !!root.querySelector('[data-testid="filter-bar-columns-only-priority"]'),
+                resultText: root.querySelector('[data-filter-result-count]')?.textContent,
+                chipCount: root.querySelectorAll('[data-active-filters] .badge').length,
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(before["hasSearch"], json!(false), "{before}");
+    assert_eq!(before["hasActions"], json!(false), "{before}");
+    assert_eq!(before["hasPrioritySelect"], json!(true), "{before}");
+    assert_eq!(before["resultText"], json!("9 of 9 results"), "{before}");
+    assert_eq!(before["chipCount"], json!(0), "{before}");
+
+    eval_json(
+        &h,
+        r#"(() => {
+            const select = document.querySelector('[data-testid="filter-bar-columns-only-priority"]');
+            select.value = 'Urgent';
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+            return true;
+        })()"#,
+    )
+    .await;
+    settle(&h).await;
+
+    let after = eval_json(
+        &h,
+        r#"(() => {
+            const root = document.querySelector(
+                '[data-testid="filter-bar-columns-only"] [data-filter-bar="local"]'
+            );
+            return {
+                resultText: root.querySelector('[data-filter-result-count]')?.textContent,
+                chipCount: root.querySelectorAll('[data-active-filters] .badge').length,
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(
+        after["resultText"],
+        json!("3 of 9 results"),
+        "the result summary must react to the column filter with no search present: {after}"
+    );
+    assert_eq!(after["chipCount"], json!(1), "{after}");
+    assert_no_browser_errors(&h, "filter bar columns-only fixture").await;
+}
+
+/// The pre-existing search-backed FilterBar on the same page (no
+/// `data-testid` wrapper -- it is the client-snapshot table's own filter
+/// row) must keep rendering `[data-filter-search]` first, unaffected by the
+/// slot becoming optional (ldui-3br: existing search callers render
+/// compatibly).
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn filter_bar_ordinary_search_configuration_still_renders_the_search_wrapper_first() {
+    let h = harness_at("/components/client-snapshot-list").await;
+
+    let shape = eval_json(
+        &h,
+        r#"(() => {
+            const bars = document.querySelectorAll('[data-filter-bar="local"]');
+            const root = bars[0];
+            return {
+                total: bars.length,
+                firstChildIsSearch: root.children[0]?.hasAttribute('data-filter-search'),
+                hasSearchInput: !!root.querySelector('[data-filter-search] input'),
+                hasActions: !!root.querySelector('[data-filter-actions]'),
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(shape["total"], json!(3), "{shape}");
+    assert_eq!(shape["firstChildIsSearch"], json!(true), "{shape}");
+    assert_eq!(shape["hasSearchInput"], json!(true), "{shape}");
+    assert_eq!(shape["hasActions"], json!(true), "{shape}");
+    assert_no_browser_errors(&h, "filter bar ordinary search configuration").await;
+}

@@ -462,6 +462,33 @@ pub fn ClientSnapshotListDemo() -> impl IntoView {
         }
     });
 
+    // ldui-3br: two standalone FilterBar fixtures with no `search` slot, for
+    // the reactivity suite's `actions-only` and `columns-only` coverage.
+    // Independent of the table above (own signals, no shared dataset
+    // identity) since the bead is layout-only.
+    let actions_only_reset_count = RwSignal::new(0_usize);
+    let columns_only_priority = RwSignal::new(String::new());
+    let columns_only_chips = Signal::derive(move || {
+        let value = columns_only_priority.get();
+        if value.is_empty() {
+            Vec::new()
+        } else {
+            vec![ActiveFilterChip::new("priority", "Priority", value)]
+        }
+    });
+    let columns_only_result = Signal::derive(move || {
+        FilterResultSummary::new(
+            if columns_only_priority.get().is_empty() {
+                9
+            } else {
+                3
+            },
+            9,
+        )
+    });
+    let columns_only_remove =
+        Callback::new(move |_: String| columns_only_priority.set(String::new()));
+
     view! {
         <ListPage contract_id=CLIENT_SNAPSHOT_DEMO_PAGE.id>
             <PageHeader
@@ -563,6 +590,61 @@ pub fn ClientSnapshotListDemo() -> impl IntoView {
                 default_save=default_save
                 texts=filter_texts
             />
+
+            // ldui-3br fixture: no `search` slot, framework actions only —
+            // the reactivity suite asserts no `[data-filter-search]` wrapper
+            // renders here and that Reset still works.
+            <div data-testid="filter-bar-actions-only">
+                <FilterBar
+                    on_reset=Callback::new(move |()| {
+                        actions_only_reset_count.update(|count| *count += 1);
+                    })
+                    actions=Box::new(|| view! {
+                        <Button
+                            class="btn-outline btn-sm"
+                            attr:data-testid="filter-bar-actions-only-export"
+                        >
+                            "Export"
+                        </Button>
+                    }.into_any())
+                />
+                <p class="text-xs text-base-content/60">
+                    "Actions-only resets: "
+                    <strong data-testid="filter-bar-actions-only-reset-count">
+                        {move || actions_only_reset_count.get()}
+                    </strong>
+                </p>
+            </div>
+
+            // ldui-3br fixture: no `search` slot, one column filter plus the
+            // active-filter chip summary and result count, no actions at
+            // all — the reactivity suite asserts no `[data-filter-search]`
+            // and no `[data-filter-actions]` wrapper renders here.
+            <div data-testid="filter-bar-columns-only">
+                <FilterBar
+                    active_filters=columns_only_chips
+                    on_remove=columns_only_remove
+                    result=columns_only_result
+                >
+                    <label class="flex flex-col gap-1">
+                        <span class="text-xs font-medium">"Priority"</span>
+                        <Select
+                            class="select-sm"
+                            attr:data-testid="filter-bar-columns-only-priority"
+                            on:change=move |event| {
+                                columns_only_priority.set(event_target_value(&event));
+                            }
+                        >
+                            <option value="" selected=move || columns_only_priority.get().is_empty()>
+                                "All priorities"
+                            </option>
+                            <option value="Urgent" selected=move || columns_only_priority.get() == "Urgent">
+                                "Urgent"
+                            </option>
+                        </Select>
+                    </label>
+                </FilterBar>
+            </div>
 
             <div class="flex flex-wrap gap-4 text-xs text-base-content/60" aria-live="polite">
                 <span>"Claims: " <strong data-testid="entity-claim-count">{move || claim_count.get()}</strong></span>

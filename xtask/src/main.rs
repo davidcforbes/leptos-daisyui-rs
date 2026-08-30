@@ -2097,13 +2097,14 @@ pub fn r() -> f32 { radius::CARD }
     }
 
     #[test]
-    fn reactivity_lane_has_exactly_42_browser_checks() {
+    fn reactivity_lane_has_exactly_45_browser_checks() {
         let source = include_str!("../../tests/reactivity_smoke.rs");
         assert_eq!(
             source.matches("#[tokio::test").count(),
-            42,
-            "the explicitly requested reactivity lane must keep its 42 checks \
-             (39 + 3 added for ldui-z16's temporal InputType variants)"
+            45,
+            "the explicitly requested reactivity lane must keep its 45 checks \
+             (39 + 3 added for ldui-z16's temporal InputType variants + 3 added \
+             for ldui-3br's FilterBar optional-search fixtures)"
         );
     }
 
