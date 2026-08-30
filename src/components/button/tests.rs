@@ -302,9 +302,9 @@ fn test_resolve_native_disabled_loading_alone_leaves_button_and_reset_enabled() 
 }
 
 /// Full 2x2x3 matrix against the documented formula, so a future edit to
-/// `resolve_native_disabled` that drifts from `disabled || (loading &&
-/// button_type == Submit)` fails here rather than only in the targeted
-/// cases above.
+/// `resolve_native_disabled` that drifts from
+/// `disabled || (loading && button_type == Submit)` fails here rather than
+/// only in the targeted cases above.
 #[test]
 fn test_resolve_native_disabled_matches_the_documented_formula_for_every_combination() {
     for &disabled in &[false, true] {

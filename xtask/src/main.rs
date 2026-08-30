@@ -380,11 +380,11 @@ fn section_heading_step() -> Step {
 /// focuses the search field, Escape/Cancel closes and restores focus, typed
 /// activation resolves the current keyed payload, async replacement/stale
 /// responses never activate an old payload, and two independent dialog
-/// instances don't collide. Lives on the general demo app (`html_target:
-/// None`, like [`reactivity_step`]/[`layout_step`]/[`style_step`]/
-/// [`result_list_step`]/[`section_heading_step`]) rather than a dedicated
-/// test-host page, and stays in its own file/step for the same reason as
-/// [`result_list_step`]/[`section_heading_step`].
+/// instances don't collide. Lives on the general demo app
+/// (`html_target: None`, like [`reactivity_step`]/[`layout_step`]/
+/// [`style_step`]/[`result_list_step`]/[`section_heading_step`]) rather than
+/// a dedicated test-host page, and stays in its own file/step for the same
+/// reason as [`result_list_step`]/[`section_heading_step`].
 fn search_picker_dialog_step() -> Step {
     Step {
         name: "test-search-picker-dialog",

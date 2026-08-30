@@ -215,7 +215,7 @@ different theme values.
 
 `verify-full` runs `verify`, then the client-snapshot and SnapshotTable
 page-scoped browser lanes, then builds the full catalog once in release mode and
-reuses that same verified server for the 34-check reactivity/DOM-oracle suite
+reuses that same verified server for the 51-check reactivity/DOM-oracle suite
 (`test-reactivity`), layout audit (`test-layout`, below), style audit
 (`test-style`, below), the focused `KeyedResultList` browser proof
 (`test-keyed-result-list`, ldui-r1z), the focused `SectionHeading`
@@ -270,7 +270,7 @@ non-screenshot lane runs by default is a separate tooling-cost decision:
   - The library's `cargo test --lib` suite is pure logic (enum/`as_str`
     mappings, layout/date math, pagination windowing, class building, queue
     behavior) and runs headlessly in `verify`.
-  - The **34-check reactivity/DOM-oracle** suite
+  - The **51-check reactivity/DOM-oracle** suite
     (`tests/reactivity_smoke.rs`) drives real
     CDP input at the demo app and asserts internal Leptos state through the
     `window.__APP_DEBUG__` oracle — no pixels, so it is deterministic across
@@ -318,7 +318,7 @@ means something, where a quarterly run just means "lots changed".
 
 ### `cargo xtask test-reactivity` — the self-spawning subset
 
-This is the independently selectable 34-check lane. Run it when reactivity,
+This is the independently selectable 51-check lane. Run it when reactivity,
 browser interaction, or localized state behavior needs proof; an ordinary
 native rebuild does not invoke it implicitly.
 

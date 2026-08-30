@@ -1643,7 +1643,9 @@ fn legacy_preferences_without_column_order_normalize_to_declared_order() {
 // apart. `next_entity_page_size_id` is the per-instance default generator
 // wired into that select's `id` and `name`; these tests pin the generator's
 // contract directly, since the reactive Select mount itself needs a browser
-// (see tests/entity_table_page_size_identity.rs for the DOM-level proof).
+// (see tests/entity_table_smoke.rs's
+// page_size_select_gets_unique_identity_without_an_override_and_honors_one
+// for the DOM-level proof).
 #[test]
 fn page_size_default_ids_are_non_empty_and_unique() {
     let a = next_entity_page_size_id();

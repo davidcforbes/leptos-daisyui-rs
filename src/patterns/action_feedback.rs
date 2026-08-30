@@ -344,10 +344,10 @@ fn content_text(
     state: ActionFeedbackState,
     content: &ActionFeedbackContent,
 ) -> String {
-    let primary = content
-        .primary
-        .clone()
-        .unwrap_or_else(|| state_text(texts, state));
+    let primary = match content.primary.as_deref() {
+        Some(primary) if !primary.is_empty() => primary.to_owned(),
+        _ => state_text(texts, state),
+    };
     match content.detail.as_deref() {
         Some(detail) if !detail.is_empty() => format!("{primary} {detail}"),
         _ => primary,
@@ -535,6 +535,33 @@ mod tests {
         assert_eq!(
             content_text(&texts, ActionFeedbackState::Success, &empty_detail),
             texts.success
+        );
+
+        // Empty-string primary is treated as absent, not an empty sentence:
+        // it falls back to the localized default exactly like an empty-string
+        // detail falls back to no appended detail.
+        let empty_primary = ActionFeedbackContent {
+            primary: Some(String::new()),
+            detail: None,
+        };
+        assert_eq!(
+            content_text(&texts, ActionFeedbackState::Success, &empty_primary),
+            texts.success
+        );
+
+        // An empty-string primary combined with a real detail still falls
+        // back to the localized default primary, with the detail appended.
+        let empty_primary_with_detail = ActionFeedbackContent {
+            primary: Some(String::new()),
+            detail: Some("3 of 5 items updated.".to_owned()),
+        };
+        assert_eq!(
+            content_text(
+                &texts,
+                ActionFeedbackState::PartialSuccess,
+                &empty_primary_with_detail
+            ),
+            format!("{} 3 of 5 items updated.", texts.partial_success)
         );
     }
 
