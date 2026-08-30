@@ -1512,10 +1512,15 @@ pub fn ServerDataTable(
     } else {
         None
     };
+    // `aria-selected` is gated on whether a `selection` binding is actually
+    // configured, independently of `row_interactive` below (ldui-cyhz): an
+    // activate/inspect-only server table is interactive (focusable,
+    // Enter/Space works) but has no selection concept to report.
+    let row_has_selection = selection.is_some();
     // Inspect alone still needs focusable rows for its Shift+Enter path.
     let row_interactive = row_is_interactive(
         false,
-        selection.is_some()
+        row_has_selection
             || has_row_activation
             || on_row_inspect.is_some()
             || on_row_inspect_keyed.is_some(),
@@ -1961,9 +1966,15 @@ pub fn ServerDataTable(
             })
             .unwrap_or(0.0);
 
+        // `table_size` is part of the key too (ldui-wgc3), same rationale as
+        // `DataTable`'s own `measure_rows`: a density change moves the
+        // row-height ceiling itself, so it must start a fresh era even while
+        // an own-induced refetch proposal is pending -- the density
+        // dimension changes the key regardless of `viewport_fit_data_revision`.
         let era_key = (
             viewport_fit_data_revision.get_value(),
             wrapper.offset_width(),
+            table_size.try_get_untracked().unwrap_or_default().as_str(),
         );
         let era = viewport_fit_row_era
             .get_value()
@@ -2345,6 +2356,7 @@ pub fn ServerDataTable(
                             on_row_inspect=body_on_row_inspect
                             row_key=row_key
                             interactive=row_interactive
+                            has_selection=row_has_selection
                         />
                     </Table>
                 </div>
@@ -2945,7 +2957,7 @@ mod tests {
 
         let mut accepted: i64 = 5;
         let mut pending: Option<i64> = None;
-        let key = (0_u64, CONTAINER_WIDTH);
+        let key = (0_u64, CONTAINER_WIDTH, "table-md");
         let mut era = RowHeightEra::empty(key);
         let mut proposals = Vec::new();
 
@@ -2997,6 +3009,43 @@ mod tests {
     }
 
     #[test]
+    fn viewport_fit_density_change_resets_era_even_when_own_induced() {
+        // ldui-wgc3: the own-induced carry-forward above deliberately keeps
+        // the era key's `data_revision`/`container_width` unchanged across a
+        // refetch caused by accepting the table's own proposal -- that's the
+        // whole point of the fix it pins. But a density (`table_size`)
+        // change must win over that carry-forward: it moves the row-height
+        // ceiling itself, so a high-water mark measured under the old
+        // density must not survive into the new one, even while a proposal
+        // is pending.
+        let accepted: i64 = 5;
+        let pending = Some(accepted);
+        assert!(
+            viewport_fit_rows_change_is_own_induced(pending, accepted),
+            "set up an own-induced refetch: pending matches accepted"
+        );
+
+        let container_width = 400;
+        let key_before = (0_u64, container_width, "table-md");
+        let era = RowHeightEra::empty(key_before).observe(key_before, 76.0);
+        assert_eq!(era.effective_row_height(FALLBACK_ROW_HEIGHT), 76.0);
+
+        // Density changed between measurements -- the era key's third
+        // component captures that independently of whatever the own-induced
+        // bookkeeping decided about `data_revision`.
+        let key_after = (0_u64, container_width, "table-xs");
+        let era = era.observe(key_after, 20.0);
+
+        assert_eq!(
+            era.effective_row_height(FALLBACK_ROW_HEIGHT),
+            20.0,
+            "a density change must start a fresh era and discard the previous \
+             density's high-water mark, even while an own-induced refetch \
+             proposal is pending"
+        );
+    }
+
+    #[test]
     fn viewport_fit_without_the_own_induced_carry_forward_the_same_trace_never_settles() {
         // Contrast for the fix above: if every `rows` change started a
         // fresh era (the pre-fix behavior -- no own-induced distinction),
@@ -3019,7 +3068,8 @@ mod tests {
             let measured_max = measured_max_for_page(accepted.max(0) as usize);
             // Always a fresh era (the pre-fix behavior): a distinct key
             // every round means `observe` can never ratchet across rounds.
-            let era = RowHeightEra::empty((round, 400)).observe((round, 400), measured_max);
+            let era = RowHeightEra::empty((round, 400, "table-md"))
+                .observe((round, 400, "table-md"), measured_max);
             let row_height = era.effective_row_height(FALLBACK_ROW_HEIGHT);
 
             match viewport_fit_page_size_proposal(

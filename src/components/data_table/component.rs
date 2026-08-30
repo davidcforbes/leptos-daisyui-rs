@@ -727,11 +727,15 @@ pub fn DataTable(
     // A row is keyboard-operable only when the consumer opted into interaction,
     // so plain display tables don't sprout a tab stop per row. Captured before
     // `selected_rows` is unwrapped into a local signal below, which would erase
-    // whether the consumer supplied one.
+    // whether the consumer supplied one. `row_has_selection` is captured
+    // alongside it for the same reason -- it gates `aria-selected`
+    // independently of `row_interactive` (ldui-cyhz): an activate-only table
+    // is interactive but has no selection concept to report.
     // `on_row_inspect` counts as an activation callback here: an inspect-only
     // table still needs focusable rows for its Shift+Enter equivalent.
+    let row_has_selection = selected_rows.is_some();
     let row_interactive = row_is_interactive(
-        selected_rows.is_some(),
+        row_has_selection,
         on_row_activate.is_some() || on_row_inspect.is_some(),
     );
 
@@ -916,7 +920,14 @@ pub fn DataTable(
         // pass and every prior pass in the same era, never just this pass's
         // raw reading. `offset_width`, like `offset_height` above, is the
         // wrapper's own border-box width, unaffected by its own scrollbar.
-        let era_key = (data_revision.get_value(), wrapper.offset_width());
+        // `table_size` is part of the key too (ldui-wgc3): a density change
+        // moves the row-height ceiling itself, so a high-water mark measured
+        // under a taller density must not survive into a shorter one.
+        let era_key = (
+            data_revision.get_value(),
+            wrapper.offset_width(),
+            table_size.try_get_untracked().unwrap_or_default().as_str(),
+        );
         let era = row_era
             .get_value()
             .unwrap_or(RowHeightEra::empty(era_key))
@@ -1231,6 +1242,7 @@ pub fn DataTable(
                             on_row_inspect=body_on_row_inspect
                             row_key=row_key
                             interactive=row_interactive
+                            has_selection=row_has_selection
                             cell_renderers=cell_renderers
                             column_widths=Signal::derive(move || column_widths.get())
                             typed_cells=typed_cells

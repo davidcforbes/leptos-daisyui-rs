@@ -104,13 +104,19 @@ pub fn max_row_height(heights: &[f64], fallback: f64) -> f64 {
 }
 
 /// Identifies "what's being measured" for [`RowHeightEra`]: a
-/// `(data_revision, container_width_px)` pair. The caller bumps
-/// `data_revision` whenever the underlying rows data changes; a different
-/// `container_width_px` (the scroll wrapper's own border-box width, immune
-/// to its own vertical scrollbar the same way `rows_per_page_for_height`'s
-/// viewport height is) also starts a fresh era. Two measurement passes with
-/// an equal key are considered the same era.
-pub type RowHeightEraKey = (u64, i32);
+/// `(data_revision, container_width_px, table_size_class)` triple. The
+/// caller bumps `data_revision` whenever the underlying rows data changes; a
+/// different `container_width_px` (the scroll wrapper's own border-box
+/// width, immune to its own vertical scrollbar the same way
+/// `rows_per_page_for_height`'s viewport height is) also starts a fresh era.
+/// `table_size_class` is the active daisyUI table-size class (e.g.
+/// `"table-md"`, from `TableSize::as_str`) -- a density change moves the row
+/// height's *ceiling*, not just this pass's reading, so a high-water mark
+/// carried over from the previous density would keep the derived page size
+/// under-filled until an unrelated data or width change happened to reset it
+/// (ldui-wgc3). Two measurement passes with an equal key are considered the
+/// same era.
+pub type RowHeightEraKey = (u64, i32, &'static str);
 
 /// High-water mark of measured row heights across measurement passes within
 /// one era (ldui-89rp).
@@ -461,7 +467,7 @@ mod tests {
 
     #[test]
     fn row_height_era_of_nothing_measured_yet_falls_back() {
-        let era = RowHeightEra::empty((1, 400));
+        let era = RowHeightEra::empty((1, 400, "table-md"));
         assert_eq!(
             era.effective_row_height(FALLBACK_ROW_HEIGHT),
             FALLBACK_ROW_HEIGHT
@@ -470,7 +476,7 @@ mod tests {
 
     #[test]
     fn row_height_era_ratchets_up_and_never_decreases_within_an_era() {
-        let key = (1_u64, 400_i32);
+        let key = (1_u64, 400_i32, "table-md");
         let era = RowHeightEra::empty(key);
 
         let era = era.observe(key, 24.0); // pass 1: only short rows rendered
@@ -487,23 +493,42 @@ mod tests {
 
     #[test]
     fn row_height_era_resets_on_a_new_key() {
-        let era = RowHeightEra::empty((1, 400)).observe((1, 400), 76.0);
+        let era = RowHeightEra::empty((1, 400, "table-md")).observe((1, 400, "table-md"), 76.0);
         assert_eq!(era.effective_row_height(FALLBACK_ROW_HEIGHT), 76.0);
 
         // Dataset changed (key's first component differs) -> fresh era, the
         // old tall reading must not carry over.
-        let era = era.observe((2, 400), 24.0);
+        let era = era.observe((2, 400, "table-md"), 24.0);
         assert_eq!(era.effective_row_height(FALLBACK_ROW_HEIGHT), 24.0);
 
         // Container width changed (key's second component differs) -> also
         // a fresh era.
-        let era = era.observe((2, 320), 60.0);
+        let era = era.observe((2, 320, "table-md"), 60.0);
         assert_eq!(era.effective_row_height(FALLBACK_ROW_HEIGHT), 60.0);
     }
 
     #[test]
+    fn row_height_era_resets_on_a_density_change() {
+        // ldui-wgc3: a `table_size`/density change moves the row-height
+        // ceiling itself, so a high-water mark measured under a taller
+        // density must not survive into a shorter one -- otherwise the
+        // derived page size stays stuck too small (under-filled) until an
+        // unrelated data or width change happens to reset it.
+        let tall_density = (1_u64, 400_i32, "table-lg");
+        let era = RowHeightEra::empty(tall_density).observe(tall_density, 76.0);
+        assert_eq!(era.effective_row_height(FALLBACK_ROW_HEIGHT), 76.0);
+
+        // Same data revision and container width, but a smaller density
+        // (key's third component differs) -> a fresh era, the tall-density
+        // high-water mark must not carry over.
+        let small_density = (1_u64, 400_i32, "table-xs");
+        let era = era.observe(small_density, 24.0);
+        assert_eq!(era.effective_row_height(FALLBACK_ROW_HEIGHT), 24.0);
+    }
+
+    #[test]
     fn row_height_era_ignores_invalid_measurements_without_resetting() {
-        let key = (1_u64, 400_i32);
+        let key = (1_u64, 400_i32, "table-md");
         let era = RowHeightEra::empty(key).observe(key, 76.0);
 
         let era = era.observe(key, f64::NAN);
@@ -524,9 +549,9 @@ mod tests {
         // A `key` change resets the high-water mark even when the very first
         // reading in the new era is garbage -- it must not "seed" the new
         // era with a stale non-finite/negative value.
-        let era = RowHeightEra::empty((1, 400))
-            .observe((1, 400), 76.0)
-            .observe((2, 400), f64::NAN);
+        let era = RowHeightEra::empty((1, 400, "table-md"))
+            .observe((1, 400, "table-md"), 76.0)
+            .observe((2, 400, "table-md"), f64::NAN);
         assert_eq!(
             era.effective_row_height(FALLBACK_ROW_HEIGHT),
             FALLBACK_ROW_HEIGHT
@@ -556,7 +581,7 @@ mod tests {
         let header = 40.0;
         let configured_page_size = 10;
         let min_rows = 5;
-        let key = (1_u64, 400_i32);
+        let key = (1_u64, 400_i32, "table-md");
 
         let mut era = RowHeightEra::empty(key);
         // The very first pass renders whatever `page_size` renders before

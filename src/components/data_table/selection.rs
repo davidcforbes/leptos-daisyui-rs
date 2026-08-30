@@ -123,16 +123,29 @@ pub fn index_of_key(
 }
 
 /// Whether a table's rows should be keyboard-operable -- focusable
-/// (`tabindex=0`) with Enter/Space mirroring a click, and carrying
-/// `aria-selected`.
+/// (`tabindex=0`) with Enter/Space mirroring a click.
 ///
 /// True exactly when the consumer opted into row interaction: either a
 /// `selected_rows` signal (`has_selection`) or an `on_row_activate` callback
 /// (`has_activate`) was supplied. A plain display table with neither gains no
 /// tab stops -- a 50-row page would otherwise add 50 tab stops to a table the
-/// user only reads.
+/// user only reads. `aria-selected` is a narrower gate than this one -- see
+/// [`row_aria_selected`].
 pub fn row_is_interactive(has_selection: bool, has_activate: bool) -> bool {
     has_selection || has_activate
+}
+
+/// The `aria-selected` attribute value for a row, gated on `has_selection`
+/// (whether the table was given a selection binding at all) rather than on
+/// general row interactivity (`row_is_interactive`). An `on_row_activate`-only
+/// table (no selection concept) has nothing to report, so it must emit `None`
+/// -- no `aria-selected` attribute on any row -- rather than
+/// `aria-selected="false"`, which would wrongly tell assistive tech the row is
+/// selectable. Only a table with selection configured emits `Some` on every
+/// row, `"true"` or `"false"`. Mirrors `entity_table::selection`'s
+/// `entity_row_aria_selected` (ldui-sh3 / ldui-cyhz).
+pub fn row_aria_selected(has_selection: bool, is_selected: bool) -> Option<String> {
+    has_selection.then(|| is_selected.to_string())
 }
 
 /// Decide whether a row click should activate or select.
@@ -257,6 +270,24 @@ mod tests {
     fn not_interactive_for_a_plain_display_table() {
         // Neither selection nor activation -> no tab stops added.
         assert!(!row_is_interactive(false, false));
+    }
+
+    // ── row_aria_selected (ldui-cyhz) ──
+
+    #[test]
+    fn an_activate_only_table_emits_no_aria_selected_attribute() {
+        // `on_row_activate` alone makes rows interactive (keyboard-operable),
+        // but there is no selection concept to report -- no `aria-selected`
+        // attribute at all, on any row, restoring the exact DOM of a table
+        // that predates this prop.
+        assert_eq!(row_aria_selected(false, false), None);
+        assert_eq!(row_aria_selected(false, true), None);
+    }
+
+    #[test]
+    fn a_selection_configured_table_emits_aria_selected_on_every_row() {
+        assert_eq!(row_aria_selected(true, true), Some("true".to_owned()));
+        assert_eq!(row_aria_selected(true, false), Some("false".to_owned()));
     }
 
     // ── plain click ──

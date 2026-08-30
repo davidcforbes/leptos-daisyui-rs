@@ -1,5 +1,7 @@
 use crate::components::badge::Badge;
-use crate::components::data_table::selection::{click_swallowed_by_inspect, key_inspects};
+use crate::components::data_table::selection::{
+    click_swallowed_by_inspect, key_inspects, row_aria_selected,
+};
 use crate::components::data_table::types::{
     CellRenderer, Column, DataTableTexts, RowDetailRenderer, TableRow, TypedCell, TypedCellFn,
 };
@@ -232,12 +234,21 @@ pub fn DataTableBody(
     row_key: Option<Callback<TableRow, String>>,
 
     /// Whether rows are keyboard-operable: focusable (`tabindex=0`) with
-    /// Enter/Space activating the same behaviour as a click, and carrying
-    /// `aria-selected`. Set by `DataTable` only when the consumer opted into
-    /// interaction (`selected_rows` or `on_row_activate`), so plain display
-    /// tables gain no tab stops.
+    /// Enter/Space activating the same behaviour as a click. Set by
+    /// `DataTable` only when the consumer opted into interaction
+    /// (`selected_rows` or `on_row_activate`), so plain display tables gain
+    /// no tab stops.
     #[prop(optional, into)]
     interactive: bool,
+
+    /// Whether a selection binding is actually configured (a `selected_rows`
+    /// signal supplied by the caller, or -- on `ServerDataTable` -- a
+    /// `selection` prop). Gates the `aria-selected` attribute independently
+    /// of `interactive`: an `on_row_activate`-only table is interactive
+    /// (focusable, Enter/Space activates) but has no selection concept, so it
+    /// must not claim any row is selectable to assistive tech (ldui-cyhz).
+    #[prop(optional, into)]
+    has_selection: bool,
 
     /// Per-cell renderers. A column with `renderer_index = Some(i)` invokes
     /// `cell_renderers[i]` with `(abs_idx, row)`; otherwise the cell renders
@@ -456,14 +467,14 @@ pub fn DataTableBody(
                                         }
                                     })
                                     tabindex=interactive.then_some(0)
-                                    aria-selected=move || interactive.then(|| {
-                                        current_row.with(|current| {
+                                    aria-selected=move || {
+                                        let is_selected = current_row.with(|current| {
                                             current
                                                 .as_ref()
                                                 .is_some_and(|row| selected_rows.with(|selected| selected.contains(&row.index)))
-                                                .to_string()
-                                        })
-                                    })
+                                        });
+                                        row_aria_selected(has_selection, is_selected)
+                                    }
                                     on:click=move |event: web_sys::MouseEvent| {
                                         if click_swallowed_by_inspect(event.detail(), on_row_inspect.is_some()) {
                                             return;
