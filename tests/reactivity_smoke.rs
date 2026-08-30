@@ -3063,6 +3063,287 @@ async fn assert_server_table_controls_match_declared_query_capabilities(
     );
 }
 
+/// Viewport-fit query sizing (ldui-2bt3): a controlled offset `ServerDataTable`
+/// with `viewport_fit=true` measures the rendered height exactly like
+/// `DataTable`'s `auto_page_size` and proposes a page-size query -- growing
+/// past the configured size in a tall container, and retaining the last
+/// accepted size (never proposing a shrink below the usability floor) once
+/// the container drops below it, while the bounded wrapper scrolls instead.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn viewport_fit_offset_proposes_growth_and_retains_below_the_floor_while_scrolling() {
+    let h = harness_at("/components/data-table").await;
+
+    let snapshot_expr = r#"(() => {
+        const root = document.querySelector('#viewport-fit-offset-server-table');
+        const viewport = root.querySelector(':scope > .overflow-x-auto');
+        return {
+            rows: root.querySelectorAll('tbody tr').length,
+            viewportHeight: viewport.clientHeight,
+            scrollHeight: viewport.scrollHeight,
+        };
+    })()"#;
+
+    tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+    let settled = eval_json(&h, snapshot_expr).await;
+    let settled_rows = settled["rows"].as_u64().unwrap_or(0);
+    assert!(
+        settled_rows >= 5,
+        "initial settle should show at least the configured page size: {settled}"
+    );
+
+    // Grow the container: the measured fit must widen the accepted page
+    // size and the proposal must reset to page one.
+    h.page()
+        .evaluate(
+            r#"(() => {
+                document.querySelector('#viewport-fit-offset-server-table').parentElement.style.height = '900px';
+                return true;
+            })()"#,
+        )
+        .await
+        .expect("grow the viewport-fit container");
+    tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+    let grown = eval_json(&h, snapshot_expr).await;
+    let grown_rows = grown["rows"].as_u64().unwrap_or(0);
+    assert!(
+        grown_rows > settled_rows,
+        "a taller viewport must propose and accept a larger page size: settled={settled} grown={grown}"
+    );
+    assert!(
+        testid_text(&h, "viewport-fit-last-query")
+            .await
+            .starts_with("page=1 "),
+        "offset viewport-fit proposals must reset to page one"
+    );
+
+    // Shrink well below the usability floor: the accepted size must be
+    // retained (no shrinking proposal below min_rows) and the bounded
+    // wrapper must scroll instead.
+    h.page()
+        .evaluate(
+            r#"(() => {
+                document.querySelector('#viewport-fit-offset-server-table').parentElement.style.height = '110px';
+                return true;
+            })()"#,
+        )
+        .await
+        .expect("shrink the viewport-fit container below the usability floor");
+    tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+    let shrunk = eval_json(&h, snapshot_expr).await;
+    assert_eq!(
+        shrunk["rows"], grown["rows"],
+        "a fit below min_rows must retain the last accepted page size rather than \
+         shrinking it: grown={grown} shrunk={shrunk}"
+    );
+    assert!(
+        shrunk["scrollHeight"].as_u64() > shrunk["viewportHeight"].as_u64(),
+        "the bounded wrapper must scroll rather than collapsing pagination: {shrunk}"
+    );
+}
+
+/// Rapid, narrow resize (ldui-2bt3): several resizes in quick succession,
+/// ending narrow enough to force a horizontal scrollbar, must still settle
+/// to a fixed page size (the `offset_height`-based measurement is immune to
+/// the scrollbar the way `client_height` is not) rather than oscillating.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn viewport_fit_offset_rapid_narrow_resize_settles_without_oscillation() {
+    let h = harness_at("/components/data-table").await;
+
+    let snapshot_expr = r#"(() => {
+        const root = document.querySelector('#viewport-fit-offset-server-table');
+        return { rows: root.querySelectorAll('tbody tr').length };
+    })()"#;
+
+    for (height, width) in [("260px", Some("180px")), ("640px", None), ("420px", None)] {
+        h.page()
+            .evaluate(
+                format!(
+                    r#"(() => {{
+                        const root = document.querySelector('#viewport-fit-offset-server-table').parentElement;
+                        root.style.height = '{height}';
+                        {width_assignment}
+                        return true;
+                    }})()"#,
+                    width_assignment = width
+                        .map(|w| format!("root.style.width = '{w}';"))
+                        .unwrap_or_default(),
+                )
+                .as_str(),
+            )
+            .await
+            .expect("resize the viewport-fit container");
+    }
+
+    tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+    let first_rows = eval_json(&h, snapshot_expr).await;
+    let first_proposals = testid_text(&h, "viewport-fit-proposals").await;
+    tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+    let second_rows = eval_json(&h, snapshot_expr).await;
+    let second_proposals = testid_text(&h, "viewport-fit-proposals").await;
+
+    assert!(
+        first_rows["rows"].as_u64().unwrap_or(0) > 0,
+        "expected at least one rendered row: {first_rows}"
+    );
+    assert_eq!(
+        first_rows["rows"], second_rows["rows"],
+        "viewport_fit did not settle -- the derived page size is still changing \
+         (oscillation): first={first_rows} second={second_rows}"
+    );
+    assert_eq!(
+        first_proposals, second_proposals,
+        "a settled table must stop emitting proposals once the fixed point is reached"
+    );
+}
+
+/// Declined proposals (ldui-2bt3): when the caller rejects a viewport-fit
+/// page-size proposal, the displayed accepted rows and size must be
+/// retained exactly -- a rejected proposal is not applied speculatively.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn viewport_fit_declined_offset_proposal_retains_accepted_rows_and_size() {
+    let h = harness_at("/components/data-table").await;
+
+    tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+    let snapshot_expr = r#"(() => {
+        const root = document.querySelector('#viewport-fit-offset-server-table');
+        return {
+            rows: root.querySelectorAll('tbody tr').length,
+            lastQuery: document.querySelector('[data-testid="viewport-fit-last-query"]').textContent,
+        };
+    })()"#;
+    let before = eval_json(&h, snapshot_expr).await;
+
+    click(&h, "[data-testid='viewport-fit-accept']").await;
+
+    h.page()
+        .evaluate(
+            r#"(() => {
+                document.querySelector('#viewport-fit-offset-server-table').parentElement.style.height = '900px';
+                return true;
+            })()"#,
+        )
+        .await
+        .expect("resize while declining proposals");
+    tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+
+    let after = eval_json(&h, snapshot_expr).await;
+    assert_eq!(
+        after["rows"], before["rows"],
+        "a declined proposal must retain the accepted rows: before={before} after={after}"
+    );
+    assert!(
+        after["lastQuery"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("declined:"),
+        "the decline must be visible in the last-query readout: {after}"
+    );
+}
+
+/// Cursor viewport-fit (ldui-2bt3): a page-size proposal against a cursor
+/// query must request the server-defined first slice, never replaying a
+/// previous/next token that was minted for the OLD size -- `ServerCursorRequest`
+/// carries no size at all, so requesting `First` is structurally incapable of
+/// reusing one.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn viewport_fit_cursor_resets_to_first_never_reusing_a_stale_token() {
+    let h = harness_at("/components/data-table").await;
+
+    tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+    let before_rows = eval_json(
+        &h,
+        r#"document.querySelectorAll('#viewport-fit-cursor-server-table tbody tr').length"#,
+    )
+    .await;
+
+    // Navigate forward once at the settled size, minting an opaque
+    // previous/next token pair for that size.
+    click(
+        &h,
+        "#viewport-fit-cursor-server-table [data-server-cursor-action='next']",
+    )
+    .await;
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    assert!(
+        testid_text(&h, "viewport-fit-cursor-last-query")
+            .await
+            .starts_with("request=Next(offset:"),
+        "expected the manual Next navigation to carry an opaque token"
+    );
+
+    // Grow the container: a genuine page-size proposal is due, and it must
+    // request First rather than replaying the token just minted above.
+    h.page()
+        .evaluate(
+            r#"(() => {
+                document.querySelector('#viewport-fit-cursor-server-table').parentElement.style.height = '900px';
+                return true;
+            })()"#,
+        )
+        .await
+        .expect("grow the cursor viewport-fit container");
+    tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+
+    let after_resize = testid_text(&h, "viewport-fit-cursor-last-query").await;
+    assert!(
+        after_resize.starts_with("request=First "),
+        "a cursor viewport-fit proposal must request First: {after_resize}"
+    );
+
+    let after_rows = eval_json(
+        &h,
+        r#"document.querySelectorAll('#viewport-fit-cursor-server-table tbody tr').length"#,
+    )
+    .await;
+    assert!(
+        after_rows.as_u64().unwrap_or(0) > before_rows.as_u64().unwrap_or(0),
+        "the accepted slice must reflect the larger proposed size: before={before_rows} after={after_rows}"
+    );
+}
+
+/// Fail-closed configuration (ldui-2bt3): `viewport_fit=true` against a
+/// fixed-slice (`navigation_only`) endpoint -- one that cannot accept a
+/// page-size change -- must reject the policy visibly rather than silently
+/// doing nothing, mirroring every other `ServerDataTable` configuration
+/// error's `role="alert"` + `data-server-*-config-error` shape.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn viewport_fit_rejects_a_fixed_slice_endpoint_visibly() {
+    let h = harness_at("/components/data-table").await;
+
+    let result = eval_json(
+        &h,
+        r#"(() => {
+            const container = document.querySelector('#viewport-fit-rejected-table');
+            const table = container.querySelector('[data-table-data-mode="server-query"]');
+            const error = container.querySelector('[data-server-viewport-fit-config-error]');
+            return {
+                status: table ? table.dataset.serverViewportFit : null,
+                errorRole: error ? error.getAttribute('role') : null,
+                errorMessage: error ? error.textContent.trim() : null,
+                pageSizeSelects: container.querySelectorAll('select[id$="-page-size"]').length,
+            };
+        })()"#,
+    )
+    .await;
+
+    assert_eq!(result["status"], json!("rejected"));
+    assert_eq!(result["errorRole"], json!("alert"));
+    assert_eq!(
+        result["errorMessage"],
+        json!(
+            "ServerDataTable viewport_fit requires an endpoint that accepts page-size \
+             changes (a fixed-slice endpoint or a disabled page-size capability rejects \
+             the policy)"
+        )
+    );
+    assert_eq!(result["pageSizeSelects"], json!(0));
+}
+
 /// Server-variant activation forwarding (ldui-1gp): ServerDataTable passes
 /// `on_row_activate`/`on_row_inspect` through to the shared body, so its
 /// rows carry the keyboard contract and a plain click activates with the

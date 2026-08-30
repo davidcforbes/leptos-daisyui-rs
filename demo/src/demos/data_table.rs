@@ -570,6 +570,114 @@ pub fn DataTableDemo() -> impl IntoView {
             Callback::new(|_| {}),
         ));
 
+    // ── Viewport-fit query sizing (ldui-2bt3) ──
+    //
+    // `viewport_fit=true` measures the rendered height exactly like
+    // `DataTable`'s `auto_page_size`, but PROPOSES a page-size query change
+    // instead of slicing rows locally: offset resets to page one, cursor
+    // resets to `First` (an existing previous/next token was minted for the
+    // old size and must never be replayed).
+    let viewport_fit_fixture = StoredValue::new(generate_users(48));
+    let viewport_fit_rows = RwSignal::new(Vec::<HashMap<&'static str, String>>::new());
+    let viewport_fit_page = RwSignal::new(1_i64);
+    let viewport_fit_total = RwSignal::new(0_i64);
+    let viewport_fit_query = RwSignal::new(TableQuery::first_page(5));
+    let viewport_fit_accept = RwSignal::new(true);
+    let viewport_fit_proposals = RwSignal::new(0_u32);
+    let viewport_fit_last_query = RwSignal::new(String::new());
+    let viewport_fit_columns = RwSignal::new(vec![
+        Column::new("name", "Name"),
+        Column::new("email", "Email"),
+        Column::new("role", "Role"),
+    ]);
+    let run_viewport_fit_query = move |q: TableQuery| {
+        let items = viewport_fit_fixture.get_value();
+        viewport_fit_total.set(items.len() as i64);
+        let start = ((q.page - 1) * q.page_size).max(0) as usize;
+        viewport_fit_rows.set(
+            items
+                .into_iter()
+                .skip(start)
+                .take(q.page_size.max(0) as usize)
+                .collect(),
+        );
+        viewport_fit_page.set(q.page);
+        viewport_fit_last_query.set(format!("page={} size={}", q.page, q.page_size));
+    };
+    let propose_viewport_fit_query = move |query: TableQuery| {
+        viewport_fit_proposals.update(|count| *count += 1);
+        if !viewport_fit_accept.get_untracked() {
+            viewport_fit_last_query.set(format!(
+                "declined: page={} size={}",
+                query.page, query.page_size
+            ));
+            return;
+        }
+        viewport_fit_query.set(query.clone());
+        run_viewport_fit_query(query);
+    };
+    run_viewport_fit_query(viewport_fit_query.get_untracked());
+
+    // Cursor variant: same measurement, but the query owns opaque tokens.
+    let viewport_fit_cursor_fixture = StoredValue::new(generate_users(30));
+    let viewport_fit_cursor_rows = RwSignal::new(Vec::<HashMap<&'static str, String>>::new());
+    let viewport_fit_cursor_query = RwSignal::new(ServerCursorQuery::first_slice(5));
+    let viewport_fit_cursor_page = RwSignal::new(ServerCursorPage::default());
+    let viewport_fit_cursor_proposals = RwSignal::new(0_u32);
+    let viewport_fit_cursor_last_request = RwSignal::new(String::new());
+    let run_viewport_fit_cursor_query = move |query: ServerCursorQuery| {
+        let requested_offset = match &query.request {
+            ServerCursorRequest::First => 0,
+            ServerCursorRequest::Previous(cursor) | ServerCursorRequest::Next(cursor) => cursor
+                .as_str()
+                .strip_prefix("offset:")
+                .and_then(|value| value.parse::<usize>().ok())
+                .unwrap_or(0),
+        };
+        let items = viewport_fit_cursor_fixture.get_value();
+        let size = query.page_size.max(1) as usize;
+        let start = requested_offset.min(items.len());
+        let previous = (start > 0)
+            .then(|| ServerCursorToken::new(format!("offset:{}", start.saturating_sub(size))));
+        let next = (start + size < items.len())
+            .then(|| ServerCursorToken::new(format!("offset:{}", start + size)));
+        viewport_fit_cursor_rows.set(items.into_iter().skip(start).take(size).collect());
+        viewport_fit_cursor_page.set(ServerCursorPage::new(previous, next));
+        let request_label = match &query.request {
+            ServerCursorRequest::First => "First".to_owned(),
+            ServerCursorRequest::Previous(cursor) => format!("Previous({})", cursor.as_str()),
+            ServerCursorRequest::Next(cursor) => format!("Next({})", cursor.as_str()),
+        };
+        viewport_fit_cursor_last_request
+            .set(format!("request={request_label} size={}", query.page_size));
+    };
+    let propose_viewport_fit_cursor_query = move |query: ServerCursorQuery| {
+        viewport_fit_cursor_proposals.update(|count| *count += 1);
+        viewport_fit_cursor_query.set(query.clone());
+        run_viewport_fit_cursor_query(query);
+    };
+    run_viewport_fit_cursor_query(viewport_fit_cursor_query.get_untracked());
+    let viewport_fit_cursor_pagination =
+        ServerTablePagination::cursor(ServerCursorPagination::controlled(
+            viewport_fit_cursor_query.into(),
+            viewport_fit_cursor_page.into(),
+            Callback::new(propose_viewport_fit_cursor_query),
+        ));
+
+    // Fail-closed fixture: viewport_fit requested against a fixed-slice
+    // (navigation-only) endpoint, which cannot accept page-size changes.
+    let viewport_fit_rejected_query = RwSignal::new(ServerCursorQuery::first_slice(4));
+    let viewport_fit_rejected_page = RwSignal::new(ServerCursorPage::new(
+        None,
+        Some(ServerCursorToken::new("rejected-next")),
+    ));
+    let viewport_fit_rejected_pagination =
+        ServerTablePagination::cursor(ServerCursorPagination::controlled(
+            viewport_fit_rejected_query.into(),
+            viewport_fit_rejected_page.into(),
+            Callback::new(move |query| viewport_fit_rejected_query.set(query)),
+        ));
+
     // Column resize + typed cells (Badge/Icon) + row background + clipboard export
     let feature_data = RwSignal::new(generate_users(12));
     let feature_columns = RwSignal::new(vec![
@@ -1901,6 +2009,104 @@ pub fn DataTableDemo() -> impl IntoView {
                         total_count=Signal::stored(13_i64)
                         page_size=Signal::stored(4_i64)
                         on_page_change=Callback::new(|_| {})
+                    />
+                </div>
+            </Section>
+
+            <Section title="Viewport-Fit Query Sizing (Server)">
+                <p class="text-sm opacity-70 mb-4">
+                    "With " <code>"viewport_fit=true"</code> " a "
+                    <code>"ServerDataTable"</code>
+                    " measures its rendered height exactly like "
+                    <code>"DataTable"</code>"'s " <code>"auto_page_size"</code>
+                    ", but PROPOSES a page-size query change instead of slicing rows "
+                    "locally: offset queries reset to page one, cursor queries reset "
+                    "to " <code>"First"</code>
+                    " (an existing previous/next token was minted for the old size "
+                    "and is never replayed against a new one)."
+                </p>
+                <div class="alert alert-info mb-4">
+                    <span>
+                        "Needs an endpoint that accepts page-size changes -- a "
+                        "fixed-slice cursor endpoint or a disabled page-size "
+                        "capability rejects the policy visibly instead of silently "
+                        "ignoring it (see the rejected fixture below)."
+                    </span>
+                </div>
+                <p class="text-xs opacity-60 mb-3">
+                    "Offset -- last query: "
+                    <code data-testid="viewport-fit-last-query">
+                        {move || viewport_fit_last_query.get()}
+                    </code>
+                    " · Proposals: "
+                    <code data-testid="viewport-fit-proposals">
+                        {move || viewport_fit_proposals.get().to_string()}
+                    </code>
+                </p>
+                <div class="mb-3 flex flex-wrap gap-2">
+                    <Button
+                        on:click=move |_| viewport_fit_accept.update(|accept| *accept = !*accept)
+                        attr:data-testid="viewport-fit-accept"
+                    >
+                        {move || if viewport_fit_accept.get() {
+                            "Reject proposals"
+                        } else {
+                            "Accept proposals"
+                        }}
+                    </Button>
+                </div>
+                // `resize-y` + `overflow-auto`, same as the DataTable auto_page_size
+                // demo above: user-resizable so the ResizeObserver can be exercised
+                // without resizing the browser window itself.
+                <div class="resize-y overflow-auto border border-base-300 rounded-lg p-3 h-96 min-h-32">
+                    <ServerDataTable
+                        rows=viewport_fit_rows
+                        columns=viewport_fit_columns
+                        current_page=Signal::derive(move || viewport_fit_page.get())
+                        total_count=Signal::derive(move || viewport_fit_total.get())
+                        page_size=Signal::derive(move || viewport_fit_query.get().page_size)
+                        on_page_change=Callback::new(move |_page: i64| {})
+                        query_ownership=ServerTableQueryOwnership::controlled(
+                            viewport_fit_query.into(),
+                            Callback::new(propose_viewport_fit_query),
+                        )
+                        viewport_fit=true
+                        viewport_fit_min_rows=3_usize
+                        max_height="100%"
+                        attr:id="viewport-fit-offset-server-table"
+                    />
+                </div>
+
+                <p class="text-xs opacity-60 mb-3 mt-6">
+                    "Cursor -- last query: "
+                    <code data-testid="viewport-fit-cursor-last-query">
+                        {move || viewport_fit_cursor_last_request.get()}
+                    </code>
+                    " · Proposals: "
+                    <code data-testid="viewport-fit-cursor-proposals">
+                        {move || viewport_fit_cursor_proposals.get().to_string()}
+                    </code>
+                </p>
+                <div class="resize-y overflow-auto border border-base-300 rounded-lg p-3 h-96 min-h-32">
+                    <ServerDataTable
+                        rows=viewport_fit_cursor_rows
+                        columns=viewport_fit_columns
+                        pagination=viewport_fit_cursor_pagination
+                        viewport_fit=true
+                        viewport_fit_min_rows=3_usize
+                        max_height="100%"
+                        attr:id="viewport-fit-cursor-server-table"
+                    />
+                </div>
+
+                <div class="mt-6" id="viewport-fit-rejected-table">
+                    <h3 class="font-semibold">"Rejected: fixed-slice endpoint"</h3>
+                    <ServerDataTable
+                        rows=viewport_fit_cursor_rows
+                        columns=viewport_fit_columns
+                        pagination=viewport_fit_rejected_pagination
+                        query_capabilities=ServerQueryCapabilities::navigation_only()
+                        viewport_fit=true
                     />
                 </div>
             </Section>

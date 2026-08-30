@@ -1,3 +1,7 @@
+use crate::components::data_table::auto_page::{
+    DEFAULT_AUTO_MIN_ROWS, FALLBACK_HEADER_HEIGHT, FALLBACK_ROW_HEIGHT, RowHeightEra,
+    auto_page_size_for_height, max_row_height,
+};
 use crate::components::data_table::body::{DataTableBody, DataTableBodyClick, DataTableBodyRow};
 use crate::components::data_table::filter::{
     ColumnFilters, DataTableFilterOption, DataTableFilterOptions, DataTableFilterRow, FILTER_ALL,
@@ -881,6 +885,114 @@ fn validate_server_query_capabilities(
     Ok(())
 }
 
+const VIEWPORT_FIT_REQUIRES_PAGE_SIZE_CONFIGURATION: &str = "ServerDataTable viewport_fit requires an endpoint that accepts page-size changes (a fixed-slice endpoint or a disabled page-size capability rejects the policy)";
+
+/// Resolves whether the opt-in `viewport_fit` policy (ldui-2bt3) is active
+/// for the current configuration. Reusing `DataTable`'s own measurement math
+/// (`auto_page.rs`) is pointless without somewhere to send the derived page
+/// size: `page_size_controllable` mirrors `ServerDataTable`'s own
+/// `has_page_size` gate (the query capability enabled AND a query callback
+/// actually wired), so a fixed-slice cursor endpoint or a disabled page-size
+/// capability fails closed and visibly rather than silently doing nothing.
+fn resolve_viewport_fit(
+    requested: bool,
+    page_size_controllable: bool,
+) -> Result<bool, &'static str> {
+    if !requested {
+        Ok(false)
+    } else if !page_size_controllable {
+        Err(VIEWPORT_FIT_REQUIRES_PAGE_SIZE_CONFIGURATION)
+    } else {
+        Ok(true)
+    }
+}
+
+/// Derives one measurement pass's page-size proposal, or `None` when the
+/// derived count already matches `accepted_page_size` (nothing to propose).
+///
+/// Comparing against the caller's currently *accepted* truth -- rather than
+/// a locally cached "last proposed" value -- means a caller that declines a
+/// proposal is asked again on the next genuine re-measurement (resize,
+/// density, wrapping, column change), and a caller that accepts sees no
+/// redundant repeat once the derived count matches what it already
+/// supplied. `accepted_page_size` doubles as the "retain what's already
+/// accepted" fallback `auto_page_size_for_height` falls back to below
+/// `min_rows`, matching `DataTable::auto_page_size`'s own contract that a
+/// too-short fit keeps the configured size and scrolls instead of shrinking
+/// pagination toward unusability.
+///
+/// ```
+/// use leptos_daisyui_rs::components::viewport_fit_page_size_proposal;
+///
+/// // 436px viewport, 36px header, 40px rows -> 10 rows fit; the caller is
+/// // currently showing 5, so a growth proposal is due.
+/// assert_eq!(
+///     viewport_fit_page_size_proposal(436.0, 36.0, 40.0, 5, 5, 5),
+///     Some(10),
+/// );
+/// // The derived count already matches what's accepted: nothing to propose.
+/// assert_eq!(
+///     viewport_fit_page_size_proposal(436.0, 36.0, 40.0, 10, 5, 10),
+///     None,
+/// );
+/// ```
+pub fn viewport_fit_page_size_proposal(
+    viewport_height: f64,
+    header_height: f64,
+    row_height: f64,
+    configured_page_size: i64,
+    min_rows: usize,
+    accepted_page_size: i64,
+) -> Option<i64> {
+    let accepted_page_size = accepted_page_size.max(1);
+    let fallback = configured_page_size.max(accepted_page_size).max(1) as usize;
+    let derived = auto_page_size_for_height(
+        viewport_height,
+        header_height,
+        row_height,
+        fallback,
+        min_rows,
+    ) as i64;
+    (derived != accepted_page_size).then_some(derived)
+}
+
+/// Guards a scheduled (macrotask-delayed) `viewport_fit` measurement pass
+/// against applying a stale result after a *newer* pass has already been
+/// scheduled -- e.g. two `ResizeObserver` callbacks fire in quick
+/// succession and their zero-delay timers could in principle run out of
+/// schedule order. Every scheduled pass is stamped with the sequence number
+/// returned by [`Self::next`] at *schedule* time (not run time); a pass may
+/// only apply its proposal when [`Self::is_current`] says its stamp is still
+/// the newest ever scheduled. This is deliberately independent of (and a
+/// belt-and-braces pairing with) cancelling the previous pending timer
+/// handle before scheduling a new one -- the same "only the most recent
+/// scheduled pass may act" invariant, expressed as a pure, unit-testable
+/// value instead of a side effect on a `TimeoutHandle`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ViewportFitEpoch(u64);
+
+impl ViewportFitEpoch {
+    /// A fresh epoch with nothing scheduled yet.
+    pub const fn new() -> Self {
+        Self(0)
+    }
+
+    /// Stamps and returns `(next_epoch, stamp)` for a newly scheduled pass.
+    /// Calling this immediately invalidates every earlier-stamped pass that
+    /// has not yet applied, even if that pass has not run yet.
+    #[must_use]
+    pub fn next(self) -> (Self, u64) {
+        let stamp = self.0.wrapping_add(1);
+        (Self(stamp), stamp)
+    }
+
+    /// Whether a pass stamped `candidate` (from a prior [`Self::next`]) is
+    /// still the newest scheduled pass -- i.e. safe to apply.
+    pub fn is_current(self, candidate: u64) -> bool {
+        candidate == self.0
+    }
+}
+
 #[derive(Clone, Copy)]
 enum ServerQuerySource {
     OffsetControlled {
@@ -1127,6 +1239,31 @@ pub fn ServerDataTable(
     /// Maximum height for viewport-constrained scrolling (e.g. "calc(100vh - 260px)")
     #[prop(optional, into)]
     max_height: Option<String>,
+
+    /// Opt-in viewport-fit page-size policy (ldui-2bt3). Reuses exactly the
+    /// same measurement math as `DataTable`'s `auto_page_size` -- the
+    /// rendered header/row heights, the era-scoped high-water-mark ratchet
+    /// that prevents measure -> page-size -> rendered-set oscillation -- but
+    /// PROPOSES the derived page size as a query change instead of slicing
+    /// rows locally. An offset query resets to page one; a cursor query
+    /// resets to `First` (an existing previous/next token was minted for the
+    /// old size and is never replayed against a new one). A configuration
+    /// that cannot accept page-size changes -- a fixed-slice cursor endpoint,
+    /// `ServerQueryCapabilities::page_size_enabled() == false`, or no query
+    /// callback wired at all -- rejects the policy visibly (a `role="alert"`
+    /// panel with `data-server-viewport-fit-config-error`) rather than
+    /// silently doing nothing. Requires the same definite height as
+    /// `auto_page_size`: pass `max_height` (promoted to a real `height`) or
+    /// give the table a parent with a definite height.
+    #[prop(optional, into)]
+    viewport_fit: Signal<bool>,
+
+    /// Usability floor for `viewport_fit` (default: 5). Mirrors
+    /// `DataTable`'s `min_rows`: below this measured fit, the currently
+    /// accepted page size is retained (no proposal is sent) and the table's
+    /// existing scroll wrapper absorbs the overflow.
+    #[prop(into, default = Signal::derive(|| DEFAULT_AUTO_MIN_ROWS))]
+    viewport_fit_min_rows: Signal<usize>,
 
     /// Callback for server-side search (fires after 300ms debounce)
     #[prop(optional, into)]
@@ -1669,21 +1806,227 @@ pub fn ServerDataTable(
         None => texts.with(|texts| texts.filter_label.clone()),
     });
 
-    // Container style for viewport-constrained scrolling
-    let container_style =
-        max_height.map(|h| format!("display: flex; flex-direction: column; max-height: {}", h));
+    // ── Viewport-fit query sizing (`viewport_fit`, ldui-2bt3) ──
+    //
+    // Reuses exactly the measurement math `DataTable`'s own `auto_page_size`
+    // uses (`auto_page.rs`), but instead of slicing `rows` locally, PROPOSES
+    // the derived page size through the same `query_state.propose` path
+    // every other control (search, sort, filters, the page-size select)
+    // already uses -- `TableQuery::with_page_size` resets to page one and
+    // `ServerCursorQuery::with_page_size` resets to `First` by construction,
+    // so cursor mode never replays a previous/next token minted for another
+    // size.
+    let viewport_fit_resolution: Memo<Result<bool, &'static str>> =
+        Memo::new(move |_| resolve_viewport_fit(viewport_fit.get(), has_page_size));
+    let viewport_fit_active =
+        Signal::derive(move || matches!(viewport_fit_resolution.get(), Ok(true)));
 
-    let has_max_height = container_style.is_some();
-    let table_wrapper_style = if has_max_height {
-        Some("flex: 1; overflow-y: auto; min-height: 0")
-    } else {
-        None
+    let table_wrapper_ref = NodeRef::<Div>::new();
+
+    // Row-height "era" identity (ldui-89rp CRITICAL fix, reused verbatim --
+    // see `auto_page.rs::RowHeightEra`'s own docs): a genuinely new server
+    // page of `rows` is a fresh era (a different max row height is expected
+    // and legitimate), while multiple measurement passes over the SAME
+    // `rows` (density change, a resize that doesn't yet have new rows, a
+    // settling layout) ratchet the row height fed to the derivation so it
+    // can only grow within the era, guaranteeing the derived count reaches a
+    // fixed point instead of oscillating.
+    let viewport_fit_data_revision: StoredValue<u64> = StoredValue::new(0);
+    Effect::new(move |ran_before: Option<()>| {
+        let _ = rows.get();
+        if ran_before.is_some() {
+            viewport_fit_data_revision
+                .update_value(|revision| *revision = revision.wrapping_add(1));
+        }
+    });
+    let viewport_fit_row_era: StoredValue<Option<RowHeightEra>> = StoredValue::new(None);
+    let viewport_fit_epoch: StoredValue<ViewportFitEpoch> =
+        StoredValue::new(ViewportFitEpoch::new());
+
+    let measure_viewport_fit = move |stamp: u64| {
+        // Late-firing guard (ldui-d54), same rationale as `DataTable`'s own
+        // measurement closure: this runs from a zero-delay macrotask, so a
+        // navigation that disposes this table's reactive owner before the
+        // timer fires must degrade to a no-op, not panic the whole wasm app.
+        if !matches!(viewport_fit_resolution.try_get_untracked(), Some(Ok(true))) {
+            return;
+        }
+        // Stale-measurement guard (ldui-2bt3): a newer pass may already have
+        // been scheduled (and therefore have already invalidated this
+        // stamp) between this timer being set and it actually firing.
+        if !viewport_fit_epoch
+            .try_get_value()
+            .is_some_and(|epoch| epoch.is_current(stamp))
+        {
+            return;
+        }
+        let Some(wrapper) = table_wrapper_ref.try_get_untracked().flatten() else {
+            return;
+        };
+
+        let measure = |selector: &str, fallback: f64| -> f64 {
+            wrapper
+                .query_selector(selector)
+                .ok()
+                .flatten()
+                .and_then(|el| el.dyn_into::<web_sys::HtmlElement>().ok())
+                .map(|el| el.offset_height() as f64)
+                .filter(|h| *h > 0.0)
+                .unwrap_or(fallback)
+        };
+
+        // `offset_height`, deliberately, not `client_height` -- immune to a
+        // horizontal scrollbar the widest rendered cell can introduce. See
+        // `DataTable`'s own measurement closure for the full oscillation
+        // rationale; the two must stay in sync.
+        let viewport = wrapper.offset_height() as f64;
+        let header_height = measure("thead", FALLBACK_HEADER_HEIGHT);
+        let measured_max = wrapper
+            .query_selector_all("tbody tr")
+            .map(|found| {
+                let heights: Vec<f64> = (0..found.length())
+                    .filter_map(|i| found.item(i))
+                    .filter_map(|node| node.dyn_into::<web_sys::HtmlElement>().ok())
+                    .map(|el| el.offset_height() as f64)
+                    .collect();
+                max_row_height(&heights, 0.0)
+            })
+            .unwrap_or(0.0);
+
+        let era_key = (
+            viewport_fit_data_revision.get_value(),
+            wrapper.offset_width(),
+        );
+        let era = viewport_fit_row_era
+            .get_value()
+            .unwrap_or(RowHeightEra::empty(era_key))
+            .observe(era_key, measured_max);
+        viewport_fit_row_era.set_value(Some(era));
+        let row_height = era.effective_row_height(FALLBACK_ROW_HEIGHT);
+
+        let accepted_page_size = query_state.get_untracked().page_size().max(1);
+        let min_rows = viewport_fit_min_rows
+            .try_get_untracked()
+            .unwrap_or(DEFAULT_AUTO_MIN_ROWS);
+        if let Some(next_size) = viewport_fit_page_size_proposal(
+            viewport,
+            header_height,
+            row_height,
+            accepted_page_size,
+            min_rows,
+            accepted_page_size,
+        ) {
+            query_state.propose(
+                query_state.get_untracked().with_page_size(next_size),
+                on_query_change,
+            );
+        }
     };
-    let controls_style = if has_max_height {
-        Some("flex-shrink: 0; padding: 12px 0")
-    } else {
-        None
+
+    // Measure on a fresh macrotask, same rationale as `DataTable`'s own
+    // `schedule_measure`: a `ResizeObserver` callback can run before the
+    // surrounding layout has settled. One pending measure at a time --
+    // cancelling a not-yet-fired timer before scheduling a new one -- is a
+    // belt-and-braces pairing with `ViewportFitEpoch`'s pure staleness
+    // guard above, not a substitute for it.
+    let viewport_fit_measure_handle: StoredValue<Option<TimeoutHandle>> = StoredValue::new(None);
+    let schedule_viewport_fit_measure = move || {
+        if let Some(handle) = viewport_fit_measure_handle.try_get_value().flatten() {
+            handle.clear();
+        }
+        let stamp = viewport_fit_epoch
+            .try_update_value(|epoch| epoch.next())
+            .map(|(_, stamp)| stamp)
+            .unwrap_or(0);
+        match set_timeout_with_handle(
+            move || measure_viewport_fit(stamp),
+            std::time::Duration::ZERO,
+        ) {
+            Ok(handle) => {
+                viewport_fit_measure_handle.try_update_value(|slot| *slot = Some(handle));
+            }
+            // No `window` to schedule against: measuring now is better than
+            // not at all.
+            Err(_) => measure_viewport_fit(stamp),
+        }
     };
+    // A zero-delay macrotask must not outlive the reactive owner (ldui-d54).
+    on_cleanup(move || {
+        if let Some(handle) = viewport_fit_measure_handle.try_get_value().flatten() {
+            handle.clear();
+        }
+    });
+
+    // Re-measure whenever anything that moves the arithmetic changes: the
+    // opt-in itself, the usability floor, table density, the rows available
+    // to measure, the visible column set (widths drive wrapping), whether a
+    // filter row is present, and the currently accepted page size (a
+    // re-measure right after a size change corrects a height latched from
+    // an unsettled layout).
+    Effect::new(move |_| {
+        let _ = viewport_fit_active.get();
+        let _ = viewport_fit_min_rows.get();
+        let _ = table_size.get();
+        let _ = rows.get();
+        let _ = effective_columns.get();
+        let _ = show_filter_row.get();
+        let _ = query_state.get().page_size();
+        schedule_viewport_fit_measure();
+    });
+
+    // Attach the `ResizeObserver` once, when the wrapper first enters the
+    // DOM -- identical rationale and pattern to `DataTable`'s own.
+    Effect::new(move |_| {
+        let Some(wrapper) = table_wrapper_ref.get() else {
+            return;
+        };
+
+        schedule_viewport_fit_measure();
+
+        let closure = wasm_bindgen::closure::Closure::wrap(Box::new(
+            move |_entries: js_sys::Array, _observer: web_sys::ResizeObserver| {
+                schedule_viewport_fit_measure();
+            },
+        )
+            as Box<dyn FnMut(js_sys::Array, web_sys::ResizeObserver)>);
+
+        match web_sys::ResizeObserver::new(closure.as_ref().unchecked_ref()) {
+            Ok(observer) => {
+                observer.observe(wrapper.unchecked_ref::<web_sys::Element>());
+                // Neither `Send` nor `Sync`; this component only ever runs
+                // single-threaded (wasm32 in the browser) -- same rationale
+                // as `DataTable`'s own ResizeObserver wiring.
+                let guard = send_wrapper::SendWrapper::new((closure, observer));
+                on_cleanup(move || {
+                    let (closure, observer) = guard.take();
+                    observer.disconnect();
+                    drop(closure);
+                });
+            }
+            Err(_) => drop(closure),
+        }
+    });
+
+    // Container style for viewport-constrained scrolling. `viewport_fit`
+    // needs a *definite* height here, not just a ceiling, for the same
+    // reason `DataTable::auto_page_size` does: promoting `max_height` to a
+    // real `height` breaks the circularity where the wrapper's measured
+    // height would be a function of the row count derived from it.
+    let has_max_height = max_height.is_some();
+    let container_style = move || match (viewport_fit_active.get(), max_height.as_deref()) {
+        (true, Some(h)) => Some(format!(
+            "display: flex; flex-direction: column; height: {h}; max-height: {h}"
+        )),
+        (true, None) => Some("display: flex; flex-direction: column; height: 100%".to_string()),
+        (false, Some(h)) => Some(format!(
+            "display: flex; flex-direction: column; max-height: {h}"
+        )),
+        (false, None) => None,
+    };
+    let is_flex_column = move || has_max_height || viewport_fit_active.get();
+    let table_wrapper_style =
+        move || is_flex_column().then_some("flex: 1; overflow-y: auto; min-height: 0");
+    let controls_style = move || is_flex_column().then_some("flex-shrink: 0; padding: 12px 0");
     let stable_tracks = Signal::derive(move || {
         let widths = column_widths.get();
         let columns = effective_columns.get();
@@ -1747,6 +2090,11 @@ pub fn ServerDataTable(
                 Ok(ResolvedServerFilterVocabulary::CurrentSlice) => "current-slice",
                 Err(_) => "invalid",
             }
+            data-server-viewport-fit=move || match viewport_fit_resolution.get() {
+                Ok(true) => "active",
+                Ok(false) => "disabled",
+                Err(_) => "rejected",
+            }
             aria-busy=move || loading.get().then_some("true")
         >
             <Show when=move || filter_vocabulary_resolution.get().is_err()>
@@ -1758,6 +2106,20 @@ pub fn ServerDataTable(
                     class="mb-3 rounded-box border border-error bg-error/10 px-3 py-2 text-sm text-error forced-colors:border-[CanvasText] forced-colors:text-[CanvasText]"
                 >
                     {move || filter_vocabulary_resolution
+                        .get()
+                        .err()
+                        .unwrap_or_default()}
+                </div>
+            </Show>
+            <Show when=move || viewport_fit_resolution.get().is_err()>
+                <div
+                    role="alert"
+                    data-server-viewport-fit-config-error=move || {
+                        viewport_fit_resolution.get().err()
+                    }
+                    class="mb-3 rounded-box border border-error bg-error/10 px-3 py-2 text-sm text-error forced-colors:border-[CanvasText] forced-colors:text-[CanvasText]"
+                >
+                    {move || viewport_fit_resolution
                         .get()
                         .err()
                         .unwrap_or_default()}
@@ -1834,7 +2196,7 @@ pub fn ServerDataTable(
                 }
             }}
 
-            <div class=TABLE_SCROLL_WRAPPER_CLASS style=table_wrapper_style>
+            <div class=TABLE_SCROLL_WRAPPER_CLASS style=table_wrapper_style node_ref=table_wrapper_ref>
                 <div style=move || stable_table_content_style(&stable_tracks.get())>
                     <Table
                         size=table_size
@@ -2283,6 +2645,174 @@ mod tests {
             options_with_active_filter_values(DataTableFilterOptions::new(), &filters, &columns)
                 .is_empty()
         );
+    }
+
+    // ── viewport_fit (ldui-2bt3) ──
+
+    #[test]
+    fn viewport_fit_is_off_by_default_regardless_of_capability() {
+        assert_eq!(resolve_viewport_fit(false, true), Ok(false));
+        assert_eq!(resolve_viewport_fit(false, false), Ok(false));
+    }
+
+    #[test]
+    fn viewport_fit_activates_only_when_page_size_is_controllable() {
+        assert_eq!(resolve_viewport_fit(true, true), Ok(true));
+    }
+
+    #[test]
+    fn viewport_fit_fails_closed_on_a_fixed_slice_or_disabled_capability() {
+        // Covers both motivating cases the same way: a fixed-slice cursor
+        // endpoint and `ServerQueryCapabilities::page_size_enabled() ==
+        // false` both collapse to `page_size_controllable = false` before
+        // this function ever sees them.
+        assert_eq!(
+            resolve_viewport_fit(true, false),
+            Err(VIEWPORT_FIT_REQUIRES_PAGE_SIZE_CONFIGURATION),
+        );
+    }
+
+    #[test]
+    fn viewport_fit_proposal_grows_the_page_size_to_the_measured_fit() {
+        // 436px viewport, 36px header, 40px rows -> 10 rows fit; accepted is
+        // still 5, so a growth proposal is due.
+        assert_eq!(
+            viewport_fit_page_size_proposal(436.0, 36.0, 40.0, 5, 5, 5),
+            Some(10),
+        );
+    }
+
+    #[test]
+    fn viewport_fit_proposal_is_none_once_it_matches_what_is_already_accepted() {
+        assert_eq!(
+            viewport_fit_page_size_proposal(436.0, 36.0, 40.0, 10, 5, 10),
+            None,
+            "the caller already accepted the derived size -- nothing to propose",
+        );
+    }
+
+    #[test]
+    fn viewport_fit_proposal_below_the_usability_floor_retains_the_accepted_size() {
+        // A 224px wrapper, 77px header, 76px rows mathematically fit one
+        // row (below `min_rows`), so the derivation retains whatever is
+        // already accepted (12) rather than proposing 1.
+        assert_eq!(
+            viewport_fit_page_size_proposal(224.0, 77.0, 76.0, 12, 5, 12),
+            None,
+            "a fit below min_rows must retain the accepted size, not propose a smaller one",
+        );
+    }
+
+    #[test]
+    fn viewport_fit_proposal_is_stable_under_repeated_measurement_of_an_unchanged_viewport() {
+        // Simulates a caller that declines a proposal: the accepted size
+        // never moves, so every subsequent re-measurement of the SAME
+        // viewport must derive the SAME proposal -- no drift, no escalation.
+        let first = viewport_fit_page_size_proposal(436.0, 36.0, 40.0, 5, 5, 5);
+        let second = viewport_fit_page_size_proposal(436.0, 36.0, 40.0, 5, 5, 5);
+        assert_eq!(first, second);
+        assert_eq!(first, Some(10));
+    }
+
+    #[test]
+    fn viewport_fit_proposal_applied_to_an_offset_query_resets_to_page_one() {
+        let accepted = TableQuery {
+            page: 7,
+            page_size: 5,
+            search: String::new(),
+            sort: None,
+            filters: ColumnFilters::new(),
+        };
+        let Some(next_size) = viewport_fit_page_size_proposal(
+            436.0,
+            36.0,
+            40.0,
+            accepted.page_size,
+            5,
+            accepted.page_size,
+        ) else {
+            panic!("expected a growth proposal");
+        };
+
+        let proposed = accepted.with_page_size(next_size);
+
+        assert_eq!(proposed.page_size, 10);
+        assert_eq!(
+            proposed.page, 1,
+            "offset viewport-fit proposals reset to page one"
+        );
+    }
+
+    #[test]
+    fn viewport_fit_proposal_applied_to_a_cursor_query_resets_to_first_never_reusing_a_token() {
+        // A token minted for `page_size: 5` must never be replayed against a
+        // proposed `page_size: 10`.
+        let accepted = ServerCursorQuery {
+            request: ServerCursorRequest::Next(ServerCursorToken::new("minted-for-size-5")),
+            page_size: 5,
+            search: String::new(),
+            sort: None,
+            filters: ColumnFilters::new(),
+        };
+        let Some(next_size) = viewport_fit_page_size_proposal(
+            436.0,
+            36.0,
+            40.0,
+            accepted.page_size,
+            5,
+            accepted.page_size,
+        ) else {
+            panic!("expected a growth proposal");
+        };
+
+        let proposed = accepted.with_page_size(next_size);
+
+        assert_eq!(proposed.page_size, 10);
+        assert_eq!(
+            proposed.request,
+            ServerCursorRequest::First,
+            "cursor viewport-fit proposals must request First, never replay an old token",
+        );
+    }
+
+    #[test]
+    fn viewport_fit_epoch_stamps_are_sequential_and_current() {
+        let epoch = ViewportFitEpoch::new();
+        let (epoch, first) = epoch.next();
+        assert!(epoch.is_current(first));
+
+        let (epoch, second) = epoch.next();
+        assert_ne!(first, second);
+        assert!(epoch.is_current(second));
+    }
+
+    #[test]
+    fn viewport_fit_epoch_rejects_a_stale_stamp_once_a_newer_pass_is_scheduled() {
+        let epoch = ViewportFitEpoch::new();
+        let (epoch, stale) = epoch.next();
+        // Scheduling a second pass immediately invalidates the first, even
+        // though the first pass's timer has not fired yet.
+        let (epoch, fresh) = epoch.next();
+
+        assert!(
+            !epoch.is_current(stale),
+            "a stamp superseded by a newer schedule must never apply its measurement"
+        );
+        assert!(epoch.is_current(fresh));
+    }
+
+    #[test]
+    fn viewport_fit_epoch_a_pass_that_fires_out_of_order_is_still_rejected_if_stale() {
+        // Three passes scheduled back to back (e.g. rapid resize); only the
+        // last-scheduled stamp may ever apply, regardless of firing order.
+        let epoch = ViewportFitEpoch::new();
+        let (epoch, first) = epoch.next();
+        let (epoch, second) = epoch.next();
+        let (epoch, third) = epoch.next();
+
+        assert!(!epoch.is_current(first));
+        assert!(!epoch.is_current(second));
+        assert!(epoch.is_current(third));
     }
 
     #[test]
