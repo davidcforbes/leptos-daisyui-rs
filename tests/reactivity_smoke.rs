@@ -3985,3 +3985,107 @@ async fn spread_attr_type_overrides_the_button_type_prop() {
     );
     assert_no_browser_errors(&h, "attr:type precedence probe").await;
 }
+
+/// Each temporal `InputType` variant (ldui-z16) emits the exact valid HTML
+/// `type` token the spec requires -- not some caller-facing format string.
+/// Exercises all five: `date`, `time`, `month`, `week`, `datetime-local`.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn temporal_input_types_emit_the_exact_html_type_tokens() {
+    let h = harness_at("/components/input").await;
+
+    let tokens = eval_json(
+        &h,
+        r#"(() => ({
+            date: document.querySelector('#input-type-date').getAttribute('type'),
+            time: document.querySelector('#input-type-time').getAttribute('type'),
+            month: document.querySelector('#input-type-month').getAttribute('type'),
+            week: document.querySelector('#input-type-week').getAttribute('type'),
+            datetimeLocal: document.querySelector('#input-type-datetime-local').getAttribute('type'),
+        }))()"#,
+    )
+    .await;
+    assert_eq!(tokens["date"], json!("date"), "{tokens}");
+    assert_eq!(tokens["time"], json!("time"), "{tokens}");
+    assert_eq!(tokens["month"], json!("month"), "{tokens}");
+    assert_eq!(tokens["week"], json!("week"), "{tokens}");
+    assert_eq!(
+        tokens["datetimeLocal"],
+        json!("datetime-local"),
+        "the DateTimeLocal variant token is hyphenated, not `datetimelocal`: {tokens}"
+    );
+    assert_no_browser_errors(&h, "temporal input type tokens").await;
+}
+
+/// A temporal value typed into a controlled `Input` (native `.value` set +
+/// a bubbling `input` event, same as a real keystroke) flows through
+/// `on_input` into the owning signal and back out through `prop:value`
+/// unchanged -- LDUI applies no parsing, reformatting, or timezone
+/// normalization anywhere in that loop. Exercises date, time, month, and
+/// datetime-local (the brief's required minimum), plus week.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn temporal_input_values_round_trip_through_controlled_value_without_normalization() {
+    let h = harness_at("/components/input").await;
+
+    let cases = [
+        ("#input-type-date", "2031-11-03"),
+        ("#input-type-time", "09:15"),
+        ("#input-type-month", "2031-11"),
+        ("#input-type-week", "2031-W44"),
+        ("#input-type-datetime-local", "2031-11-03T09:15"),
+    ];
+    for (selector, typed) in cases {
+        let script = format!(
+            r#"(() => {{
+                const input = document.querySelector('{selector}');
+                input.value = '{typed}';
+                input.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                return input.value;
+            }})()"#
+        );
+        let immediate = eval_json(&h, &script).await;
+        assert_eq!(
+            immediate,
+            json!(typed),
+            "{selector}: browser accepted the native-format value before any Leptos round trip"
+        );
+        settle(&h).await;
+        let after_settle =
+            eval_json(&h, &format!("document.querySelector('{selector}').value")).await;
+        assert_eq!(
+            after_settle,
+            json!(typed),
+            "{selector}: value must survive the on_input -> signal -> prop:value round trip \
+             unchanged (no LDUI normalization)"
+        );
+    }
+    assert_no_browser_errors(&h, "temporal input value round trip").await;
+}
+
+/// A duplicate spread `attr:type` beats the component's own `input_type`,
+/// mirroring Button's `attr:type` precedence (ldui-9vs).
+/// `#input-type-precedence-probe` sets `input_type=InputType::Date` *and*
+/// spreads `attr:r#type="time"`; on this crate's CSR-only rendering path the
+/// spread attribute is applied to the root element after the component's own
+/// view is built, so `set_attribute` runs last and the spread wins. This is
+/// the concrete verification behind Input's doc comment "Precedence vs a
+/// spread `attr:type`" (ldui-z16) -- never rely on this in real code, use
+/// `input_type` alone.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn spread_attr_type_overrides_the_input_type_prop() {
+    let h = harness_at("/components/input").await;
+
+    let emitted_type = eval_json(
+        &h,
+        "document.querySelector('#input-type-precedence-probe').getAttribute('type')",
+    )
+    .await;
+    assert_eq!(
+        emitted_type,
+        json!("time"),
+        "a later spread attr:type overrides input_type on the CSR path: {emitted_type}"
+    );
+    assert_no_browser_errors(&h, "input attr:type precedence probe").await;
+}

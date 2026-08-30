@@ -205,10 +205,62 @@ fn test_all_input_types_return_valid_html_type_values() {
         (InputType::Tel, "tel"),
         (InputType::Search, "search"),
         (InputType::Url, "url"),
+        (InputType::Date, "date"),
+        (InputType::Time, "time"),
+        (InputType::Month, "month"),
+        (InputType::Week, "week"),
+        (InputType::DateTimeLocal, "datetime-local"),
     ];
     for (variant, expected) in variants {
         assert_eq!(variant.as_str(), expected);
     }
+}
+
+// Temporal InputType variants (ldui-z16). Each must emit the exact valid
+// HTML `type` token -- verbatim, not a caller-facing format string. Value
+// parsing/validation/timezone/min-max-step stay caller-owned (attr:min,
+// attr:max, attr:step); these variants only decide the DOM `type`.
+#[test]
+fn test_input_type_date_emits_date_token() {
+    assert_eq!(InputType::Date.as_str(), "date");
+}
+
+#[test]
+fn test_input_type_time_emits_time_token() {
+    assert_eq!(InputType::Time.as_str(), "time");
+}
+
+#[test]
+fn test_input_type_month_emits_month_token() {
+    assert_eq!(InputType::Month.as_str(), "month");
+}
+
+#[test]
+fn test_input_type_week_emits_week_token() {
+    assert_eq!(InputType::Week.as_str(), "week");
+}
+
+#[test]
+fn test_input_type_datetime_local_emits_datetime_local_token() {
+    // The one variant whose token is not a lowercased rename of the Rust
+    // identifier -- `DateTimeLocal` -> `datetime-local`, hyphenated per the
+    // HTML spec, not `datetimelocal`.
+    assert_eq!(InputType::DateTimeLocal.as_str(), "datetime-local");
+}
+
+#[test]
+fn test_temporal_input_types_clone_and_eq() {
+    let v1 = InputType::DateTimeLocal;
+    let v2 = v1.clone();
+    assert_eq!(v1, v2);
+    assert_ne!(InputType::Date, InputType::Time);
+    assert_ne!(InputType::Month, InputType::Week);
+}
+
+#[test]
+fn test_temporal_input_types_debug() {
+    assert!(format!("{:?}", InputType::Date).contains("Date"));
+    assert!(format!("{:?}", InputType::DateTimeLocal).contains("DateTimeLocal"));
 }
 
 #[test]
@@ -305,4 +357,76 @@ fn test_optional_numeric_attr_some_value() {
         super::component::optional_numeric_attr(Some(10)),
         Some("10".to_string())
     );
+}
+
+// resolve_effective_type tests (ldui-z16) -- the DOM `type` attribute Input
+// actually applies, extracted for native (host-target) testability, mirroring
+// Button's `resolve_native_disabled` (ldui-9vs). Only `InputType::Password`
+// is affected by the reveal toggle; every other variant -- including all
+// five temporal variants -- must pass through unchanged regardless of
+// `revealable`/`revealed`.
+use super::component::resolve_effective_type;
+
+#[test]
+fn test_resolve_effective_type_password_not_revealed_stays_password() {
+    assert_eq!(
+        resolve_effective_type(InputType::Password, true, false),
+        "password"
+    );
+}
+
+#[test]
+fn test_resolve_effective_type_password_revealed_flips_to_text() {
+    assert_eq!(
+        resolve_effective_type(InputType::Password, true, true),
+        "text"
+    );
+}
+
+#[test]
+fn test_resolve_effective_type_password_revealed_but_not_revealable_stays_password() {
+    // `revealed` alone (internal reveal signal) never flips the type -- only
+    // when the caller opted in via `revealable=true` too.
+    assert_eq!(
+        resolve_effective_type(InputType::Password, false, true),
+        "password"
+    );
+}
+
+#[test]
+fn test_resolve_effective_type_temporal_variants_are_never_affected_by_reveal() {
+    for (variant, expected) in [
+        (InputType::Date, "date"),
+        (InputType::Time, "time"),
+        (InputType::Month, "month"),
+        (InputType::Week, "week"),
+        (InputType::DateTimeLocal, "datetime-local"),
+    ] {
+        for &revealable in &[false, true] {
+            for &revealed in &[false, true] {
+                assert_eq!(
+                    resolve_effective_type(variant.clone(), revealable, revealed),
+                    expected,
+                    "variant={variant:?}, revealable={revealable}, revealed={revealed}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn test_resolve_effective_type_non_password_non_temporal_variants_pass_through() {
+    for (variant, expected) in [
+        (InputType::Text, "text"),
+        (InputType::Email, "email"),
+        (InputType::Number, "number"),
+        (InputType::Tel, "tel"),
+        (InputType::Search, "search"),
+        (InputType::Url, "url"),
+    ] {
+        assert_eq!(
+            resolve_effective_type(variant.clone(), true, true),
+            expected
+        );
+    }
 }

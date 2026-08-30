@@ -12,11 +12,36 @@ pub(super) fn optional_numeric_attr(value: Option<u32>) -> Option<String> {
     value.map(|v| v.to_string())
 }
 
+/// Resolves the DOM `type` attribute [`Input`] actually applies, given
+/// `input_type`, the opt-in password-reveal toggle, and whether the field is
+/// currently revealed. Extracted for native (host-target) testability,
+/// mirroring `Button`'s `resolve_native_disabled` (ldui-9vs).
+///
+/// Only [`InputType::Password`] is affected: while `revealable` is true and
+/// `revealed` is true, the DOM type flips to `text` so the browser shows the
+/// plaintext value. Every other variant -- including all five temporal
+/// variants ([`InputType::Date`], [`InputType::Time`], [`InputType::Month`],
+/// [`InputType::Week`], [`InputType::DateTimeLocal`]) -- passes through
+/// `input_type.as_str()` unchanged regardless of `revealable`/`revealed`
+/// (ldui-z16).
+pub(super) fn resolve_effective_type(
+    input_type: InputType,
+    revealable: bool,
+    revealed: bool,
+) -> &'static str {
+    if revealable && revealed && input_type == InputType::Password {
+        InputType::Text.as_str()
+    } else {
+        input_type.as_str()
+    }
+}
+
 /// # Input Component
 ///
 /// A reactive Leptos wrapper for daisyUI's input component that provides styled
 /// text input fields with customizable size, color, and style. Also supports a
-/// type-safe `input_type` (password/email/number/tel/search/url), an opt-in
+/// type-safe `input_type` (password/email/number/tel/search/url, plus the
+/// temporal variants date/time/month/week/datetime-local), an opt-in
 /// password reveal toggle, character-class input filtering, and a leading icon
 /// slot rendered via daisyUI 5's `<label class="input">` wrapper markup.
 ///
@@ -39,8 +64,49 @@ pub(super) fn optional_numeric_attr(value: Option<u32>) -> Option<String> {
 ///         value=value
 ///         leading_icon=Box::new(|| view! { <span>"search"</span> }.into_any())
 ///     />
+///
+///     // Native date picker. `value`/`on_input` carry the raw `YYYY-MM-DD`
+///     // string verbatim -- LDUI does no parsing, validation, timezone
+///     // conversion, or reformatting. `min`/`max`/`step` are caller-owned,
+///     // passed as spread attrs.
+///     <Input
+///         input_type=InputType::Date
+///         value=value
+///         on_input=move |v| set_value.set(v)
+///         attr:min="2020-01-01"
+///         attr:max="2030-12-31"
+///     />
 /// }
 /// ```
+///
+/// ## Temporal variants (`Date`/`Time`/`Month`/`Week`/`DateTimeLocal`)
+///
+/// Each emits the exact HTML `type` token the spec requires (`date`, `time`,
+/// `month`, `week`, `datetime-local`); see [`InputType`] for the caller-owned
+/// contract each one carries -- value parsing, domain validation, timezone
+/// handling, and `min`/`max`/`step` all stay outside this crate. `value` and
+/// `on_input` round-trip the browser's native string representation
+/// unchanged (no LDUI-side normalization), exactly like every other
+/// `InputType`; the browser itself is the only thing that ever rewrites the
+/// string (e.g. zero-padding a typed `2026-8-9` to `2026-08-09`).
+///
+/// ## Precedence vs a spread `attr:type`
+///
+/// `Input` always emits its own `type` attribute (driven by `input_type`,
+/// via [`resolve_effective_type`]). Spreading a duplicate --
+/// `<Input attr:r#type="date" .../>` (`type` is a Rust keyword, so the spread
+/// needs the raw-identifier escape) -- is redundant and its result should
+/// not be relied upon, but concretely: on this crate's CSR-only rendering
+/// path, spread attributes are applied *after* the component's own view is
+/// built, so `set_attribute` runs last and **the spread `attr:r#type`
+/// wins**, silently overriding `input_type` -- same mechanism already
+/// documented on [`Button`](crate::components::button::Button)'s
+/// `button_type` (ldui-9vs) and on
+/// [`Progress`](crate::components::progress::Progress)'s `attr:max`.
+/// Verified directly by the demo's `#input-type-precedence-probe` fixture
+/// and `spread_attr_type_overrides_the_input_type_prop` in
+/// `tests/reactivity_smoke.rs` (ldui-z16). Use `input_type`, not a spread
+/// `type`.
 ///
 /// ### Add to `input.css`
 /// ```css
@@ -165,14 +231,10 @@ pub fn Input(
     let reveal = RwSignal::new(false);
 
     // The type actually applied to the DOM element: flips Password -> Text
-    // while revealed, otherwise mirrors `input_type`.
-    let effective_type = Signal::derive(move || {
-        if revealable && reveal.get() && input_type.get() == InputType::Password {
-            InputType::Text.as_str()
-        } else {
-            input_type.get().as_str()
-        }
-    });
+    // while revealed, otherwise mirrors `input_type`. See
+    // `resolve_effective_type` for the (natively tested) pure logic.
+    let effective_type =
+        Signal::derive(move || resolve_effective_type(input_type.get(), revealable, reveal.get()));
 
     // Structural decision, made once: use the daisyUI `label.input` wrapper
     // markup only when a leading icon or the password-reveal toggle was

@@ -140,6 +140,34 @@ pub enum InputType {
 
     /// URL; browsers may offer format validation/autocomplete
     Url,
+
+    /// Calendar date (`YYYY-MM-DD`); browsers typically render a native date
+    /// picker. Value parsing/validation, timezone policy, and `min`/`max`/
+    /// `step` are caller-owned — pass them as spread attrs (`attr:min`,
+    /// `attr:max`, `attr:step`). Ported from d2d-ui's desktop date field
+    /// (see the `Precedence vs a spread` note on
+    /// [`Input`](super::component::Input) for `attr:type`'s own caveat).
+    Date,
+
+    /// Time of day (`HH:MM` or `HH:MM:SS`); browsers typically render a
+    /// native time picker. Same caller-owned parsing/`min`/`max`/`step`
+    /// contract as [`InputType::Date`].
+    Time,
+
+    /// Year-and-month (`YYYY-MM`); browsers typically render a native
+    /// month picker. Same caller-owned contract as [`InputType::Date`].
+    Month,
+
+    /// ISO week (`YYYY-Www`); browsers typically render a native week
+    /// picker. Same caller-owned contract as [`InputType::Date`].
+    Week,
+
+    /// Local date and time with no timezone offset
+    /// (`YYYY-MM-DDTHH:MM[:SS]`); browsers typically render a combined
+    /// date/time picker. Same caller-owned contract as [`InputType::Date`]
+    /// — in particular, LDUI applies no timezone conversion; the string is
+    /// passed through verbatim.
+    DateTimeLocal,
 }
 
 impl InputType {
@@ -153,6 +181,11 @@ impl InputType {
             InputType::Tel => "tel",
             InputType::Search => "search",
             InputType::Url => "url",
+            InputType::Date => "date",
+            InputType::Time => "time",
+            InputType::Month => "month",
+            InputType::Week => "week",
+            InputType::DateTimeLocal => "datetime-local",
         }
     }
 }
