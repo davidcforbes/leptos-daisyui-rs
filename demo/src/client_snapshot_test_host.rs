@@ -17,7 +17,8 @@ use leptos::prelude::*;
 use leptos_daisyui_rs::test_mode;
 use leptos_daisyui_rs::tokens::{UiAnimationsPreamble, UiTokensPreamble};
 use snapshot_table_page::{
-    EntityTablePresentationFixture, EntityTableViewportFitFixture, SnapshotTablePageFixture,
+    EntityTablePageSizeIdentityFixture, EntityTablePresentationFixture,
+    EntityTableViewportFitFixture, SnapshotTablePageFixture,
 };
 
 fn main() {
@@ -48,11 +49,16 @@ fn main() {
         let presentation_fixture = web_sys::window()
             .and_then(|window| window.location().pathname().ok())
             .is_some_and(|path| path.ends_with("/entity-table-presentation"));
+        let page_size_identity_fixture = web_sys::window()
+            .and_then(|window| window.location().pathname().ok())
+            .is_some_and(|path| path.ends_with("/entity-table-page-size-identity"));
         view! {
             <UiTokensPreamble />
             <UiAnimationsPreamble />
             <main class="min-h-screen bg-base-200 p-4 sm:p-6">
-                {if presentation_fixture {
+                {if page_size_identity_fixture {
+                    view! { <EntityTablePageSizeIdentityFixture /> }.into_any()
+                } else if presentation_fixture {
                     view! { <EntityTablePresentationFixture /> }.into_any()
                 } else if viewport_fit_fixture {
                     view! { <EntityTableViewportFitFixture /> }.into_any()

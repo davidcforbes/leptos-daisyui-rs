@@ -539,3 +539,51 @@ pub fn EntityTablePresentationFixture() -> impl IntoView {
         </section>
     }
 }
+
+/// Focused browser fixture for the framework-owned page-size select identity
+/// (ldui-kl55). Table A and table B both omit `page_size_control_id` — the
+/// bug was that this left the rows-per-page `<select>` with no `id`/`name` at
+/// all, and Office satellites mounting several `EntityTable`s on one Setup
+/// page had no way to tell the controls apart. Table C supplies an explicit
+/// override, which must be honored verbatim rather than replaced by a
+/// generated default.
+#[component]
+pub fn EntityTablePageSizeIdentityFixture() -> impl IntoView {
+    let data_a = RwSignal::new_local(rows("office-mx"));
+    let data_b = RwSignal::new_local(rows("office-in"));
+    let data_c = RwSignal::new_local(rows("office-mx"));
+
+    view! {
+        <section
+            id="entity-table-page-size-identity-fixture"
+            class="mx-auto max-w-3xl space-y-6 bg-base-100 p-4"
+        >
+            <h1 class="ld-text-display font-semibold">"Page-size select identity"</h1>
+            <div data-testid="page-size-identity-table-a">
+                <EntityTable
+                    data=data_a
+                    columns=columns()
+                    row_key=Rc::new(|row: &FixtureRow| row.id.clone())
+                    dataset_identity="page-size-identity-a"
+                />
+            </div>
+            <div data-testid="page-size-identity-table-b">
+                <EntityTable
+                    data=data_b
+                    columns=columns()
+                    row_key=Rc::new(|row: &FixtureRow| row.id.clone())
+                    dataset_identity="page-size-identity-b"
+                />
+            </div>
+            <div data-testid="page-size-identity-table-c">
+                <EntityTable
+                    data=data_c
+                    columns=columns()
+                    row_key=Rc::new(|row: &FixtureRow| row.id.clone())
+                    dataset_identity="page-size-identity-c"
+                    page_size_control_id="page-size-identity-explicit-override"
+                />
+            </div>
+        </section>
+    }
+}

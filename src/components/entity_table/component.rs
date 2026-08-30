@@ -40,11 +40,25 @@ use web_sys::wasm_bindgen::JsCast;
 
 const MAX_VISIBLE_PAGES: usize = 7;
 static ENTITY_CHOOSER_ID: AtomicU64 = AtomicU64::new(0);
+static ENTITY_PAGE_SIZE_ID: AtomicU64 = AtomicU64::new(0);
 
 fn next_entity_chooser_id() -> String {
     format!(
         "ldui-entity-column-chooser-{}",
         ENTITY_CHOOSER_ID.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
+/// A process-unique id base for one `EntityTable`'s framework-owned
+/// rows-per-page `<select>`, minted only when the caller does not supply
+/// `page_size_control_id`. Monotonic counter, not randomness — stable within
+/// a page's lifetime and unique across every mounted `EntityTable` instance,
+/// which is all `id`/`name` association needs (ldui-kl55: Office satellites
+/// mount three `EntityTable`s on one Setup page).
+pub(crate) fn next_entity_page_size_id() -> String {
+    format!(
+        "ldui-entity-page-size-{}",
+        ENTITY_PAGE_SIZE_ID.fetch_add(1, Ordering::Relaxed)
     )
 }
 
@@ -479,7 +493,11 @@ pub fn EntityTable<T>(
     /// Localizable labels for table controls.
     #[prop(into, default = Signal::stored(EntityTableTexts::default()))]
     texts: Signal<EntityTableTexts>,
-    /// Stable, caller-owned DOM identity for the rows-per-page select.
+    /// Stable DOM identity for the rows-per-page select's `id` and `name`
+    /// attributes. When omitted, a process-unique default is generated so
+    /// every mounted `EntityTable` still gets a non-empty, mutually unique
+    /// `id`/`name` (ldui-kl55) — a caller-supplied value always wins and
+    /// stays stable across re-renders.
     #[prop(optional, into)]
     page_size_control_id: MaybeProp<String>,
     /// Shows separate reset-sort and reset-columns actions.
@@ -554,6 +572,18 @@ where
     let column_chooser_trigger_ref = NodeRef::<leptos::html::Button>::new();
     let column_chooser_menu_id = next_entity_chooser_id();
     let column_chooser_controls_id = column_chooser_menu_id.clone();
+    // Framework-owned default for the rows-per-page select's id/name, used
+    // only when the caller omits `page_size_control_id`. Minted once per
+    // mounted instance, so two or more `EntityTable`s on one page never
+    // collide even without a caller-supplied override (ldui-kl55).
+    let default_page_size_control_id = next_entity_page_size_id();
+    let page_size_select_id: Signal<Option<String>> = Signal::derive(move || {
+        Some(
+            page_size_control_id
+                .get()
+                .unwrap_or_else(|| default_page_size_control_id.clone()),
+        )
+    });
     let configured_page_size =
         Signal::derive(move || preferences.with(|preferences| preferences.page_size.max(1)));
     let page_capacity = Signal::derive(move || {
@@ -978,7 +1008,8 @@ where
                     <span class="min-w-0 break-words">{move || texts.with(|texts| texts.rows_per_page.clone())}</span>
                     <Select
                         class="select-sm w-20 shrink-0"
-                        id=page_size_control_id
+                        id=page_size_select_id
+                        name=page_size_select_id
                         label=Signal::derive(move || {
                             Some(texts.with(|texts| texts.rows_per_page.clone()))
                         })

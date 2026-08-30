@@ -35,5 +35,8 @@ pub(crate) use types::{
 use model::SortedIndexCache;
 
 #[cfg(test)]
+pub(crate) use component::next_entity_page_size_id;
+
+#[cfg(test)]
 mod tests;
 pub use component::{EntityRowAction, EntityTable};

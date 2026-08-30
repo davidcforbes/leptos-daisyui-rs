@@ -1500,3 +1500,24 @@ fn legacy_preferences_without_column_order_normalize_to_declared_order() {
         serde_json::json!(["client", "rank", "office", "actions"])
     );
 }
+
+// ldui-kl55: EntityTable's framework-owned page-size `<select>` had no
+// id/name at all when the caller omitted `page_size_control_id`, and two
+// tables on one page (the Office satellites' Setup page) could not be told
+// apart. `next_entity_page_size_id` is the per-instance default generator
+// wired into that select's `id` and `name`; these tests pin the generator's
+// contract directly, since the reactive Select mount itself needs a browser
+// (see tests/entity_table_page_size_identity.rs for the DOM-level proof).
+#[test]
+fn page_size_default_ids_are_non_empty_and_unique() {
+    let a = next_entity_page_size_id();
+    let b = next_entity_page_size_id();
+    assert!(!a.is_empty());
+    assert!(!b.is_empty());
+    assert_ne!(
+        a, b,
+        "two EntityTable instances must not share a default id"
+    );
+    assert!(a.starts_with("ldui-entity-page-size-"));
+    assert!(b.starts_with("ldui-entity-page-size-"));
+}
