@@ -118,10 +118,9 @@ pub fn SectionHeading(
     #[prop(optional)]
     level: HeadingLevel,
 
-    /// Stable id placed on the heading element itself, so an ancestor can
-    /// point `aria-labelledby` at this heading (e.g. `<section
-    /// aria-labelledby=id>`) without duplicating its text. Omitted when
-    /// empty.
+    /// Stable id placed on the heading element itself, so a wrapping
+    /// section element's `aria-labelledby` can point at this heading
+    /// without duplicating its text. Omitted when empty.
     #[prop(optional, into)]
     id: &'static str,
 

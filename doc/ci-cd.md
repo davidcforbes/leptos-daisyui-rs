@@ -217,8 +217,9 @@ different theme values.
 page-scoped browser lanes, then builds the full catalog once in release mode and
 reuses that same verified server for the 34-check reactivity/DOM-oracle suite
 (`test-reactivity`), layout audit (`test-layout`, below), style audit
-(`test-style`, below), and the focused `KeyedResultList` browser proof
-(`test-keyed-result-list`, ldui-r1z). That catalog server is the real
+(`test-style`, below), the focused `KeyedResultList` browser proof
+(`test-keyed-result-list`, ldui-r1z), and the focused `SectionHeading`
+browser proof (`test-section-heading`, ldui-lwu). That catalog server is the real
 `wasm32-unknown-unknown` release build, so a second standalone
 `trunk build --release` would only repeat the same pipeline and is intentionally
 absent. It is a **separate task**, not part of the default gate, because it needs
@@ -230,14 +231,14 @@ The page-scoped host and catalog are two distinct HTML/Wasm targets and therefor
 require two server builds. Consecutive suites for the same target share one
 server. In measured warm runs, Cargo's catalog compile was under one second but
 Trunk's Wasm optimization took roughly two minutes per invocation; sharing the
-catalog server across its four suites (reactivity, layout, style, and the
-focused `KeyedResultList` proof) removes three redundant optimization passes
-from `verify-full`.
+catalog server across its five suites (reactivity, layout, style, the
+focused `KeyedResultList` proof, and the focused `SectionHeading` proof)
+removes four redundant optimization passes from `verify-full`.
 
 ### Gate cadence during a live Beads drain
 
 `cargo xtask verify` is the 14-step native gate listed in the table above.
-`cargo xtask verify-full` adds six browser/Wasm checks and reports 20 steps.
+`cargo xtask verify-full` adds seven browser/Wasm checks and reports 21 steps.
 Say which command is running before starting it; "the verification gate" is
 ambiguous because the two commands have materially different cost and coverage.
 
@@ -348,8 +349,9 @@ may still use that variable for interactive diagnosis; it is not a verification
 gate.
 
 When these catalog suites are adjacent inside `verify-full`, steps 1-3 and 5
-wrap the group once: reactivity, layout, style, and the focused
-`KeyedResultList` proof (`test-keyed-result-list`) all use the same current
+wrap the group once: reactivity, layout, style, the focused
+`KeyedResultList` proof (`test-keyed-result-list`), and the focused
+`SectionHeading` proof (`test-section-heading`) all use the same current
 release server. Their standalone subcommands continue to own an isolated server
 so they remain independently reproducible.
 
