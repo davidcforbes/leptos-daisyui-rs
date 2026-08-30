@@ -10,6 +10,7 @@ mod list_page;
 mod macros;
 mod page_header;
 mod page_state_panel;
+mod server_cursor_history;
 mod snapshot_table;
 mod snapshot_table_page;
 
@@ -46,6 +47,10 @@ pub use filter_bar::{
 pub use list_page::{LIST_PAGE_BASE_CLASS, ListPage, list_page_class};
 pub use page_header::{PageHeader, PageHeaderNavigationLayout};
 pub use page_state_panel::{PageStatePanel, PageStatePanelTexts};
+pub use server_cursor_history::{
+    ServerCursorHistory, ServerCursorHistoryDisposition, ServerCursorHistoryError,
+    ServerCursorHistoryGeneration, ServerCursorHistoryHandle,
+};
 pub use snapshot_table::{
     LocalResultSummary, PageStatePanelKind, SnapshotAccess, SnapshotActionDisposition,
     SnapshotActionHandle, SnapshotActionStartError, SnapshotData, SnapshotDataError,
