@@ -652,3 +652,303 @@ fn concurrent_actions_retain_independent_content_and_one_coherent_announcement()
         Some("2 of 4 items on row B.".to_owned())
     );
 }
+
+// ldui-vn81 / ldui-cb29: generation-bound displayed-snapshot deltas.
+
+/// A successful delta (e.g. removing a row the caller just claimed)
+/// atomically replaces rows/revision/count/metadata without bumping the
+/// dataset/access generation, so `EntityTable`'s `focus_scope`/
+/// `dataset_identity` bindings (both driven off `generation()`) stay stable
+/// across the mutation.
+#[test]
+fn own_claim_removal_delta_replaces_rows_without_bumping_generation() {
+    let mut state = SnapshotTableState::<u32, &'static str, &'static str, (), &'static str>::new();
+    let request = state.start_request("mx").unwrap();
+    state.complete(request, data("mx", "r1", &[1, 2, 3]));
+    let before_generation = state.generation();
+
+    let delta = state.start_delta().expect("displayed snapshot exists");
+    assert_eq!(delta.generation(), before_generation);
+    assert_eq!(
+        state.apply_delta(delta, data("mx", "r1-claimed", &[2, 3])),
+        SnapshotDeltaDisposition::Applied
+    );
+
+    let view = state.view(None);
+    assert_eq!(view.generation(), before_generation);
+    assert_eq!(view.phase(), SnapshotTablePhase::Displaying);
+    let displayed = view.displayed().unwrap();
+    assert_eq!(displayed.dataset(), &"mx");
+    assert_eq!(displayed.revision(), "r1-claimed");
+    assert_eq!(displayed.rows().as_slice(), &[2, 3]);
+    assert_eq!(displayed.authoritative_count(), 2);
+}
+
+/// Sequential deltas from independent sources -- the caller's own claim, then
+/// a different user's SSE removal -- each mint fresh against the
+/// just-updated displayed snapshot and both apply in order.
+#[test]
+fn sequential_own_claim_and_another_user_sse_removal_deltas_both_apply() {
+    let mut state = SnapshotTableState::<u32, &'static str, &'static str, (), &'static str>::new();
+    let request = state.start_request("mx").unwrap();
+    state.complete(request, data("mx", "r1", &[1, 2, 3]));
+    let generation = state.generation();
+
+    let own_claim = state.start_delta().unwrap();
+    assert_eq!(
+        state.apply_delta(own_claim, data("mx", "r2", &[2, 3])),
+        SnapshotDeltaDisposition::Applied
+    );
+
+    let sse_removal = state.start_delta().unwrap();
+    assert_eq!(
+        state.apply_delta(sse_removal, data("mx", "r3", &[3])),
+        SnapshotDeltaDisposition::Applied
+    );
+
+    let view = state.view(None);
+    assert_eq!(view.generation(), generation, "no delta bumps generation");
+    let displayed = view.displayed().unwrap();
+    assert_eq!(displayed.revision(), "r3");
+    assert_eq!(displayed.rows().as_slice(), &[3]);
+}
+
+/// Re-applying an already-applied handle is rejected as stale rather than
+/// silently reverting a later delta's rows.
+#[test]
+fn duplicate_delta_reapplication_is_rejected_as_stale() {
+    let mut state = SnapshotTableState::<u32, &'static str, &'static str, (), &'static str>::new();
+    let request = state.start_request("mx").unwrap();
+    state.complete(request, data("mx", "r1", &[1, 2, 3]));
+
+    let delta = state.start_delta().unwrap();
+    let duplicate = delta.clone();
+    assert_eq!(
+        state.apply_delta(delta, data("mx", "r2", &[2, 3])),
+        SnapshotDeltaDisposition::Applied
+    );
+    assert_eq!(
+        state.apply_delta(duplicate, data("mx", "r2-again", &[9])),
+        SnapshotDeltaDisposition::IgnoredStale
+    );
+    let displayed = state.view(None).displayed().unwrap();
+    assert_eq!(
+        displayed.revision(),
+        "r2",
+        "the duplicate must not overwrite the applied delta"
+    );
+    assert_eq!(displayed.rows().as_slice(), &[2, 3]);
+}
+
+/// A delta minted before an already-applied later delta cannot apply out of
+/// order and silently regress rows a newer delta already removed.
+#[test]
+fn out_of_order_stale_delta_cannot_regress_already_applied_rows() {
+    let mut state = SnapshotTableState::<u32, &'static str, &'static str, (), &'static str>::new();
+    let request = state.start_request("mx").unwrap();
+    state.complete(request, data("mx", "r1", &[1, 2, 3]));
+
+    let older = state.start_delta().unwrap();
+    let newer = state.start_delta().unwrap();
+    assert!(newer.sequence() > older.sequence());
+
+    assert_eq!(
+        state.apply_delta(newer, data("mx", "r2", &[3])),
+        SnapshotDeltaDisposition::Applied
+    );
+    assert_eq!(
+        state.apply_delta(older, data("mx", "stale", &[1, 2, 3])),
+        SnapshotDeltaDisposition::IgnoredStale
+    );
+    let displayed = state.view(None).displayed().unwrap();
+    assert_eq!(displayed.revision(), "r2");
+    assert_eq!(displayed.rows().as_slice(), &[3]);
+}
+
+/// A delta may be minted and applied while an unrelated office replacement
+/// remains in flight, leaving the pending request untouched; completing that
+/// replacement afterward still succeeds and supersedes the delta's rows.
+#[test]
+fn delta_applies_during_an_unrelated_office_replacement_and_leaves_it_intact() {
+    let mut state = SnapshotTableState::<u32, &'static str, &'static str, (), &'static str>::new();
+    let request = state.start_request("mx").unwrap();
+    state.complete(request, data("mx", "r1", &[1, 2, 3]));
+    let generation = state.generation();
+
+    let replacement = state.start_request("in").unwrap();
+    assert_eq!(state.view(None).phase(), SnapshotTablePhase::Replacing);
+    assert_eq!(state.view(None).requested_dataset(), Some(&"in"));
+
+    let delta = state
+        .start_delta()
+        .expect("delta targets the still-displayed mx snapshot");
+    assert_eq!(
+        state.apply_delta(delta, data("mx", "r2", &[2, 3])),
+        SnapshotDeltaDisposition::Applied
+    );
+
+    let view = state.view(None);
+    assert_eq!(
+        view.generation(),
+        generation,
+        "delta preserves the generation"
+    );
+    assert_eq!(
+        view.phase(),
+        SnapshotTablePhase::Replacing,
+        "the delta must not disturb the in-flight replacement's phase"
+    );
+    assert_eq!(view.requested_dataset(), Some(&"in"));
+    let displayed = view.displayed().unwrap();
+    assert_eq!(displayed.dataset(), &"mx");
+    assert_eq!(displayed.rows().as_slice(), &[2, 3]);
+
+    // The still-pending replacement completes normally afterward.
+    assert_eq!(
+        state.complete(replacement, data("in", "in-r1", &[10, 11])),
+        SnapshotTransitionDisposition::Applied
+    );
+    let after = state.view(None);
+    assert_eq!(after.phase(), SnapshotTablePhase::Displaying);
+    assert_ne!(after.generation(), generation);
+    let displayed = after.displayed().unwrap();
+    assert_eq!(displayed.dataset(), &"in");
+    assert_eq!(displayed.rows().as_slice(), &[10, 11]);
+}
+
+/// A delta minted before a full dataset replacement completes is invalidated
+/// by the resulting generation bump, exactly like a stale action handle.
+#[test]
+fn delta_minted_before_a_completed_replacement_becomes_stale() {
+    let mut state = SnapshotTableState::<u32, &'static str, &'static str, (), &'static str>::new();
+    let request = state.start_request("mx").unwrap();
+    state.complete(request, data("mx", "r1", &[1, 2, 3]));
+
+    let delta = state.start_delta().unwrap();
+    let replacement = state.start_request("in").unwrap();
+    assert_eq!(
+        state.complete(replacement, data("in", "r2", &[9])),
+        SnapshotTransitionDisposition::Applied
+    );
+
+    assert_eq!(
+        state.apply_delta(delta, data("mx", "wrong", &[2, 3])),
+        SnapshotDeltaDisposition::IgnoredStale
+    );
+    let displayed = state.view(None).displayed().unwrap();
+    assert_eq!(displayed.dataset(), &"in");
+    assert_eq!(displayed.rows().as_slice(), &[9]);
+}
+
+/// An access replacement (session expiry) also invalidates any outstanding
+/// delta handle through the same generation bump.
+#[test]
+fn delta_minted_before_access_replacement_becomes_stale() {
+    let mut state = SnapshotTableState::<u32, &'static str, &'static str, (), &'static str>::new();
+    let request = state.start_request("mx").unwrap();
+    state.complete(request, data("mx", "r1", &[1]));
+
+    let delta = state.start_delta().unwrap();
+    state.replace_access(SnapshotAccess::Expired);
+    assert_eq!(
+        state.apply_delta(delta, data("mx", "r2", &[])),
+        SnapshotDeltaDisposition::IgnoredStale
+    );
+    assert!(state.view(None).displayed().is_none());
+}
+
+/// A delta whose supplied data names a different dataset than the handle was
+/// minted against fails closed without touching any field.
+#[test]
+fn delta_with_mismatched_dataset_is_rejected_without_mutation() {
+    let mut state = SnapshotTableState::<u32, &'static str, &'static str, (), &'static str>::new();
+    let request = state.start_request("mx").unwrap();
+    state.complete(request, data("mx", "r1", &[1, 2]));
+
+    let delta = state.start_delta().unwrap();
+    assert_eq!(
+        state.apply_delta(delta, data("in", "wrong-dataset", &[9])),
+        SnapshotDeltaDisposition::IgnoredDatasetMismatch
+    );
+    let displayed = state.view(None).displayed().unwrap();
+    assert_eq!(displayed.dataset(), &"mx");
+    assert_eq!(displayed.revision(), "r1");
+    assert_eq!(displayed.rows().as_slice(), &[1, 2]);
+}
+
+/// Minting fails closed while access is replaced or before any dataset has
+/// ever been displayed.
+#[test]
+fn delta_start_fails_closed_without_allowed_displayed_membership() {
+    let mut state = SnapshotTableState::<u32, &'static str, &'static str, (), &'static str>::new();
+    assert_eq!(
+        state.start_delta(),
+        Err(SnapshotDeltaStartError::NoDisplayedSnapshot)
+    );
+
+    let request = state.start_request("mx").unwrap();
+    state.complete(request, data("mx", "r1", &[1]));
+    state.replace_access(SnapshotAccess::Forbidden);
+    assert_eq!(
+        state.start_delta(),
+        Err(SnapshotDeltaStartError::AccessUnavailable(
+            SnapshotAccess::Forbidden
+        ))
+    );
+}
+
+/// The delta sequence counter fails closed instead of wrapping, mirroring
+/// the request/action sequence guarantee.
+#[test]
+fn delta_sequence_fails_closed_instead_of_wrapping() {
+    let mut state = SnapshotTableState::<u32, &'static str, &'static str, (), &'static str>::new();
+    let request = state.start_request("mx").unwrap();
+    state.complete(request, data("mx", "r1", &[1]));
+
+    state.force_next_delta_sequence_for_test(u64::MAX);
+    assert_eq!(
+        state.start_delta(),
+        Err(SnapshotDeltaStartError::SequenceExhausted)
+    );
+    assert_eq!(state.view(None).displayed().unwrap().revision(), "r1");
+}
+
+/// A delta preserves keyed action feedback in the same generation: an action
+/// started before the delta can still be completed successfully afterward,
+/// and the delta itself never clears the action model (unlike a full
+/// [`SnapshotTableState::complete`] replacement).
+#[test]
+fn keyed_action_completion_remains_valid_after_a_delta_in_the_same_generation() {
+    let mut state = SnapshotTableState::<u32, &'static str, &'static str, (), &'static str>::new();
+    let request = state.start_request("mx").unwrap();
+    state.complete(request, data("mx", "r1", &[1, 2, 3]));
+
+    let action = state.start_action("claim-row-1").unwrap();
+    assert_eq!(action.generation(), state.generation());
+
+    let delta = state.start_delta().unwrap();
+    assert_eq!(
+        state.apply_delta(delta, data("mx", "r2", &[2, 3])),
+        SnapshotDeltaDisposition::Applied
+    );
+
+    assert_eq!(
+        state
+            .actions()
+            .entry(&"claim-row-1")
+            .expect("the delta must not clear unrelated action feedback")
+            .state(),
+        ActionFeedbackState::Pending
+    );
+    assert_eq!(
+        state
+            .finish_action(action, ActionFeedbackState::Success)
+            .unwrap(),
+        SnapshotActionDisposition::Applied,
+        "the action handle's generation is unaffected by the delta"
+    );
+    assert_eq!(
+        state.actions().entry(&"claim-row-1").unwrap().state(),
+        ActionFeedbackState::Success
+    );
+}

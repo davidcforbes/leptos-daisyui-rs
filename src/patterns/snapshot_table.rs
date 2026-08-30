@@ -196,6 +196,60 @@ pub enum SnapshotTransitionDisposition {
     IgnoredDatasetMismatch,
 }
 
+/// Opaque generation-bound token minted only by
+/// [`SnapshotTableState::start_delta`].
+///
+/// The token never carries a consumer-supplied dataset value: minting
+/// captures the currently displayed dataset internally, so a delta can only
+/// ever target the exact dataset that was on screen at mint time, never one
+/// a caller names.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SnapshotDeltaHandle<V> {
+    generation: SnapshotGeneration,
+    sequence: u64,
+    dataset: V,
+}
+
+impl<V> SnapshotDeltaHandle<V> {
+    /// Monotonic delta-mint sequence used for diagnostics and ordering.
+    pub const fn sequence(&self) -> u64 {
+        self.sequence
+    }
+
+    /// Dataset/access generation this handle was minted in.
+    pub const fn generation(&self) -> SnapshotGeneration {
+        self.generation
+    }
+}
+
+/// Failure to mint a new generation-bound delta token.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SnapshotDeltaStartError {
+    /// A delta cannot start while access is replaced.
+    AccessUnavailable(SnapshotAccess),
+    /// No displayed snapshot exists for a delta to target.
+    NoDisplayedSnapshot,
+    /// The checked delta sequence cannot advance without wrapping.
+    SequenceExhausted,
+}
+
+/// Whether a delta application changed the controller.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SnapshotDeltaDisposition {
+    /// Rows/revision/count/metadata were atomically replaced in place; the
+    /// dataset/access generation, keyed action feedback, and any unrelated
+    /// active replacement request are all left untouched.
+    Applied,
+    /// The handle's generation no longer matches (an access replacement or
+    /// full dataset replacement happened since mint), or a later-sequenced
+    /// delta already applied since this handle was minted -- which also
+    /// rejects a duplicate re-application of an already-applied handle.
+    IgnoredStale,
+    /// The supplied data names a different dataset than the one this handle
+    /// was minted against.
+    IgnoredDatasetMismatch,
+}
+
 /// Runtime phase derived from private controller state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SnapshotTablePhase {
@@ -346,6 +400,8 @@ pub struct SnapshotTableState<R, V, E, M, K> {
     generation: SnapshotGeneration,
     actions: ActionFeedbackModel<K>,
     active_actions: Vec<SnapshotActionHandle<K>>,
+    next_delta_sequence: u64,
+    last_applied_delta_sequence: u64,
 }
 
 impl<R, V, E, M, K> Default for SnapshotTableState<R, V, E, M, K> {
@@ -366,6 +422,8 @@ impl<R, V, E, M, K> SnapshotTableState<R, V, E, M, K> {
             generation: SnapshotGeneration(0),
             actions: ActionFeedbackModel::new(),
             active_actions: Vec::new(),
+            next_delta_sequence: 0,
+            last_applied_delta_sequence: 0,
         }
     }
 
@@ -480,6 +538,11 @@ impl<R, V, E, M, K> SnapshotTableState<R, V, E, M, K> {
     fn force_next_request_sequence_for_test(&mut self, sequence: u64) {
         self.next_request_sequence = sequence;
     }
+
+    #[cfg(test)]
+    fn force_next_delta_sequence_for_test(&mut self, sequence: u64) {
+        self.next_delta_sequence = sequence;
+    }
 }
 
 impl<R, V: Clone, E, M, K> SnapshotTableState<R, V, E, M, K> {
@@ -557,6 +620,70 @@ impl<R, V: Clone + PartialEq, E, M, K> SnapshotTableState<R, V, E, M, K> {
             error,
         });
         SnapshotTransitionDisposition::Applied
+    }
+
+    /// Mints a new generation-bound delta token targeting whichever dataset
+    /// is currently displayed. The dataset is captured internally -- never
+    /// supplied by the caller -- so the handle can only ever bind to the
+    /// exact snapshot on screen at mint time.
+    ///
+    /// Unlike [`Self::start_request`], minting a delta does not touch
+    /// `active_request`: an unrelated in-flight full-dataset replacement is
+    /// left completely intact, and multiple delta handles may be minted and
+    /// applied independently within the same generation (one per office
+    /// claim, one per incoming SSE removal, and so on).
+    pub fn start_delta(&mut self) -> Result<SnapshotDeltaHandle<V>, SnapshotDeltaStartError> {
+        if self.access != SnapshotAccess::Allowed {
+            return Err(SnapshotDeltaStartError::AccessUnavailable(self.access));
+        }
+        let Some(displayed) = self.displayed.as_ref() else {
+            return Err(SnapshotDeltaStartError::NoDisplayedSnapshot);
+        };
+        let sequence = self
+            .next_delta_sequence
+            .checked_add(1)
+            .ok_or(SnapshotDeltaStartError::SequenceExhausted)?;
+        self.next_delta_sequence = sequence;
+        Ok(SnapshotDeltaHandle {
+            generation: self.generation,
+            sequence,
+            dataset: displayed.dataset.clone(),
+        })
+    }
+
+    /// Atomically replaces rows/revision/count/metadata for the still-current
+    /// displayed dataset/access generation, without bumping the generation
+    /// and without touching `active_request` or any keyed action feedback.
+    ///
+    /// This is the boundary [`SnapshotTablePage`](super::SnapshotTablePage)
+    /// relies on for own-claim row removal and incoming SSE deltas: because
+    /// the dataset/access generation is preserved, `EntityTable`'s
+    /// `focus_scope`/`dataset_identity` bindings stay stable across the
+    /// mutation (so filtered/sorted/paged focus recovery still targets the
+    /// correct next row), and every still-active keyed action handle in the
+    /// same generation remains valid. A stale handle (superseded by access
+    /// or a full dataset replacement, or by a later-sequenced delta that
+    /// already applied -- including a duplicate re-application of this exact
+    /// handle) and a handle/data dataset mismatch both fail closed without
+    /// touching any field.
+    pub fn apply_delta(
+        &mut self,
+        handle: SnapshotDeltaHandle<V>,
+        data: SnapshotData<R, V, M>,
+    ) -> SnapshotDeltaDisposition {
+        if handle.generation != self.generation
+            || self.access != SnapshotAccess::Allowed
+            || self.displayed.is_none()
+            || handle.sequence <= self.last_applied_delta_sequence
+        {
+            return SnapshotDeltaDisposition::IgnoredStale;
+        }
+        if data.dataset != handle.dataset {
+            return SnapshotDeltaDisposition::IgnoredDatasetMismatch;
+        }
+        self.displayed = Some(data);
+        self.last_applied_delta_sequence = handle.sequence;
+        SnapshotDeltaDisposition::Applied
     }
 }
 

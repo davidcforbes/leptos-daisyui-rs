@@ -7,8 +7,9 @@ use leptos_daisyui_rs::components::{
 };
 use leptos_daisyui_rs::patterns::{
     ActionFeedbackContent, ActionFeedbackState, PageHeader, PageHeaderNavigationLayout,
-    SnapshotData, SnapshotDatasetOption, SnapshotDatasetSelectorConfig, SnapshotEntityTableConfig,
-    SnapshotLocalRowProjection, SnapshotRequestHandle, SnapshotTablePage, SnapshotTableState,
+    SnapshotData, SnapshotDatasetOption, SnapshotDatasetSelectorConfig, SnapshotDeltaDisposition,
+    SnapshotDeltaHandle, SnapshotEntityTableConfig, SnapshotLocalRowProjection,
+    SnapshotRequestHandle, SnapshotTablePage, SnapshotTableState,
 };
 use std::rc::Rc;
 use std::sync::Arc;
@@ -137,6 +138,98 @@ pub fn SnapshotTablePageFixture() -> impl IntoView {
         pending.set(None);
     });
     let retry = Callback::new(move |_| request_dataset.run("office-in".to_owned()));
+
+    // ldui-vn81 / ldui-cb29: generation-bound displayed-snapshot delta
+    // fixtures. Each button mints a fresh `start_delta` handle against the
+    // currently displayed snapshot and immediately applies it -- exactly how
+    // a real consumer reacts to their own claim response or an incoming SSE
+    // removal -- proving rows/revision/count change while the dataset/access
+    // generation, and any unrelated in-flight replacement, stay untouched.
+    let delta_revision = RwSignal::new(0_u32);
+    let last_delta_disposition = RwSignal::new(String::from("(none)"));
+    let stale_delta_handle = RwSignal::new_local(Option::<SnapshotDeltaHandle<String>>::None);
+
+    let apply_delta_removing = move |remove_id: Option<String>| {
+        state.update(|state| {
+            let Ok(handle) = state.start_delta() else {
+                last_delta_disposition.set("start_delta failed".to_owned());
+                return;
+            };
+            // Keep the very first minted handle around so a later click can
+            // replay it after it has already been consumed -- the
+            // duplicate/stale-delta negative control.
+            stale_delta_handle.update(|stored| {
+                if stored.is_none() {
+                    *stored = Some(handle.clone());
+                }
+            });
+            let Some(displayed) = state.view(None).displayed() else {
+                last_delta_disposition.set("no displayed snapshot".to_owned());
+                return;
+            };
+            let dataset = displayed.dataset().clone();
+            let mut rows = displayed.rows().as_ref().clone();
+            if let Some(remove_id) = remove_id {
+                rows.retain(|row| row.id != remove_id);
+            }
+            let next_revision = delta_revision.get_untracked() + 1;
+            delta_revision.set(next_revision);
+            let row_count = rows.len();
+            let new_data = SnapshotData::new(
+                dataset,
+                Rc::new(rows),
+                format!("delta-r{next_revision}"),
+                row_count,
+                Some(()),
+            )
+            .expect("delta fixture data is complete");
+            let disposition = state.apply_delta(handle, new_data);
+            last_delta_disposition.set(
+                match disposition {
+                    SnapshotDeltaDisposition::Applied => "applied",
+                    SnapshotDeltaDisposition::IgnoredStale => "ignored-stale",
+                    SnapshotDeltaDisposition::IgnoredDatasetMismatch => "ignored-dataset-mismatch",
+                }
+                .to_owned(),
+            );
+        });
+    };
+    let delta_own_claim = Callback::new(move |_| {
+        // Removes the fixture's own Urgent row -- the caller's own claim.
+        apply_delta_removing(Some("office-mx-1".to_owned()));
+    });
+    let delta_sse_removal = Callback::new(move |_| {
+        // Removes a different row -- another user's SSE-delivered removal.
+        apply_delta_removing(Some("office-mx-2".to_owned()));
+    });
+    let delta_replay_stale = Callback::new(move |_| {
+        let Some(handle) = stale_delta_handle.get_untracked() else {
+            last_delta_disposition.set("no stored handle".to_owned());
+            return;
+        };
+        state.update(|state| {
+            let Some(displayed) = state.view(None).displayed() else {
+                return;
+            };
+            let data = SnapshotData::new(
+                displayed.dataset().clone(),
+                Rc::clone(displayed.rows()),
+                "delta-replay-stale".to_owned(),
+                displayed.rows().len(),
+                Some(()),
+            )
+            .expect("replay fixture data is complete");
+            let disposition = state.apply_delta(handle, data);
+            last_delta_disposition.set(
+                match disposition {
+                    SnapshotDeltaDisposition::Applied => "applied",
+                    SnapshotDeltaDisposition::IgnoredStale => "ignored-stale",
+                    SnapshotDeltaDisposition::IgnoredDatasetMismatch => "ignored-dataset-mismatch",
+                }
+                .to_owned(),
+            );
+        });
+    });
 
     // ldui-baz4: per-action message detail fixtures. Each button drives the
     // typed `start_action_with_content`/`finish_action_with_content` API
@@ -345,6 +438,18 @@ pub fn SnapshotTablePageFixture() -> impl IntoView {
                     <Button attr:data-testid="action-stale" on_click=action_stale>
                         "Trigger stale completion"
                     </Button>
+                    <Button attr:data-testid="delta-own-claim" on_click=delta_own_claim>
+                        "Apply own-claim delta"
+                    </Button>
+                    <Button attr:data-testid="delta-sse-removal" on_click=delta_sse_removal>
+                        "Apply SSE-removal delta"
+                    </Button>
+                    <Button attr:data-testid="delta-replay-stale" on_click=delta_replay_stale>
+                        "Replay stale delta"
+                    </Button>
+                    <span data-testid="delta-last-disposition">
+                        {move || last_delta_disposition.get()}
+                    </span>
                 </div>
             }.into_any())
             entity_table=table

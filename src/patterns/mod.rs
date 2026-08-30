@@ -61,7 +61,8 @@ pub use server_cursor_history::{
 pub use snapshot_table::{
     LocalResultSummary, PageStatePanelKind, SnapshotAccess, SnapshotActionDisposition,
     SnapshotActionHandle, SnapshotActionStartError, SnapshotData, SnapshotDataError,
-    SnapshotGeneration, SnapshotLocalRowProjection, SnapshotRenderDecision, SnapshotRequestError,
+    SnapshotDeltaDisposition, SnapshotDeltaHandle, SnapshotDeltaStartError, SnapshotGeneration,
+    SnapshotLocalRowProjection, SnapshotRenderDecision, SnapshotRequestError,
     SnapshotRequestHandle, SnapshotTablePhase, SnapshotTableState, SnapshotTableView,
     SnapshotTransitionDisposition,
 };
