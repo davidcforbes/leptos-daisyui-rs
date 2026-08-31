@@ -97,7 +97,7 @@ pub fn DataTableHeader(
                         let cell_class =
                             merge_classes!(
                                 header_cell_class,
-                                col.class.unwrap_or(""),
+                                col.effective_class(),
                                 "relative border border-table-grid bg-table-header text-table-header-content forced-colors:border-[CanvasText] forced-colors:bg-[Canvas] forced-colors:text-[CanvasText]"
                             );
 

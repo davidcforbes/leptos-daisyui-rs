@@ -44,9 +44,11 @@ pub fn DataTableDemo() -> impl IntoView {
         Column::new("joined", "Joined Date"),
     ]);
 
-    // Columns with non-sortable
+    // Columns with non-sortable. `id` demonstrates `.identifier()` -- the
+    // theme's mono face, applied by the component instead of hand-written
+    // `font-mono` (ldui-lrig).
     let mixed_columns = RwSignal::new(vec![
-        Column::new("id", "ID"),
+        Column::new("id", "ID").identifier(),
         Column::new("name", "Name"),
         Column::new("email", "Email"),
         Column::new_non_sortable("status", "Status"),
@@ -55,7 +57,10 @@ pub fn DataTableDemo() -> impl IntoView {
 
     // Typed sorting: money / duration / date columns whose display strings do
     // not sort correctly as text ("$1,000" < "$900" because '1' < '9'). The em
-    // dash means "not measured" and must not sort as 0.
+    // dash means "not measured" and must not sort as 0. `.numeric()` on
+    // "balance"/"days" supplies right-align + tabular-nums presentation AND
+    // implies SortAs::Number in one call (ldui-lrig); "opened" is a date, not
+    // a number, so it stays on plain `with_sort_as`.
     let typed_sort_data = RwSignal::new(vec![
         HashMap::from([
             ("account", "Northwind".to_string()),
@@ -84,8 +89,8 @@ pub fn DataTableDemo() -> impl IntoView {
     ]);
     let typed_sort_columns = RwSignal::new(vec![
         Column::new("account", "Account"),
-        Column::new("balance", "Balance").with_sort_as(SortAs::Number),
-        Column::new("days", "Days in Stage").with_sort_as(SortAs::Number),
+        Column::new("balance", "Balance").numeric(),
+        Column::new("days", "Days in Stage").numeric(),
         Column::new("opened", "Opened").with_sort_as(SortAs::Date),
     ]);
 

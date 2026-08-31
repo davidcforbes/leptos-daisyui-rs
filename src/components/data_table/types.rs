@@ -81,6 +81,51 @@ pub enum ColumnFilterKind {
     Contains,
 }
 
+/// Semantic presentation kind for a column's cells.
+///
+/// [`Column::new`] and [`Column::new_non_sortable`] default every column to
+/// [`ColumnKind::Text`], the plain rendering the component has always had.
+/// [`Column::numeric`] and [`Column::identifier`] opt a column into a
+/// presentation the component owns, instead of hand-writing the same
+/// Tailwind utilities at every call site -- measured in one consumer at 43
+/// `with_class` calls carrying `tabular-nums` and 20 carrying `font-mono`
+/// (`ldui-lrig`). See [`Column::effective_class`] for how a kind's default
+/// class interacts with an explicit [`Column::with_class`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ColumnKind {
+    /// Plain text rendering; contributes no default class. The default.
+    #[default]
+    Text,
+    /// A number: right-aligned with tabular (monospaced) figures so digits
+    /// line up column-to-column -- money, counts, percentages, durations.
+    /// Set via [`Column::numeric`], which also implies
+    /// [`SortAs::Number`](crate::components::SortAs).
+    Numeric,
+    /// An identifier: the theme's declared monospace face, so every
+    /// character occupies equal width and visually similar glyphs (`0`/`O`,
+    /// `1`/`l`) stay distinguishable -- ids, codes, hashes, SKUs. Set via
+    /// [`Column::identifier`].
+    Identifier,
+}
+
+impl ColumnKind {
+    /// The Tailwind utility classes this kind contributes by default.
+    /// `None` for [`ColumnKind::Text`] -- it changes nothing.
+    fn default_class(self) -> Option<&'static str> {
+        match self {
+            ColumnKind::Text => None,
+            // Matches the string 30 hand-written columns in the audited
+            // consumer already used verbatim before this existed.
+            ColumnKind::Numeric => Some("text-right tabular-nums"),
+            // Resolves against the theme's `--font-mono` variable
+            // (`ThemeConfig::font_family.monospace` in `src/theme`), so this
+            // tracks a themed consumer's declared mono face rather than
+            // hardcoding one.
+            ColumnKind::Identifier => Some("font-mono"),
+        }
+    }
+}
+
 /// Column definition for DataTable
 #[derive(Clone, Debug, PartialEq)]
 pub struct Column {
@@ -142,6 +187,10 @@ pub struct Column {
     /// `true` can never be hidden through the chooser regardless of
     /// preference payload contents.
     pub required: bool,
+    /// Semantic presentation kind (default [`ColumnKind::Text`]). Set via
+    /// [`Column::numeric`] or [`Column::identifier`]; contributes a default
+    /// class resolved by [`Column::effective_class`].
+    pub kind: ColumnKind,
 }
 
 impl Column {
@@ -168,6 +217,7 @@ impl Column {
             is_action: false,
             searched: true,
             required: false,
+            kind: ColumnKind::Text,
         }
     }
 
@@ -190,6 +240,7 @@ impl Column {
             is_action: false,
             searched: true,
             required: false,
+            kind: ColumnKind::Text,
         }
     }
 
@@ -199,9 +250,103 @@ impl Column {
         self
     }
 
-    /// Set CSS class
+    /// Set an explicit CSS class for this column's cells (header and body).
+    ///
+    /// Precedence vs. [`Column::numeric`]/[`Column::identifier`]: an
+    /// explicit `with_class` **replaces** the kind's default class wholesale
+    /// rather than merging with it -- see [`Column::effective_class`]. Two
+    /// conflicting Tailwind utilities (e.g. `text-right` from `.numeric()`
+    /// and a hand-written `text-left`) are not reliably resolved by their
+    /// order in a `class` attribute -- Tailwind's cascade order comes from
+    /// generated stylesheet position, not attribute position -- so merging
+    /// them would silently pick whichever the build happened to emit last. A
+    /// column that wants a kind's presentation plus an unrelated extra
+    /// utility should spell the kind's class out alongside it, e.g.
+    /// `.numeric().with_class("text-right tabular-nums text-error")`.
     pub fn with_class(mut self, class: &'static str) -> Self {
         self.class = Some(class);
+        self
+    }
+
+    /// Resolves this column's cell class: the explicit
+    /// [`with_class`](Column::with_class) value when set, otherwise the
+    /// default class contributed by [`kind`](Column::kind) (empty for the
+    /// default [`ColumnKind::Text`]). This is what `DataTable` actually
+    /// renders on both the header and body cells for this column.
+    ///
+    /// ```
+    /// use leptos_daisyui_rs::components::Column;
+    ///
+    /// let plain = Column::new("name", "Name");
+    /// assert_eq!(plain.effective_class(), "");
+    ///
+    /// let amount = Column::new("balance", "Balance").numeric();
+    /// assert_eq!(amount.effective_class(), "text-right tabular-nums");
+    ///
+    /// // An explicit class overrides the kind's default entirely.
+    /// let overridden = Column::new("balance", "Balance")
+    ///     .numeric()
+    ///     .with_class("text-left");
+    /// assert_eq!(overridden.effective_class(), "text-left");
+    /// ```
+    pub fn effective_class(&self) -> &'static str {
+        self.class
+            .unwrap_or_else(|| self.kind.default_class().unwrap_or(""))
+    }
+
+    /// Marks this column as numeric: right-aligned cells with tabular
+    /// (monospaced) figures, so digits line up column-to-column -- money,
+    /// counts, percentages, durations.
+    ///
+    /// Implies [`with_sort_as(SortAs::Number)`](Column::with_sort_as).
+    /// Numeric presentation and numeric sorting are the same underlying
+    /// fact ("this column holds numbers"); before this method existed,
+    /// callers stated it twice by hand, and disagreed 2 times out of 24 in
+    /// the consumer that measured it (`ldui-lrig`). Call `.with_sort_as(...)`
+    /// *after* `.numeric()` if a column needs a different comparator while
+    /// keeping the numeric presentation -- builder calls apply in order, so
+    /// the later one wins.
+    ///
+    /// See [`Column::with_class`] for how this interacts with an explicit
+    /// class.
+    ///
+    /// ```
+    /// use leptos_daisyui_rs::components::{Column, SortAs};
+    ///
+    /// let balance = Column::new("balance", "Balance").numeric();
+    /// assert_eq!(balance.sort_as, SortAs::Number);
+    /// assert_eq!(balance.effective_class(), "text-right tabular-nums");
+    /// ```
+    pub fn numeric(mut self) -> Self {
+        self.kind = ColumnKind::Numeric;
+        self.sort_as = SortAs::Number;
+        self
+    }
+
+    /// Marks this column as an identifier (id, code, hash, SKU): the
+    /// theme's declared monospace face (`font-mono`, themed via the
+    /// `--font-mono` CSS variable) so characters line up and visually
+    /// similar glyphs (`0`/`O`, `1`/`l`) stay distinguishable.
+    ///
+    /// Does not change [`sort_as`](Column::sort_as) -- identifiers still
+    /// compare correctly as plain text (the default).
+    ///
+    /// See [`Column::with_class`] for how this interacts with an explicit
+    /// class. Note: `font-mono` currently trips the style audit's
+    /// typography-family check regardless of whether the component or the
+    /// caller applied it -- `StyleProfile` records one dominant family per
+    /// page and flags every deviation, with no way yet to mark a mono face
+    /// as intentional (tracked separately as `ldui-kq9w`). That is a known
+    /// gap in the audit, not a reason to avoid `.identifier()`.
+    ///
+    /// ```
+    /// use leptos_daisyui_rs::components::Column;
+    ///
+    /// let job = Column::new("job", "Job").identifier();
+    /// assert_eq!(job.effective_class(), "font-mono");
+    /// ```
+    pub fn identifier(mut self) -> Self {
+        self.kind = ColumnKind::Identifier;
         self
     }
 
@@ -566,6 +711,95 @@ mod tests {
     #[test]
     fn column_new_sorts_as_text_by_default() {
         assert_eq!(Column::new("x", "X").sort_as, SortAs::Text);
+    }
+
+    #[test]
+    fn column_new_kind_is_text_by_default() {
+        assert_eq!(Column::new("x", "X").kind, ColumnKind::Text);
+        assert_eq!(Column::new_non_sortable("x", "X").kind, ColumnKind::Text);
+    }
+
+    // ── ColumnKind / numeric / identifier / effective_class (ldui-lrig) ──
+
+    #[test]
+    fn text_column_effective_class_is_empty() {
+        assert_eq!(Column::new("name", "Name").effective_class(), "");
+    }
+
+    #[test]
+    fn numeric_sets_kind_and_class() {
+        let col = Column::new("balance", "Balance").numeric();
+        assert_eq!(col.kind, ColumnKind::Numeric);
+        assert_eq!(col.effective_class(), "text-right tabular-nums");
+    }
+
+    #[test]
+    fn numeric_implies_sort_as_number() {
+        let col = Column::new("balance", "Balance").numeric();
+        assert_eq!(col.sort_as, SortAs::Number);
+    }
+
+    #[test]
+    fn with_sort_as_after_numeric_overrides_the_implied_sort_as() {
+        // Builder calls apply in order: a caller reaching for a different
+        // comparator (e.g. a numeric-looking but date-typed column) can
+        // still say so, without losing the numeric presentation.
+        let col = Column::new("opened", "Opened")
+            .numeric()
+            .with_sort_as(SortAs::Date);
+        assert_eq!(col.sort_as, SortAs::Date);
+        assert_eq!(col.effective_class(), "text-right tabular-nums");
+    }
+
+    #[test]
+    fn identifier_sets_kind_and_class() {
+        let col = Column::new("job", "Job").identifier();
+        assert_eq!(col.kind, ColumnKind::Identifier);
+        assert_eq!(col.effective_class(), "font-mono");
+    }
+
+    #[test]
+    fn identifier_does_not_change_sort_as() {
+        let col = Column::new("job", "Job").identifier();
+        assert_eq!(col.sort_as, SortAs::Text);
+    }
+
+    #[test]
+    fn explicit_class_replaces_numeric_default_wholesale() {
+        // Documented precedence: with_class REPLACES the kind's default, it
+        // does not merge with it (Tailwind cascade order is not attribute
+        // order, so a caller could not reliably override text-right with a
+        // later text-left in the same string).
+        let col = Column::new("balance", "Balance")
+            .numeric()
+            .with_class("text-left");
+        assert_eq!(col.effective_class(), "text-left");
+    }
+
+    #[test]
+    fn explicit_class_replaces_identifier_default_wholesale() {
+        let col = Column::new("job", "Job").identifier().with_class("italic");
+        assert_eq!(col.effective_class(), "italic");
+    }
+
+    #[test]
+    fn with_class_before_numeric_is_overridden_by_the_kind_default() {
+        // Order matters, as with any builder: numeric() called after
+        // with_class does not clear the caller's class field, but
+        // effective_class only consults `class` when it is Some -- calling
+        // with_class AFTER the kind is what wins. This test pins the
+        // opposite order does NOT silently drop the kind: with_class was
+        // never called after numeric() here, so the kind's default stands.
+        let col = Column::new("balance", "Balance").numeric();
+        assert_eq!(col.class, None);
+        assert_eq!(col.effective_class(), "text-right tabular-nums");
+    }
+
+    #[test]
+    fn columns_with_different_kind_are_not_equal() {
+        let a = Column::new("x", "X");
+        let b = Column::new("x", "X").numeric();
+        assert_ne!(a, b);
     }
 
     // ── Column::new_non_sortable ──

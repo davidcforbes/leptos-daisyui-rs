@@ -540,7 +540,7 @@ pub fn DataTableBody(
                                             let cell_class = merge_classes!(
                                                 "border border-table-grid forced-colors:border-[CanvasText]",
                                                 body_cell_class,
-                                                column.class.unwrap_or("")
+                                                column.effective_class()
                                             );
                                             let column_id = column.id;
                                             let is_action = column.is_action;
