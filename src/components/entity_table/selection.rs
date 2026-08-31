@@ -99,9 +99,23 @@ pub(super) fn entity_row_aria_selected(has_selection: bool, is_selected: bool) -
 /// unselected. Dropping the hover class outright when `selected` is true
 /// keeps the selected treatment dominant no matter how Tailwind/daisyUI
 /// order their generated rules.
+///
+/// **`hover:text-table-filter-content` travels with the background,
+/// always.** `--color-table-filter` is a fixed, theme-independent hex (see
+/// `styles/tokens.css`), unlike `--color-base-content`, which daisyUI
+/// redefines per theme -- near-white in `dark`/`dracula`/etc. Pairing the
+/// fixed light-blue background with only the row's ordinary (theme-driven)
+/// text color reads fine under a light theme but goes to ~1:1 contrast
+/// (effectively invisible) the moment the active theme's `base-content` is
+/// itself light, exactly the failure axe-core caught hovering a plain
+/// `Standard`-emphasis row under `dark`. `--color-table-filter-content` is
+/// the fixed dark counterpart already used everywhere else `bg-table-filter`
+/// appears (the column-filter row/dropdowns in `filter.rs`/`types.rs`), so
+/// the hover utility now always carries its own paired foreground the same
+/// way, rather than trusting whatever `color` the row already inherited.
 pub(super) const fn entity_row_hover_class(interactive: bool, selected: bool) -> &'static str {
     if interactive && !selected {
-        "hover:bg-table-filter forced-colors:hover:bg-[Highlight] forced-colors:hover:text-[HighlightText]"
+        "hover:bg-table-filter hover:text-table-filter-content forced-colors:hover:bg-[Highlight] forced-colors:hover:text-[HighlightText]"
     } else {
         ""
     }
@@ -197,6 +211,18 @@ mod tests {
         let class = entity_row_hover_class(true, false);
         assert!(class.contains("hover:bg-table-filter"));
         assert!(!class.contains("bg-base-200"));
+    }
+
+    #[test]
+    fn hover_background_always_travels_with_its_paired_text_color() {
+        // `--color-table-filter` is a fixed, theme-independent hex, but the
+        // row's ordinary text color (`--color-base-content`) is redefined
+        // per daisyUI theme -- near-white under `dark`/`dracula`/etc. Without
+        // a paired `hover:text-table-filter-content`, hovering any row under
+        // one of those themes reads as ~1:1 contrast (axe-caught, ldui-jdzr
+        // follow-up): the fixed light-blue background under near-white text.
+        let class = entity_row_hover_class(true, false);
+        assert!(class.contains("hover:text-table-filter-content"));
     }
 
     #[test]

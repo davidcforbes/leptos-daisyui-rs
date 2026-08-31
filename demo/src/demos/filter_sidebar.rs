@@ -129,7 +129,17 @@ fn HeaderActionsWorkspace() -> impl IntoView {
                 toggle_label="Toggle the assistant panel"
                 header_actions=Box::new(move || {
                     view! {
+                        // Wrapping `<label>` + `for`/`id`, matching the
+                        // sr-only pattern `FilterSidebar`'s own search input
+                        // uses (ldui-g66e) and `EntityTable`'s page-size
+                        // select -- the `input-outside-field` audit accepts
+                        // a fieldset ancestor, a wrapping label, or
+                        // `label[for]`, but not `aria-label` alone (ldui-bx6n).
+                        <label class="sr-only" r#for="fs-header-actions-model">
+                            "Assistant model"
+                        </label>
                         <select
+                            id="fs-header-actions-model"
                             class="select select-xs w-24"
                             data-header-actions-model="true"
                             aria-label="Assistant model"

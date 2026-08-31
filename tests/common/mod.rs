@@ -508,6 +508,40 @@ async fn dispatch_mouse(h: &Harness, params: DispatchMouseEventParams, what: &st
         .unwrap_or_else(|e| panic!("dispatch {what}: {e}"));
 }
 
+/// Make this page's `(hover)`/`(pointer)` media features report a real
+/// desktop mouse, undoing a `chromiumoxide` 0.7.0 bug (ldui-jdzr).
+///
+/// Root cause, traced with a raw-CDP probe outside chromiumoxide entirely
+/// (a bare `chrome.exe --headless=new` reports `hover: hover` correctly
+/// from first paint): every page `pixelproof-web::Harness` creates goes
+/// through chromiumoxide's `Browser::new_page`, whose
+/// `EmulationManager::init_commands` (`chromiumoxide-0.7.0/src/handler/
+/// emulation.rs`) unconditionally sends
+/// `Emulation.setTouchEmulationEnabled(true)` -- hardcoded `true`, ignoring
+/// the configured `Viewport::has_touch` (which defaults to `false` and is
+/// never overridden here). That's a live touch-emulation override on every
+/// harness page, independent of `Harness::set_viewport`'s later
+/// `Emulation.setDeviceMetricsOverride{mobile: false}` (which doesn't touch
+/// it), and Chromium reports `hover: none` / `pointer: coarse` while touch
+/// emulation is enabled -- Tailwind wraps every `hover:` utility in
+/// `@media (hover: hover)` specifically to avoid sticky-hover on touch
+/// devices, so that flag silently drops every `hover:`-utility style in a
+/// harness-driven test even though the element is genuinely `:hover`ed
+/// (`Element.matches(':hover')` is `true`; a real CDP `MouseMoved` dispatch
+/// always lands the element in `:hover`, media features notwithstanding).
+/// `Emulation.setEmulatedMedia`'s `features` list does not cover `hover`/
+/// `pointer` in this Chrome build (verified: setting them there has no
+/// effect) -- the fix has to undo the actual cause, touch emulation, not
+/// paper over its symptom. Call once per page, after `harness_at`, before
+/// asserting on any `hover:`-gated computed style.
+pub async fn force_desktop_hover_media(h: &Harness) {
+    use chromiumoxide::cdp::browser_protocol::emulation::SetTouchEmulationEnabledParams;
+    h.page()
+        .execute(SetTouchEmulationEnabledParams::new(false))
+        .await
+        .unwrap_or_else(|e| panic!("Emulation.setTouchEmulationEnabled(false): {e}"));
+}
+
 /// Move the real CDP pointer to `(x_fraction, y_fraction)` of `selector`'s
 /// bounding box (0.0 = left/top edge, 1.0 = right/bottom), then settle.
 pub async fn move_pointer_to_svg_fraction(

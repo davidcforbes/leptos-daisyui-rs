@@ -4,8 +4,8 @@ mod common;
 
 use common::{
     assert_no_browser_errors, assert_not_truncated, begin_browser_error_capture, body_font_family,
-    click, harness_at, move_pointer_to_svg_fraction, oracle, shift_click, shift_enter,
-    wait_for_selector,
+    click, force_desktop_hover_media, harness_at, move_pointer_to_svg_fraction, oracle,
+    shift_click, shift_enter, wait_for_selector,
 };
 use ldui_audit::{Ceiling, ShadowSpec, family};
 use pixelproof_web::{Key, ViewportSize};
@@ -3470,6 +3470,14 @@ async fn entity_table_row_emphasis_survives_sort_and_composes_with_selection() {
 #[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
 async fn interactive_rows_get_the_framework_hover_and_selection_suppresses_it() {
     let harness = harness_at("/components/entity-table-emphasis").await;
+    // Every harness page comes up with `chromiumoxide`'s touch emulation
+    // force-enabled (a bug independent of `Harness::set_viewport`), which
+    // makes Chromium report `(hover: hover)`/`(pointer: fine)` false and
+    // drops every `hover:`-utility rule (Tailwind wraps them in `@media
+    // (hover: hover)`) even though the CDP-dispatched pointer genuinely
+    // puts the element in `:hover` -- see `force_desktop_hover_media`'s doc
+    // comment for the full story (ldui-jdzr).
+    force_desktop_hover_media(&harness).await;
     begin_browser_error_capture(&harness).await;
     wait_for_selector(
         &harness,
@@ -3678,7 +3686,13 @@ async fn interactive_rows_get_the_framework_hover_and_selection_suppresses_it() 
     let report = axe.run(harness.page()).await.expect("run axe-core");
     report
         .assert_no_blocking("entity table interactive-row hover")
-        .unwrap_or_else(|error| panic!("{error}; {}", report.summary()));
+        .unwrap_or_else(|error| {
+            panic!(
+                "{error}; {}\nviolations: {:#?}",
+                report.summary(),
+                report.violations
+            )
+        });
     assert_no_browser_errors(&harness, "entity table interactive-row hover").await;
 }
 
