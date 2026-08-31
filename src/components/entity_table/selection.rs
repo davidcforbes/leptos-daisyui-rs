@@ -82,6 +82,31 @@ pub(super) fn entity_row_aria_selected(has_selection: bool, is_selected: bool) -
     has_selection.then(|| is_selected.to_string())
 }
 
+/// `<tr>`-level hover classes for one row (ldui-jdzr): a light-blue
+/// semantic hover, reusing the table hierarchy's `--color-table-filter`
+/// token rather than a new hardcoded hex, painted only on rows that would
+/// otherwise receive a click/keyboard handler -- `interactive` is the same
+/// predicate `render_keyed_row` already uses for `tabindex`/
+/// `cursor-pointer`, never a second notion of "interactive".
+///
+/// **Precedence: hover < selected.** The hover utility is present in the
+/// class list only while the row is not selected, rather than always
+/// present and merely out-ranked. Selection's `bg-base-200` is an
+/// unconditional class, not itself a `:hover` rule, so if both classes were
+/// always emitted together the `:hover` pseudo-class selector would win the
+/// specificity fight over the plain class selector on hover regardless of
+/// stylesheet order -- making a hovered, selected row visually read as
+/// unselected. Dropping the hover class outright when `selected` is true
+/// keeps the selected treatment dominant no matter how Tailwind/daisyUI
+/// order their generated rules.
+pub(super) const fn entity_row_hover_class(interactive: bool, selected: bool) -> &'static str {
+    if interactive && !selected {
+        "hover:bg-table-filter forced-colors:hover:bg-[Highlight] forced-colors:hover:text-[HighlightText]"
+    } else {
+        ""
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -163,5 +188,46 @@ mod tests {
             entity_row_aria_selected(true, false),
             Some("false".to_owned())
         );
+    }
+
+    // ── entity_row_hover_class ──
+
+    #[test]
+    fn interactive_unselected_row_carries_the_light_blue_hover() {
+        let class = entity_row_hover_class(true, false);
+        assert!(class.contains("hover:bg-table-filter"));
+        assert!(!class.contains("bg-base-200"));
+    }
+
+    #[test]
+    fn interactive_selected_row_carries_no_hover_class() {
+        // Precedence: hover < selected. The hover utility is dropped
+        // outright, not merely out-ranked, so a `:hover` pseudo-class
+        // selector (higher specificity than a plain class selector) can
+        // never win over the selected row's `bg-base-200` on hover.
+        assert_eq!(entity_row_hover_class(true, true), "");
+    }
+
+    #[test]
+    fn non_interactive_row_carries_no_hover_class_regardless_of_selection() {
+        assert_eq!(entity_row_hover_class(false, false), "");
+        assert_eq!(entity_row_hover_class(false, true), "");
+    }
+
+    #[test]
+    fn hover_class_sets_no_background_outside_the_hover_pseudo_class() {
+        // The hover-only utility must never leak a static background --
+        // only `hover:` (and its forced-colors compound) may appear.
+        let class = entity_row_hover_class(true, false);
+        assert!(!class.split_whitespace().any(|token| {
+            (token.starts_with("bg-") || token.contains(":bg-")) && !token.contains("hover:")
+        }));
+    }
+
+    #[test]
+    fn forced_colors_hover_uses_the_system_highlight_pair() {
+        let class = entity_row_hover_class(true, false);
+        assert!(class.contains("forced-colors:hover:bg-[Highlight]"));
+        assert!(class.contains("forced-colors:hover:text-[HighlightText]"));
     }
 }

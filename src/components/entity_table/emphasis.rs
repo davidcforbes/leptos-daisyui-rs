@@ -192,6 +192,39 @@ mod tests {
     }
 
     #[test]
+    fn merged_row_class_keeps_hover_alongside_emphasis_when_unselected() {
+        // Cross-module composition proof (ldui-jdzr): the interactive hover
+        // utility, an emphasis variant's text/border classes, and the
+        // interactive/cursor classes all land in the same merged string
+        // without one crowding out another, exactly as selection's
+        // `bg-base-200` already does above.
+        use super::super::selection::entity_row_hover_class;
+        let merged = crate::merge_classes!(
+            "cursor-pointer ld-focus-ring",
+            entity_row_hover_class(true, false),
+            entity_row_emphasis_row_class(EntityRowEmphasis::Attention)
+        )
+        .to_class();
+        assert!(merged.contains("cursor-pointer"));
+        assert!(merged.contains("hover:bg-table-filter"));
+        assert!(merged.contains("text-warning"));
+    }
+
+    #[test]
+    fn merged_row_class_drops_hover_when_selected() {
+        use super::super::selection::entity_row_hover_class;
+        let merged = crate::merge_classes!(
+            "cursor-pointer ld-focus-ring",
+            "bg-base-200",
+            entity_row_hover_class(true, true),
+            entity_row_emphasis_row_class(EntityRowEmphasis::Standard)
+        )
+        .to_class();
+        assert!(merged.contains("bg-base-200"));
+        assert!(!merged.contains("hover:bg-table-filter"));
+    }
+
+    #[test]
     fn as_str_is_stable_and_distinct() {
         assert_eq!(EntityRowEmphasis::Standard.as_str(), "standard");
         assert_eq!(EntityRowEmphasis::Summary.as_str(), "summary");

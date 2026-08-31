@@ -4,7 +4,8 @@ mod common;
 
 use common::{
     assert_no_browser_errors, assert_not_truncated, begin_browser_error_capture, body_font_family,
-    click, harness_at, oracle, shift_click, shift_enter, wait_for_selector,
+    click, harness_at, move_pointer_to_svg_fraction, oracle, shift_click, shift_enter,
+    wait_for_selector,
 };
 use ldui_audit::{Ceiling, ShadowSpec, family};
 use pixelproof_web::{Key, ViewportSize};
@@ -3451,6 +3452,234 @@ async fn entity_table_row_emphasis_survives_sort_and_composes_with_selection() {
         .assert_no_blocking("entity table row emphasis")
         .unwrap_or_else(|error| panic!("{error}; {}", report.summary()));
     assert_no_browser_errors(&harness, "entity table row emphasis").await;
+}
+
+/// Interactive-row hover (ldui-jdzr): a row that would receive a click/
+/// keyboard handler -- `on_row_activate` or `selection` -- gets the
+/// framework's light-blue semantic hover background (`--color-table-filter`,
+/// the same token the column-filter row already uses) across every visible
+/// cell in both the wide and compact presentations, which share one `<tr>`.
+/// Non-interactive rows get no hover class at all. Hover composes with row
+/// emphasis (no `EntityRowEmphasis` variant sets a background -- ldui-mqb)
+/// but is dropped outright, not merely out-specificity'd, once a row is
+/// selected, so the selected background stays visually dominant under the
+/// pointer -- see `entity_row_hover_class`'s doc comment in
+/// `src/components/entity_table/selection.rs` for the full precedence
+/// rationale.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
+async fn interactive_rows_get_the_framework_hover_and_selection_suppresses_it() {
+    let harness = harness_at("/components/entity-table-emphasis").await;
+    begin_browser_error_capture(&harness).await;
+    wait_for_selector(
+        &harness,
+        "#entity-emphasis-table tbody tr[data-entity-row-key]",
+    )
+    .await;
+
+    // Structural proof, no real mouse needed: this fixture wires
+    // `selection`, so every row -- including the Muted/Attention/Summary
+    // emphasis rows -- is interactive and carries the hover utility class
+    // (plus its forced-colors compound) before anything is selected.
+    let classes_by_key = eval_json(
+        &harness,
+        r#"(() => {
+            const rows = Array.from(document.querySelectorAll('#entity-emphasis-table tbody tr[data-entity-row-key]'));
+            const byKey = {};
+            for (const row of rows) {
+                byKey[row.dataset.entityRowKey] = {
+                    hover: row.classList.contains('hover:bg-table-filter'),
+                    forcedColorsHoverBg: row.classList.contains('forced-colors:hover:bg-[Highlight]'),
+                    forcedColorsHoverText: row.classList.contains('forced-colors:hover:text-[HighlightText]'),
+                };
+            }
+            return byKey;
+        })()"#,
+    )
+    .await;
+    assert_eq!(
+        classes_by_key,
+        json!({
+            "emphasis-1": { "hover": true, "forcedColorsHoverBg": true, "forcedColorsHoverText": true },
+            "emphasis-2": { "hover": true, "forcedColorsHoverBg": true, "forcedColorsHoverText": true },
+            "emphasis-3": { "hover": true, "forcedColorsHoverBg": true, "forcedColorsHoverText": true },
+            "emphasis-4": { "hover": true, "forcedColorsHoverBg": true, "forcedColorsHoverText": true },
+            "emphasis-total": { "hover": true, "forcedColorsHoverBg": true, "forcedColorsHoverText": true },
+        }),
+        "every interactive, unselected row -- including each emphasis variant -- must carry the hover utility"
+    );
+
+    // Real-pointer proof: hovering an unselected row (odd position, off
+    // this fixture's zebra stripe so nothing else could tint the paint)
+    // actually resolves the `<tr>`'s own background-color to the
+    // table-filter token's hex, not merely a class-list token.
+    move_pointer_to_svg_fraction(
+        &harness,
+        "#entity-emphasis-table tbody tr[data-entity-row-key='emphasis-1']",
+        0.5,
+        0.5,
+    )
+    .await;
+    let hovered_unselected_bg = eval_json(
+        &harness,
+        r#"getComputedStyle(document.querySelector('#entity-emphasis-table tbody tr[data-entity-row-key="emphasis-1"]')).backgroundColor"#,
+    )
+    .await;
+    assert_eq!(
+        hovered_unselected_bg,
+        json!("rgb(229, 241, 251)"),
+        "hovering an interactive, unselected row must paint the table-filter light-blue background"
+    );
+
+    // Selecting the same row must suppress the hover utility outright: the
+    // class disappears from the row's class list, and re-hovering it no
+    // longer resolves to the table-filter blue.
+    click(
+        &harness,
+        "#entity-emphasis-table tbody tr[data-entity-row-key='emphasis-1'] td[data-entity-column='client']",
+    )
+    .await;
+    let selected_state = eval_json(
+        &harness,
+        r#"(() => {
+            const row = document.querySelector('#entity-emphasis-table tbody tr[data-entity-row-key="emphasis-1"]');
+            return {
+                ariaSelected: row.getAttribute('aria-selected'),
+                selectedBackground: row.classList.contains('bg-base-200'),
+                hoverClassPresent: row.classList.contains('hover:bg-table-filter'),
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(
+        selected_state,
+        json!({ "ariaSelected": "true", "selectedBackground": true, "hoverClassPresent": false }),
+        "selecting a row must drop the hover utility class, not merely lose a specificity fight"
+    );
+    move_pointer_to_svg_fraction(
+        &harness,
+        "#entity-emphasis-table tbody tr[data-entity-row-key='emphasis-1']",
+        0.5,
+        0.5,
+    )
+    .await;
+    let hovered_selected_bg = eval_json(
+        &harness,
+        r#"getComputedStyle(document.querySelector('#entity-emphasis-table tbody tr[data-entity-row-key="emphasis-1"]')).backgroundColor"#,
+    )
+    .await;
+    assert_ne!(
+        hovered_selected_bg,
+        json!("rgb(229, 241, 251)"),
+        "a selected row must stay legible under the pointer, never repainted table-filter blue by hover"
+    );
+
+    // Compact presentation: same shared `<tr>`, so shrinking below `lg:`
+    // only swaps which `<td>` is visible -- the row-level hover still
+    // resolves, and neither the wide nor the compact cell carries its own
+    // background that could hide it, which is the reason this is a
+    // row-level class rather than per-cell styling.
+    harness
+        .set_viewport(ViewportSize::TABLET)
+        .await
+        .expect("shrink to a compact-layout viewport");
+    move_pointer_to_svg_fraction(
+        &harness,
+        "#entity-emphasis-table tbody tr[data-entity-row-key='emphasis-2']",
+        0.5,
+        0.5,
+    )
+    .await;
+    let compact_hover = eval_json(
+        &harness,
+        r#"(() => {
+            const row = document.querySelector('#entity-emphasis-table tbody tr[data-entity-row-key="emphasis-2"]');
+            const compactCell = row.querySelector('td.lg\\:hidden');
+            const wideCell = row.querySelector('td[data-entity-column="client"]');
+            return {
+                compactVisible: getComputedStyle(compactCell).display !== 'none',
+                wideHidden: getComputedStyle(wideCell).display === 'none',
+                compactCellOwnBackground: getComputedStyle(compactCell).backgroundColor,
+                rowBackground: getComputedStyle(row).backgroundColor,
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(
+        compact_hover["compactVisible"],
+        json!(true),
+        "the compact cell must be the one visible below the lg breakpoint"
+    );
+    assert_eq!(
+        compact_hover["wideHidden"],
+        json!(true),
+        "the wide cell must be hidden below the lg breakpoint"
+    );
+    assert_eq!(
+        compact_hover["compactCellOwnBackground"],
+        json!("rgba(0, 0, 0, 0)"),
+        "the compact cell must carry no background of its own -- the row's hover paint is what shows through"
+    );
+    assert_eq!(
+        compact_hover["rowBackground"],
+        json!("rgb(229, 241, 251)"),
+        "the shared row's hover background must resolve identically in the compact presentation"
+    );
+    harness
+        .set_viewport(ViewportSize::SMALL)
+        .await
+        .expect("restore the wide-layout viewport");
+
+    // Non-interactive control: EntityTablePresentationFixture wires neither
+    // `on_row_activate` nor `selection`, so its rows carry no hover utility
+    // at all and hovering one leaves its background untouched.
+    let presentation_harness = harness_at("/components/entity-table-presentation").await;
+    begin_browser_error_capture(&presentation_harness).await;
+    wait_for_selector(
+        &presentation_harness,
+        "#entity-table-presentation-fixture [data-entity-row-key='presentation-1']",
+    )
+    .await;
+    let non_interactive_classes = eval_json(
+        &presentation_harness,
+        r#"document.querySelector('#entity-table-presentation-fixture [data-entity-row-key="presentation-1"]').classList.contains('hover:bg-table-filter')"#,
+    )
+    .await;
+    assert_eq!(
+        non_interactive_classes,
+        json!(false),
+        "a non-interactive row must carry no hover utility class"
+    );
+    move_pointer_to_svg_fraction(
+        &presentation_harness,
+        "#entity-table-presentation-fixture [data-entity-row-key='presentation-1']",
+        0.5,
+        0.5,
+    )
+    .await;
+    let non_interactive_hover_bg = eval_json(
+        &presentation_harness,
+        r#"getComputedStyle(document.querySelector('#entity-table-presentation-fixture [data-entity-row-key="presentation-1"]')).backgroundColor"#,
+    )
+    .await;
+    assert_ne!(
+        non_interactive_hover_bg,
+        json!("rgb(229, 241, 251)"),
+        "hovering a non-interactive row must never paint the table-filter light-blue background"
+    );
+    assert_no_browser_errors(
+        &presentation_harness,
+        "entity table non-interactive hover control",
+    )
+    .await;
+
+    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
+        .expect("load vendored axe-core");
+    let report = axe.run(harness.page()).await.expect("run axe-core");
+    report
+        .assert_no_blocking("entity table interactive-row hover")
+        .unwrap_or_else(|error| panic!("{error}; {}", report.summary()));
+    assert_no_browser_errors(&harness, "entity table interactive-row hover").await;
 }
 
 /// Focused browser proof for EntityTable's page-size select identity

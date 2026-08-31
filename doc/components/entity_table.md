@@ -414,6 +414,43 @@ absent -- the same fail-safe as selection above) renders identically to a
 table that predates this prop: no extra class, no
 `data-entity-row-emphasis` attribute on any row.
 
+## Interactive-row hover (ldui-jdzr)
+
+Any row that would receive a click/keyboard handler -- `on_row_activate` is
+supplied, `selection` is supplied, or both -- gets a framework-owned
+light-blue hover background, reusing the same `interactive` predicate that
+already drives `tabindex`/`cursor-pointer`/the focus ring, never a second
+notion of "interactive". A table with neither carries no hover class on any
+row. The color is this crate's existing table-hierarchy token
+(`--color-table-filter`, `ui_tokens::color::table::FILTER`) rather than a new
+hardcoded hex -- the same light blue already used for the column-filter row
+and dropdown, so a hovered row and the filter chrome read as one visual
+language.
+
+**Precedence: hover < selected.** The hover utility class is present in the
+row's class list only while the row is *not* selected -- not merely
+out-ranked by a later declaration. A selected row's `bg-base-200` is an
+unconditional class, not itself a `:hover` rule; if both classes were always
+present, the `:hover` pseudo-class selector would win the specificity fight
+over a plain class selector regardless of source order, and hovering a
+selected row would visually read as unselected. Dropping the hover class
+outright when a row is selected keeps the selected treatment dominant no
+matter how Tailwind or daisyUI order their generated rules.
+
+Emphasis (`row_emphasis`, above) never sets a `background-color`, so
+Summary/Muted/Attention rows pick up the hover background exactly the way
+they already compose with selection and `zebra` -- text/border emphasis on
+top of whichever background (none, selected, zebra-striped, or hovered) is
+already painted underneath. The wide and compact presentations share one
+`<tr>`, so the hover class is applied once at the row level and covers both
+layouts' cells without per-cell styling; neither `<td>` sets its own
+background, so the row's hover paints through.
+
+Under `forced-colors` (Windows High Contrast), the hover state uses the
+system `Highlight`/`HighlightText` color pair instead of the light-blue
+token, mirroring how a native control signals a hover/focus target in that
+mode.
+
 ## Preference ownership
 
 ### Controlled: recommended for governed persistence

@@ -13,7 +13,7 @@ use super::model::{
     toggle_hidden_column,
 };
 use super::selection::{
-    EntityTableSelection, entity_row_aria_selected, entity_row_is_selected,
+    EntityTableSelection, entity_row_aria_selected, entity_row_hover_class, entity_row_is_selected,
     entity_selection_proposal,
 };
 use super::storage::{load_preferences, save_preferences};
@@ -2026,11 +2026,17 @@ fn render_keyed_row<T: Clone + 'static>(
             data-entity-row-key=key
             data-entity-visible-position=move || visible_position.get()
             tabindex=interactive.then_some(0)
-            class=move || merge_classes!(
-                if interactive { "cursor-pointer ld-focus-ring" } else { "" },
-                if has_selection && is_row_selected(&selected_class_key) { "bg-base-200" } else { "" },
-                entity_row_emphasis_row_class(cached_emphasis.get())
-            )
+            class=move || {
+                let selected = has_selection && is_row_selected(&selected_class_key);
+                merge_classes!(
+                    if interactive { "cursor-pointer ld-focus-ring" } else { "" },
+                    if selected { "bg-base-200" } else { "" },
+                    // See `entity_row_hover_class`'s doc comment for the
+                    // hover-vs-selected precedence this encodes (ldui-jdzr).
+                    entity_row_hover_class(interactive, selected),
+                    entity_row_emphasis_row_class(cached_emphasis.get())
+                )
+            }
             aria-selected=move || entity_row_aria_selected(has_selection, is_row_selected(&selected_aria_key))
             data-entity-row-emphasis=move || {
                 has_row_emphasis.then(|| cached_emphasis.get().as_str())

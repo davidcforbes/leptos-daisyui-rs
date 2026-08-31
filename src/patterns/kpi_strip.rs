@@ -303,7 +303,7 @@ fn kpi_card_accessible_name(
 /// @source inline("h-(--border-width-accent) w-full");
 /// @source inline("bg-info bg-success bg-warning bg-error");
 /// @source inline("flex flex-col items-center gap-1 gap-2 p-3 p-4 min-w-0 shrink-0 truncate");
-/// @source inline("ld-text-small ld-text-title ld-text-display ld-text-caption");
+/// @source inline("ld-text-small ld-text-title ld-text-display");
 /// @source inline("font-semibold uppercase tracking-wide tabular-nums break-words italic");
 /// @source inline("text-base-content/75 text-base-content/40 text-base-content/60 text-info text-success text-warning text-error");
 /// @source inline("tooltip tooltip-top inline-flex h-4 w-4 items-center justify-center rounded-full border sr-only");
@@ -379,10 +379,15 @@ pub fn KpiCard(
         }
     };
 
+    // ldui-beqs: the supporting description and trend line sit one rung
+    // below the card's label -- `ld-text-small`, the ramp's smallest step
+    // (11px, below `ld-text-caption`'s 12px) -- so both read as
+    // subordinate to the label (also `ld-text-small`) and value, never
+    // competing with them. Label and value sizing are unchanged.
     let has_description = has_text(&description);
     let description_node = has_description.then(|| {
         view! {
-            <p class="ld-text-caption text-base-content/75 break-words">{description}</p>
+            <p class="ld-text-small text-base-content/75 break-words">{description}</p>
         }
     });
 
@@ -396,7 +401,7 @@ pub fn KpiCard(
             format!("{arrow} {magnitude} {}", trend.label)
         };
         view! {
-            <p class=format!("ld-text-caption {color_class}")>{text}</p>
+            <p class=format!("ld-text-small {color_class}")>{text}</p>
         }
     });
 
@@ -691,6 +696,40 @@ mod tests {
         assert!(
             component.contains("has_description.then"),
             "expected the description block to gate on has_text: {component}"
+        );
+    }
+
+    /// ldui-beqs: description and trend copy must sit on the ramp's
+    /// smallest step (`ld-text-small`, below `ld-text-caption`) so they
+    /// read as clearly subordinate to the label/value, while the value's
+    /// own size class (`kpi_card_value_size_class`, asserted elsewhere)
+    /// and the label's `ld-text-small` stay exactly as they were. This is
+    /// a source-level guard because the description/trend nodes are built
+    /// as static class strings, not through a helper function like
+    /// `kpi_card_value_size_class`.
+    #[test]
+    fn description_and_trend_use_the_smaller_supporting_copy_ramp_step() {
+        let source = include_str!("kpi_strip.rs");
+        let component = source
+            .split_once("pub fn KpiCard(")
+            .expect("KpiCard component source")
+            .1
+            .split_once("\n#[cfg(test)]")
+            .map_or(source, |(before, _)| before);
+        assert!(
+            component.contains(
+                r#"class="ld-text-small text-base-content/75 break-words">{description}"#
+            ),
+            "expected the description <p> to use ld-text-small: {component}"
+        );
+        assert!(
+            component.contains(r#"format!("ld-text-small {color_class}")"#),
+            "expected the trend <p> to use ld-text-small: {component}"
+        );
+        assert!(
+            !component.contains(r#"class="ld-text-caption"#)
+                && !component.contains(r#"format!("ld-text-caption"#),
+            "ld-text-caption must not reappear as a class on KpiCard's description/trend copy: {component}"
         );
     }
 
