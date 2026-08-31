@@ -440,60 +440,71 @@ pub fn AdminWorkbenchDemo() -> impl IntoView {
                                     </Fab>
                                 </div>
 
-                                <FilterSidebar
-                                    side=SidebarSide::Right
-                                    collapsed=assistant_collapsed
-                                    on_toggle=Callback::new(move |()| {
-                                        assistant_collapsed.update(|collapsed| *collapsed = !*collapsed);
-                                    })
-                                    active_count=Signal::derive(move || assistant_unread.get())
-                                    title="Assistant"
-                                    toggle_label="Toggle the assistant panel"
-                                    expanded_width="w-[280px] min-w-[280px]"
-                                    attr:data-testid="admin-workbench-assistant"
-                                >
-                                    <div class="flex flex-col gap-3" data-testid="admin-workbench-assistant-body">
-                                        <p class="ld-text-caption text-base-content/75">
-                                            "Suggestions based on what's on your desk today."
-                                        </p>
-                                        <ul class="flex flex-col gap-2">
-                                            <For
-                                                each=move || {
-                                                    assistant_messages
-                                                        .get()
-                                                        .into_iter()
-                                                        .enumerate()
-                                                        .collect::<Vec<_>>()
-                                                }
-                                                key=|(index, _)| *index
-                                                children=move |(_, message)| {
-                                                    view! {
-                                                        <li class="rounded-box border border-base-300 bg-base-200/60 p-2 ld-text-caption">
-                                                            {message}
-                                                        </li>
+                                // Docked beside the content only from `lg` up.
+                                // The panel's 280px min-width is not negotiable
+                                // in a flex row, so at 390px it took 280 of the
+                                // row's 340 and left the content column 60px --
+                                // which starved the KpiStrip to 12px and clipped
+                                // every card (ldui-kwup). A right-docked
+                                // assistant is a desktop affordance; on a phone
+                                // the Help FAB is the way in, so below `lg` it
+                                // does not compete with the content for width.
+                                <div class="hidden h-full lg:flex">
+                                    <FilterSidebar
+                                        side=SidebarSide::Right
+                                        collapsed=assistant_collapsed
+                                        on_toggle=Callback::new(move |()| {
+                                            assistant_collapsed.update(|collapsed| *collapsed = !*collapsed);
+                                        })
+                                        active_count=Signal::derive(move || assistant_unread.get())
+                                        title="Assistant"
+                                        toggle_label="Toggle the assistant panel"
+                                        expanded_width="w-[280px] min-w-[280px]"
+                                        attr:data-testid="admin-workbench-assistant"
+                                    >
+                                        <div class="flex flex-col gap-3" data-testid="admin-workbench-assistant-body">
+                                            <p class="ld-text-caption text-base-content/75">
+                                                "Suggestions based on what's on your desk today."
+                                            </p>
+                                            <ul class="flex flex-col gap-2">
+                                                <For
+                                                    each=move || {
+                                                        assistant_messages
+                                                            .get()
+                                                            .into_iter()
+                                                            .enumerate()
+                                                            .collect::<Vec<_>>()
                                                     }
-                                                }
-                                            />
-                                        </ul>
-                                        <label class="flex flex-col gap-1">
-                                            <span class="sr-only">"Ask the assistant"</span>
-                                            <Input
-                                                size=InputSize::Sm
-                                                placeholder="Ask the assistant"
-                                                value=assistant_draft
-                                                on_input=Callback::new(move |value| assistant_draft.set(value))
-                                            />
-                                        </label>
-                                        <Button
-                                            size=ButtonSize::Sm
-                                            color=ButtonColor::Primary
-                                            attr:data-testid="admin-workbench-assistant-ask"
-                                            on_click=ask_assistant
-                                        >
-                                            "Ask"
-                                        </Button>
-                                    </div>
-                                </FilterSidebar>
+                                                    key=|(index, _)| *index
+                                                    children=move |(_, message)| {
+                                                        view! {
+                                                            <li class="rounded-box border border-base-300 bg-base-200/60 p-2 ld-text-caption">
+                                                                {message}
+                                                            </li>
+                                                        }
+                                                    }
+                                                />
+                                            </ul>
+                                            <label class="flex flex-col gap-1">
+                                                <span class="sr-only">"Ask the assistant"</span>
+                                                <Input
+                                                    size=InputSize::Sm
+                                                    placeholder="Ask the assistant"
+                                                    value=assistant_draft
+                                                    on_input=Callback::new(move |value| assistant_draft.set(value))
+                                                />
+                                            </label>
+                                            <Button
+                                                size=ButtonSize::Sm
+                                                color=ButtonColor::Primary
+                                                attr:data-testid="admin-workbench-assistant-ask"
+                                                on_click=ask_assistant
+                                            >
+                                                "Ask"
+                                            </Button>
+                                        </div>
+                                    </FilterSidebar>
+                                </div>
                             </div>
                         </AppShellContent>
                     </AppShell>
