@@ -190,7 +190,22 @@ const PAGES: &[(&str, &[(&str, usize)])] = &[
             // ui-monospace — genuinely fixing the new debt at the source
             // (`demo/src/demos/data_table.rs`) instead of ratcheting it, so
             // TYPOGRAPHY stays at 92.
-            (family::TYPOGRAPHY, 92),
+            //
+            // 105, was 92: this raise is DELIBERATE and is the one case on this
+            // page where raising beats fixing at source. Every finding above 92
+            // is `font-family "ui-monospace"` on the demo's `id` column, which
+            // now declares `Column::identifier()` (ldui-lrig) — the theme's mono
+            // face applied BY DESIGN, one finding per rendered row. That is the
+            // opposite of the `<code>` debt above it: a `<code>` span inheriting
+            // the UA monospace default inside sans prose is unintentional, so
+            // those were genuinely fixed with `font-sans`; an identifier column
+            // is *supposed* to be monospace, so "fixing" it would mean deleting
+            // the feature. The finding exists only because `StyleProfile` carries
+            // a single family name and reports any element whose first computed
+            // family differs (ldui-kq9w, owned upstream in PixelProof). Once that
+            // bead lands and the profile can accept a deliberate mono family,
+            // THIS CEILING MUST COME BACK DOWN — it is not new page debt.
+            (family::TYPOGRAPHY, 105),
             (family::SHAPE, 0),
             // 32, was 18: the auto_page_size/viewport_fit demo additions
             // (ldui-89rp, ldui-2bt3) add several new ServerDataTable/DataTable
