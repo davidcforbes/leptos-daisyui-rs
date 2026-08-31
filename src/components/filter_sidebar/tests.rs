@@ -406,6 +406,65 @@ fn header_actions_sits_between_the_title_and_the_toggle() {
     );
 }
 
+// ── ldui-8hba: collapsed header actions contribute zero layout width ───────
+//
+// `ldui-bx6n` hid the collapsed slot with `opacity-0 pointer-events-none`
+// alone, which hides paint but not layout: `shrink-0` kept the wrapper's
+// full intrinsic width, and on a right-docked panel with a wide slot that
+// pushed the toggle button past the panel's own edge, where the panel's own
+// `overflow-hidden` clipped it -- `elementFromPoint` at the toggle's center
+// resolved whatever sat underneath instead (a P1 consumer blocker: the
+// toggle could not be clicked at all). These guard the fix: the collapsed
+// wrapper must claim zero width, not merely zero opacity, and must be
+// removed from the tab order and accessibility tree rather than merely
+// losing pointer events.
+
+#[test]
+fn collapsed_header_actions_claim_zero_layout_width() {
+    let source = include_str!("component.rs");
+    let wrapper_fn = source
+        .split("pub(crate) fn filter_sidebar_header_actions_wrapper")
+        .nth(1)
+        .expect("the header_actions wrapper function must exist");
+    assert!(
+        wrapper_fn.contains("w-0"),
+        "the collapsed wrapper must claim zero width -- opacity alone hides \
+         paint, not the layout space that pushed the toggle off the panel \
+         in ldui-8hba"
+    );
+    assert!(
+        wrapper_fn.contains("mx-0"),
+        "the collapsed wrapper's margin must also collapse to zero, or the \
+         margin alone still pushes the toggle"
+    );
+    assert!(
+        wrapper_fn.contains("overflow-hidden"),
+        "the collapsed wrapper must clip its own children so nothing inside \
+         it can bleed past the zero-width box"
+    );
+}
+
+#[test]
+fn collapsed_header_actions_are_unfocusable_and_unannounced() {
+    let source = include_str!("component.rs");
+    let wrapper_fn = source
+        .split("pub(crate) fn filter_sidebar_header_actions_wrapper")
+        .nth(1)
+        .expect("the header_actions wrapper function must exist");
+    assert!(
+        wrapper_fn.contains("inert=move || collapsed.get()"),
+        "collapsed header actions must go `inert`, which removes them from \
+         both the tab order and the accessibility tree -- \
+         `pointer-events-none` alone leaves them keyboard- and \
+         screen-reader-reachable"
+    );
+    assert!(
+        wrapper_fn.contains("aria-hidden=move || collapsed.get().to_string()"),
+        "belt-and-braces `aria-hidden`, matching the collapsed rail's own \
+         treatment, in case a user agent does not yet honour `inert`"
+    );
+}
+
 #[test]
 fn header_actions_fades_with_the_title_on_collapse() {
     // "Shown only in the expanded header" (ldui-bx6n): hidden in place on

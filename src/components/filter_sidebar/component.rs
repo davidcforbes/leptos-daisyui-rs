@@ -24,8 +24,26 @@ fn next_filter_sidebar_search_id() -> String {
 /// Fades and stops receiving pointer events alongside the title when the
 /// panel collapses -- the same "hidden in place, never unmounted" treatment
 /// the header title and the main content area already get, so collapsing
-/// cannot discard interaction state inside a header control. The panel's own
-/// `overflow-hidden` clips it at the 44px collapsed rail width.
+/// cannot discard interaction state inside a header control.
+///
+/// **`ldui-8hba` regression, fixed here.** `opacity-0 pointer-events-none`
+/// alone hides *paint*, not *layout*: the wrapper's `shrink-0` kept its full
+/// intrinsic width even while invisible, so on a right-docked panel with a
+/// wide slot (a Select plus a setup action) the collapsed header's
+/// `flex-row-reverse` line demanded far more width than the 44px rail has.
+/// With nothing left to absorb the overflow (the title has already shrunk to
+/// 0), the toggle button was pushed out past the panel's own edge and
+/// clipped by the panel's `overflow-hidden` -- `elementFromPoint` at the
+/// toggle's visual center resolved whatever sat underneath instead. Collapsed
+/// state now zeroes the wrapper's actual footprint (`w-0`, no margin, its own
+/// `overflow-hidden` so children cannot bleed past it) rather than merely
+/// fading it, so it contributes nothing to the header's flex layout and the
+/// toggle keeps the full available width to itself. The slot stays mounted
+/// (per the module doc comment) and additionally goes `inert` -- excluded
+/// from both the tab order and the accessibility tree, belt-and-braces with
+/// `aria-hidden`, matching the "visually hidden must not still be reachable"
+/// rule -- rather than merely uninteractive under `pointer-events-none`,
+/// which a keyboard or screen-reader user could still reach.
 pub(crate) fn filter_sidebar_header_actions_wrapper(
     header_actions: Option<Children>,
     collapsed: Signal<bool>,
@@ -35,15 +53,16 @@ pub(crate) fn filter_sidebar_header_actions_wrapper(
             <div
                 class=move || {
                     format!(
-                        "mx-2 flex shrink-0 items-center gap-2 \
-                         transition-opacity duration-[150ms] {}",
+                        "flex items-center gap-2 transition-opacity duration-[150ms] {}",
                         if collapsed.get() {
-                            "opacity-0 pointer-events-none"
+                            "mx-0 w-0 overflow-hidden opacity-0 pointer-events-none"
                         } else {
-                            "opacity-100"
+                            "mx-2 shrink-0 opacity-100"
                         },
                     )
                 }
+                inert=move || collapsed.get()
+                aria-hidden=move || collapsed.get().to_string()
                 data-filter-sidebar-header-actions="true"
             >
                 {header_actions()}
@@ -134,10 +153,13 @@ pub fn FilterSidebar(
     /// Assistant panel). `None` omits the wrapper entirely -- an
     /// unconditionally-rendered empty wrapper is a phantom flex item, the
     /// same reasoning `FilterBar` documents for its own optional slots.
-    /// Shown only in the EXPANDED header: it fades and stops receiving
-    /// pointer events alongside the title when the panel collapses, and is
-    /// clipped by the panel's own `overflow-hidden` at the 44px rail width.
-    /// Sits between the title and the toggle in DOM order, so left/right
+    /// Shown only in the EXPANDED header: it fades out and collapses to zero
+    /// layout width and no pointer events when the panel collapses
+    /// (`ldui-8hba` -- retaining its width while merely invisible pushed the
+    /// toggle button outside the panel on the right-docked orientation, see
+    /// [`filter_sidebar_header_actions_wrapper`] for the full story), and
+    /// goes `inert` so it drops out of the tab order and accessibility tree
+    /// too. Sits between the title and the toggle in DOM order, so left/right
     /// mirroring (`flex-row-reverse` on [`SidebarSide::Right`]) carries it
     /// automatically -- see the header's own comment for why the toggle
     /// stays at the panel's inner edge.
@@ -264,6 +286,11 @@ pub fn FilterSidebar(
                            border border-black/[.12] bg-base-100 text-base-content/75 \
                            shadow-none hover:bg-black/[.06] hover:text-base-content"
                     on:click=move |_| on_toggle.run(())
+                    // Unambiguous selector for tests: `header_actions` can
+                    // itself contain a `<button aria-label>` (e.g. a setup
+                    // action), so `[aria-label]` alone does not uniquely
+                    // identify the toggle (`ldui-8hba`).
+                    data-filter-sidebar-toggle="true"
                 >
                     // The arrow points where the panel would GO, so it depends
                     // on the side AND the collapsed state - see

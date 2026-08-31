@@ -3954,6 +3954,209 @@ async fn filter_sidebar_search_accessible_name_covers_every_variant() {
     assert_no_browser_errors(&h, "FilterSidebar search accessible name").await;
 }
 
+/// `ldui-8hba`, a P1 consumer blocker: a collapsed right-side `FilterSidebar`
+/// with `header_actions` (4iiz-Office's Client Coordinator Assistant) could
+/// not be re-expanded at all. Regression from `ldui-bx6n`'s `header_actions`
+/// slot -- `opacity-0 pointer-events-none` hid PAINT, not LAYOUT: the
+/// wrapper's `shrink-0` kept its full intrinsic width even while invisible,
+/// so the collapsed header's `flex-row-reverse` line demanded far more width
+/// than the 44px rail has and pushed the toggle button past the panel's own
+/// edge, where the panel's own `overflow-hidden` clipped it --
+/// `elementFromPoint` at the toggle's visual center resolved whatever sat
+/// underneath instead. Our defect, not a consumer one.
+///
+/// Proves every cell of the binding acceptance criteria, for BOTH
+/// `SidebarSide::Left` and `SidebarSide::Right`, WITH and WITHOUT
+/// `header_actions`: the toggle's complete 28px hit target sits inside the
+/// aside once collapsed; `header_actions` remain mounted (their state
+/// survives a collapse/expand cycle) but claim no collapsed layout width and
+/// go `inert` (unfocusable, unannounced); `elementFromPoint` at the toggle
+/// center resolves the toggle; a real click there expands the panel; and the
+/// expanded header geometry is unchanged by the round trip.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn filter_sidebar_collapsed_toggle_stays_inside_its_panel_ldui_8hba() {
+    let h = harness_at("/components/filter-sidebar").await;
+    begin_browser_error_capture(&h).await;
+
+    fn measure_js(panel_id: &str) -> String {
+        format!(
+            r#"(() => {{
+                const root = document.getElementById('{panel_id}');
+                const aside = root.getBoundingClientRect();
+                const button = root.querySelector('[data-filter-sidebar-toggle]');
+                const b = button.getBoundingClientRect();
+                const cx = b.x + b.width / 2;
+                const cy = b.y + b.height / 2;
+                const hit = document.elementFromPoint(cx, cy);
+                const actions = root.querySelector('[data-filter-sidebar-header-actions]');
+                const model = root.querySelector('select[data-header-actions-model]');
+                return {{
+                    aside: [aside.x, aside.y, aside.width, aside.height],
+                    button: [b.x, b.y, b.width, b.height],
+                    hitIsButton: !!hit && (hit === button || button.contains(hit)),
+                    ariaExpanded: button.getAttribute('aria-expanded'),
+                    actionsInert: actions ? actions.inert : null,
+                    actionsAriaHidden: actions ? actions.getAttribute('aria-hidden') : null,
+                    actionsWidth: actions ? actions.getBoundingClientRect().width : null,
+                    modelValue: model ? model.value : null,
+                }};
+            }})()"#
+        )
+    }
+
+    // Left/Right x with/without `header_actions` -- all four acceptance cells.
+    let panels: [(&str, bool); 4] = [
+        ("fs-header-actions-left", true),
+        ("fs-header-actions-right", true),
+        ("fs-interactive-left", false),
+        ("fs-interactive-right", false),
+    ];
+
+    for (panel_id, has_actions) in panels {
+        let toggle_selector = format!("#{panel_id} [data-filter-sidebar-toggle]");
+
+        // ── expanded baseline ───────────────────────────────────────────
+        let expanded_before = eval_json(&h, &measure_js(panel_id)).await;
+        assert_eq!(
+            expanded_before["ariaExpanded"],
+            json!("true"),
+            "{panel_id}: must start expanded"
+        );
+        if has_actions {
+            assert_eq!(
+                expanded_before["actionsInert"],
+                json!(false),
+                "{panel_id}: header_actions must be interactive while expanded"
+            );
+            // Change the model selection so a later assertion can prove this
+            // state survives a collapse/expand round trip (the slot stays
+            // mounted, per the module doc comment -- it must not reset).
+            eval_json(
+                &h,
+                &format!(
+                    r#"(() => {{
+                        const sel = document.querySelector('#{panel_id} select[data-header-actions-model]');
+                        sel.value = 'Deep';
+                        sel.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                        return sel.value;
+                    }})()"#
+                ),
+            )
+            .await;
+        }
+
+        // ── collapse via a REAL click at the toggle's own bounding-rect
+        //    center -- exactly what a user does, and exactly what a
+        //    clipped/pushed-off-panel button would silently swallow
+        //    pre-fix, because the browser's own hit-testing (not just our
+        //    assertion below) decides who receives it ──
+        click(&h, &toggle_selector).await;
+
+        let collapsed = eval_json(&h, &measure_js(panel_id)).await;
+        assert_eq!(
+            collapsed["ariaExpanded"],
+            json!("false"),
+            "{panel_id}: the collapse click did not register -- reproduces \
+             ldui-8hba if this fails"
+        );
+
+        // 1. the toggle's complete 28px hit target sits inside the aside.
+        let aside_box: Vec<f64> = collapsed["aside"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_f64().unwrap())
+            .collect();
+        let button_box: Vec<f64> = collapsed["button"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_f64().unwrap())
+            .collect();
+        let (ax, ay, aw, ah) = (aside_box[0], aside_box[1], aside_box[2], aside_box[3]);
+        let (bx, by, bw, bh) = (button_box[0], button_box[1], button_box[2], button_box[3]);
+        assert!(
+            bx >= ax - 0.5
+                && by >= ay - 0.5
+                && bx + bw <= ax + aw + 0.5
+                && by + bh <= ay + ah + 0.5,
+            "{panel_id}: collapsed toggle {button_box:?} is not fully inside \
+             its own aside {aside_box:?} -- this is the ldui-8hba geometry"
+        );
+        assert!(
+            bw >= 27.0 && bh >= 27.0,
+            "{panel_id}: collapsed toggle hit target shrank below its ~28px \
+             size: {button_box:?}"
+        );
+
+        // 2. `elementFromPoint` at the toggle center resolves the toggle.
+        assert_eq!(
+            collapsed["hitIsButton"],
+            json!(true),
+            "{panel_id}: elementFromPoint at the toggle's own center did not \
+             resolve the toggle -- this is exactly the ldui-8hba symptom \
+             (the underlying control receives the click instead)"
+        );
+
+        if has_actions {
+            // header_actions remain mounted, but claim no collapsed layout
+            // width and are excluded from the tab order / accessibility tree.
+            assert_eq!(
+                collapsed["actionsInert"],
+                json!(true),
+                "{panel_id}: collapsed header_actions must be `inert`"
+            );
+            assert_eq!(
+                collapsed["actionsAriaHidden"],
+                json!("true"),
+                "{panel_id}: collapsed header_actions must be `aria-hidden`"
+            );
+            let width = collapsed["actionsWidth"].as_f64().unwrap();
+            assert!(
+                width < 1.0,
+                "{panel_id}: collapsed header_actions must claim ~zero \
+                 layout width, got {width}px"
+            );
+        }
+
+        // 3. clicking the toggle (the same real-click path) expands it again.
+        click(&h, &toggle_selector).await;
+        let expanded_after = eval_json(&h, &measure_js(panel_id)).await;
+        assert_eq!(
+            expanded_after["ariaExpanded"],
+            json!("true"),
+            "{panel_id}: re-clicking the toggle must expand the panel"
+        );
+
+        // 4. expanded header layout is unchanged by the round trip.
+        assert_eq!(
+            expanded_after["button"], expanded_before["button"],
+            "{panel_id}: expanded toggle geometry drifted across a \
+             collapse/expand cycle"
+        );
+
+        if has_actions {
+            assert_eq!(
+                expanded_after["actionsInert"],
+                json!(false),
+                "{panel_id}: header_actions must regain interactivity once \
+                 re-expanded"
+            );
+            // The slot stayed mounted throughout -- its state was never
+            // discarded by collapsing (per the module doc comment).
+            assert_eq!(
+                expanded_after["modelValue"],
+                json!("Deep"),
+                "{panel_id}: header_actions state must survive a \
+                 collapse/expand cycle -- the slot must never unmount"
+            );
+        }
+    }
+
+    assert_no_browser_errors(&h, "FilterSidebar collapsed toggle hit target (ldui-8hba)").await;
+}
+
 /// Tabs: controlled selection, roving focus, relationships, localization,
 /// overflow, orientation, disabled skipping, and removal recovery stay coherent.
 #[tokio::test(flavor = "multi_thread")]

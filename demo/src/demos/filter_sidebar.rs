@@ -97,74 +97,110 @@ fn Workspace(
     }
 }
 
-/// A right-docked Assistant panel carrying panel-scoped header controls (a
-/// model selector plus a setup action) beside the title and toggle
-/// (`ldui-bx6n`). Composed directly rather than through `Workspace`, because
-/// `Workspace`'s `panel` closure is reused twice across two `<Show>` sites and
-/// therefore must stay `Copy` -- `Children` is not, so the slot is threaded
-/// through here instead.
+/// An Assistant panel carrying panel-scoped header controls (a model
+/// selector plus a setup action) beside the title and toggle (`ldui-bx6n`).
+/// Composed directly rather than through `Workspace`, because `Workspace`'s
+/// `panel` closure is reused twice across two `<Show>` sites and therefore
+/// must stay `Copy` -- `Children` is not, so the slot is threaded through
+/// here instead.
+///
+/// Takes `side` so the fixture can render BOTH orientations
+/// (`ldui-8hba`: the collapsed-toggle regression was right-side-specific --
+/// `flex-row-reverse` is what let the header_actions slot's retained width
+/// push the toggle past the panel's own edge -- but the acceptance criteria
+/// call for proving the left side stays correct too, not assuming it).
 #[component]
-fn HeaderActionsWorkspace() -> impl IntoView {
+fn HeaderActionsWorkspace(
+    /// Which edge to dock against. A plain `SidebarSide`, not a reactive
+    /// `Signal` -- this fixture never flips orientation at runtime, unlike
+    /// `FilterSidebar`'s own `side` prop, so branching on it once at
+    /// component-build time (rather than inside a `<Show>`) avoids the two
+    /// mirrored branches fighting over ownership of the same `String` ids.
+    side: SidebarSide,
+    /// A stable id on the panel's root `<aside>`, mirroring `Workspace`'s own
+    /// `panel_id` -- so the reactivity fixture can select one specific
+    /// instance among the several `header_actions` panels this page renders.
+    #[prop(into)]
+    panel_id: &'static str,
+) -> impl IntoView {
     let collapsed = RwSignal::new(false);
     let search = RwSignal::new(String::new());
+    let model_select_id = format!("{panel_id}-model");
+
+    let panel = view! {
+        <FilterSidebar
+            attr:id=panel_id
+            side=side
+            collapsed=collapsed
+            on_toggle=Callback::new(move |()| collapsed.update(|c| *c = !*c))
+            active_count=1usize
+            title="Assistant"
+            search=search
+            search_placeholder="Type to filter…"
+            search_label="Search the assistant"
+            toggle_label="Toggle the assistant panel"
+            header_actions=header_actions_slot(model_select_id)
+        >
+            <ExampleFilters />
+        </FilterSidebar>
+    };
+    let page_content = view! {
+        <div class="flex min-w-0 flex-1 flex-col gap-2 bg-base-200/40 p-4">
+            <p class="text-sm font-semibold">"Page content"</p>
+            <p class="text-sm opacity-60">
+                "4iiz-Office's Client Coordinator Assistant: a model picker and a setup action live in the header, beside the title - not a second row squeezed under it."
+            </p>
+        </div>
+    };
 
     view! {
         <div class="flex h-96 w-full overflow-hidden rounded-lg border border-base-300">
-            <div class="flex min-w-0 flex-1 flex-col gap-2 bg-base-200/40 p-4">
-                <p class="text-sm font-semibold">"Page content"</p>
-                <p class="text-sm opacity-60">
-                    "4iiz-Office's Client Coordinator Assistant: a model picker and a setup action live in the header, beside the title - not a second row squeezed under it."
-                </p>
-            </div>
-            <FilterSidebar
-                attr:id="fs-header-actions-right"
-                side=SidebarSide::Right
-                collapsed=collapsed
-                on_toggle=Callback::new(move |()| collapsed.update(|c| *c = !*c))
-                active_count=1usize
-                title="Assistant"
-                search=search
-                search_placeholder="Type to filter…"
-                search_label="Search the assistant"
-                toggle_label="Toggle the assistant panel"
-                header_actions=Box::new(move || {
-                    view! {
-                        // Wrapping `<label>` + `for`/`id`, matching the
-                        // sr-only pattern `FilterSidebar`'s own search input
-                        // uses (ldui-g66e) and `EntityTable`'s page-size
-                        // select -- the `input-outside-field` audit accepts
-                        // a fieldset ancestor, a wrapping label, or
-                        // `label[for]`, but not `aria-label` alone (ldui-bx6n).
-                        <label class="sr-only" r#for="fs-header-actions-model">
-                            "Assistant model"
-                        </label>
-                        <select
-                            id="fs-header-actions-model"
-                            class="select select-xs w-24"
-                            data-header-actions-model="true"
-                            aria-label="Assistant model"
-                        >
-                            <option>"Fast"</option>
-                            <option>"Balanced"</option>
-                            <option>"Deep"</option>
-                        </select>
-                        <Button
-                            attr:data-header-actions-setup="true"
-                            shape=ButtonShape::Square
-                            size=ButtonSize::Xs
-                            style=ButtonStyle::Outline
-                            attr:aria-label="Assistant setup"
-                        >
-                            <Icon name="settings" size=IconSize::XSmall />
-                        </Button>
-                    }
-                        .into_any()
-                })
-            >
-                <ExampleFilters />
-            </FilterSidebar>
+            {if side == SidebarSide::Left {
+                vec![panel.into_any(), page_content.into_any()]
+            } else {
+                vec![page_content.into_any(), panel.into_any()]
+            }}
         </div>
     }
+}
+
+/// The model-select + setup-action pair shared by both `HeaderActionsWorkspace`
+/// instances, parameterised only by the select's id so the two panels on the
+/// page never collide.
+fn header_actions_slot(model_select_id: String) -> Children {
+    let label_target = model_select_id.clone();
+    Box::new(move || {
+        view! {
+            // Wrapping `<label>` + `for`/`id`, matching the sr-only pattern
+            // `FilterSidebar`'s own search input uses (ldui-g66e) and
+            // `EntityTable`'s page-size select -- the `input-outside-field`
+            // audit accepts a fieldset ancestor, a wrapping label, or
+            // `label[for]`, but not `aria-label` alone (ldui-bx6n).
+            <label class="sr-only" r#for=label_target.clone()>
+                "Assistant model"
+            </label>
+            <select
+                id=label_target.clone()
+                class="select select-xs w-24"
+                data-header-actions-model="true"
+                aria-label="Assistant model"
+            >
+                <option>"Fast"</option>
+                <option>"Balanced"</option>
+                <option>"Deep"</option>
+            </select>
+            <Button
+                attr:data-header-actions-setup="true"
+                shape=ButtonShape::Square
+                size=ButtonSize::Xs
+                style=ButtonStyle::Outline
+                attr:aria-label="Assistant setup"
+            >
+                <Icon name="settings" size=IconSize::XSmall />
+            </Button>
+        }
+        .into_any()
+    })
 }
 
 #[component]
@@ -375,9 +411,22 @@ pub fn FilterSidebarDemo() -> impl IntoView {
 
             <Section title="Header actions: panel-scoped controls beside the title" col=true>
                 <p class="text-sm opacity-60">
-                    "`header_actions` (ldui-bx6n) puts panel-scoped controls in the SAME header row as the title and toggle, not a second row. It shows only while expanded - collapse the panel and it fades with the title rather than surviving as a stranded control on a 44px rail."
+                    "`header_actions` (ldui-bx6n) puts panel-scoped controls in the SAME header row as the title and toggle, not a second row. It shows only while expanded - collapse the panel and it fades with the title rather than surviving as a stranded control on a 44px rail. It also stays fully mounted when collapsed (ldui-8hba): the model select keeps its chosen value, but it takes no collapsed layout width and cannot be tabbed to or clicked, so the 44px toggle keeps its own full hit target on both edges."
                 </p>
-                <HeaderActionsWorkspace />
+                <div class="flex flex-wrap gap-4">
+                    <div class="min-w-0 flex-1">
+                        <HeaderActionsWorkspace
+                            side=SidebarSide::Left
+                            panel_id="fs-header-actions-left"
+                        />
+                    </div>
+                    <div class="min-w-0 flex-1">
+                        <HeaderActionsWorkspace
+                            side=SidebarSide::Right
+                            panel_id="fs-header-actions-right"
+                        />
+                    </div>
+                </div>
             </Section>
         </ContentLayout>
     }
