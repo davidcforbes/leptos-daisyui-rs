@@ -15,6 +15,43 @@ fn next_filter_sidebar_search_id() -> String {
     )
 }
 
+/// Builds the header row's optional panel-scoped controls slot, or emits
+/// nothing at all when the consumer omits it (`ldui-bx6n`). Follows the same
+/// `Option`-gated idiom as `FilterBar`'s own optional slots
+/// (`filter_bar_children_wrapper`): an unconditionally-rendered empty wrapper
+/// is a phantom flex item in the header row's `justify-between` layout.
+///
+/// Fades and stops receiving pointer events alongside the title when the
+/// panel collapses -- the same "hidden in place, never unmounted" treatment
+/// the header title and the main content area already get, so collapsing
+/// cannot discard interaction state inside a header control. The panel's own
+/// `overflow-hidden` clips it at the 44px collapsed rail width.
+pub(crate) fn filter_sidebar_header_actions_wrapper(
+    header_actions: Option<Children>,
+    collapsed: Signal<bool>,
+) -> Option<impl IntoView> {
+    header_actions.map(|header_actions| {
+        view! {
+            <div
+                class=move || {
+                    format!(
+                        "mx-2 flex shrink-0 items-center gap-2 \
+                         transition-opacity duration-[150ms] {}",
+                        if collapsed.get() {
+                            "opacity-0 pointer-events-none"
+                        } else {
+                            "opacity-100"
+                        },
+                    )
+                }
+                data-filter-sidebar-header-actions="true"
+            >
+                {header_actions()}
+            </div>
+        }
+    })
+}
+
 /// # FilterSidebar
 ///
 /// A collapsible side panel: header with a toggle, a filter-search field,
@@ -92,6 +129,20 @@ pub fn FilterSidebar(
     /// the collapsed rail.
     #[prop(into)]
     title: Signal<String>,
+    /// Optional panel-scoped controls rendered in the SAME header row as the
+    /// title and toggle (e.g. a model selector plus a setup action for an
+    /// Assistant panel). `None` omits the wrapper entirely -- an
+    /// unconditionally-rendered empty wrapper is a phantom flex item, the
+    /// same reasoning `FilterBar` documents for its own optional slots.
+    /// Shown only in the EXPANDED header: it fades and stops receiving
+    /// pointer events alongside the title when the panel collapses, and is
+    /// clipped by the panel's own `overflow-hidden` at the 44px rail width.
+    /// Sits between the title and the toggle in DOM order, so left/right
+    /// mirroring (`flex-row-reverse` on [`SidebarSide::Right`]) carries it
+    /// automatically -- see the header's own comment for why the toggle
+    /// stays at the panel's inner edge.
+    #[prop(optional)]
+    header_actions: Option<Children>,
     /// Optional filter-search box. `None` omits it entirely rather than rendering
     /// a disabled one — a search field that cannot search is worse than none.
     #[prop(optional, into)]
@@ -201,6 +252,7 @@ pub fn FilterSidebar(
                 >
                     {move || title.get()}
                 </h3>
+                {filter_sidebar_header_actions_wrapper(header_actions, collapsed)}
                 <button
                     type="button"
                     aria-label=move || toggle_label.get()

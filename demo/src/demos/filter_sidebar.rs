@@ -97,6 +97,66 @@ fn Workspace(
     }
 }
 
+/// A right-docked Assistant panel carrying panel-scoped header controls (a
+/// model selector plus a setup action) beside the title and toggle
+/// (`ldui-bx6n`). Composed directly rather than through `Workspace`, because
+/// `Workspace`'s `panel` closure is reused twice across two `<Show>` sites and
+/// therefore must stay `Copy` -- `Children` is not, so the slot is threaded
+/// through here instead.
+#[component]
+fn HeaderActionsWorkspace() -> impl IntoView {
+    let collapsed = RwSignal::new(false);
+    let search = RwSignal::new(String::new());
+
+    view! {
+        <div class="flex h-96 w-full overflow-hidden rounded-lg border border-base-300">
+            <div class="flex min-w-0 flex-1 flex-col gap-2 bg-base-200/40 p-4">
+                <p class="text-sm font-semibold">"Page content"</p>
+                <p class="text-sm opacity-60">
+                    "4iiz-Office's Client Coordinator Assistant: a model picker and a setup action live in the header, beside the title - not a second row squeezed under it."
+                </p>
+            </div>
+            <FilterSidebar
+                attr:id="fs-header-actions-right"
+                side=SidebarSide::Right
+                collapsed=collapsed
+                on_toggle=Callback::new(move |()| collapsed.update(|c| *c = !*c))
+                active_count=1usize
+                title="Assistant"
+                search=search
+                search_placeholder="Type to filter…"
+                search_label="Search the assistant"
+                toggle_label="Toggle the assistant panel"
+                header_actions=Box::new(move || {
+                    view! {
+                        <select
+                            class="select select-xs w-24"
+                            data-header-actions-model="true"
+                            aria-label="Assistant model"
+                        >
+                            <option>"Fast"</option>
+                            <option>"Balanced"</option>
+                            <option>"Deep"</option>
+                        </select>
+                        <Button
+                            attr:data-header-actions-setup="true"
+                            shape=ButtonShape::Square
+                            size=ButtonSize::Xs
+                            style=ButtonStyle::Outline
+                            attr:aria-label="Assistant setup"
+                        >
+                            <Icon name="settings" size=IconSize::XSmall />
+                        </Button>
+                    }
+                        .into_any()
+                })
+            >
+                <ExampleFilters />
+            </FilterSidebar>
+        </div>
+    }
+}
+
 #[component]
 pub fn FilterSidebarDemo() -> impl IntoView {
     // Independent state per example: the point of the page is comparing two
@@ -301,6 +361,13 @@ pub fn FilterSidebarDemo() -> impl IntoView {
                         />
                     </div>
                 </div>
+            </Section>
+
+            <Section title="Header actions: panel-scoped controls beside the title" col=true>
+                <p class="text-sm opacity-60">
+                    "`header_actions` (ldui-bx6n) puts panel-scoped controls in the SAME header row as the title and toggle, not a second row. It shows only while expanded - collapse the panel and it fades with the title rather than surviving as a stranded control on a 44px rail."
+                </p>
+                <HeaderActionsWorkspace />
             </Section>
         </ContentLayout>
     }

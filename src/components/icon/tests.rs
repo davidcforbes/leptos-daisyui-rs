@@ -1,5 +1,6 @@
 //! Unit tests for Icon component
 
+use super::component::lucide_to_sprite;
 use super::style::IconSize;
 
 #[test]
@@ -171,4 +172,43 @@ fn as_str_and_as_px_never_disagree() {
         let expected = format!("w-{step} h-{step}");
         assert_eq!(size.as_str(), expected, "{size:?} class/px mismatch");
     }
+}
+
+// ---------------------------------------------------------------------------
+// Coordinator semantic icon mappings (ldui-af4b)
+// ---------------------------------------------------------------------------
+//
+// Each of these names resolves to a real symbol in the shared Office sprite
+// (verified against `crates/office-perf-web/assets/brand/icons.svg`) rather
+// than the blank fallback, so consumers can request them without shipping
+// their own SVG markup.
+
+#[test]
+fn dollar_sign_maps_to_us_dollar() {
+    assert_eq!(lucide_to_sprite("dollar-sign"), "us-dollar");
+}
+
+#[test]
+fn thumbs_up_maps_to_thumbs_up() {
+    assert_eq!(lucide_to_sprite("thumbs-up"), "thumbs-up");
+}
+
+#[test]
+fn bar_chart_3_maps_to_performance_stats() {
+    assert_eq!(lucide_to_sprite("bar-chart-3"), "performance-stats");
+}
+
+#[test]
+fn phone_call_maps_to_phone_ring() {
+    assert_eq!(lucide_to_sprite("phone-call"), "phone-ring");
+}
+
+#[test]
+fn whatsapp_maps_to_whatsapp() {
+    assert_eq!(lucide_to_sprite("whatsapp"), "whatsapp");
+}
+
+#[test]
+fn unknown_name_still_falls_back_to_blank() {
+    assert_eq!(lucide_to_sprite("not-a-real-icon-name"), "blank");
 }

@@ -7,7 +7,10 @@
 //! matches the product it exists to match — and nothing else in the build would
 //! object.
 
+use super::component::filter_sidebar_header_actions_wrapper;
 use super::style::{SidebarSide, join_side_class};
+use leptos::prelude::*;
+use leptos::reactive::owner::Owner;
 
 /// Both files, because `ldui-vh6` moved the orientation-dependent class
 /// fragments out of the view and into `style.rs`. Scanning only `component.rs`
@@ -93,10 +96,18 @@ fn the_toggle_survives_collapsing_and_is_labelled() {
         header.contains("aria-expanded"),
         "the toggle must report its state to assistive technology"
     );
+    // The title AND the optional `header_actions` slot (ldui-bx6n) both fade
+    // on collapse; only the button element itself must stay put. Isolate the
+    // button's own markup rather than counting fades across the whole header.
+    let button_markup = header
+        .split("<button")
+        .nth(1)
+        .expect("the toggle button must exist");
     assert!(
-        !header.contains("hidden_when_collapsed()")
-            || header.matches("hidden_when_collapsed()").count() == 1,
-        "only the TITLE fades on collapse - the button must stay visible"
+        !button_markup.contains("hidden_when_collapsed()")
+            && !button_markup.contains("opacity-0 pointer-events-none"),
+        "the toggle itself must stay visible on collapse, even though the \
+         title and any header_actions fade"
     );
 }
 
@@ -319,5 +330,99 @@ fn no_hidden_label_is_emitted_when_search_is_omitted() {
         1,
         "the sr-only search label must be emitted exactly once, inside the \
          `search.map` branch -- never unconditionally"
+    );
+}
+
+// ── header-actions slot (ldui-bx6n) ─────────────────────────────────────────
+//
+// A collapsible right-side Assistant panel needs panel-scoped controls (a
+// model selector plus a setup action) in the SAME header row as the title and
+// toggle. Mirrors `FilterBar`'s own `Option`-gated slot idiom
+// (`filter_bar_children_wrapper`): an unconditionally-rendered empty wrapper
+// is a phantom flex item, so the wrapper-building logic is a standalone pure
+// function that can be asserted directly without a DOM/SSR renderer (this
+// crate has none -- see the module doc comment on `filter_bar/tests.rs`).
+
+#[test]
+fn header_actions_wrapper_is_absent_when_no_slot_is_supplied() {
+    let owner = Owner::new();
+    owner.with(|| {
+        let collapsed = Signal::stored(false);
+        assert!(
+            filter_sidebar_header_actions_wrapper(None, collapsed).is_none(),
+            "an absent header_actions slot must emit no wrapper node at all, \
+             so existing callers stay render-compatible"
+        );
+    });
+}
+
+#[test]
+fn header_actions_wrapper_is_present_when_a_slot_is_supplied() {
+    let owner = Owner::new();
+    owner.with(|| {
+        let collapsed = Signal::stored(false);
+        assert!(
+            filter_sidebar_header_actions_wrapper(
+                Some(ToChildren::to_children(|| view! { "model select" })),
+                collapsed,
+            )
+            .is_some(),
+            "a supplied header_actions slot must still emit its wrapper"
+        );
+    });
+}
+
+#[test]
+fn header_actions_slot_is_typed_and_optional_in_the_props() {
+    assert!(
+        VIEW_SRC.contains("header_actions: Option<Children>"),
+        "header_actions must be an optional typed composition slot, matching \
+         the `Option<Children>` shape `FilterBar` uses for its own slots"
+    );
+}
+
+#[test]
+fn header_actions_sits_between_the_title_and_the_toggle() {
+    // DOM order, not CSS, is what carries left/right mirroring: the header
+    // row's `flex-row-reverse` (ldui-vh6) reverses whatever is written here,
+    // so the slot must be written between the title and the toggle button in
+    // source order for both sides to come out correct.
+    let header = VIEW_SRC
+        .split("── expanded content")
+        .next()
+        .expect("the header section must exist");
+    let title_pos = header
+        .find("{move || title.get()}")
+        .expect("the title must be rendered in the header");
+    let actions_pos = header
+        .find("filter_sidebar_header_actions_wrapper(header_actions, collapsed)")
+        .expect("the header_actions wrapper must be called in the header");
+    let button_pos = header
+        .find("<button")
+        .expect("the toggle button must exist in the header");
+    assert!(
+        title_pos < actions_pos && actions_pos < button_pos,
+        "header_actions must sit between the title and the toggle in DOM order"
+    );
+}
+
+#[test]
+fn header_actions_fades_with_the_title_on_collapse() {
+    // "Shown only in the expanded header" (ldui-bx6n): hidden in place on
+    // collapse, matching the title and main content's own treatment, never
+    // unmounted -- collapsing must not discard state inside a header control.
+    let source = include_str!("component.rs");
+    let wrapper_fn = source
+        .split("pub(crate) fn filter_sidebar_header_actions_wrapper")
+        .nth(1)
+        .expect("the header_actions wrapper function must exist");
+    assert!(
+        wrapper_fn.contains("opacity-0 pointer-events-none"),
+        "the header_actions slot must hide in place on collapse, not merely \
+         become invisible while still catching clicks"
+    );
+    assert!(
+        wrapper_fn.contains("collapsed.get()"),
+        "the fade must be driven by the same `collapsed` signal as the title"
     );
 }

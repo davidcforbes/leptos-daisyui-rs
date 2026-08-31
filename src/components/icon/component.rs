@@ -181,6 +181,12 @@ pub fn lucide_to_sprite(name: &str) -> &'static str {
         "layout-dashboard" => "performance-stats",
         "activity" => "performance-stats",
         "settings" => "settings-gear",
+        // Same concept under the sprite's naming (ldui-af4b).
+        "dollar-sign" => "us-dollar",
+        "thumbs-up" => "thumbs-up",
+        "bar-chart-3" => "performance-stats",
+        "phone-call" => "phone-ring",
+        "whatsapp" => "whatsapp",
         _ => "blank",
     }
 }
