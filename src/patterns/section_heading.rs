@@ -90,10 +90,16 @@ const fn has_text(value: &str) -> bool {
 /// ```css
 /// @source inline("flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between");
 /// @source inline("min-w-0 flex-1 space-y-1 flex flex-wrap items-center gap-2 sm:shrink-0");
-/// @source inline("ld-text-title ld-text-subtitle ld-text-body ld-text-small");
 /// @source inline("font-semibold tracking-tight tracking-wide uppercase text-base-content");
 /// @source inline("text-base-content/75 max-w-3xl forced-colors:text-[CanvasText]");
 /// ```
+///
+/// The `ld-text-*` steps are NOT listed above on purpose: they are not
+/// Tailwind utilities, so `@source inline(...)` cannot generate them.
+/// They are authored rules emitted into `styles/tokens.css` by
+/// `cargo xtask gen-tokens`, so a consumer gets them by IMPORTING that
+/// stylesheet (see the crate docs). Listing them here would do nothing
+/// while implying the ramp was handled (ldui-h7tw, ldui-fg2h).
 ///
 /// ## Node References
 /// - `node_ref` - References the outer `<div>` element ([HTMLDivElement](https://developer.mozilla.org/en-US/docs/Web/API/HTMLDivElement))

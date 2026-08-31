@@ -303,11 +303,17 @@ fn kpi_card_accessible_name(
 /// @source inline("h-(--border-width-accent) w-full");
 /// @source inline("bg-info bg-success bg-warning bg-error");
 /// @source inline("flex flex-col items-center gap-1 gap-2 p-3 p-4 min-w-0 shrink-0 truncate");
-/// @source inline("ld-text-small ld-text-title ld-text-display");
 /// @source inline("font-semibold uppercase tracking-wide tabular-nums break-words italic");
 /// @source inline("text-base-content/75 text-base-content/40 text-base-content/60 text-info text-success text-warning text-error");
 /// @source inline("tooltip tooltip-top inline-flex h-4 w-4 items-center justify-center rounded-full border sr-only");
 /// ```
+///
+/// The `ld-text-*` steps are NOT listed above on purpose: they are not
+/// Tailwind utilities, so `@source inline(...)` cannot generate them.
+/// They are authored rules emitted into `styles/tokens.css` by
+/// `cargo xtask gen-tokens`, so a consumer gets them by IMPORTING that
+/// stylesheet (see the crate docs). Listing them here would do nothing
+/// while implying the ramp was handled (ldui-h7tw, ldui-fg2h).
 ///
 /// ## Node References
 /// - `node_ref` - References the outer `<div>` element ([HTMLDivElement](https://developer.mozilla.org/en-US/docs/Web/API/HTMLDivElement))
