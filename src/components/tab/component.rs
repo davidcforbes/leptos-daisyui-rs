@@ -135,12 +135,65 @@ impl TabSetContext {
     }
 
     fn first_enabled_key(self) -> Option<String> {
-        self.registrations.with(|registrations| {
-            registrations
+        self.dom_ordered_registrations()
+            .into_iter()
+            .find(|registration| !registration.disabled.get())
+            .map(|registration| registration.key)
+    }
+
+    /// Registrations reordered to match the tabset's actual DOM order rather
+    /// than the order `register` happened to be called in. A tab whose
+    /// visibility is gated by something like `<Show>` mounts its content via
+    /// a deferred reactive pass, so it can register *after* later siblings
+    /// that render unconditionally (confirmed empirically: with `alpha`,
+    /// `Show`-wrapped `beta`, `gamma`, `delta`, `epsilon`, `zeta`, the
+    /// registration order came back `[alpha, gamma, delta, epsilon, zeta,
+    /// beta]` -- `beta` last, not second). `next_enabled_tab` walks its
+    /// `disabled` slice by index assuming that index tracks left-to-right
+    /// (or top-to-bottom) visual position, so without this reconciliation
+    /// `ArrowRight`/`ArrowLeft`/`Home`/`End` silently compute movement
+    /// against the wrong neighbor list whenever a controlled tab list
+    /// contains any conditionally-rendered tab (ldui-d2hg). Falls back to
+    /// registration order when the tabset root is not yet in the DOM (first
+    /// render) or the query otherwise turns up nothing usable.
+    fn dom_ordered_registrations(self) -> Vec<RegisteredTab> {
+        let registrations = self.registrations.get();
+        let tab_nodes = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| document.get_element_by_id(&self.id()))
+            .and_then(|root| root.query_selector_all("[role='tab']").ok());
+        let Some(tab_nodes) = tab_nodes else {
+            return registrations;
+        };
+        let tabset_id = self.id();
+        let mut ordered = Vec::with_capacity(registrations.len());
+        for index in 0..tab_nodes.length() {
+            let Some(id) = tab_nodes
+                .item(index)
+                .and_then(|node| node.dyn_into::<web_sys::Element>().ok())
+                .map(|element| element.id())
+            else {
+                continue;
+            };
+            if let Some(registration) = registrations
                 .iter()
-                .find(|registration| !registration.disabled.get())
-                .map(|registration| registration.key.clone())
-        })
+                .find(|registration| tab_dom_id(&tabset_id, &registration.key) == id)
+            {
+                ordered.push(registration.clone());
+            }
+        }
+        // Defensive: a registration the DOM query missed (should not happen
+        // once the tabset has settled) keeps a stable place at the end
+        // rather than being silently dropped from keyboard navigation.
+        for registration in &registrations {
+            if !ordered
+                .iter()
+                .any(|found| found.registration_id == registration.registration_id)
+            {
+                ordered.push(registration.clone());
+            }
+        }
+        ordered
     }
 
     fn effective_selected_key(self) -> Option<String> {
@@ -179,7 +232,7 @@ impl TabSetContext {
     }
 
     fn move_focus(self, key: &str, movement: TabMove) {
-        let registrations = self.registrations.get_untracked();
+        let registrations = self.dom_ordered_registrations();
         let disabled = registrations
             .iter()
             .map(|registration| registration.disabled.get_untracked())
@@ -197,17 +250,27 @@ impl TabSetContext {
 }
 
 fn focus_tab(tabset_id: String, key: String) {
+    // Focus synchronously. The target tab is always an already-registered,
+    // already-rendered `<a role="tab">` that already carries a real
+    // `tabindex` (0 or -1, never absent -- see `Tab`'s view), so it is a
+    // valid script focus target the instant this runs; no reactive DOM
+    // patch or native browser API (like Modal's `showModal()`, which does
+    // need a `request_animation_frame` -- see `search_picker_dialog.rs`)
+    // has to land first. Deferring this through `request_animation_frame`
+    // (the previous implementation) raced the calling test/consumer code
+    // that reads `document.activeElement` right after dispatching the key:
+    // confirmed empirically (ldui-d2hg) -- the correct target id was
+    // already computed, but the scheduled focus() had not always run by
+    // the time a synchronous read of `document.activeElement` fired.
     let id = tab_dom_id(&tabset_id, &key);
-    request_animation_frame(move || {
-        let Some(element) = web_sys::window()
-            .and_then(|window| window.document())
-            .and_then(|document| document.get_element_by_id(&id))
-            .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
-        else {
-            return;
-        };
-        let _ = element.focus();
-    });
+    let Some(element) = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.get_element_by_id(&id))
+        .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
+    else {
+        return;
+    };
+    let _ = element.focus();
 }
 
 /// Controlled, accessible owner for one tab list and its panels.

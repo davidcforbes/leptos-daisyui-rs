@@ -3123,7 +3123,16 @@ async fn assert_server_table_controls_match_declared_query_capabilities(
                     table.dataset.serverQuerySorting,
                     table.dataset.serverQueryFiltering,
                 ],
-                search: table.querySelectorAll('input[type="text"]').length,
+                // Scoped to the table-wide search box's own id prefix (the
+                // same selector this file already uses for `#cursor-server-
+                // table` at ~line 2917 and for other tables at ~3677/3702).
+                // A bare `input[type="text"]` also matches the "Name"
+                // column's `Column::filterable_text()` per-column filter
+                // input (`demo/src/demos/data_table.rs`'s `cursor_columns`,
+                // present since this table's very first commit), which
+                // inflates this count to 2 and has nothing to do with
+                // whether the search box itself rendered exactly once.
+                search: table.querySelectorAll('input[id^="ldui-data-table-search-"]').length,
                 pageSize: table.querySelectorAll('select[id$="-page-size"]').length,
                 filters: table.querySelectorAll('[data-table-filter-row]').length,
                 sorts: table.querySelectorAll('[data-table-sort-state]').length,
