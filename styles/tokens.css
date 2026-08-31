@@ -79,3 +79,30 @@
   --text-xl: 1.25rem;
   --text-xl--line-height: calc(28 / 20);
 }
+
+@layer components {
+  .ld-text-display {
+    font-size: var(--text-display);
+    line-height: var(--text-display--line-height);
+  }
+  .ld-text-title {
+    font-size: var(--text-title);
+    line-height: var(--text-title--line-height);
+  }
+  .ld-text-subtitle {
+    font-size: var(--text-subtitle);
+    line-height: var(--text-subtitle--line-height);
+  }
+  .ld-text-body {
+    font-size: var(--text-body);
+    line-height: var(--text-body--line-height);
+  }
+  .ld-text-caption {
+    font-size: var(--text-caption);
+    line-height: var(--text-caption--line-height);
+  }
+  .ld-text-small {
+    font-size: var(--text-small);
+    line-height: var(--text-small--line-height);
+  }
+}

@@ -139,11 +139,20 @@ view! {
 @source inline("h-(--border-width-accent) w-full");
 @source inline("bg-info bg-success bg-warning bg-error");
 @source inline("flex flex-col items-center gap-1 gap-2 p-3 p-4 min-w-0 shrink-0 truncate");
-@source inline("ld-text-small ld-text-title ld-text-display ld-text-caption");
 @source inline("font-semibold uppercase tracking-wide tabular-nums break-words italic");
 @source inline("text-base-content/75 text-base-content/40 text-base-content/60 text-info text-success text-warning text-error");
 @source inline("tooltip tooltip-top inline-flex h-4 w-4 items-center justify-center rounded-full border sr-only");
 ```
+
+The `.ld-text-*` classes are **not** listed above and must not be added via
+`@source inline`: they are not Tailwind utilities (`@source` scanning cannot
+generate them), they are plain rules generated into `styles/tokens.css` by
+`cargo xtask gen-tokens` (ldui-h7tw). Import that file once, as shown under
+[CSS Configuration](../../CLAUDE.md#css-configuration), and the ramp resolves
+with no further action -- unlike most of this crate's `--ld-*` custom
+properties (durations, easings, elevation, `.ld-eased`/`.ld-focus-ring`/etc.),
+which still require mounting `UiTokensPreamble`/`UiAnimationsPreamble` at
+runtime. See `src/tokens/preamble.rs` for which family is which.
 
 ## Reference
 

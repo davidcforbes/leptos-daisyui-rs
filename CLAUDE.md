@@ -427,6 +427,50 @@ Adjust consumer paths relative to `input.css`. See `demo/input.css` for the
 showcase's complete source configuration and each component guide for dynamic
 inline classes.
 
+### `--ld-*` design tokens: two delivery paths, easy to conflate (ldui-h7tw)
+
+`ui-tokens` values reach the web face through **two independent
+mechanisms**, and a consumer that only wires up one gets a silent partial
+result rather than an error:
+
+- **Generated into `styles/tokens.css`** by `cargo xtask gen-tokens` (see
+  `xtask/src/main.rs`'s `tokens_css()`). This is the `@theme` block (Tailwind
+  numeric spacing scale, `--border-width-*`, `--radius-*`, `--color-table-*`,
+  `--text-*`) plus, as of ldui-h7tw, an `@layer components` block defining
+  the six `.ld-text-display/title/subtitle/body/caption/small` classes that
+  `SectionHeading`, `KpiStrip` and `PageHeader` emit. **Importing this file
+  (as shown above) is enough on its own** — no component needs to be mounted
+  for these to work.
+- **Injected at runtime** by mounting `UiTokensPreamble` /
+  `UiAnimationsPreamble` (`leptos_daisyui_rs::tokens`) near your app's root,
+  which render a `<style>` element from `ui_tokens_css()` /
+  `ui_animations_css()`. This is the *only* source for the `--ld-duration-*`,
+  `--ld-ease-*`, `--ld-elevation-*`, `--ld-space-*`, `--ld-stroke-*`,
+  `--ld-radius-*` custom properties, and for classes documented as requiring
+  it: `.ld-eased`, `.ld-pressable`, `.ld-focus-ring`, `.ld-elevated`,
+  `.ld-ripple-host`/`.ld-ripple-element`, `.ld-aichat-msg-in`,
+  `.ld-vstep-rail`/`.ld-vstep-flow-dash`, and the `@keyframes` names motion
+  primitives reference by name. **A consumer that never mounts these
+  components gets no error — the classes are simply undefined**, so weight
+  and colour classes on the same element still apply while the effect the
+  `ld-*` class was for (animation, focus ring, elevation) silently does
+  nothing.
+
+Before ldui-h7tw, the six `.ld-text-*` classes were runtime-only too, which
+is exactly the shape of bug above: a consumer using `SectionHeading` without
+mounting `UiTokensPreamble` got the heading's weight and colour but no size
+step, and with Tailwind preflight resetting heading sizes, an `<h2>` rendered
+at body size. They are now emitted both ways (same `ui_tokens::typography`
+source, so they cannot drift apart) specifically because nothing in
+`SectionHeading`'s or `KpiStrip`'s own documentation said mounting the
+preamble was required — unlike the animation classes above, which do say so.
+`tests/ld_class_stylesheet_coverage.rs` guards both properties: that the type
+ramp works from `styles/tokens.css` alone, and that every literal `ld-*`
+class any component emits is defined by *some* stylesheet this crate ships
+(a lower bar, intentionally — see that file's module doc for what it does
+and does not cover, including the currently-unreferenced `--ld-space-*`/
+`--ld-stroke-*`/`--ld-radius-*` custom-property family).
+
 ## Component Guidelines
 
 When adding or modifying components:

@@ -1359,17 +1359,25 @@ fn tokens_css() -> String {
         css.push_str(&format!("  --radius-{}: {};\n", name, rem(dips)));
     }
 
-    css.push_str("\n  /* Type ramp. Every step pins its line height from the\n");
-    css.push_str("     shared LINE_* ramp, so N stacked lines occupy exactly\n");
-    css.push_str("     N x line-height instead of N x a font metric. */\n");
-    for (name, size, line) in [
+    // The type ramp, largest first. Shared by the `@theme` loop below (which
+    // emits `--text-*`/`--text-*--line-height`) and the `.ld-text-*` class
+    // block after `@theme` closes — one array, so the two emissions can never
+    // hand-drift apart from each other. Both ultimately trace to the same
+    // `ui_tokens::typography` constants `src/tokens/preamble.rs`'s runtime
+    // `TYPE_STEPS` also draws from.
+    const TYPE_RAMP: [(&str, f32, f32); 6] = [
         ("display", ty::SIZE_DISPLAY, ty::LINE_DISPLAY),
         ("title", ty::SIZE_TITLE, ty::LINE_TITLE),
         ("subtitle", ty::SIZE_SUBTITLE, ty::LINE_SUBTITLE),
         ("body", ty::SIZE_BODY, ty::LINE_BODY),
         ("caption", ty::SIZE_CAPTION, ty::LINE_CAPTION),
         ("small", ty::SIZE_SMALL, ty::LINE_SMALL),
-    ] {
+    ];
+
+    css.push_str("\n  /* Type ramp. Every step pins its line height from the\n");
+    css.push_str("     shared LINE_* ramp, so N stacked lines occupy exactly\n");
+    css.push_str("     N x line-height instead of N x a font metric. */\n");
+    for (name, size, line) in TYPE_RAMP {
         css.push_str(&format!("  --text-{}: {};\n", name, rem(size)));
         css.push_str(&format!(
             "  --text-{}--line-height: {};\n",
@@ -1397,6 +1405,40 @@ fn tokens_css() -> String {
     }
 
     css.push_str("}\n");
+
+    // ldui-h7tw: the six `.ld-text-*` classes SectionHeading/KpiStrip/etc.
+    // emit are a real per-step contract (font-size + line-height together),
+    // not merely the `--text-*` custom properties above. Before this, that
+    // contract was defined ONLY by `UiTokensPreamble`'s runtime `<style>`
+    // (src/tokens/preamble.rs's `ui_tokens_css()`) — so a consumer using
+    // those components without also mounting the preamble silently lost the
+    // size step (weight and colour still applied; with Tailwind preflight
+    // resetting heading sizes, an H2 rendered at body size). Emitting the
+    // same rules here means the ramp works from this stylesheet alone.
+    //
+    // `@layer components` (not `@utility`): these are fixed, non-tree-shaken
+    // authored rules, exactly like `.btn`/`.indicator-item...` in
+    // demo/input.css — Tailwind never purges anything written directly in a
+    // `@layer` block regardless of `@source` scanning, so a consumer need not
+    // reference these class names anywhere Tailwind's scanner looks for the
+    // rule to survive the build. `@utility` would make them scan-dependent,
+    // which is the exact failure mode this bead exists to remove.
+    //
+    // Each rule references the `--text-*`/`--text-*--line-height` custom
+    // properties just emitted above rather than re-deriving the numbers, so
+    // there is exactly one place in this generated file the sizes come from.
+    // `UiTokensPreamble` keeps emitting its own copy (in px, not rem) so a
+    // runtime-only consumer keeps working unchanged; both ultimately read
+    // from the same `ui_tokens::typography` constants, so they cannot drift
+    // apart from each other even though the units differ.
+    css.push_str("\n@layer components {\n");
+    for (name, _, _) in TYPE_RAMP {
+        css.push_str(&format!(
+            "  .ld-text-{name} {{\n    font-size: var(--text-{name});\n    line-height: var(--text-{name}--line-height);\n  }}\n"
+        ));
+    }
+    css.push_str("}\n");
+
     css
 }
 
@@ -2798,22 +2840,41 @@ mod gen_tokens_tests {
         //
         // Walk the generated css the way a CSS tokenizer would, splitting it
         // into comment / non-comment segments on `/*` and `*/`, and assert
-        // every non-comment segment is only ever blank lines, the `@theme`
-        // block braces, or a `--custom-property: value;` declaration.
+        // every non-comment segment is only ever blank lines, the `@theme` /
+        // `@layer components` block braces, a `--custom-property: value;`
+        // declaration, an `.ld-text-*` selector opener (ldui-h7tw), or a
+        // plain `property: value;` declaration inside that selector.
+        //
+        // The stricter "starts with `--`" rule from before ldui-h7tw still
+        // applies within `@theme` in practice: the `.ld-text-*` block carries
+        // no CSS comments of its own (every string in it comes from a fixed
+        // Rust literal, never a hand-written comment that could contain a
+        // stray `*/`), so there is nothing in that block for this guard to
+        // catch — widening the accepted shapes here does not weaken the
+        // `@theme`-grammar protection this test exists for.
         let css = tokens_css();
 
         fn assert_segment_is_only_declarations_or_structure(segment: &str, css: &str) {
             for line in segment.lines() {
                 let trimmed = line.trim();
-                if trimmed.is_empty() || trimmed == "@theme {" || trimmed == "}" {
+                if trimmed.is_empty()
+                    || trimmed == "@theme {"
+                    || trimmed == "@layer components {"
+                    || trimmed == "}"
+                {
                     continue;
                 }
+                let is_custom_property_decl = trimmed.starts_with("--") && trimmed.ends_with(';');
+                let is_class_selector_opener =
+                    trimmed.starts_with(".ld-text-") && trimmed.ends_with('{');
+                let is_plain_decl = (trimmed.starts_with("font-size:")
+                    || trimmed.starts_with("line-height:"))
+                    && trimmed.ends_with(';');
                 assert!(
-                    trimmed.starts_with("--") && trimmed.ends_with(';'),
-                    "non-comment content in generated css is not a custom-property \
-                     declaration, which Tailwind's @theme grammar rejects \
-                     (a comment likely closed early via a stray `*/`): \
-                     {trimmed:?}\nfull css:\n{css}"
+                    is_custom_property_decl || is_class_selector_opener || is_plain_decl,
+                    "non-comment content in generated css is not a recognised \
+                     declaration or selector shape (a comment likely closed \
+                     early via a stray `*/`): {trimmed:?}\nfull css:\n{css}"
                 );
             }
         }
@@ -2938,5 +2999,50 @@ mod gen_tokens_tests {
         let css = tokens_css();
         assert_eq!(css.matches("@theme {").count(), 1);
         assert!(css.trim_end().ends_with('}'));
+    }
+
+    #[test]
+    fn generated_css_carries_exactly_one_ld_text_layer_block() {
+        let css = tokens_css();
+        assert_eq!(css.matches("@layer components {").count(), 1);
+    }
+
+    #[test]
+    fn ld_text_classes_are_defined_in_the_static_stylesheet() {
+        // ldui-h7tw: SectionHeading/KpiStrip/PageHeader emit these six
+        // classes as plain literal strings — they must resolve from
+        // `styles/tokens.css` alone, with no dependency on the runtime
+        // `UiTokensPreamble` component being mounted. See the doc comment on
+        // the `.ld-text-*` block above `tokens_css` for why that dependency
+        // was silent before this fix.
+        let css = tokens_css();
+        for name in ["display", "title", "subtitle", "body", "caption", "small"] {
+            let want = format!(
+                "  .ld-text-{name} {{\n    font-size: var(--text-{name});\n    line-height: var(--text-{name}--line-height);\n  }}\n"
+            );
+            assert!(
+                css.contains(&want),
+                "missing or malformed .ld-text-{name} rule in generated css:\n{css}"
+            );
+        }
+    }
+
+    #[test]
+    fn ld_text_classes_reference_the_theme_vars_rather_than_re_deriving_numbers() {
+        // Guards the "single source of truth" requirement directly: the
+        // rule must read `var(--text-<name>)`, not a second computed
+        // `rem(...)`/`line_ratio(...)` literal that could drift from the
+        // `@theme` block's own numbers.
+        let css = tokens_css();
+        for name in ["display", "title", "subtitle", "body", "caption", "small"] {
+            assert!(
+                css.contains(&format!("var(--text-{name})")),
+                "ld-text-{name} does not reference var(--text-{name}): {css}"
+            );
+            assert!(
+                css.contains(&format!("var(--text-{name}--line-height)")),
+                "ld-text-{name} does not reference var(--text-{name}--line-height): {css}"
+            );
+        }
     }
 }
