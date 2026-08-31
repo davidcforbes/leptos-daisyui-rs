@@ -31,6 +31,31 @@ mod common;
 
 use common::{harness_at, state};
 
+/// Assert a captured page matches its committed baseline.
+///
+/// `Outcome::check` deliberately returns `Ok` in capture mode -- a baseline was
+/// written, *not* verified -- which is the claim the removed `Outcome::passed`
+/// field used to make silently (PixelProof 60dcd8b split capture from
+/// comparison for exactly that reason). These tests are named
+/// `*_matches_baseline`, so outside an explicit `VISUAL_TEST_MODE=capture` run
+/// they must refuse to pass without a real comparison: a misconfigured run that
+/// quietly captured instead of comparing would otherwise report green having
+/// verified nothing.
+fn assert_matches_baseline(outcome: &pixelproof_web::Outcome, what: &str) {
+    let capturing = std::env::var("VISUAL_TEST_MODE")
+        .map(|mode| mode.eq_ignore_ascii_case("capture"))
+        .unwrap_or(false);
+    if !capturing {
+        assert!(
+            outcome.compared().is_some(),
+            "{what}: expected a real comparison against a committed baseline,              got a capture -- set VISUAL_TEST_MODE=capture only when refreshing"
+        );
+    }
+    if let Err(summary) = outcome.check() {
+        panic!("{what}: {summary}");
+    }
+}
+
 #[test]
 fn component_capture_region_requires_painted_area_inside_the_viewport() {
     let viewport = pixelproof_web::ViewportSize::new(1280, 800);
@@ -64,7 +89,7 @@ async fn button_default_matches_baseline() {
         .capture_and_compare("button", &state("default"))
         .await
         .expect("capture button/default");
-    assert!(r.passed, "{}", r.summary());
+    assert_matches_baseline(&r, "visual");
 }
 
 /// Alert demo, default state (covers the toast/alert tier).
@@ -76,7 +101,7 @@ async fn alert_default_matches_baseline() {
         .capture_and_compare("alert", &state("default"))
         .await
         .expect("capture alert/default");
-    assert!(r.passed, "{}", r.summary());
+    assert_matches_baseline(&r, "visual");
 }
 
 /// Toast demo, default state.
@@ -88,7 +113,7 @@ async fn toast_default_matches_baseline() {
         .capture_and_compare("toast", &state("default"))
         .await
         .expect("capture toast/default");
-    assert!(r.passed, "{}", r.summary());
+    assert_matches_baseline(&r, "visual");
 }
 
 /// Tab demo, default state (first tab active).
@@ -100,7 +125,7 @@ async fn tab_default_matches_baseline() {
         .capture_and_compare("tab", &state("default"))
         .await
         .expect("capture tab/default");
-    assert!(r.passed, "{}", r.summary());
+    assert_matches_baseline(&r, "visual");
 }
 
 /// DataTable demo, default (unsorted) state.
@@ -112,7 +137,7 @@ async fn data_table_default_matches_baseline() {
         .capture_and_compare("data_table", &state("default"))
         .await
         .expect("capture data_table/default");
-    assert!(r.passed, "{}", r.summary());
+    assert_matches_baseline(&r, "visual");
 }
 
 /// DataTable demo, sorted state: real CDP click on the "Name" header of the
@@ -129,7 +154,7 @@ async fn data_table_sorted_matches_baseline() {
         )
         .await
         .expect("click header + capture data_table/sorted");
-    assert!(r.passed, "{}", r.summary());
+    assert_matches_baseline(&r, "visual");
 }
 
 /// The opinionated semantic header/filter bands and faint grid, captured as a
@@ -148,7 +173,7 @@ async fn data_table_filter_row_matches_baseline() {
         )
         .await
         .expect("capture data_table/filter-row/semantic-bands");
-    assert!(r.passed, "{}", r.summary());
+    assert_matches_baseline(&r, "visual");
 }
 
 /// At a narrow viewport the aligned filter row stays attached to the same
@@ -173,7 +198,7 @@ async fn data_table_filter_row_narrow_matches_baseline() {
         )
         .await
         .expect("capture data_table/filter-row/semantic-bands-narrow");
-    assert!(r.passed, "{}", r.summary());
+    assert_matches_baseline(&r, "visual");
 }
 
 /// Modal demo, open state: click "Open Modal" (the page's first primary
@@ -187,7 +212,7 @@ async fn modal_open_matches_baseline() {
         .await
         .expect("click open + capture modal/open");
     h.assert_modal_open().await.expect("modal should be open");
-    assert!(r.passed, "{}", r.summary());
+    assert_matches_baseline(&r, "visual");
 }
 
 /// Dropdown demo, expanded state: click the first "Menu" trigger (daisyUI
@@ -200,7 +225,7 @@ async fn dropdown_expanded_matches_baseline() {
         .click_and_capture("main .dropdown .btn", "dropdown", &state("expanded"))
         .await
         .expect("click trigger + capture dropdown/expanded");
-    assert!(r.passed, "{}", r.summary());
+    assert_matches_baseline(&r, "visual");
 }
 
 /// Kanban board demo (flagship fork addition), default state.
@@ -212,7 +237,7 @@ async fn kanban_default_matches_baseline() {
         .capture_and_compare("kanban", &state("default"))
         .await
         .expect("capture kanban/default");
-    assert!(r.passed, "{}", r.summary());
+    assert_matches_baseline(&r, "visual");
 }
 
 // ── Interactive line chart component-region baselines (ldui-9tr.7) ──────────
@@ -247,7 +272,7 @@ async fn line_chart_default_matches_baseline() {
         )
         .await
         .expect("capture charts/interactive-line-chart/default");
-    assert!(r.passed, "{}", r.summary());
+    assert_matches_baseline(&r, "visual");
 }
 
 /// Hovered: real pointer at category 8; card lists all values and stays
@@ -269,7 +294,7 @@ async fn line_chart_hovered_matches_baseline() {
         )
         .await
         .expect("capture charts/interactive-line-chart/hovered");
-    assert!(r.passed, "{}", r.summary());
+    assert_matches_baseline(&r, "visual");
 }
 
 /// Focused: real focus + arrow input; visible focus cue, same card contract.
@@ -303,7 +328,7 @@ async fn line_chart_focused_matches_baseline() {
         )
         .await
         .expect("capture charts/interactive-line-chart/focused");
-    assert!(r.passed, "{}", r.summary());
+    assert_matches_baseline(&r, "visual");
 }
 
 /// Missing data: the `Show gaps` control swaps in the deterministic multi-gap
@@ -322,7 +347,7 @@ async fn line_chart_missing_data_matches_baseline() {
         )
         .await
         .expect("capture charts/interactive-line-chart/missing-data");
-    assert!(r.passed, "{}", r.summary());
+    assert_matches_baseline(&r, "visual");
 }
 
 /// Narrow (tablet width): ticks thin, legend wraps, edge label and card stay
@@ -348,5 +373,5 @@ async fn line_chart_narrow_matches_baseline() {
         )
         .await
         .expect("capture charts/interactive-line-chart/narrow");
-    assert!(r.passed, "{}", r.summary());
+    assert_matches_baseline(&r, "visual");
 }
