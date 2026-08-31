@@ -409,7 +409,41 @@ pub fn AdminWorkbenchDemo() -> impl IntoView {
                                     // treatment and `aria-label` is its only
                                     // accessible name (icon-only, matching the
                                     // top bar's Settings/Sign out buttons above).
-                                    <Fab attr:data-testid="admin-workbench-help-fab">
+                                    //
+                                    // `style:position="fixed"` is a load-bearing
+                                    // override, not decoration (ldui-0qro
+                                    // root-cause): `demo/custom-components.css`
+                                    // ships a LEGACY, pre-daisyUI-5 `.fab {
+                                    // position: relative; ... }` rule (its own
+                                    // header comment says "not included in
+                                    // daisyUI 5", which stopped being true when
+                                    // the daisyUI dependency added a native
+                                    // `.fab`). That legacy rule is unlayered
+                                    // author CSS, which per the CSS Cascade
+                                    // Layers spec beats ANY layered rule --
+                                    // including daisyUI's own `.fab { position:
+                                    // fixed; ... }`, which ships inside `@layer
+                                    // utilities` -- regardless of specificity or
+                                    // source order. Confirmed empirically: every
+                                    // `<Fab>` in this demo (not just this one)
+                                    // computes `position: relative`, silently, no
+                                    // matter what CSS this file writes around it;
+                                    // it was invisible on the existing FabDemo
+                                    // showcase page because that page only ever
+                                    // centers a FAB inside a `relative` wrapper
+                                    // for illustration, so `position: relative`
+                                    // *looks* the same as `fixed` there. An
+                                    // inline style is its own cascade origin and
+                                    // beats any non-`!important` stylesheet rule
+                                    // unconditionally, so this restores real
+                                    // `position: fixed` for just this instance
+                                    // without touching the shared, out-of-scope
+                                    // stylesheet. Fixing the legacy CSS file
+                                    // itself is filed as a follow-up rather than
+                                    // done here (out of this bead's file scope,
+                                    // and it affects every Fab caller, not only
+                                    // this reference).
+                                    <Fab style:position="fixed" attr:data-testid="admin-workbench-help-fab">
                                         <Button
                                             color=ButtonColor::Info
                                             shape=ButtonShape::Circle

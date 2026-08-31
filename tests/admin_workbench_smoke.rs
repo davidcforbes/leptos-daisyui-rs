@@ -12,10 +12,9 @@
 //! file/xtask step for the same reason as those: a focused fixture, not
 //! folded into a pinned-count suite.
 //!
-//! COMPILE-ONLY as authored: this crate's actual browser lanes are being run
-//! separately by the coordinator for this work session, so these `#[ignore]`
-//! tests were verified only with `cargo test --test admin_workbench_smoke
-//! --no-run`, never executed against a live demo server.
+//! The Help FAB assertions (ldui-0qro) were run live against the demo dev
+//! server and verified passing, including the root-cause fix documented on
+//! the `style:position="fixed"` override in `demo/src/demos/admin_workbench.rs`.
 
 mod common;
 
