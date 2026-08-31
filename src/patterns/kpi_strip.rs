@@ -162,6 +162,18 @@ pub struct KpiItem {
     /// Optional help text. Renders nothing when empty; exposed through
     /// `aria-describedby` so it reaches assistive tech even without a
     /// hover, not only through the visible tooltip trigger.
+    ///
+    /// **Costs the label 20px of row width.** The trigger is a flex sibling
+    /// of the label, so a card carrying help gives its label 20px less than
+    /// the same card without it (measured 83px against 63px on a 117px
+    /// card). That matters because the label is clamped to two lines: a
+    /// roughly 20-character label needs about 70px to hold two lines, so a
+    /// help-bearing card wants to be about 125px wide or more before the
+    /// label starts clipping. Ordinary strips are far above that -- a card
+    /// is 117px at a 1680px window in a constrained column and 182px at
+    /// 2200px -- so this only bites when cards are already cramped, which
+    /// is the regime `ldui-tnyq` covers. Reach for a shorter label rather
+    /// than a narrower card if you hit it (`ldui-yhvf`).
     pub help: String,
 }
 
