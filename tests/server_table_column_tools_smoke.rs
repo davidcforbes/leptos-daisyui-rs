@@ -101,9 +101,7 @@ async fn column_tools_chooser_projection_and_required_column_contract() {
     assert_eq!(initial["menuVisible"], json!(false));
     assert_eq!(initial["hasNameHeader"], json!(true));
     assert_eq!(initial["hasEmailHeader"], json!(true));
-    let page_rows = initial["bodyRows"]
-        .as_u64()
-        .expect("initial page has rows");
+    let page_rows = initial["bodyRows"].as_u64().expect("initial page has rows");
     assert!(
         page_rows > 0 && page_rows <= 10,
         "server table is paged at 10 rows: {initial}"
@@ -112,7 +110,11 @@ async fn column_tools_chooser_projection_and_required_column_contract() {
     // Open: stays inside the viewport, and the required "name" column is
     // not merely undisturbed -- it is never offered as a toggle at all,
     // matching EntityTable's own `.filter(|column| !column.required)`.
-    click(&harness, "#server-table [data-server-column-chooser=\"true\"]").await;
+    click(
+        &harness,
+        "#server-table [data-server-column-chooser=\"true\"]",
+    )
+    .await;
     let opened = snapshot(&harness).await;
     assert_eq!(opened["chooserExpanded"], json!("true"));
     assert_eq!(opened["chooserOpenAttr"], json!("true"));
@@ -178,8 +180,16 @@ async fn column_tools_chooser_projection_and_required_column_contract() {
 
     // Reopen and reset: visibility and order both return to their declared
     // defaults.
-    click(&harness, "#server-table [data-server-column-chooser=\"true\"]").await;
-    click(&harness, "#server-table [data-server-column-reset=\"true\"]").await;
+    click(
+        &harness,
+        "#server-table [data-server-column-chooser=\"true\"]",
+    )
+    .await;
+    click(
+        &harness,
+        "#server-table [data-server-column-reset=\"true\"]",
+    )
+    .await;
     let after_reset = snapshot(&harness).await;
     assert_eq!(
         after_reset["hasEmailHeader"],
