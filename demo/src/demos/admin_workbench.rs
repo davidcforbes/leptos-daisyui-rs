@@ -122,26 +122,39 @@ fn workbench_column_filters(
 
 /// Eight varied KPI cards -- available/unavailable, every [`KpiStatus`], with
 /// and without a trend, matching the bead's "eight varied cards" wording.
+///
+/// Labels are deliberately a mix of short (one line), Office-length (wraps
+/// to exactly two lines), and one deliberately over-long label, matching
+/// ldui-tbaw's binding acceptance ("component and browser evidence cover
+/// representative short, two-line, and over-long labels"). Five of the
+/// two-line labels below are the exact wording the consumer reported as
+/// ellipsized at 1680px: "No-Hire Conversions", "Payments Collected",
+/// "Customer Success Pts", "Conversations Open", "Responses Pending".
 fn workbench_kpis() -> Vec<KpiItem> {
     vec![
         KpiItem::new("open-matters", "Open matters", "128")
             .trend(KpiTrend::new(4.0, StatDeltaTrend::Positive).label("this week")),
-        KpiItem::new("overdue-tasks", "Overdue tasks", "6")
-            .status(KpiStatus::Warning)
-            .help("Tasks past their due date, across every assignee."),
-        KpiItem::new("new-leads", "New leads", "23")
+        KpiItem::new("no-hire-conversions", "No-Hire Conversions", "38")
             .status(KpiStatus::Info)
-            .description("Last 7 days"),
-        KpiItem::new("revenue-booked", "Revenue booked", "$18,400")
+            .description("This quarter"),
+        KpiItem::new("payments-collected", "Payments Collected", "$92,400")
             .status(KpiStatus::Success)
             .trend(KpiTrend::new(12.5, StatDeltaTrend::Positive).label("vs last month")),
-        KpiItem::new("sla-breaches", "SLA breaches", "2")
+        KpiItem::new("customer-success-pts", "Customer Success Pts", "812")
+            .status(KpiStatus::Warning)
+            .help("Composite score across satisfaction, retention, and referrals."),
+        KpiItem::new("conversations-open", "Conversations Open", "17")
             .status(KpiStatus::Error)
             .trend(KpiTrend::new(1.0, StatDeltaTrend::Negative)),
-        KpiItem::new("avg-response", "Avg. response time", "3h 12m"),
+        KpiItem::new("responses-pending", "Responses Pending", "").unavailable(),
         KpiItem::new("client-satisfaction", "Client satisfaction", "94%")
             .status(KpiStatus::Success),
-        KpiItem::new("last-sync", "Last sync", "").unavailable(),
+        KpiItem::new(
+            "avg-first-response",
+            "Average time to first response across every active support queue",
+            "3h 12m",
+        )
+        .description("Rolling 7-day average"),
     ]
 }
 

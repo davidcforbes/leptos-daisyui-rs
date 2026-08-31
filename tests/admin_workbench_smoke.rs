@@ -123,6 +123,109 @@ async fn wide_viewport_matches_the_intended_single_hierarchy() {
     assert_no_browser_errors(&h, "admin-workbench wide viewport").await;
 }
 
+/// Per-card `{ id, ariaLabel, cardHeight, valueTop, labelClipped, labelText }`
+/// for every `[data-kpi-card]` in the admin-workbench `KpiStrip`. `labelClipped`
+/// compares the label span's `scrollHeight` (the height its full text needs)
+/// against its `clientHeight` (capped by `line-clamp-2`'s reserved two-line
+/// box): a normal-length label fits inside that box and is therefore never
+/// visually clamped, while the fixture's one deliberately over-long label
+/// (`avg-first-response`) is allowed to clip.
+async fn kpi_label_wrap_report(h: &pixelproof_web::Harness) -> Value {
+    eval_json(
+        h,
+        r#"(() => {
+            const cards = Array.from(
+                document.querySelectorAll('[data-testid="admin-workbench-kpis"] [data-kpi-card]')
+            );
+            return cards.map(card => {
+                const label = card.querySelector('.line-clamp-2');
+                const value = card.querySelector('[data-kpi-card-value]');
+                const cardRect = card.getBoundingClientRect();
+                const valueRect = value ? value.getBoundingClientRect() : null;
+                return {
+                    id: card.getAttribute('data-kpi-card'),
+                    ariaLabel: card.getAttribute('aria-label'),
+                    cardHeight: Math.round(cardRect.height),
+                    valueTop: valueRect ? Math.round(valueRect.top) : null,
+                    labelClipped: label ? label.scrollHeight > label.clientHeight + 1 : null,
+                    labelText: label ? label.textContent.trim() : null,
+                };
+            });
+        })()"#,
+    )
+    .await
+}
+
+/// ldui-tbaw: at the reported 1680px consumer width, ordinary and
+/// two-line-length labels render with no ellipsis, cards in the row stay
+/// equal height, every card's value starts at the identical vertical offset
+/// regardless of whether its own label used one or two lines, and every
+/// card's accessible name still carries its label in full -- including the
+/// fixture's one deliberately over-long label, which is allowed to clip
+/// visually after two lines but must not lose text from assistive tech.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-admin-workbench)"]
+async fn wide_viewport_kpi_labels_wrap_without_ellipsis_and_stay_aligned() {
+    let h = harness_at(PAGE).await;
+    begin_browser_error_capture(&h).await;
+
+    h.set_viewport(ViewportSize::new(1680, 900))
+        .await
+        .expect("set 1680px viewport");
+
+    let report = kpi_label_wrap_report(&h).await;
+    let cards = report.as_array().expect("kpi label wrap report array");
+    assert_eq!(cards.len(), 8, "eight KPI cards: {report}");
+
+    let heights: Vec<i64> = cards
+        .iter()
+        .map(|c| c["cardHeight"].as_i64().expect("card height"))
+        .collect();
+    let min_height = *heights.iter().min().expect("at least one card");
+    let max_height = *heights.iter().max().expect("at least one card");
+    assert!(
+        max_height - min_height <= 1,
+        "cards must stay equal height across one- and two-line labels: {report}"
+    );
+
+    let value_tops: Vec<i64> = cards
+        .iter()
+        .map(|c| c["valueTop"].as_i64().expect("value top"))
+        .collect();
+    let min_top = *value_tops.iter().min().expect("at least one card");
+    let max_top = *value_tops.iter().max().expect("at least one card");
+    assert!(
+        max_top - min_top <= 1,
+        "values must stay aligned across one- and two-line labels: {report}"
+    );
+
+    for card in cards {
+        let id = card["id"].as_str().unwrap_or_default();
+        let aria = card["ariaLabel"].as_str().unwrap_or_default();
+        let label_text = card["labelText"].as_str().unwrap_or_default();
+        assert!(
+            !label_text.is_empty(),
+            "every card must expose its label span: {card}"
+        );
+        assert!(
+            aria.contains(label_text),
+            "the accessible name must contain the complete label for {id}: {card}"
+        );
+        // Only the fixture's one deliberately over-long label is allowed to
+        // clip visually after two lines; every ordinary/two-line label must
+        // render without an ellipsis.
+        if id != "avg-first-response" {
+            assert_eq!(
+                card["labelClipped"],
+                json!(false),
+                "normal-length labels must render without ellipsis for {id}: {card}"
+            );
+        }
+    }
+
+    assert_no_browser_errors(&h, "admin-workbench kpi label wrap").await;
+}
+
 async fn table_width(h: &pixelproof_web::Harness) -> f64 {
     eval_json(
         h,

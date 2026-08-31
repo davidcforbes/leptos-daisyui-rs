@@ -81,6 +81,22 @@ value text down one rung on the `.ld-text-*` ramp (`ld-text-display` to
 `ld-text-title`), for dense contexts such as a sidebar summary or an
 embedded card.
 
+## Label wrapping (ldui-tbaw)
+
+A `KpiCard` label wraps up to two lines (`line-clamp-2`) rather than
+ellipsizing on one -- ordinary Office-length labels ("No-Hire Conversions",
+"Payments Collected", "Customer Success Pts", ...) are fully visible at the
+consumer's eight-card 1680px width; only deliberately over-long copy clamps
+after two lines. The label box always reserves the height of two
+`ld-text-small` line boxes (`min-h-8`, 32px) regardless of whether a given
+label actually needs one line or two, so a short-label card and a
+two-line-label card in the same row stay equal height and their
+values/descriptions/help controls start at the identical vertical offset --
+clamping the text alone would still let a one-line label leave a shorter,
+unreserved box than a wrapped one. Visual clamping never shortens the
+accessible name: `aria-label` is computed from the label string directly, so
+even a clamped label reaches assistive tech in full.
+
 ## Accessibility
 
 Each `KpiCard` is `role="group"` with a computed `aria-label` combining the
@@ -138,7 +154,8 @@ view! {
 @source inline("forced-colors:border-[CanvasText]");
 @source inline("h-(--border-width-accent) w-full");
 @source inline("bg-info bg-success bg-warning bg-error");
-@source inline("flex flex-col items-center gap-1 gap-2 p-3 p-4 min-w-0 shrink-0 truncate");
+@source inline("flex flex-col items-center gap-1 gap-2 p-3 p-4 min-w-0 shrink-0");
+@source inline("line-clamp-2 min-h-8");
 @source inline("font-semibold uppercase tracking-wide tabular-nums break-words italic");
 @source inline("text-base-content/75 text-base-content/40 text-base-content/60 text-info text-success text-warning text-error");
 @source inline("tooltip tooltip-top inline-flex h-4 w-4 items-center justify-center rounded-full border sr-only");

@@ -254,6 +254,22 @@ fn kpi_card_value_size_class(compact: bool) -> &'static str {
     }
 }
 
+/// Label classes: a bounded two-line clamp, never single-line truncation
+/// (ldui-tbaw). `ld-text-small`'s line height is exactly `1rem`
+/// (`--text-small--line-height: calc(16 / 11)` times `--text-small:
+/// 0.6875rem`), so `min-h-8` (32px/2rem, the canonical spacing scale's
+/// `32` step) reserves precisely two line boxes regardless of whether the
+/// label actually needs one line or two. That reservation -- not the
+/// clamp alone -- is what keeps a one-line-label card and a two-line-label
+/// card the same height in the same grid row, and keeps every card's value/
+/// description/help control starting at the identical vertical offset:
+/// clamping alone would still let a short label leave a shorter, unreserved
+/// box than a wrapped one. Same size regardless of `compact`, since the
+/// label's own font size does not change in compact mode.
+fn kpi_card_label_class() -> &'static str {
+    "ld-text-small font-semibold uppercase tracking-wide text-base-content/75 line-clamp-2 break-words min-h-8"
+}
+
 /// Builds the card's accessible name from its label, value (or the
 /// unavailable fallback), and trend, so a screen reader announces one
 /// coherent phrase for the card rather than reading unrelated child text
@@ -302,7 +318,8 @@ fn kpi_card_accessible_name(
 /// @source inline("forced-colors:border-[CanvasText]");
 /// @source inline("h-(--border-width-accent) w-full");
 /// @source inline("bg-info bg-success bg-warning bg-error");
-/// @source inline("flex flex-col items-center gap-1 gap-2 p-3 p-4 min-w-0 shrink-0 truncate");
+/// @source inline("flex flex-col items-center gap-1 gap-2 p-3 p-4 min-w-0 shrink-0");
+/// @source inline("line-clamp-2 min-h-8");
 /// @source inline("font-semibold uppercase tracking-wide tabular-nums break-words italic");
 /// @source inline("text-base-content/75 text-base-content/40 text-base-content/60 text-info text-success text-warning text-error");
 /// @source inline("tooltip tooltip-top inline-flex h-4 w-4 items-center justify-center rounded-full border sr-only");
@@ -452,9 +469,7 @@ pub fn KpiCard(
             {accent}
             <div class=move || kpi_card_body_class(compact.get())>
                 <div class="flex items-center gap-1 min-w-0">
-                    <span class="ld-text-small font-semibold uppercase tracking-wide text-base-content/75 truncate">
-                        {label}
-                    </span>
+                    <span class=kpi_card_label_class()>{label}</span>
                     {help_button}
                 </div>
                 <p class=value_class data-kpi-card-value="true">{value_node}</p>
@@ -656,6 +671,28 @@ mod tests {
         assert_eq!(kpi_card_value_size_class(true), "ld-text-title");
     }
 
+    /// ldui-tbaw: the label must wrap up to two lines rather than ellipsize
+    /// on a single line -- `line-clamp-2`, never `truncate`.
+    #[test]
+    fn kpi_card_label_class_clamps_to_two_lines_instead_of_truncating() {
+        let label_class = kpi_card_label_class();
+        assert!(label_class.contains("line-clamp-2"));
+        assert!(
+            !label_class.contains("truncate"),
+            "single-line truncate must not reappear on the label: {label_class}"
+        );
+    }
+
+    /// ldui-tbaw: the label box always reserves two full `ld-text-small`
+    /// line heights (`min-h-8` = 32px = 2 * 1rem), so a one-line label and a
+    /// two-line label leave identically sized boxes -- the mechanism behind
+    /// equal card height and aligned values/descriptions/help controls
+    /// across a row of cards with differing label lengths.
+    #[test]
+    fn kpi_card_label_class_reserves_a_fixed_two_line_height() {
+        assert!(kpi_card_label_class().contains("min-h-8"));
+    }
+
     #[test]
     fn kpi_card_accessible_name_combines_label_and_value() {
         let texts = KpiStripTexts::default();
@@ -676,6 +713,20 @@ mod tests {
         let trend = KpiTrend::new(4.0, StatDeltaTrend::Positive);
         let name = kpi_card_accessible_name("Open matters", Some("128"), Some(&trend), &texts);
         assert_eq!(name, "Open matters: 128, trending up");
+    }
+
+    /// ldui-tbaw: a label long enough to clamp visually after two lines
+    /// must still reach assistive tech in full -- `kpi_card_accessible_name`
+    /// never truncates or clamps, since visual clamping is a CSS-only
+    /// (`line-clamp-2`) presentation of the label span's own full text, not
+    /// a change to the label string this function receives.
+    #[test]
+    fn kpi_card_accessible_name_preserves_an_over_long_label_in_full() {
+        let texts = KpiStripTexts::default();
+        let long_label =
+            "Average time to first response across every active support queue this quarter";
+        let name = kpi_card_accessible_name(long_label, Some("3h 12m"), None, &texts);
+        assert_eq!(name, format!("{long_label}: 3h 12m"));
     }
 
     #[test]
