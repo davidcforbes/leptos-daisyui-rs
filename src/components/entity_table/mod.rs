@@ -20,14 +20,14 @@ pub use storage::{decode_preferences, encode_preferences};
 pub use types::{
     EntityBadgeCell, EntityBadgePresentation, EntityCellPresentation, EntityCellRenderer,
     EntityColumn, EntityColumnAlignment, EntityColumnChooserTrigger, EntityColumnFilter,
-    EntityColumnFilterOption, EntityColumnFilterRenderer, EntityColumnFilters, EntityColumns,
-    EntityCompactRow, EntityComparator, EntityIconCell, EntityIconColor, EntityIconPresentation,
-    EntityNullOrder, EntityPreparedSortComparator, EntityPrimaryTextCell, EntityRowKey,
-    EntityRowRenderer, EntitySecondaryTextCell, EntitySort, EntitySortColumn, EntitySortDirection,
-    EntitySortKey, EntitySortKeyFactory, EntityTableActionColumnPolicy, EntityTableDisplayColumn,
-    EntityTableDisplayProjection, EntityTableDisplayRow, EntityTablePreferenceOwnership,
-    EntityTablePreferencePersistence, EntityTablePreferences, EntityTableProjectionScope,
-    EntityTableTexts, EntityTableViewportFit, EntityTextOverflow,
+    EntityColumnFilterOption, EntityColumnFilterRenderer, EntityColumnFilters, EntityColumnKind,
+    EntityColumns, EntityCompactRow, EntityComparator, EntityIconCell, EntityIconColor,
+    EntityIconPresentation, EntityNullOrder, EntityPreparedSortComparator, EntityPrimaryTextCell,
+    EntityRowKey, EntityRowRenderer, EntitySecondaryTextCell, EntitySort, EntitySortColumn,
+    EntitySortDirection, EntitySortKey, EntitySortKeyFactory, EntityTableActionColumnPolicy,
+    EntityTableDisplayColumn, EntityTableDisplayProjection, EntityTableDisplayRow,
+    EntityTablePreferenceOwnership, EntityTablePreferencePersistence, EntityTablePreferences,
+    EntityTableProjectionScope, EntityTableTexts, EntityTableViewportFit, EntityTextOverflow,
 };
 
 #[cfg(test)]

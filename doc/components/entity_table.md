@@ -144,6 +144,50 @@ forced-colors mode and still apply as inherited presentation around a
 inside its own markup. The canonical full text remains the accessibility,
 sorting, and export value; these builders never introduce number formatters.
 
+### `.numeric()` and `.identifier()`
+
+`EntityColumn::kind` (`EntityColumnKind`, default `Text`) names two common
+presentations so callers stop hand-writing the same Tailwind utilities at
+every call site -- mirroring `DataTable::Column::numeric`/`identifier`
+(`ldui-lrig`) after the same duplication was measured in `EntityTable`'s own
+`tabular_numbers: bool` plumbing (`ldui-no94`):
+
+- `.numeric()` -- tabular (monospaced) figures plus right alignment. Equivalent
+  to `.tabular_numbers().align_end()`. It does **not** imply a numeric sort
+  key: `EntityColumn` is typed over its row and already has an exact way to
+  say "sort this numerically" -- `.sortable_by_key(...)` -- unlike
+  `DataTable::Column`, which is untyped (`HashMap<String, String>` rows) and
+  has to re-parse the displayed text at sort time via `SortAs::Number`.
+  Re-deriving a numeric comparator from `.numeric()`'s own presentational
+  text would be strictly less correct than a caller's typed extractor, and
+  making it conditional on builder call order would reintroduce the exact
+  kind of silent disagreement this bead removed. Pair `.numeric()` with
+  `.sortable_by_key(...)` explicitly.
+- `.identifier()` -- the theme's declared monospace face (`font-mono`) for
+  ids, codes, hashes, and SKUs. Does not change alignment or sorting.
+- `.tabular_numbers()` -- the lower-level primitive `.numeric()` is built
+  from: tabular figures only, alignment untouched. `EntityColumn` has no raw
+  CSS class escape hatch (see below), so this remains the only way to express
+  a centered or left-aligned column that still wants tabular figures (a
+  centered date column, for example).
+
+As with any builder, later calls win: `.numeric().align_center()` keeps the
+tabular figures but overrides the implied right alignment.
+
+`EntityColumn` never exposes a `with_class`-style raw CSS override -- every
+visual decision here is a narrow, framework-owned enum (alignment, row
+emphasis, and now this kind), by design. So there is no
+`effective_class`/wholesale-replace pairing to document the way
+`DataTable::Column::with_class` documents against `Column::numeric`/
+`identifier`: a kind's contributed class is always an additive token combined
+with the already-independent `alignment` field, and a caller "overrides" it
+the same way any builder call overrides an earlier one -- by calling it later.
+
+An `.identifier()` column's `font-mono` currently trips the style audit's
+typography-family check regardless of who applied it -- `StyleProfile` records
+one dominant family per page (`ldui-kq9w`, a known upstream gap, not a reason
+to avoid `.identifier()`).
+
 ## Semantic badge and icon cells
 
 Use `.badge_with(...)` or `.icon_with(...)` for ordinary status treatment that

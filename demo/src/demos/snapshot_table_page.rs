@@ -828,6 +828,7 @@ fn presentation_columns(localized: bool) -> Vec<EntityColumn<EntityTablePresenta
             "Reference",
             |row: &EntityTablePresentationRow| row.reference.clone(),
         )
+        .identifier()
         .ellipsis()
         .with_min_width(110)
         .with_width(150),
@@ -846,8 +847,7 @@ fn presentation_columns(localized: bool) -> Vec<EntityColumn<EntityTablePresenta
         )
         .line_clamp(2)
         .with_width(180)
-        .align_end()
-        .tabular_numbers()
+        .numeric()
         .render_with(|row: &EntityTablePresentationRow| {
             let text = row.rich.clone();
             view! { <em data-entity-presentation-rich="true">{text}</em> }.into_any()
@@ -858,8 +858,7 @@ fn presentation_columns(localized: bool) -> Vec<EntityColumn<EntityTablePresenta
             |row: &EntityTablePresentationRow| row.number.to_string(),
         )
         .sortable_by_key(|row| row.number)
-        .align_end()
-        .tabular_numbers()
+        .numeric()
         .with_width(130),
         EntityColumn::text("date", "Typed date", |row: &EntityTablePresentationRow| {
             format!(
@@ -880,16 +879,14 @@ fn presentation_columns(localized: bool) -> Vec<EntityColumn<EntityTablePresenta
             },
         )
         .sortable_by_optional_key(EntityNullOrder::Last, |row| row.optional_rank)
-        .align_end()
-        .tabular_numbers()
+        .numeric()
         .with_width(140),
         EntityColumn::text(
             "currency",
             "Currency-like",
             |row: &EntityTablePresentationRow| row.currency.clone(),
         )
-        .align_end()
-        .tabular_numbers()
+        .numeric()
         .ellipsis()
         .with_width(165),
         EntityColumn::text(
@@ -897,8 +894,7 @@ fn presentation_columns(localized: bool) -> Vec<EntityColumn<EntityTablePresenta
             "Percentage-like",
             |row: &EntityTablePresentationRow| row.percentage.clone(),
         )
-        .align_end()
-        .tabular_numbers()
+        .numeric()
         .with_width(145),
         EntityColumn::text(
             "status_badge",
@@ -1325,8 +1321,7 @@ fn emphasis_columns() -> Vec<EntityColumn<EmphasisRow>> {
             row.amount.to_string()
         })
         .sortable_by_key(|row: &EmphasisRow| row.amount)
-        .align_end()
-        .tabular_numbers()
+        .numeric()
         .with_width(140),
     ]
 }

@@ -966,7 +966,7 @@ fn rich_renderer_keeps_visual_precedence_over_text_overflow_metadata() {
 fn entity_column_alignment_and_tabular_number_builders_are_typed() {
     let base = EntityColumn::text("amount", "Amount", |row: &Row| row.rank.to_string());
     assert_eq!(base.alignment, EntityColumnAlignment::Auto);
-    assert!(!base.tabular_numbers);
+    assert_eq!(base.kind, EntityColumnKind::Text);
 
     let centered = base.clone().align_center();
     assert_eq!(centered.alignment, EntityColumnAlignment::Center);
@@ -974,7 +974,7 @@ fn entity_column_alignment_and_tabular_number_builders_are_typed() {
     assert_eq!(started.alignment, EntityColumnAlignment::Start);
     let numeric = base.align_end().tabular_numbers();
     assert_eq!(numeric.alignment, EntityColumnAlignment::End);
-    assert!(numeric.tabular_numbers);
+    assert_eq!(numeric.kind, EntityColumnKind::Numeric);
     assert_eq!(
         entity_alignment_class(EntityColumnAlignment::Start),
         "text-left"
@@ -1001,8 +1001,86 @@ fn rich_renderer_retains_wrapper_level_numeric_presentation() {
         .render_with(|_| ().into_any());
 
     assert_eq!(column.alignment, EntityColumnAlignment::End);
-    assert!(column.tabular_numbers);
+    assert_eq!(column.kind, EntityColumnKind::Numeric);
     assert!(column.renderer.is_some());
+}
+
+// ── EntityColumnKind / numeric / identifier (ldui-no94) ──
+
+#[test]
+fn numeric_sets_kind_and_right_alignment() {
+    let col = EntityColumn::text("balance", "Balance", |row: &Row| row.rank.to_string()).numeric();
+    assert_eq!(col.kind, EntityColumnKind::Numeric);
+    assert_eq!(col.alignment, EntityColumnAlignment::End);
+}
+
+#[test]
+fn numeric_does_not_change_sort_key_or_comparator() {
+    // EntityColumn's sort model is typed, not a `SortAs` enum: `.numeric()`
+    // must never silently replace a caller's exact typed comparator with a
+    // re-parsed-text fallback, regardless of call order.
+    let with_typed_key = EntityColumn::new("balance", "Balance", |row: &Row| row.rank.to_string())
+        .sortable_by_key(|row: &Row| row.rank)
+        .numeric();
+    assert!(with_typed_key.sort_key.is_some());
+    assert!(with_typed_key.comparator.is_none());
+
+    let numeric_first = EntityColumn::new("balance", "Balance", |row: &Row| row.rank.to_string())
+        .numeric()
+        .sortable_by_key(|row: &Row| row.rank);
+    assert!(numeric_first.sort_key.is_some());
+}
+
+#[test]
+fn align_after_numeric_overrides_the_implied_alignment() {
+    // Builder calls apply in order: a caller reaching for centered or
+    // left-aligned numeric presentation can still say so.
+    let col = EntityColumn::text("balance", "Balance", |row: &Row| row.rank.to_string())
+        .numeric()
+        .align_center();
+    assert_eq!(col.alignment, EntityColumnAlignment::Center);
+    assert_eq!(col.kind, EntityColumnKind::Numeric);
+}
+
+#[test]
+fn identifier_sets_kind_without_touching_alignment_or_sort() {
+    let col = EntityColumn::text("job", "Job", |row: &Row| row.name.to_owned()).identifier();
+    assert_eq!(col.kind, EntityColumnKind::Identifier);
+    assert_eq!(col.alignment, EntityColumnAlignment::Auto);
+    assert!(col.comparator.is_none());
+    assert!(col.sort_key.is_some());
+}
+
+#[test]
+fn tabular_numbers_sets_kind_without_touching_alignment() {
+    // The lower-level primitive `.numeric()` is built from: kind only,
+    // alignment untouched -- e.g. a centered date column with tabular
+    // figures but not right-aligned.
+    let col = EntityColumn::text("opened", "Opened", |row: &Row| row.name.to_owned())
+        .align_center()
+        .tabular_numbers();
+    assert_eq!(col.kind, EntityColumnKind::Numeric);
+    assert_eq!(col.alignment, EntityColumnAlignment::Center);
+}
+
+#[test]
+fn entity_column_kind_default_class_matches_data_table_tokens() {
+    assert_eq!(EntityColumnKind::Text.default_class(), None);
+    assert_eq!(
+        EntityColumnKind::Numeric.default_class(),
+        Some("tabular-nums")
+    );
+    assert_eq!(
+        EntityColumnKind::Identifier.default_class(),
+        Some("font-mono")
+    );
+}
+
+#[test]
+fn entity_column_kind_as_str_is_stable() {
+    assert_eq!(EntityColumnKind::Text.as_str(), "text");
+    assert_eq!(EntityColumnKind::Numeric.as_str(), "numeric");
+    assert_eq!(EntityColumnKind::Identifier.as_str(), "identifier");
 }
 
 #[test]

@@ -19,11 +19,11 @@ use super::selection::{
 use super::storage::{load_preferences, save_preferences};
 use super::types::{
     EntityCellPresentation, EntityColumn, EntityColumnAlignment, EntityColumnChooserTrigger,
-    EntityColumnFilter, EntityColumnFilterPlacement, EntityColumnFilters, EntityColumns,
-    EntityCompactRow, EntityRowKey, EntityRowRenderer, EntitySort, EntitySortDirection,
-    EntityTableActionColumnPolicy, EntityTableDisplayProjection, EntityTablePreferenceOwnership,
-    EntityTablePreferencePersistence, EntityTablePreferences, EntityTableTexts,
-    EntityTableViewportFit, EntityTextOverflow, entity_alignment_class,
+    EntityColumnFilter, EntityColumnFilterPlacement, EntityColumnFilters, EntityColumnKind,
+    EntityColumns, EntityCompactRow, EntityRowKey, EntityRowRenderer, EntitySort,
+    EntitySortDirection, EntityTableActionColumnPolicy, EntityTableDisplayProjection,
+    EntityTablePreferenceOwnership, EntityTablePreferencePersistence, EntityTablePreferences,
+    EntityTableTexts, EntityTableViewportFit, EntityTextOverflow, entity_alignment_class,
     entity_compact_alignment_class, entity_header_justify_class, entity_text_overflow_style,
     normalize_entity_secondary_text,
 };
@@ -122,7 +122,7 @@ struct EntityHeaderDescriptor {
     min_width: Option<u32>,
     initial_width: Option<u32>,
     alignment: EntityColumnAlignment,
-    tabular_numbers: bool,
+    kind: EntityColumnKind,
 }
 
 #[derive(Clone, Copy)]
@@ -1460,7 +1460,7 @@ where
                                     column.min_width,
                                     column.initial_width,
                                     column.alignment,
-                                    column.tabular_numbers,
+                                    column.kind,
                                 )
                                 children=move |column| {
                                 let column_id = column.id;
@@ -1468,7 +1468,7 @@ where
                                 let resizable = column.resizable;
                                 let minimum_width = column.min_width;
                                 let alignment = column.alignment;
-                                let tabular_numbers = column.tabular_numbers;
+                                let kind = column.kind;
                                 let minimum_value = effective_min_width(minimum_width);
                                 let width_style = move || {
                                     if flexible_column_id.get() == Some(column_id) {
@@ -1500,12 +1500,13 @@ where
                                         class=move || merge_classes!(
                                             "relative border border-table-grid bg-table-header text-table-header-content forced-colors:border-[CanvasText] forced-colors:bg-[Canvas] forced-colors:text-[CanvasText]",
                                             entity_alignment_class(alignment),
-                                            if tabular_numbers { "tabular-nums" } else { "" }
+                                            kind.default_class().unwrap_or("")
                                         )
                                         scope="col"
                                         data-entity-column=column_id
                                         data-entity-alignment=alignment.as_str()
-                                        data-entity-tabular-numbers=tabular_numbers.then_some("true")
+                                        data-entity-column-kind=kind.as_str()
+                                        data-entity-tabular-numbers=(kind == EntityColumnKind::Numeric).then_some("true")
                                         aria-sort=move || preferences.with(|preferences| {
                                             preferences.sort.aria_value_for(column_id)
                                         })
@@ -2130,19 +2131,20 @@ fn render_row_cells<T: Clone + 'static>(
         .map(|column| {
             let cell = render_cell(&row, &column);
             let alignment = column.alignment;
-            let tabular_numbers = column.tabular_numbers;
+            let kind = column.kind;
             view! {
                 <td
                     class=move || merge_classes!(
                         "hidden border border-table-grid forced-colors:border-[CanvasText] lg:table-cell",
                         entity_alignment_class(alignment),
-                        if tabular_numbers { "tabular-nums" } else { "" },
+                        kind.default_class().unwrap_or(""),
                         emphasis_cell_class
                     )
                     data-entity-column=column.id
                     data-entity-action=column.is_action.then_some("true")
                     data-entity-alignment=alignment.as_str()
-                    data-entity-tabular-numbers=tabular_numbers.then_some("true")
+                    data-entity-column-kind=kind.as_str()
+                    data-entity-tabular-numbers=(kind == EntityColumnKind::Numeric).then_some("true")
                     on:click=move |event| {
                         if column.is_action {
                             event.stop_propagation();
@@ -2396,7 +2398,7 @@ fn entity_header_descriptors<T>(
             min_width: column.min_width,
             initial_width: column.initial_width,
             alignment: column.alignment,
-            tabular_numbers: column.tabular_numbers,
+            kind: column.kind,
         })
         .collect()
 }
@@ -2429,14 +2431,15 @@ fn render_default_compact_row<T: 'static>(row: &T, columns: &[EntityColumn<T>]) 
         .map(|column| {
             let cell = render_cell(row, &column);
             let alignment = column.alignment;
-            let tabular_numbers = column.tabular_numbers;
+            let kind = column.kind;
             view! {
                 <div
                     class="flex items-start justify-between gap-3 py-1"
                     data-entity-column=column.id
                     data-entity-action=column.is_action.then_some("true")
                     data-entity-alignment=alignment.as_str()
-                    data-entity-tabular-numbers=tabular_numbers.then_some("true")
+                    data-entity-column-kind=kind.as_str()
+                    data-entity-tabular-numbers=(kind == EntityColumnKind::Numeric).then_some("true")
                 >
                     <span class="text-xs font-medium uppercase tracking-wide text-base-content/60">
                         {column.header}
@@ -2444,7 +2447,7 @@ fn render_default_compact_row<T: 'static>(row: &T, columns: &[EntityColumn<T>]) 
                     <span class=move || merge_classes!(
                         "min-w-0",
                         entity_compact_alignment_class(alignment),
-                        if tabular_numbers { "tabular-nums" } else { "" }
+                        kind.default_class().unwrap_or("")
                     )>{cell}</span>
                 </div>
             }

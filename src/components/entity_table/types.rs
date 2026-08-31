@@ -1153,6 +1153,72 @@ pub(crate) const fn entity_header_justify_class(alignment: EntityColumnAlignment
     }
 }
 
+/// Semantic presentation kind for an [`EntityColumn`]'s cells.
+///
+/// [`EntityColumn::new`]/[`EntityColumn::text`] default every column to
+/// [`EntityColumnKind::Text`], the plain rendering the component has always
+/// had. [`EntityColumn::numeric`] and [`EntityColumn::identifier`] opt a
+/// column into a presentation the component owns, instead of hand-writing
+/// the same Tailwind utilities at every call site -- `DataTable`'s sibling
+/// `ColumnKind` (`ldui-lrig`) measured one consumer at 43 `with_class` calls
+/// carrying `tabular-nums` and 20 carrying `font-mono`; `EntityTable` had
+/// the same fact traveling as an ad-hoc `tabular_numbers: bool` (`ldui-no94`).
+///
+/// Unlike `DataTable::Column`, `EntityColumn` never exposes a raw CSS class
+/// escape hatch -- every visual decision (alignment, emphasis, this kind) is
+/// a narrow framework-owned enum, by design (see `emphasis.rs`). So there is
+/// no `with_class`/`effective_class` override pair to mirror here: a kind's
+/// contributed token composes with the already-independent
+/// [`EntityColumn::alignment`] field exactly as it always has, and a caller
+/// overrides a kind's effect on alignment the same way any builder call
+/// overrides an earlier one -- by calling `.align_start()`/`.align_center()`/
+/// `.align_end()` *after* `.numeric()`. See [`EntityColumn::numeric`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum EntityColumnKind {
+    /// Plain text rendering; contributes no default class. The default.
+    #[default]
+    Text,
+    /// A number: tabular (monospaced) figures so digits line up
+    /// column-to-column -- money, counts, percentages, durations. Set via
+    /// [`EntityColumn::numeric`] (which also right-aligns) or the lower-level
+    /// [`EntityColumn::tabular_numbers`] (figures only, alignment untouched).
+    Numeric,
+    /// An identifier: the theme's declared monospace face, so every
+    /// character occupies equal width and visually similar glyphs (`0`/`O`,
+    /// `1`/`l`) stay distinguishable -- ids, codes, hashes, SKUs. Set via
+    /// [`EntityColumn::identifier`].
+    Identifier,
+}
+
+impl EntityColumnKind {
+    /// Stable marker emitted as `data-entity-column-kind` for browser audits.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            EntityColumnKind::Text => "text",
+            EntityColumnKind::Numeric => "numeric",
+            EntityColumnKind::Identifier => "identifier",
+        }
+    }
+
+    /// The Tailwind utility class this kind contributes by default. `None`
+    /// for [`EntityColumnKind::Text`] -- it changes nothing. This is an
+    /// additive token composed with [`entity_alignment_class`] at render
+    /// time, not a whole-class override -- see the type's doc comment for
+    /// why `EntityColumn` has no override slot to mirror `DataTable::Column`'s
+    /// `effective_class`.
+    pub(crate) const fn default_class(self) -> Option<&'static str> {
+        match self {
+            EntityColumnKind::Text => None,
+            EntityColumnKind::Numeric => Some("tabular-nums"),
+            // Resolves against the theme's `--font-mono` variable
+            // (`ThemeConfig::font_family.monospace` in `src/theme`), so this
+            // tracks a themed consumer's declared mono face rather than
+            // hardcoding one.
+            EntityColumnKind::Identifier => Some("font-mono"),
+        }
+    }
+}
+
 /// Column behavior and borrowed-row callbacks for [`EntityTable`](super::EntityTable).
 pub struct EntityColumn<T> {
     /// Stable identifier used by sort and persisted preferences.
@@ -1175,8 +1241,11 @@ pub struct EntityColumn<T> {
     pub text_overflow: EntityTextOverflow,
     /// Framework-owned horizontal alignment.
     pub alignment: EntityColumnAlignment,
-    /// Whether values inherit tabular numeral glyph widths.
-    pub tabular_numbers: bool,
+    /// Semantic presentation kind (default [`EntityColumnKind::Text`]). Set
+    /// via [`EntityColumn::numeric`], [`EntityColumn::identifier`], or the
+    /// lower-level [`EntityColumn::tabular_numbers`]; contributes an
+    /// additive class resolved by [`EntityColumnKind::default_class`].
+    pub kind: EntityColumnKind,
     /// Plain text used for default rendering and accessible/exported content.
     pub text: Rc<dyn Fn(&T) -> String>,
     /// Optional rich renderer invoked with a borrowed typed row.
@@ -1202,7 +1271,7 @@ impl<T> Clone for EntityColumn<T> {
             initial_width: self.initial_width,
             text_overflow: self.text_overflow,
             alignment: self.alignment,
-            tabular_numbers: self.tabular_numbers,
+            kind: self.kind,
             text: Rc::clone(&self.text),
             renderer: self.renderer.as_ref().map(Rc::clone),
             presentation: self.presentation.clone(),
@@ -1226,7 +1295,7 @@ impl<T> fmt::Debug for EntityColumn<T> {
             .field("initial_width", &self.initial_width)
             .field("text_overflow", &self.text_overflow)
             .field("alignment", &self.alignment)
-            .field("tabular_numbers", &self.tabular_numbers)
+            .field("kind", &self.kind)
             .field("presentation", &self.presentation)
             .finish_non_exhaustive()
     }
@@ -1252,7 +1321,7 @@ impl<T: 'static> EntityColumn<T> {
             initial_width: None,
             text_overflow: EntityTextOverflow::Wrap,
             alignment: EntityColumnAlignment::Auto,
-            tabular_numbers: false,
+            kind: EntityColumnKind::Text,
             text,
             renderer: None,
             presentation: None,
@@ -1420,9 +1489,88 @@ impl<T: 'static> EntityColumn<T> {
         self
     }
 
-    /// Uses tabular-width numeral glyphs without formatting the canonical text.
+    /// Uses tabular-width numeral glyphs without formatting the canonical
+    /// text, and without changing [`alignment`](EntityColumn::alignment).
+    ///
+    /// This is the lower-level primitive [`EntityColumn::numeric`] is built
+    /// from (`kind` only); it remains a distinct method because `EntityColumn`
+    /// has no raw class escape hatch, so a column that wants tabular figures
+    /// under a non-right alignment (e.g. a centered date column) has no other
+    /// way to say so. Prefer [`EntityColumn::numeric`] for the common
+    /// right-aligned numeric case.
     pub fn tabular_numbers(mut self) -> Self {
-        self.tabular_numbers = true;
+        self.kind = EntityColumnKind::Numeric;
+        self
+    }
+
+    /// Marks this column as numeric: tabular (monospaced) figures plus
+    /// right alignment, so digits line up column-to-column -- money, counts,
+    /// percentages, durations. Equivalent to
+    /// `.tabular_numbers().align_end()`.
+    ///
+    /// Unlike `DataTable::Column::numeric`, this does **not** imply a
+    /// numeric sort key. `DataTable`'s rows are untyped
+    /// (`HashMap<String, String>`), so its `SortAs::Number` re-parses the
+    /// displayed text at sort time -- the only numeric comparison it has
+    /// available. `EntityColumn` is typed over `T` and already has an exact,
+    /// zero-parsing way to say "sort this numerically":
+    /// [`EntityColumn::sortable_by_key`]. Deriving a sort key from this
+    /// method by re-parsing the same formatted display text `.numeric()`
+    /// styles would be strictly less correct than a caller's own typed
+    /// extractor, and doing so only when no other sort key had been set yet
+    /// would make the result depend on builder call order -- exactly the
+    /// kind of silent disagreement `ldui-lrig` measured and this bead exists
+    /// to remove. Presentation and sorting stay two independent, explicit
+    /// choices: reach for [`EntityColumn::sortable_by_key`] alongside this.
+    ///
+    /// Calling `.align_start()`/`.align_center()`/`.align_end()` *after*
+    /// `.numeric()` overrides the alignment it sets, the same as any other
+    /// builder call order.
+    ///
+    /// ```
+    /// use leptos_daisyui_rs::components::{EntityColumn, EntityColumnAlignment, EntityColumnKind};
+    ///
+    /// struct Row { balance: i64 }
+    ///
+    /// let balance = EntityColumn::new("balance", "Balance", |row: &Row| row.balance.to_string())
+    ///     .sortable_by_key(|row: &Row| row.balance)
+    ///     .numeric();
+    /// assert_eq!(balance.kind, EntityColumnKind::Numeric);
+    /// assert_eq!(balance.alignment, EntityColumnAlignment::End);
+    /// ```
+    pub fn numeric(mut self) -> Self {
+        self.kind = EntityColumnKind::Numeric;
+        self.alignment = EntityColumnAlignment::End;
+        self
+    }
+
+    /// Marks this column as an identifier (id, code, hash, SKU): the
+    /// theme's declared monospace face (`font-mono`, themed via the
+    /// `--font-mono` CSS variable) so characters line up and visually
+    /// similar glyphs (`0`/`O`, `1`/`l`) stay distinguishable.
+    ///
+    /// Does not change [`alignment`](EntityColumn::alignment) or sorting --
+    /// identifiers still align and compare correctly as plain text (the
+    /// defaults).
+    ///
+    /// Note: `font-mono` currently trips the style audit's typography-family
+    /// check regardless of whether the component or the caller applied it --
+    /// `StyleProfile` records one dominant family per page and flags every
+    /// deviation, with no way yet to mark a mono face as intentional (tracked
+    /// separately as `ldui-kq9w`, the same gap `DataTable::Column::identifier`
+    /// documents). That is a known gap in the audit, not a reason to avoid
+    /// `.identifier()`.
+    ///
+    /// ```
+    /// use leptos_daisyui_rs::components::{EntityColumn, EntityColumnKind};
+    ///
+    /// struct Row { job_id: String }
+    ///
+    /// let job = EntityColumn::new("job", "Job", |row: &Row| row.job_id.clone()).identifier();
+    /// assert_eq!(job.kind, EntityColumnKind::Identifier);
+    /// ```
+    pub fn identifier(mut self) -> Self {
+        self.kind = EntityColumnKind::Identifier;
         self
     }
 
