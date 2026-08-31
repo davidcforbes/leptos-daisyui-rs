@@ -452,6 +452,8 @@ contract as `data-table-data-mode="server-query"` for runtime audits.
 | `on_row_activate_keyed` | `Option<Callback<ServerTableRowAction>>` | Plain click or keyboard activation with a stable key, page-local index, and displayed row snapshot; requires `row_key` |
 | `on_row_inspect` | `Option<Callback<usize>>` | Double-click or Shift+Enter inspection with the current-page row index |
 | `on_row_inspect_keyed` | `Option<Callback<ServerTableRowAction>>` | Double-click or Shift+Enter inspection with the same keyed snapshot; requires `row_key` |
+| `column_tools` | `Option<ServerTableColumnTools>` | Opt-in compact gear chooser, column visibility/order preferences, and a toolbar-actions slot beside it; see [Column tools](#column-tools-chooser-toolbar-actions-displayed-slice-projection) below |
+| `on_displayed_slice` | `Option<Callback<ServerTableDisplayedSlice>>` | Atomic snapshot of exactly the currently displayed columns/rows -- the accepted current server slice only, never a complete-result-set projection |
 | `loading`, `classes`, `texts`, `sort_texts`, `class`, `table_size`, `zebra`, `pin_rows`, `pin_cols`, `max_height`, `cell_renderers`, `typed_cells`, `detail_renderer`, `row_class_fn`, `node_ref` | | As `DataTable` |
 
 **Not available**: `selected_rows` / `selection_anchor` (the server variant
@@ -692,6 +694,61 @@ selection and activation callbacks are both supplied, the selection proposal
 is emitted first and the explicit activation callback then fires from the same
 plain gesture. Double-click keeps the existing contract: its first click takes
 the plain path once, its repeat click is swallowed, and inspection fires once.
+
+### Column tools (chooser, toolbar actions, displayed-slice projection)
+
+`ServerDataTable` can opt into `EntityTable`-style presentation without
+becoming a client-snapshot table: a compact gear column chooser, stable
+column visibility/order preferences under a caller-owned namespace, and a
+toolbar-actions slot beside the chooser (the natural home for an Export
+button). It is entirely optional and source-compatible: omit `column_tools`
+and rendering is exactly as before.
+
+```rust,no_run
+view! {
+    <ServerDataTable
+        rows=rows
+        columns=columns
+        pagination=pagination
+        column_tools=ServerTableColumnTools::new(
+            EntityTablePreferenceOwnership::uncontrolled(
+                EntityTablePreferencePersistence::LegacyLocalStorage {
+                    storage_key: "matters-table",
+                },
+            ),
+            1, // schema_version
+        )
+            .with_chooser_trigger(EntityColumnChooserTrigger::Icon)
+            .with_toolbar_actions(move || view! {
+                <Button on_click=export_current_slice>"Export this page"</Button>
+            }.into_any())
+        on_displayed_slice=Callback::new(move |slice: ServerTableDisplayedSlice| {
+            displayed_slice.set(slice);
+        })
+    />
+}
+```
+
+Mark a column `Column::new(id, header).required()` to forbid the chooser from
+ever hiding it; a required column is not even offered as a toggle. Reordering
+and hide/show both reach `effective_columns` immediately, so the rendered
+header, body, and stable column tracks always agree with what the chooser
+shows checked. `EntityColumnChooserTrigger`, `EntityTablePreferenceOwnership`,
+`EntityTablePreferencePersistence`, and the pure column-order/visibility
+functions behind the chooser are all reused directly from `EntityTable` —
+this is the same accessible, viewport-safe dropdown (`Escape` closes and
+returns focus to the trigger; the menu never spills outside the viewport),
+not a reimplementation.
+
+**`ServerTableDisplayedSlice` is not `EntityTableDisplayProjection`.** It has
+no `AllFiltered` scope and never will: a server-paginated table holds only
+the page or cursor slice its caller fetched into `rows`, and `on_displayed_slice`
+fires exactly that — the columns and rows currently rendered, nothing more.
+Building an "export all" or "export filtered" feature from this value is a
+type error waiting to happen turned into a naming impossibility instead: read
+the type's own doc comment before wiring an export action, and label any UI
+built from it against the visible page/slice ("Export this page"), never
+"all" or "filtered".
 
 ## Helper functions
 

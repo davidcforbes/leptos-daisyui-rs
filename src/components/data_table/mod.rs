@@ -64,6 +64,7 @@ mod header;
 mod pagination;
 mod resize;
 mod selection;
+mod server_column_tools;
 mod server_component;
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -115,6 +116,10 @@ pub(crate) use resize::{
 pub use selection::{
     RowClickKind, click_swallowed_by_inspect, handle_row_click, key_inspects, row_click_kind,
     row_is_interactive,
+};
+pub use server_column_tools::{
+    ServerTableColumnTools, ServerTableColumnToolsTexts, ServerTableDisplayColumn,
+    ServerTableDisplayRow, ServerTableDisplayedSlice,
 };
 pub use server_component::*;
 pub use sort::{SortAs, column_sort_as, compare_cells, parse_date, parse_number};

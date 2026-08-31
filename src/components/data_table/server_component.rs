@@ -1,3 +1,4 @@
+use crate::components::button::Button;
 use crate::components::data_table::auto_page::{
     DEFAULT_AUTO_MIN_ROWS, FALLBACK_HEADER_HEIGHT, FALLBACK_ROW_HEIGHT, RowHeightEra,
     auto_page_size_for_height, max_row_height,
@@ -13,11 +14,18 @@ use crate::components::data_table::geometry::{
 };
 use crate::components::data_table::header::DataTableHeader;
 use crate::components::data_table::selection::row_is_interactive;
+use crate::components::data_table::server_column_tools::{
+    ServerColumnToolsSource, ServerColumnToolsState, ServerRowKeyFn, ServerTableColumnTools,
+    ServerTableColumnToolsTexts, ServerTableDisplayedSlice, apply_column_tools_presentation,
+    format_server_move_label, save_column_tools_preferences, server_table_displayed_slice,
+};
 use crate::components::data_table::types::{
     CellRenderer, Column, ColumnFilterKind, DataTableClasses, DataTableSortTexts, DataTableTexts,
     RowDetailRenderer, SortOrder, TableRow, TypedCellFn,
 };
 use crate::components::data_table::{TABLE_SCROLL_WRAPPER_CLASS, next_data_table_search_id};
+use crate::components::entity_table::{EntityColumnChooserTrigger, EntityColumnMove};
+use crate::components::menu::{Menu, MenuCheckItem};
 use crate::components::table::{Table, TableSize};
 use crate::merge_classes;
 use leptos::{html::Div, prelude::*};
@@ -1440,11 +1448,76 @@ pub fn ServerDataTable(
     /// `row_key`; can be used alongside the compatibility index callback.
     #[prop(optional, into)]
     on_row_inspect_keyed: Option<Callback<ServerTableRowAction>>,
+
+    /// Opt-in presentation tools (ldui-9j16): a compact gear column chooser,
+    /// stable column visibility/order preferences, and a toolbar-actions
+    /// slot rendered beside the chooser (the natural home for a caller's
+    /// Export action). Reuses `EntityTable`'s preference model and pure
+    /// ordering/visibility functions. Omit to keep the historical rendering
+    /// exactly -- no chooser, no toolbar row, no `on_displayed_slice`
+    /// column/row filtering beyond what `columns`/`rows` already supply.
+    /// Query ownership (paging, search, sort, filters, cursor tokens) is
+    /// entirely unaffected either way; this option never touches it.
+    #[prop(optional)]
+    column_tools: Option<ServerTableColumnTools>,
+
+    /// Emits an atomic [`ServerTableDisplayedSlice`] whenever the displayed
+    /// columns or rows change. This is the CURRENT ACCEPTED SERVER SLICE
+    /// ONLY -- see that type's documentation for why it can never become a
+    /// complete-result-set projection. Callers own storage, export encoding,
+    /// authorization, and download behavior; label any resulting UI or file
+    /// against the visible page/slice, never as "all" or "filtered".
+    #[prop(optional, into)]
+    on_displayed_slice: Option<Callback<ServerTableDisplayedSlice>>,
 ) -> impl IntoView {
     // Column-width overrides from dragging a header divider, keyed by
     // column id. Shared between the header (writer) and body (reader) so
     // resized columns stay aligned.
     let column_widths = RwSignal::new(HashMap::<&'static str, f64>::new());
+
+    // ── Optional presentation tools (ldui-9j16) ──
+    //
+    // `column_tools` is consumed once here into its constituent pieces so
+    // the rest of the component can use each independently. `state` is
+    // `None` when the caller omitted `column_tools`, which keeps every
+    // downstream site (`effective_columns`, the chooser markup below) a
+    // plain no-op -- historical rendering is unchanged.
+    let (column_tools_state, column_tools_trigger, column_tools_texts, column_tools_actions) =
+        match column_tools {
+            Some(tools) => (
+                Some(ServerColumnToolsState::new(
+                    tools.preference_ownership,
+                    tools.schema_version,
+                    columns,
+                )),
+                tools.chooser_trigger,
+                tools.texts,
+                tools.toolbar_actions,
+            ),
+            None => (
+                None,
+                Signal::stored(EntityColumnChooserTrigger::default()),
+                Signal::stored(ServerTableColumnToolsTexts::default()),
+                None,
+            ),
+        };
+    // Autosave mirrors `EntityTable`'s own uncontrolled persistence Effect
+    // (`PreferenceState`'s save-on-change): only an uncontrolled table with
+    // `LegacyLocalStorage` persistence writes anything.
+    if let Some(state) = column_tools_state
+        && let ServerColumnToolsSource::Uncontrolled {
+            current,
+            persistence,
+        } = state.source
+    {
+        Effect::new(move |_| {
+            current.with(|preferences| save_column_tools_preferences(persistence, preferences));
+        });
+    }
+    let column_tools_open = RwSignal::new(false);
+    let column_tools_trigger_ref = NodeRef::<leptos::html::Button>::new();
+    let column_tools_menu_id = format!("{}-column-tools", next_data_table_search_id());
+    let column_tools_controls_id = column_tools_menu_id.clone();
 
     // Row activation, forwarded to the shared body exactly like the
     // client-paged DataTable (ldui-1gp): a plain click/Enter/Space activates;
@@ -1671,6 +1744,9 @@ pub fn ServerDataTable(
             for column in &mut effective {
                 column.filterable = false;
             }
+        }
+        if let Some(state) = column_tools_state {
+            effective = apply_column_tools_presentation(effective, &state.get());
         }
         effective
     });
@@ -2156,6 +2232,27 @@ pub fn ServerDataTable(
         };
         loading.get() && !retain_rows
     });
+    // Atomic displayed-slice projection (ldui-9j16): fires whenever the
+    // currently *rendered* columns or rows change. `rows` is entirely
+    // caller-owned -- during a retained-while-loading/failed slice the
+    // caller kept the old rows in place, so this naturally re-emits the
+    // same retained snapshot rather than needing separate retained-state
+    // handling.
+    if let Some(on_displayed_slice) = on_displayed_slice {
+        Effect::new(move |_| {
+            let columns = effective_columns.get();
+            let rows = rows.get();
+            let key_of: Option<ServerRowKeyFn> = row_key.map(|callback| {
+                Box::new(move |row: &TableRow| callback.run(row.clone())) as ServerRowKeyFn
+            });
+            on_displayed_slice.run(server_table_displayed_slice(
+                &columns,
+                &rows,
+                key_of.as_deref(),
+            ));
+        });
+    }
+
     let search_input_id = next_data_table_search_id();
     let page_size_input_id = format!("{search_input_id}-page-size");
     let query_ownership_marker = if cursor_pagination || controlled_offset_query {
@@ -2292,6 +2389,210 @@ pub fn ServerDataTable(
                     None
                 }
             }}
+
+            {column_tools_state.map(|state| view! {
+                <div class="mb-3 flex flex-wrap items-center justify-end gap-2" data-server-column-tools="true">
+                    {column_tools_actions.map(|render_actions| view! {
+                        <div class="contents" data-server-toolbar-actions="true">
+                            {render_actions()}
+                        </div>
+                    })}
+                    <div
+                        class="dropdown dropdown-end dropdown-bottom"
+                        class:dropdown-open=move || column_tools_open.get()
+                        // See EntityTable's own chooser for the rationale
+                        // (ldui-vn81): daisyUI also shows `.dropdown-content`
+                        // on `:focus-within`, so `.dropdown-close` must
+                        // unconditionally override it once the menu closes.
+                        class:dropdown-close=move || !column_tools_open.get()
+                        data-server-column-chooser-open=move || column_tools_open.get().then_some("true")
+                        on:focusout=move |event: web_sys::FocusEvent| {
+                            let remains_inside = event
+                                .current_target()
+                                .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
+                                .zip(
+                                    event
+                                        .related_target()
+                                        .and_then(|target| target.dyn_into::<web_sys::Node>().ok()),
+                                )
+                                .is_some_and(|(root, next)| root.contains(Some(&next)));
+                            if !remains_inside {
+                                column_tools_open.set(false);
+                            }
+                        }
+                        on:keydown=move |event: web_sys::KeyboardEvent| {
+                            if event.key() == "Escape" && column_tools_open.get_untracked() {
+                                event.prevent_default();
+                                event.stop_propagation();
+                                column_tools_open.set(false);
+                                if let Some(trigger) = column_tools_trigger_ref.get() {
+                                    let _ = trigger.focus();
+                                }
+                            }
+                        }
+                    >
+                        <button
+                            node_ref=column_tools_trigger_ref
+                            type="button"
+                            data-server-column-chooser="true"
+                            data-server-column-chooser-presentation=move || match column_tools_trigger.get() {
+                                EntityColumnChooserTrigger::Text => "text",
+                                EntityColumnChooserTrigger::Icon => "icon",
+                            }
+                            aria-label=move || column_tools_texts.with(|texts| texts.choose_columns.clone())
+                            aria-haspopup="menu"
+                            aria-expanded=move || column_tools_open.get().to_string()
+                            aria-controls=column_tools_controls_id
+                            class=move || match column_tools_trigger.get() {
+                                EntityColumnChooserTrigger::Text => "btn btn-ghost btn-sm gap-0",
+                                EntityColumnChooserTrigger::Icon => "btn btn-ghost btn-sm btn-square gap-0 forced-colors:border forced-colors:border-[ButtonText] forced-colors:text-[ButtonText]",
+                            }
+                            on:click=move |_| column_tools_open.update(|open| *open = !*open)
+                        >
+                            {move || match column_tools_trigger.get() {
+                                EntityColumnChooserTrigger::Text => view! {
+                                    <span>{move || column_tools_texts.with(|texts| texts.choose_columns.clone())}</span>
+                                }.into_any(),
+                                EntityColumnChooserTrigger::Icon => view! {
+                                    <span aria-hidden="true" class="text-base leading-none">"⚙"</span>
+                                }.into_any(),
+                            }}
+                        </button>
+                        <div class="dropdown-content bg-base-100 rounded-box z-[2] w-72 p-0 shadow-lg border border-base-300">
+                            <Menu class="w-full" attr:id=column_tools_menu_id>
+                                {move || columns.get()
+                                    .into_iter()
+                                    .filter(|column| !column.required)
+                                    .map(|column| {
+                                        let column_id = column.id;
+                                        let checked = Signal::derive(move || {
+                                            !state.get().hidden_columns.contains(column_id)
+                                        });
+                                        let on_toggle = Callback::new(move |_| {
+                                            state.toggle_column(column_id);
+                                        });
+                                        view! {
+                                            <MenuCheckItem
+                                                checked=checked
+                                                on_toggle=on_toggle
+                                                attr:data-server-column=column_id
+                                            >
+                                                <span class="min-w-0 truncate">{column.header}</span>
+                                            </MenuCheckItem>
+                                        }
+                                    })
+                                    .collect_view()}
+                            </Menu>
+                            <div class="border-t border-base-300 p-2">
+                                <p class="px-2 pb-1 text-xs font-semibold text-base-content/65">
+                                    {move || column_tools_texts.with(|texts| texts.column_order.clone())}
+                                </p>
+                                <ol
+                                    class="space-y-1"
+                                    aria-label=move || column_tools_texts.with(|texts| texts.column_order.clone())
+                                >
+                                    <For
+                                        each=move || state.ordered_column_ids()
+                                        key=|column_id| column_id.clone()
+                                        children=move |column_id| {
+                                            let earlier_id = column_id.clone();
+                                            let later_id = column_id.clone();
+                                            let earlier_disabled_id = column_id.clone();
+                                            let later_disabled_id = column_id.clone();
+                                            let earlier_click_id = column_id.clone();
+                                            let later_click_id = column_id.clone();
+                                            let label_id = column_id.clone();
+                                            view! {
+                                                <li
+                                                    class="flex items-center gap-1 rounded-field px-2 py-1"
+                                                    data-server-column-order=column_id.clone()
+                                                >
+                                                    <span class="min-w-0 flex-1 truncate text-sm">
+                                                        {move || state.header_for(&label_id)}
+                                                    </span>
+                                                    <Button
+                                                        class="btn-ghost btn-xs btn-square"
+                                                        attr:data-server-column-order=column_id.clone()
+                                                        attr:data-server-column-move="earlier"
+                                                        attr:aria-label=move || {
+                                                            let preferences = state.get();
+                                                            let position = preferences
+                                                                .column_order
+                                                                .iter()
+                                                                .position(|id| *id == earlier_id)
+                                                                .map(|index| index + 1)
+                                                                .unwrap_or(1);
+                                                            let total = preferences.column_order.len();
+                                                            column_tools_texts.with(|texts| {
+                                                                format_server_move_label(
+                                                                    &texts.move_earlier,
+                                                                    &state.header_for(&earlier_id),
+                                                                    position,
+                                                                    total,
+                                                                )
+                                                            })
+                                                        }
+                                                        disabled=Signal::derive(move || {
+                                                            state.get().column_order.first().is_some_and(|id| *id == earlier_disabled_id)
+                                                        })
+                                                        on_click=Callback::new(move |_: web_sys::MouseEvent| {
+                                                            state.move_column(&earlier_click_id, EntityColumnMove::Earlier);
+                                                        })
+                                                    >
+                                                        <span aria-hidden="true">"↑"</span>
+                                                    </Button>
+                                                    <Button
+                                                        class="btn-ghost btn-xs btn-square"
+                                                        attr:data-server-column-order=column_id.clone()
+                                                        attr:data-server-column-move="later"
+                                                        attr:aria-label=move || {
+                                                            let preferences = state.get();
+                                                            let position = preferences
+                                                                .column_order
+                                                                .iter()
+                                                                .position(|id| *id == later_id)
+                                                                .map(|index| index + 1)
+                                                                .unwrap_or(1);
+                                                            let total = preferences.column_order.len();
+                                                            column_tools_texts.with(|texts| {
+                                                                format_server_move_label(
+                                                                    &texts.move_later,
+                                                                    &state.header_for(&later_id),
+                                                                    position,
+                                                                    total,
+                                                                )
+                                                            })
+                                                        }
+                                                        disabled=Signal::derive(move || {
+                                                            state.get().column_order.last().is_some_and(|id| *id == later_disabled_id)
+                                                        })
+                                                        on_click=Callback::new(move |_: web_sys::MouseEvent| {
+                                                            state.move_column(&later_click_id, EntityColumnMove::Later);
+                                                        })
+                                                    >
+                                                        <span aria-hidden="true">"↓"</span>
+                                                    </Button>
+                                                </li>
+                                            }
+                                        }
+                                    />
+                                </ol>
+                                <div class="pt-2">
+                                    <Button
+                                        class="btn-ghost btn-xs w-full"
+                                        attr:data-server-column-reset="true"
+                                        on_click=Callback::new(move |_: web_sys::MouseEvent| {
+                                            state.reset();
+                                        })
+                                    >
+                                        {move || column_tools_texts.with(|texts| texts.reset_columns.clone())}
+                                    </Button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            })}
 
             <div class=TABLE_SCROLL_WRAPPER_CLASS style=table_wrapper_style node_ref=table_wrapper_ref>
                 <div style=move || stable_table_content_style(&stable_tracks.get())>

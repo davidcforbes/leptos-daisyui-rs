@@ -135,6 +135,13 @@ pub struct Column {
     /// no declared column (renderer-only metadata such as state codes, route
     /// ids or epoch instants) is never searched at all.
     pub searched: bool,
+    /// Whether an opt-in column-chooser (e.g. `ServerDataTable`'s
+    /// `column_tools`) is forbidden from hiding this column (default:
+    /// `false`). Mirrors `EntityColumn::required`. A column left `false`
+    /// stays visible by default but may be hidden by the user; a column with
+    /// `true` can never be hidden through the chooser regardless of
+    /// preference payload contents.
+    pub required: bool,
 }
 
 impl Column {
@@ -160,6 +167,7 @@ impl Column {
             filter_kind: ColumnFilterKind::Exact,
             is_action: false,
             searched: true,
+            required: false,
         }
     }
 
@@ -181,6 +189,7 @@ impl Column {
             filter_kind: ColumnFilterKind::Exact,
             is_action: false,
             searched: true,
+            required: false,
         }
     }
 
@@ -316,6 +325,19 @@ impl Column {
     /// ```
     pub fn action(mut self) -> Self {
         self.is_action = true;
+        self
+    }
+
+    /// Forbids an opt-in column chooser (e.g. `ServerDataTable`'s
+    /// `column_tools`) from hiding this column.
+    ///
+    /// ```
+    /// use leptos_daisyui_rs::components::Column;
+    ///
+    /// let name = Column::new("name", "Name").required();
+    /// ```
+    pub fn required(mut self) -> Self {
+        self.required = true;
         self
     }
 }

@@ -219,8 +219,10 @@ reuses that same verified server for the 51-check reactivity/DOM-oracle suite
 (`test-reactivity`), layout audit (`test-layout`, below), style audit
 (`test-style`, below), the focused `KeyedResultList` browser proof
 (`test-keyed-result-list`, ldui-r1z), the focused `SectionHeading`
-browser proof (`test-section-heading`, ldui-lwu), and the focused
-`SearchPickerDialog` browser proof (`test-search-picker-dialog`, ldui-i95p).
+browser proof (`test-section-heading`, ldui-lwu), the focused
+`SearchPickerDialog` browser proof (`test-search-picker-dialog`, ldui-i95p),
+and the focused `ServerDataTable` column-tools browser proof
+(`test-server-table-column-tools`, ldui-9j16).
 That catalog server is the real `wasm32-unknown-unknown` release build, so a
 second standalone `trunk build --release` would only repeat the same pipeline
 and is intentionally absent. It is a **separate task**, not part of the

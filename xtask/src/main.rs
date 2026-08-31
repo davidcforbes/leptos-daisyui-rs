@@ -463,6 +463,28 @@ fn admin_workbench_step() -> Step {
     }
 }
 
+/// Focused browser proof for `ServerDataTable`'s opt-in presentation tools
+/// (ldui-9j16): the compact gear chooser stays inside the viewport and
+/// closes on Escape with focus restored, a required column is unhideable
+/// and absent from the chooser list entirely, the toolbar Export action
+/// sits beside the chooser, and the atomic `on_displayed_slice` projection
+/// tracks only the current server page -- never the fixture's full
+/// population. Lives on the general demo app (`html_target: None`, like
+/// [`reactivity_step`]/[`result_list_step`]) rather than a dedicated
+/// test-host page, and stays in its own file/step for the same reason as
+/// [`result_list_step`]: it targets an unrelated part of the same demo page
+/// `reactivity_smoke.rs` already covers, without growing that suite's
+/// pinned check count.
+fn server_table_column_tools_step() -> Step {
+    Step {
+        name: "test-server-table-column-tools",
+        run: Run::BrowserSuite {
+            test: "server_table_column_tools_smoke",
+            html_target: None,
+        },
+    }
+}
+
 /// The full release gate. The catalog browser suites are deliberately
 /// consecutive: [`run_steps`] reuses one verified release server for adjacent
 /// suites targeting the same HTML entry point.
@@ -480,6 +502,7 @@ fn full_steps() -> Vec<Step> {
     steps.push(search_picker_dialog_step());
     steps.push(page_quick_actions_step());
     steps.push(admin_workbench_step());
+    steps.push(server_table_column_tools_step());
     steps
 }
 
@@ -1918,6 +1941,7 @@ fn main() -> ExitCode {
         "test-admin-workbench" => run_steps(&[admin_workbench_step()]),
         "test-snapshot-table-delta" => run_steps(&[snapshot_table_delta_step()]),
         "test-snapshot-table-page-controls" => run_steps(&[snapshot_table_page_controls_step()]),
+        "test-server-table-column-tools" => run_steps(&[server_table_column_tools_step()]),
         "gen-tokens" => {
             let check = std::env::args().any(|a| a == "--check");
             gen_tokens(check)
@@ -1931,7 +1955,7 @@ fn main() -> ExitCode {
         other => {
             eprintln!("xtask: unknown subcommand {other:?}");
             eprintln!(
-                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-section-heading|test-search-picker-dialog|test-page-quick-actions|gen-tokens|check-sibling-tokens|bump>"
+                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-server-table-column-tools|gen-tokens|check-sibling-tokens|bump>"
             );
             ExitCode::from(2)
         }
@@ -2361,6 +2385,29 @@ pub fn r() -> f32 { radius::CARD }
             full_steps()
                 .iter()
                 .any(|s| s.name == "test-admin-workbench")
+        );
+    }
+
+    #[test]
+    fn server_table_column_tools_step_is_in_process_and_full_only() {
+        let step = server_table_column_tools_step();
+        assert_eq!(step.name, "test-server-table-column-tools");
+        assert!(matches!(
+            step.run,
+            Run::BrowserSuite {
+                test: "server_table_column_tools_smoke",
+                html_target: None
+            }
+        ));
+        assert!(
+            !gate_steps()
+                .iter()
+                .any(|s| s.name == "test-server-table-column-tools")
+        );
+        assert!(
+            full_steps()
+                .iter()
+                .any(|s| s.name == "test-server-table-column-tools")
         );
     }
 

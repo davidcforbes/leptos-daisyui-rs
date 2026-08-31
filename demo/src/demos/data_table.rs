@@ -315,11 +315,17 @@ pub fn DataTableDemo() -> impl IntoView {
     let server_activated = RwSignal::new(Option::<usize>::None);
     let server_inspected = RwSignal::new(Option::<usize>::None);
     let server_columns = RwSignal::new(vec![
-        Column::new("name", "Name"),
+        Column::new("name", "Name").required(),
         Column::new("email", "Email"),
         Column::new("role", "Role").filterable(),
         Column::new("status", "Status").filterable(),
     ]);
+    // Opt-in presentation tools (ldui-9j16): the compact gear chooser, an
+    // Export toolbar action beside it, and the atomic displayed-slice
+    // projection -- the current server page only, never "all rows".
+    let server_column_preferences = RwSignal::new(EntityTablePreferences::new(1));
+    let server_displayed_slice = RwSignal::new(ServerTableDisplayedSlice::default());
+    let server_export_count = RwSignal::new(0_u32);
 
     let run_server_query = move |q: TableQuery| {
         let query_debug = serde_json::json!({
@@ -1680,6 +1686,14 @@ pub fn DataTableDemo() -> impl IntoView {
                                 .unwrap_or_else(|| "(none)".to_string())
                         }}
                     </code>
+                    " \u{b7} Displayed slice (this page only): "
+                    <code data-testid="server-displayed-slice-rows">
+                        {move || server_displayed_slice.get().rows.len().to_string()}
+                    </code>
+                    " rows \u{b7} Exports clicked: "
+                    <code data-testid="server-export-count">
+                        {move || server_export_count.get().to_string()}
+                    </code>
                 </p>
                 <div class="mb-3 flex flex-wrap items-center gap-2" data-testid="server-query-controls">
                     <Button
@@ -1756,6 +1770,31 @@ pub fn DataTableDemo() -> impl IntoView {
                     })
                     texts=localized_texts
                     sort_texts=localized_sort_texts
+                    column_tools=ServerTableColumnTools::new(
+                        EntityTablePreferenceOwnership::controlled(
+                            server_column_preferences.into(),
+                            Callback::new(move |next| server_column_preferences.set(next)),
+                        ),
+                        1,
+                    )
+                        .with_chooser_trigger(EntityColumnChooserTrigger::Icon)
+                        .with_toolbar_actions(move || {
+                            view! {
+                                <Button
+                                    class="btn-ghost btn-xs"
+                                    attr:data-testid="server-export-slice"
+                                    on_click=Callback::new(move |_| {
+                                        server_export_count.update(|count| *count += 1);
+                                    })
+                                >
+                                    "Export this page"
+                                </Button>
+                            }
+                                .into_any()
+                        })
+                    on_displayed_slice=Callback::new(move |slice: ServerTableDisplayedSlice| {
+                        server_displayed_slice.set(slice);
+                    })
                     attr:id="server-table"
                 />
             </Section>
