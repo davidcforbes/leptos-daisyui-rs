@@ -178,34 +178,24 @@ const PAGES: &[(&str, &[(&str, usize)])] = &[
     (
         "/components/data-table",
         &[
-            // 92, was 83: the on_row_inspect (ldui-tmr) and ServerDataTable
-            // activation (ldui-1gp) demo additions put nine more <code>/<kbd>
-            // spans into the page prose — the same monospace-in-sans-context
-            // class as the rest of this page's typography debt. The
-            // viewport_fit (ldui-2bt3) demo additions added 22 more <code>
-            // spans (8 prose, 14 data-testid readouts); rather than widen
-            // this ceiling further, every one of those new spans was given
-            // `class="font-sans"` so it resolves the page's declared
-            // ui-sans-serif family instead of the `<code>` UA default of
-            // ui-monospace — genuinely fixing the new debt at the source
-            // (`demo/src/demos/data_table.rs`) instead of ratcheting it, so
-            // TYPOGRAPHY stays at 92.
+            // 31, was 105 (and 92 before that). This drop is NOT a page fix:
+            // it is ldui-kq9w landing upstream. PixelProof 8a74b06 exempts the
+            // FAMILY check on the mono tags (code/pre/kbd/samp/tt), so this
+            // page's inline <code> spans stopped being reported. Those should
+            // be monospace, and were unfixable by construction short of
+            // forcing code into the body sans face. The font-SIZE check still
+            // runs on them, so a <code> at 13px is as off-ramp as anything.
             //
-            // 105, was 92: this raise is DELIBERATE and is the one case on this
-            // page where raising beats fixing at source. Every finding above 92
-            // is `font-family "ui-monospace"` on the demo's `id` column, which
-            // now declares `Column::identifier()` (ldui-lrig) — the theme's mono
-            // face applied BY DESIGN, one finding per rendered row. That is the
-            // opposite of the `<code>` debt above it: a `<code>` span inheriting
-            // the UA monospace default inside sans prose is unintentional, so
-            // those were genuinely fixed with `font-sans`; an identifier column
-            // is *supposed* to be monospace, so "fixing" it would mean deleting
-            // the feature. The finding exists only because `StyleProfile` carries
-            // a single family name and reports any element whose first computed
-            // family differs (ldui-kq9w, owned upstream in PixelProof). Once that
-            // bead lands and the profile can accept a deliberate mono family,
-            // THIS CEILING MUST COME BACK DOWN — it is not new page debt.
-            (family::TYPOGRAPHY, 105),
+            // 31 is the real remaining count, measured by zeroing the ceiling
+            // and reading the failure rather than estimated: daisyUI's own
+            // -xs/-xl size steps and Tailwind text-2xl, all genuinely
+            // undecided debt. The 105 it replaces was raised for
+            // Column::identifier() (ldui-lrig), whose mono face is deliberate;
+            // that reasoning held at the time but is moot now the upstream
+            // exemption covers the whole class of finding. Ceilings here carry
+            // no slack on purpose: the sweep pushes at most one violation per
+            // element, so headroom is exactly where a real regression hides.
+            (family::TYPOGRAPHY, 31),
             (family::SHAPE, 0),
             // 32, was 18: the auto_page_size/viewport_fit demo additions
             // (ldui-89rp, ldui-2bt3) add several new ServerDataTable/DataTable
