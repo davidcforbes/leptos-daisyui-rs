@@ -444,14 +444,21 @@ pub fn KpiCard(
         view! { <span id=id class="sr-only">{help}</span> }
     });
 
-    let accent = (status != KpiStatus::Neutral).then(|| {
-        view! {
-            <div
-                class=format!("h-(--border-width-accent) w-full {}", status.accent_bg_class())
-                aria-hidden="true"
-            ></div>
-        }
-    });
+    // Always laid out, and merely uncoloured when the card has no status
+    // (`accent_bg_class` is "" for `Neutral`). Rendering it conditionally
+    // made the strip 3px tall on some cards and absent on others, so a
+    // KpiStrip mixing status and neutral cards started their bodies at
+    // different offsets and their values sat 3px apart -- measured at
+    // valueTop 567 vs 570 across one row (ldui-tbaw, whose acceptance
+    // requires values to retain their alignment). Reserving the space
+    // unconditionally is the same reasoning as `min-h-8` on the label:
+    // equal geometry has to be structural, not a side effect of content.
+    let accent = view! {
+        <div
+            class=format!("h-(--border-width-accent) w-full {}", status.accent_bg_class())
+            aria-hidden="true"
+        ></div>
+    };
 
     view! {
         <div

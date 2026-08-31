@@ -133,7 +133,8 @@ fn workbench_column_filters(
 fn workbench_kpis() -> Vec<KpiItem> {
     vec![
         KpiItem::new("open-matters", "Open matters", "128")
-            .trend(KpiTrend::new(4.0, StatDeltaTrend::Positive).label("this week")),
+            .trend(KpiTrend::new(4.0, StatDeltaTrend::Positive).label("this week"))
+            .help("Every matter currently open, across all assignees."),
         KpiItem::new("no-hire-conversions", "No-Hire Conversions", "38")
             .status(KpiStatus::Info)
             .description("This quarter"),
@@ -141,8 +142,7 @@ fn workbench_kpis() -> Vec<KpiItem> {
             .status(KpiStatus::Success)
             .trend(KpiTrend::new(12.5, StatDeltaTrend::Positive).label("vs last month")),
         KpiItem::new("customer-success-pts", "Customer Success Pts", "812")
-            .status(KpiStatus::Warning)
-            .help("Composite score across satisfaction, retention, and referrals."),
+            .status(KpiStatus::Warning),
         KpiItem::new("conversations-open", "Conversations Open", "17")
             .status(KpiStatus::Error)
             .trend(KpiTrend::new(1.0, StatDeltaTrend::Negative)),

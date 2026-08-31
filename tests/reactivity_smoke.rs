@@ -3994,6 +3994,15 @@ async fn filter_sidebar_collapsed_toggle_stays_inside_its_panel_ldui_8hba() {
                 return {{
                     aside: [aside.x, aside.y, aside.width, aside.height],
                     button: [b.x, b.y, b.width, b.height],
+                    // Offset from the panel's own origin: unlike the raw
+                    // viewport rect this survives the page scrolling that
+                    // clicking the toggle causes (ldui-8hba).
+                    buttonInAside: [
+                        b.x - aside.x,
+                        b.y - aside.y,
+                        b.width,
+                        b.height,
+                    ],
                     hitIsButton: !!hit && (hit === button || button.contains(hit)),
                     ariaExpanded: button.getAttribute('aria-expanded'),
                     actionsInert: actions ? actions.inert : null,
@@ -4130,10 +4139,13 @@ async fn filter_sidebar_collapsed_toggle_stays_inside_its_panel_ldui_8hba() {
         );
 
         // 4. expanded header layout is unchanged by the round trip.
+        // Compared against the panel's own origin rather than the viewport:
+        // clicking the toggle scrolls it into view, so the raw rect's `y`
+        // moves for reasons that have nothing to do with header layout.
         assert_eq!(
-            expanded_after["button"], expanded_before["button"],
-            "{panel_id}: expanded toggle geometry drifted across a \
-             collapse/expand cycle"
+            expanded_after["buttonInAside"], expanded_before["buttonInAside"],
+            "{panel_id}: expanded toggle geometry drifted within its panel \
+             across a collapse/expand cycle"
         );
 
         if has_actions {
