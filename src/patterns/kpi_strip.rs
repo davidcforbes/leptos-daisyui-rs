@@ -59,7 +59,7 @@ impl KpiStripTexts {
 
 /// Semantic emphasis for one [`KpiCard`].
 ///
-/// Drives the value text color and a top accent stripe together, so the
+/// Drives the value text color and a left accent edge together, so the
 /// two never disagree. `Neutral` renders no stripe at all -- a structural
 /// cue, not only a color one, matching this crate's "never color-only"
 /// posture elsewhere (e.g. `RosterGrid`'s state bar).
@@ -90,11 +90,24 @@ impl KpiStatus {
         }
     }
 
-    /// Top accent stripe background class. Empty for `Neutral`, which
-    /// renders no stripe at all.
+    /// Left accent edge background class.
+    ///
+    /// `Neutral` is the DEFAULT and paints the house dark blue
+    /// (`--color-status-blue`, `ui_tokens::color::STATUS_BLUE_FG`), not
+    /// nothing: every card carries an accent edge, and a status is what
+    /// OVERRIDES it when one card needs to stand out from the rest. An
+    /// accent that only appears on exceptional cards would make the edge
+    /// itself the signal; making it universal means the COLOUR is the
+    /// signal, which is what lets one warning card read against seven
+    /// ordinary ones.
+    ///
+    /// Deliberately the generic status blue rather than
+    /// `color::table::HEADER`. They are the same hex today, but the table
+    /// module exists so the table role can drift independently, and a card
+    /// accent is not a table role.
     fn accent_bg_class(self) -> &'static str {
         match self {
-            KpiStatus::Neutral => "",
+            KpiStatus::Neutral => "bg-status-blue",
             KpiStatus::Info => "bg-info",
             KpiStatus::Success => "bg-success",
             KpiStatus::Warning => "bg-warning",
@@ -250,10 +263,13 @@ fn kpi_strip_grid_class(compact: bool) -> &'static str {
 /// (`p-4` <= `gap-4`, `p-3` <= `gap-3`) so cards never read as a single
 /// group with their neighbours.
 fn kpi_card_body_class(compact: bool) -> &'static str {
+    // `min-w-0` matters: the body is a flex item beside the accent edge, and
+    // without it the default `min-width: auto` lets a long unbroken value push
+    // the card wider than its grid track.
     if compact {
-        "flex flex-col gap-1 p-3"
+        "flex min-w-0 flex-1 flex-col gap-1 p-3"
     } else {
-        "flex flex-col gap-2 p-4"
+        "flex min-w-0 flex-1 flex-col gap-2 p-4"
     }
 }
 
@@ -329,8 +345,8 @@ fn kpi_card_accessible_name(
 /// ```css
 /// @source inline("rounded-box border border-base-300 bg-base-100 shadow-sm h-full min-w-0 overflow-hidden");
 /// @source inline("forced-colors:border-[CanvasText]");
-/// @source inline("h-(--border-width-accent) w-full");
-/// @source inline("bg-info bg-success bg-warning bg-error");
+/// @source inline("w-(--border-width-accent) shrink-0 self-stretch");
+/// @source inline("bg-status-blue bg-info bg-success bg-warning bg-error");
 /// @source inline("flex flex-col items-center gap-1 gap-2 p-3 p-4 min-w-0 shrink-0");
 /// @source inline("line-clamp-2 min-h-8");
 /// @source inline("font-semibold uppercase tracking-wide tabular-nums break-words italic");
@@ -457,18 +473,25 @@ pub fn KpiCard(
         view! { <span id=id class="sr-only">{help}</span> }
     });
 
+    // A LEFT edge, not a top stripe: left-edge accents are the prevailing
+    // convention for stat cards, and the geometry is better behaved, because
+    // a vertical edge cannot shift the body's vertical rhythm at all.
+    //
     // Always laid out, and merely uncoloured when the card has no status
-    // (`accent_bg_class` is "" for `Neutral`). Rendering it conditionally
-    // made the strip 3px tall on some cards and absent on others, so a
-    // KpiStrip mixing status and neutral cards started their bodies at
-    // different offsets and their values sat 3px apart -- measured at
-    // valueTop 567 vs 570 across one row (ldui-tbaw, whose acceptance
-    // requires values to retain their alignment). Reserving the space
-    // unconditionally is the same reasoning as `min-h-8` on the label:
-    // equal geometry has to be structural, not a side effect of content.
+    // (`accent_bg_class` is "" for `Neutral`). The reason is the same as it
+    // was for the top stripe, just on the other axis: rendering it
+    // conditionally would inset the body on status cards and not on neutral
+    // ones, so a KpiStrip mixing the two would have two different text
+    // alignments. As a top stripe this cost 3px of VERTICAL offset and put
+    // values in one row at 567 and 570 (ldui-tbaw); as a left edge the same
+    // mistake would cost 3px of horizontal inset. Equal geometry has to be
+    // structural, not a side effect of which cards carry a status.
     let accent = view! {
         <div
-            class=format!("h-(--border-width-accent) w-full {}", status.accent_bg_class())
+            class=format!(
+                "w-(--border-width-accent) shrink-0 self-stretch {}",
+                status.accent_bg_class(),
+            )
             aria-hidden="true"
         ></div>
     };
@@ -482,7 +505,7 @@ pub fn KpiCard(
             data-kpi-card=id
             data-kpi-card-unavailable=(!available).then_some("true")
             class=merge_classes!(
-                "rounded-box border border-base-300 bg-base-100 shadow-sm h-full min-w-0 overflow-hidden forced-colors:border-[CanvasText]",
+                "flex rounded-box border border-base-300 bg-base-100 shadow-sm h-full min-w-0 overflow-hidden forced-colors:border-[CanvasText]",
                 class
             )
         >
@@ -611,8 +634,10 @@ mod tests {
     }
 
     #[test]
-    fn kpi_status_neutral_renders_no_accent_stripe() {
-        assert_eq!(KpiStatus::Neutral.accent_bg_class(), "");
+    fn kpi_status_neutral_paints_the_default_blue_accent() {
+        // Neutral is the default accent, not the absence of one: it paints
+        // the house dark blue, and a status overrides it.
+        assert_eq!(KpiStatus::Neutral.accent_bg_class(), "bg-status-blue");
         assert_eq!(KpiStatus::Success.accent_bg_class(), "bg-success");
     }
 

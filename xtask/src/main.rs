@@ -1350,6 +1350,33 @@ fn tokens_css() -> String {
         ));
     }
 
+    css.push_str(
+        "
+  /* Generic status blue, from ui_tokens::color::STATUS_BLUE_FG.
+",
+    );
+    css.push_str(
+        "     Deliberately the GENERIC alias, not color::table::HEADER: the two
+",
+    );
+    css.push_str(
+        "     are the same hex today, but the table module exists precisely so
+",
+    );
+    css.push_str(
+        "     the table role can drift on its own, so a non-table accent must
+",
+    );
+    css.push_str(
+        "     not borrow it. This is the default KpiCard accent edge. */
+",
+    );
+    css.push_str(&format!(
+        "  --color-status-blue: {};
+",
+        color::to_css_hex(color::STATUS_BLUE_FG)
+    ));
+
     css.push_str("\n  /* Corner radii. */\n");
     for (name, dips) in [
         ("control", radius::CONTROL),
