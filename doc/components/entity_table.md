@@ -350,6 +350,16 @@ layout and declared `colgroup` keep column tracks stable; sorting updates rows,
 markers, and accessibility state in place without replacing the table/header
 nodes or moving the shell.
 
+The stable `colgroup` and its forced content `min-width` are desktop-only
+geometry (ldui-ibjk). Below the `lg` breakpoint the table switches to its
+compact single-cell row renderer, and the `<colgroup>`/`min-width` are omitted
+entirely rather than merely hidden — a hidden `<td>` (`lg:hidden`) does not
+stop its `<col>` track from claiming width, so the desktop column widths would
+otherwise force the compact card region wider than its viewport and require
+horizontal scrolling even though nothing is off to the side. Compact mode
+therefore fits its containing block; desktop keeps its exact prior geometry
+and horizontal scrolling unchanged.
+
 These are generated semantic utilities, not demo-only CSS. Every consuming
 Tailwind build must import `leptos-daisyui-rs/styles/tokens.css` and scan
 `leptos-daisyui-rs/src/**/*.rs`, with paths resolved from its own `input.css`.

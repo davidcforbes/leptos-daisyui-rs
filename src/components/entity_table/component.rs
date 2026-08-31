@@ -1441,14 +1441,31 @@ where
                     ));
                 }
             >
-                <div style=move || stable_table_content_style(&stable_tracks.get())>
+                <div style=move || {
+                    // Compact mode ignores the desktop colgroup's forced
+                    // min-width entirely -- it must fit its containing
+                    // block, not the sum of desktop column tracks
+                    // (ldui-ibjk). Desktop keeps the exact prior style.
+                    (!compact_filter_layout.get())
+                        .then(|| stable_table_content_style(&stable_tracks.get()))
+                }>
                 <table
-                    class="table table-sm table-fixed w-full border-collapse border border-table-grid"
+                    class="table table-sm w-full border-collapse border border-table-grid"
+                    class:table-fixed=move || !compact_filter_layout.get()
                     class:table-zebra=move || zebra.get()
                     data-entity-table-grid="true"
                     data-table-layout="stable"
+                    data-entity-table-compact=move || compact_filter_layout.get().then_some("true")
                 >
-                    <StableTableColGroup tracks=stable_tracks />
+                    // The stable colgroup pins one `<col>` per desktop
+                    // column. Hiding a compact `<td>` with `lg:hidden` does
+                    // not stop its `<col>` track from claiming width, so
+                    // compact mode must not emit the colgroup at all -- it
+                    // is desktop-only geometry (ldui-ibjk).
+                    {move || {
+                        (!compact_filter_layout.get())
+                            .then(|| view! { <StableTableColGroup tracks=stable_tracks /> })
+                    }}
                     <thead class="hidden lg:table-header-group">
                         <tr>
                             <For

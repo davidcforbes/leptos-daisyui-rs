@@ -3810,3 +3810,170 @@ async fn page_size_select_gets_unique_identity_without_an_override_and_honors_on
 
     assert_no_browser_errors(&harness, "EntityTable page-size select identity").await;
 }
+
+/// ldui-ibjk: at a 390px viewport `EntityTable` switches to its compact
+/// single-column row renderer, but the desktop `<colgroup>` (and the
+/// `min-width` it drives on the scroll-region content wrapper) used to keep
+/// sizing the table regardless -- the compact `<td>` is `lg:hidden`, but
+/// hiding a cell does not stop its `<col>` track from claiming width. The
+/// visible region therefore had to grow past the viewport and scroll
+/// horizontally even though nothing was hidden past the fold. Assert the
+/// compact table/row/cell and the scroll region all fit within the 390px
+/// viewport with no horizontal overflow, that the compact card content and
+/// its action button stay usable, and -- restoring the desktop viewport --
+/// that the colgroup-driven geometry is byte-identical to before the resize.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
+async fn compact_layout_fits_the_viewport_and_desktop_colgroup_survives_unchanged() {
+    let harness = harness_at("/components/client-snapshot-list").await;
+    wait_for_selector(
+        &harness,
+        "[data-entity-table-grid] tbody tr[data-entity-row-key]",
+    )
+    .await;
+    begin_browser_error_capture(&harness).await;
+
+    let geometry = || {
+        let harness = &harness;
+        async move {
+            eval_json(
+                harness,
+                r#"(() => {
+                    const root = document.querySelector('[data-entity-table]');
+                    const table = root.querySelector('[data-entity-table-grid]');
+                    const content = table.parentElement;
+                    const region = content.parentElement;
+                    const headerCells = Array.from(table.querySelectorAll('thead tr:first-child th'));
+                    const colgroup = table.querySelector('colgroup[data-table-column-tracks="stable"]');
+                    const cols = colgroup ? Array.from(colgroup.querySelectorAll('col')) : [];
+                    const firstRow = table.querySelector('tbody tr[data-entity-row-key]');
+                    const compactCell = firstRow.querySelector(':scope > td:first-child');
+                    const claimButton = firstRow.querySelector('[data-claim-row]');
+                    const box = element => element.getBoundingClientRect();
+                    const claimBox = claimButton ? box(claimButton) : null;
+                    return {
+                        viewportWidth: document.documentElement.clientWidth,
+                        pageOverflows: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+                        colgroupPresent: colgroup !== null,
+                        colCount: cols.length,
+                        headerCount: headerCells.length,
+                        contentMinWidthStyle: content.style.minWidth,
+                        tableHasFixedClass: table.classList.contains('table-fixed'),
+                        tableWidth: box(table).width,
+                        contentWidth: box(content).width,
+                        regionWidth: box(region).width,
+                        regionScrollWidth: region.scrollWidth,
+                        regionClientWidth: region.clientWidth,
+                        rowWidth: box(firstRow).width,
+                        compactCellWidth: box(compactCell).width,
+                        compactCellTextLength: compactCell.textContent.trim().length,
+                        claimVisible: claimBox !== null && claimBox.width > 0 && claimBox.height > 0,
+                        claimRight: claimBox ? claimBox.right : null,
+                    };
+                })()"#,
+            )
+            .await
+        }
+    };
+
+    // Desktop baseline: the colgroup pins one `<col>` per header column and
+    // the content wrapper carries the matching forced `min-width`.
+    let wide = geometry().await;
+    assert_eq!(
+        wide["colgroupPresent"],
+        json!(true),
+        "desktop must keep the stable colgroup: {wide}"
+    );
+    assert_eq!(
+        wide["colCount"], wide["headerCount"],
+        "desktop colgroup must have one track per header column: {wide}"
+    );
+    assert_ne!(
+        wide["contentMinWidthStyle"],
+        json!(""),
+        "desktop content wrapper must keep its forced min-width: {wide}"
+    );
+    assert_eq!(
+        wide["tableHasFixedClass"],
+        json!(true),
+        "desktop table must keep table-layout: fixed: {wide}"
+    );
+
+    harness
+        .set_viewport(ViewportSize::new(390, 844))
+        .await
+        .expect("set compact viewport for the colgroup regression");
+    tokio::time::sleep(Duration::from_millis(150)).await;
+
+    let compact = geometry().await;
+    assert_eq!(
+        compact["colgroupPresent"],
+        json!(false),
+        "compact mode must not emit the desktop colgroup tracks: {compact}"
+    );
+    assert_eq!(
+        compact["contentMinWidthStyle"],
+        json!(""),
+        "compact mode must not force the desktop content min-width: {compact}"
+    );
+    assert_eq!(
+        compact["pageOverflows"],
+        json!(false),
+        "compact mode must not require horizontal page scrolling: {compact}"
+    );
+    let viewport_width = compact["viewportWidth"].as_f64().expect("viewport width");
+    for (field, label) in [
+        ("tableWidth", "table"),
+        ("contentWidth", "content wrapper"),
+        ("regionWidth", "scroll region"),
+        ("rowWidth", "row"),
+        ("compactCellWidth", "compact cell"),
+    ] {
+        let measured = compact[field]
+            .as_f64()
+            .unwrap_or_else(|| panic!("missing {field} in {compact}"));
+        assert!(
+            measured <= viewport_width + 0.5,
+            "compact {label} width {measured} exceeds the 390px viewport ({viewport_width}): {compact}"
+        );
+    }
+    let region_scroll_width = compact["regionScrollWidth"]
+        .as_f64()
+        .expect("region scrollWidth");
+    let region_client_width = compact["regionClientWidth"]
+        .as_f64()
+        .expect("region clientWidth");
+    assert!(
+        region_scroll_width <= region_client_width + 0.5,
+        "compact scroll region must not require horizontal scrolling: {compact}"
+    );
+    assert!(
+        compact["compactCellTextLength"].as_u64().unwrap_or(0) > 0,
+        "compact card must still render readable row content: {compact}"
+    );
+    assert_eq!(
+        compact["claimVisible"],
+        json!(true),
+        "compact card's claim action must remain visible: {compact}"
+    );
+    assert!(
+        compact["claimRight"].as_f64().unwrap_or(f64::INFINITY) <= viewport_width + 0.5,
+        "compact card's claim action must stay within the viewport: {compact}"
+    );
+
+    // Restoring the desktop viewport must reproduce the exact original
+    // colgroup-driven geometry -- proving the compact-mode fix left the
+    // desktop path untouched.
+    harness
+        .set_viewport(ViewportSize::new(1280, 800))
+        .await
+        .expect("restore wide viewport after the compact colgroup regression");
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    let wide_after = geometry().await;
+    assert_eq!(
+        wide_after, wide,
+        "restoring the desktop viewport must reproduce byte-identical colgroup geometry"
+    );
+
+    assert_no_browser_errors(&harness, "EntityTable compact colgroup viewport fit").await;
+}
