@@ -1,4 +1,4 @@
-//! Admin workbench composition reference (ldui-ynmd.3).
+//! Admin workbench composition reference (ldui-ynmd.3, ldui-0qro).
 //!
 //! One deliberately small demo/reference state proving the intended
 //! opinionated workbench hierarchy: [`AppShellTopBar`] with brand/search/
@@ -6,8 +6,9 @@
 //! [`PageHeader`] (no back slot) with a greeting/subtitle and seven
 //! [`PageQuickActions`], [`KpiStrip`] with eight varied cards, [`EntityTable`]
 //! with typed text/select filters in its own aligned filter row (no external
-//! filter bar), and a right-docked [`FilterSidebar`] with assistant content
-//! and controlled collapse.
+//! filter bar), a right-docked [`FilterSidebar`] with assistant content and
+//! controlled collapse, and a blue [`Fab`] Help button anchored bottom-right
+//! (ldui-0qro).
 //!
 //! Every part here is an EXISTING component, reused exactly as published --
 //! this file composes them, it does not extend or wrap any of them into a
@@ -289,6 +290,13 @@ pub fn AdminWorkbenchDemo() -> impl IntoView {
         "2 SLA breaches need review before end of day.".to_owned(),
         "3 new leads are unassigned.".to_owned(),
     ]);
+    // Synthetic only, exactly like `action_count` above -- no Office-specific
+    // Help route, copy, or handler. Activation stays caller-owned via this
+    // callback (ldui-0qro).
+    let help_requests = RwSignal::new(0_usize);
+    let open_help = Callback::new(move |_| {
+        help_requests.update(|count| *count += 1);
+    });
 
     let rows = workbench_rows();
     let filtered_rows = Signal::derive_local(move || {
@@ -335,7 +343,27 @@ pub fn AdminWorkbenchDemo() -> impl IntoView {
                     })>
                         <AppShellContent class="p-0">
                             <div class="flex h-full min-h-0 w-full">
-                                <div class="flex min-w-0 flex-1 flex-col gap-6 overflow-y-auto p-6">
+                                // `contain: layout` scopes the Help FAB's `.fab`
+                                // `position: fixed` to THIS column (CSS
+                                // Containment L1 sec.2: layout containment makes
+                                // an element the containing block for its fixed-
+                                // and absolutely-positioned descendants). That is
+                                // structural, not incidental: the column is a flex
+                                // sibling of the right-docked assistant panel, so
+                                // a FAB anchored to the column's own bottom-right
+                                // corner can never render past the column's right
+                                // edge into the assistant panel, collapsed or
+                                // expanded -- no per-state offset math needed. The
+                                // extra `pb-24` (96px, on the canonical spacing
+                                // scale) reserves clearance below the table's own
+                                // pagination footer so the FAB -- pinned 1rem from
+                                // the column's visible bottom edge -- never sits
+                                // on top of it even when the column's content is
+                                // tall enough to scroll.
+                                <div
+                                    class="flex min-w-0 flex-1 flex-col gap-6 overflow-y-auto pt-6 px-6 pb-24"
+                                    style="contain: layout"
+                                >
                                     <PageHeader
                                         title="Good afternoon, Alex"
                                         subtitle="Everything on your desk today, across every active matter."
@@ -366,6 +394,33 @@ pub fn AdminWorkbenchDemo() -> impl IntoView {
                                             dataset_identity="admin-workbench"
                                         />
                                     </div>
+
+                                    // Reuses the existing `Fab` primitive exactly
+                                    // as published (ldui-0qro) -- no second
+                                    // floating-button component. A single child,
+                                    // not a speed dial: daisyUI's `.fab` fans out
+                                    // siblings after the first only when a
+                                    // `FabClose`/`FabMainAction` and further
+                                    // buttons are present, so one plain `Button`
+                                    // renders as one plain floating button, with
+                                    // no double-nested interactive-element
+                                    // wrapper. `Button` already carries
+                                    // `ld-focus-ring` for a visible focus
+                                    // treatment and `aria-label` is its only
+                                    // accessible name (icon-only, matching the
+                                    // top bar's Settings/Sign out buttons above).
+                                    <Fab attr:data-testid="admin-workbench-help-fab">
+                                        <Button
+                                            color=ButtonColor::Info
+                                            shape=ButtonShape::Circle
+                                            size=ButtonSize::Lg
+                                            attr:aria-label="Help"
+                                            attr:data-testid="admin-workbench-help-fab-trigger"
+                                            on_click=open_help
+                                        >
+                                            <Icon name="help-circle" size=IconSize::Medium />
+                                        </Button>
+                                    </Fab>
                                 </div>
 
                                 <FilterSidebar
@@ -436,6 +491,12 @@ pub fn AdminWorkbenchDemo() -> impl IntoView {
                         "Assistant messages: "
                         <strong data-testid="admin-workbench-assistant-count">
                             {move || assistant_messages.get().len()}
+                        </strong>
+                    </span>
+                    <span>
+                        "Help requests: "
+                        <strong data-testid="admin-workbench-help-count">
+                            {move || help_requests.get()}
                         </strong>
                     </span>
                 </div>
