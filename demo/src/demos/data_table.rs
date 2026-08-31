@@ -1687,11 +1687,11 @@ pub fn DataTableDemo() -> impl IntoView {
                         }}
                     </code>
                     " \u{b7} Displayed slice (this page only): "
-                    <code data-testid="server-displayed-slice-rows">
+                    <code class="font-sans" data-testid="server-displayed-slice-rows">
                         {move || server_displayed_slice.get().rows.len().to_string()}
                     </code>
                     " rows \u{b7} Exports clicked: "
-                    <code data-testid="server-export-count">
+                    <code class="font-sans" data-testid="server-export-count">
                         {move || server_export_count.get().to_string()}
                     </code>
                 </p>

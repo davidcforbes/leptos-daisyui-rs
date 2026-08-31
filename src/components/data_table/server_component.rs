@@ -2501,6 +2501,8 @@ pub fn ServerDataTable(
                                             let later_disabled_id = column_id.clone();
                                             let earlier_click_id = column_id.clone();
                                             let later_click_id = column_id.clone();
+                                            let earlier_focus_id = column_id.clone();
+                                            let later_focus_id = column_id.clone();
                                             let label_id = column_id.clone();
                                             view! {
                                                 <li
@@ -2535,7 +2537,12 @@ pub fn ServerDataTable(
                                                         disabled=Signal::derive(move || {
                                                             state.get().column_order.first().is_some_and(|id| *id == earlier_disabled_id)
                                                         })
-                                                        on_click=Callback::new(move |_: web_sys::MouseEvent| {
+                                                        on_click=Callback::new(move |event: web_sys::MouseEvent| {
+                                                            restore_server_column_move_focus(
+                                                                event,
+                                                                earlier_focus_id.clone(),
+                                                                EntityColumnMove::Earlier,
+                                                            );
                                                             state.move_column(&earlier_click_id, EntityColumnMove::Earlier);
                                                         })
                                                     >
@@ -2566,7 +2573,12 @@ pub fn ServerDataTable(
                                                         disabled=Signal::derive(move || {
                                                             state.get().column_order.last().is_some_and(|id| *id == later_disabled_id)
                                                         })
-                                                        on_click=Callback::new(move |_: web_sys::MouseEvent| {
+                                                        on_click=Callback::new(move |event: web_sys::MouseEvent| {
+                                                            restore_server_column_move_focus(
+                                                                event,
+                                                                later_focus_id.clone(),
+                                                                EntityColumnMove::Later,
+                                                            );
                                                             state.move_column(&later_click_id, EntityColumnMove::Later);
                                                         })
                                                     >
@@ -2715,6 +2727,75 @@ pub fn ServerDataTable(
         </div>
     }
     .into_any()
+}
+
+/// Mirrors `EntityTable`'s own `restore_column_move_focus` (ldui-vn81): a
+/// move that lands a column at either end of the order disables that same
+/// button reactively, and every browser blurs a focused element the instant
+/// it becomes disabled. That blur escapes the chooser's `.dropdown` wrapper
+/// entirely (`relatedTarget` is null, so `on:focusout`'s "did focus stay
+/// inside" check fails), closing the chooser immediately and leaving no
+/// element for a later `Escape` to restore focus to (ldui-9j16). Land focus
+/// on the chooser trigger synchronously as a safe fallback, then on the next
+/// frame -- after the move has re-rendered the ordered list -- prefer the
+/// moved column's button in the same direction, falling back to its
+/// opposite-direction button when the column is now at that end too.
+fn restore_server_column_move_focus(
+    event: web_sys::MouseEvent,
+    column_id: String,
+    direction: EntityColumnMove,
+) {
+    let Some(root) = event
+        .target()
+        .or_else(|| event.current_target())
+        .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
+        .and_then(|element| {
+            element
+                .closest("[data-table-data-mode='server-query']")
+                .ok()
+                .flatten()
+        })
+    else {
+        return;
+    };
+    if let Ok(Some(anchor)) = root.query_selector("[data-server-column-chooser]")
+        && let Ok(anchor) = anchor.dyn_into::<web_sys::HtmlElement>()
+    {
+        let _ = anchor.focus();
+    }
+    let preferred_direction = match direction {
+        EntityColumnMove::Earlier => "earlier",
+        EntityColumnMove::Later => "later",
+    };
+    let fallback_direction = match direction {
+        EntityColumnMove::Earlier => "later",
+        EntityColumnMove::Later => "earlier",
+    };
+    request_animation_frame(move || {
+        let Ok(nodes) = root.query_selector_all("[data-server-column-move]") else {
+            return;
+        };
+        for direction in [preferred_direction, fallback_direction] {
+            for index in 0..nodes.length() {
+                let Some(node) = nodes.item(index) else {
+                    continue;
+                };
+                let Ok(element) = node.dyn_into::<web_sys::Element>() else {
+                    continue;
+                };
+                if element.get_attribute("data-server-column-order").as_deref()
+                    == Some(column_id.as_str())
+                    && element.get_attribute("data-server-column-move").as_deref()
+                        == Some(direction)
+                    && !element.has_attribute("disabled")
+                    && let Ok(element) = element.dyn_into::<web_sys::HtmlElement>()
+                {
+                    let _ = element.focus();
+                    return;
+                }
+            }
+        }
+    });
 }
 
 /// Cursor pagination controls with no fabricated page number or total.
