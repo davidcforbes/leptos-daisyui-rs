@@ -233,15 +233,16 @@ fn has_text(value: &str) -> bool {
 ///
 /// Two columns at the narrowest width (never a single full-bleed column,
 /// which reads as a list rather than a grid of cards), growing to eight --
-/// a full row -- at `xl`. When there are fewer than eight items, CSS Grid
+/// a full row -- once the STRIP is wide enough, not the window. When there
+/// are fewer than eight items, CSS Grid
 /// leaves the remaining explicit-column tracks empty rather than
 /// stretching the existing cards to fill them, so card size stays equal
 /// regardless of count.
 fn kpi_strip_grid_class(compact: bool) -> &'static str {
     if compact {
-        "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-8 gap-3"
+        "grid grid-cols-2 @sm:grid-cols-3 @lg:grid-cols-4 @5xl:grid-cols-8 gap-3"
     } else {
-        "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-8 gap-4"
+        "grid grid-cols-2 @sm:grid-cols-3 @lg:grid-cols-4 @5xl:grid-cols-8 gap-4"
     }
 }
 
@@ -535,7 +536,7 @@ pub fn KpiCard(
 ///
 /// ### Add to `input.css`
 /// ```css
-/// @source inline("grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-8 gap-3 gap-4");
+/// @source inline("@container grid grid-cols-2 @sm:grid-cols-3 @lg:grid-cols-4 @5xl:grid-cols-8 gap-3 gap-4 w-full");
 /// ```
 /// See [`KpiCard`] for the per-card classes.
 ///
@@ -567,6 +568,11 @@ pub fn KpiStrip(
     node_ref: NodeRef<Div>,
 ) -> impl IntoView {
     view! {
+        // Structural container only. An element cannot answer its OWN
+        // container query, so the `@sm`/`@lg`/`@6xl` steps on the grid below
+        // need a container ancestor to measure (ldui-tnyq). It carries no
+        // spacing of its own, so it cannot affect the strip's geometry.
+        <div class="@container w-full" data-kpi-strip-container="true">
         <div
             node_ref=node_ref
             class=move || merge_classes!(kpi_strip_grid_class(compact.get()), class)
@@ -581,6 +587,7 @@ pub fn KpiStrip(
                     })
                     .collect_view()
             }}
+        </div>
         </div>
     }
 }
@@ -660,9 +667,14 @@ mod tests {
     fn kpi_strip_grid_class_wraps_from_two_to_eight_columns() {
         let normal = kpi_strip_grid_class(false);
         assert!(normal.contains("grid-cols-2"));
-        assert!(normal.contains("sm:grid-cols-3"));
-        assert!(normal.contains("md:grid-cols-4"));
-        assert!(normal.contains("xl:grid-cols-8"));
+        // Container steps, not viewport ones: the column count must follow
+        // the strip's own width (ldui-tnyq). A plain `sm:`/`md:`/`xl:` here
+        // would mean the strip asks how wide the WINDOW is, which is how an
+        // eight-card strip came to render 67px cards in a 648px column.
+        assert!(normal.contains("@sm:grid-cols-3"));
+        assert!(normal.contains("@lg:grid-cols-4"));
+        assert!(normal.contains("@5xl:grid-cols-8"));
+        assert!(!normal.contains("xl:grid-cols-8") || normal.contains("@5xl:grid-cols-8"));
         assert!(normal.contains("gap-4"));
     }
 
