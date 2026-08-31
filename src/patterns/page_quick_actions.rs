@@ -64,7 +64,11 @@ impl PageQuickActionLabelVisibility {
 ///         <PageQuickActions label="Case actions">
 ///             // Always-visible icon + label (the common case).
 ///             <Button style=ButtonStyle::Outline size=ButtonSize::Sm color=ButtonColor::Primary>
-///                 <PageQuickActionContent icon="plus" label="New matter" />
+///                 <PageQuickActionContent
+///                     icon="plus"
+///                     icon_color="text-success"
+///                     label="New matter"
+///                 />
 ///             </Button>
 ///
 ///             // Icon-only below `sm`: the Tooltip supplies the same text on
@@ -105,6 +109,12 @@ pub fn PageQuickActionContent(
     #[prop(optional, into, default = Signal::stored(IconSize::Small))]
     icon_size: Signal<IconSize>,
 
+    /// Semantic color class applied only to the owned icon, leaving the
+    /// surrounding button label on its normal foreground color. Prefer theme
+    /// tokens such as `text-success`, `text-warning`, or `text-info`.
+    #[prop(optional, into)]
+    icon_color: Signal<String>,
+
     /// Responsive behavior for the visible label. Defaults to
     /// [`PageQuickActionLabelVisibility::Always`].
     #[prop(optional, into)]
@@ -119,7 +129,7 @@ pub fn PageQuickActionContent(
             class=move || merge_classes!("inline-flex items-center gap-2", class)
             data-page-quick-action-label-visibility=label_visibility.as_str()
         >
-            <Icon name=icon size=icon_size />
+            <Icon name=icon size=icon_size color=icon_color />
             <span class=label_visibility.label_class()>{move || label.get()}</span>
         </span>
     }
@@ -238,6 +248,20 @@ mod tests {
         // Reappears visually at `sm` and above.
         assert!(class.contains("sm:not-sr-only"));
         assert!(class.contains("sm:inline"));
+    }
+
+    #[test]
+    fn semantic_icon_color_is_forwarded_to_the_owned_icon() {
+        let source = include_str!("page_quick_actions.rs");
+        let component = source
+            .split_once("pub fn PageQuickActionContent(")
+            .expect("PageQuickActionContent component source")
+            .1
+            .split_once("/// Opinionated, wrapping icon-action row")
+            .expect("PageQuickActionContent component end")
+            .0;
+        assert!(component.contains("icon_color: Signal<String>"));
+        assert!(component.contains("<Icon name=icon size=icon_size color=icon_color />"));
     }
 
     /// Guards the wrapping contract at the source level: `PageQuickActions`

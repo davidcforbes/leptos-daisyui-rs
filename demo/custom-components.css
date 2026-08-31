@@ -1,8 +1,8 @@
 /**
  * Custom Component Styles for leptos-daisyui-rs
  *
- * These are custom components not included in daisyUI 5:
- * - FAB (Floating Action Button) with speed dial
+ * These are demo-specific extensions layered onto daisyUI 5 components:
+ * - FAB speed-dial motion and flower placement
  * - Text Rotate with CSS animations
  * - Hover 3D (requires JavaScript, styles here support it)
  * - Hover Gallery (requires JavaScript, styles here support it)
@@ -52,15 +52,6 @@
 .fab:focus > *:nth-child(6),
 .fab:focus-within > *:nth-child(6) {
   transition-delay: 0.25s;
-}
-
-/* Vertical stacking layout */
-.fab {
-  display: inline-flex;
-  flex-direction: column-reverse;
-  align-items: center;
-  gap: 0.5rem;
-  position: relative;
 }
 
 /* Flower layout (quarter-circle) */
