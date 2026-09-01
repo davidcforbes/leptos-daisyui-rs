@@ -538,3 +538,187 @@ async fn controlled_multi_selection_is_page_scoped_and_never_optimistic() {
 
     assert_no_browser_errors(&harness, "server-table controlled multi-selection").await;
 }
+
+/// Every framework-owned form control the two demo tables render, with the
+/// `id`/`name` each carries.
+async fn identity_inventory(harness: &pixelproof_web::Harness, root: &str) -> Value {
+    eval_json(
+        harness,
+        &format!(
+            r#"(() => {{
+                const root = document.querySelector('{root}');
+                if (!root) return null;
+                const selector = [
+                    'input[data-table-search-control="true"]',
+                    'select[data-table-page-size-control="true"]',
+                    '[data-table-filter-kind]',
+                    '[data-server-selection-toggle="slice"]',
+                    '[data-server-selection-row]',
+                ].join(',');
+                return Array.from(root.querySelectorAll(selector)).map(el => ({{
+                    role: el.dataset.tableSearchControl ? 'search'
+                        : el.dataset.tablePageSizeControl ? 'page-size'
+                        : el.dataset.tableFilterKind ? 'filter'
+                        : el.dataset.serverSelectionToggle ? 'slice'
+                        : 'row',
+                    column: el.closest('[data-table-filter-column]')
+                        ?.dataset.tableFilterColumn ?? null,
+                    key: el.dataset.serverSelectionRow ?? null,
+                    id: el.id,
+                    name: el.getAttribute('name'),
+                    // The accessible name must survive gaining an identity.
+                    ariaLabel: el.getAttribute('aria-label'),
+                    // An explicit `for` on the wrapping visually-hidden label
+                    // is the point of having an `id` at all.
+                    labelFor: Array.from(el.labels ?? []).map(l => l.getAttribute('for')),
+                }}));
+            }})()"#
+        ),
+    )
+    .await
+}
+
+fn rows_by_key(inventory: &Value) -> Vec<(String, String)> {
+    inventory
+        .as_array()
+        .expect("inventory is an array")
+        .iter()
+        .filter(|entry| entry["role"] == json!("row"))
+        .map(|entry| {
+            (
+                entry["key"].as_str().unwrap_or_default().to_owned(),
+                entry["id"].as_str().unwrap_or_default().to_owned(),
+            )
+        })
+        .collect()
+}
+
+/// `ldui-j6sh` in a real browser: the Office Conversations satellite found
+/// visible LDUI-owned form controls with no `id` and no `name`, which a
+/// consuming page cannot repair without reaching into markup this crate owns.
+///
+/// Two tables render on this page -- `#server-table` takes the minted
+/// fallback prefix, `#server-multi-select-table` supplies `control_id`
+/// -- so one pass proves both paths, proves they cannot collide, and proves
+/// a row checkbox's identity follows its stable key across a cursor page
+/// rather than its position in the slice.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-server-table-column-tools)"]
+async fn every_framework_owned_table_control_has_a_stable_identity() {
+    let harness = harness_at("/components/data-table").await;
+    wait_for_selector(&harness, &format!("{MULTI} tbody tr")).await;
+    begin_browser_error_capture(&harness).await;
+
+    for root in ["#server-table", MULTI] {
+        let inventory = identity_inventory(&harness, root).await;
+        let entries = inventory
+            .as_array()
+            .unwrap_or_else(|| panic!("{root} rendered no framework-owned controls"));
+        assert!(
+            !entries.is_empty(),
+            "{root} rendered no framework-owned controls to inspect"
+        );
+        for entry in entries {
+            let id = entry["id"].as_str().unwrap_or_default();
+            let name = entry["name"].as_str().unwrap_or_default();
+            assert!(
+                !id.is_empty() && !id.contains(' '),
+                "{root} control has no usable id: {entry}"
+            );
+            assert_eq!(name, id, "{root} control's name must match its id: {entry}");
+            assert!(
+                entry["ariaLabel"]
+                    .as_str()
+                    .is_some_and(|label| !label.trim().is_empty()),
+                "gaining an identity must not cost the accessible name: {entry}"
+            );
+            if entry["role"] == json!("filter") {
+                assert_eq!(
+                    entry["labelFor"],
+                    json!([id]),
+                    "a filter's visually-hidden label must point at it: {entry}"
+                );
+            }
+        }
+    }
+
+    // The caller-supplied prefix is honoured verbatim, and the row control is
+    // named by the ROW KEY (escape-encoded), not by its slice position.
+    let multi = identity_inventory(&harness, MULTI).await;
+    let page_one = rows_by_key(&multi);
+    assert!(
+        page_one
+            .iter()
+            .all(|(_, id)| id.starts_with("conversations-select-row-")),
+        "caller-supplied control_id must win: {page_one:?}"
+    );
+    assert!(
+        page_one
+            .iter()
+            .any(|(key, id)| key == "conv-1" && id == "conversations-select-row-conv_2d1"),
+        "row identity must encode the stable key: {page_one:?}"
+    );
+    let header_id = multi
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["role"] == json!("slice"))
+        .and_then(|entry| entry["id"].as_str())
+        .expect("the current-slice checkbox renders")
+        .to_owned();
+    assert_eq!(header_id, "conversations-select-all");
+    assert!(
+        page_one.iter().all(|(_, id)| *id != header_id),
+        "no row may share the current-slice checkbox's identity"
+    );
+
+    // Every id on the whole page -- both tables at once -- is unique.
+    let duplicates = eval_json(
+        &harness,
+        r#"(() => {
+            const seen = new Map();
+            const duplicates = [];
+            for (const el of document.querySelectorAll('[id]')) {
+                if (seen.has(el.id)) duplicates.push(el.id);
+                seen.set(el.id, true);
+            }
+            return duplicates;
+        })()"#,
+    )
+    .await;
+    assert_eq!(
+        duplicates,
+        json!([]),
+        "two tables on one page minted a duplicate id"
+    );
+
+    // Page the slice. An index-derived id would hand page two's first row the
+    // id page one's first row just had; a key-derived one must not.
+    click(
+        &harness,
+        &format!("{MULTI} [data-server-cursor-action=\"next\"]"),
+    )
+    .await;
+    let page_two = rows_by_key(&identity_inventory(&harness, MULTI).await);
+    assert!(!page_two.is_empty());
+    assert!(
+        page_two
+            .iter()
+            .all(|(_, id)| page_one.iter().all(|(_, seen)| seen != id)),
+        "a paged slice reused an id for a different row: {page_one:?} then {page_two:?}"
+    );
+
+    // Back: the same keys must come back with byte-identical ids.
+    click(
+        &harness,
+        &format!("{MULTI} [data-server-cursor-action=\"previous\"]"),
+    )
+    .await;
+    let returned = rows_by_key(&identity_inventory(&harness, MULTI).await);
+    assert_eq!(
+        returned, page_one,
+        "a row's identity must survive a round trip through another page"
+    );
+
+    assert_no_browser_errors(&harness, "server-table control identity").await;
+}

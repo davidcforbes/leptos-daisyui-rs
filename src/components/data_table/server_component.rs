@@ -30,7 +30,11 @@ use crate::components::data_table::types::{
     CellRenderer, Column, ColumnFilterKind, DataTableClasses, DataTableSortTexts, DataTableTexts,
     RowDetailRenderer, SortOrder, TableRow, TypedCellFn,
 };
-use crate::components::data_table::{TABLE_SCROLL_WRAPPER_CLASS, next_data_table_search_id};
+use crate::components::data_table::{
+    TABLE_SCROLL_WRAPPER_CLASS, column_tools_control_id, next_data_table_control_id,
+    page_size_control_id, resolve_control_id, search_control_id, selection_header_control_id,
+    selection_row_control_id,
+};
 use crate::components::entity_table::{EntityColumnChooserTrigger, EntityColumnMove};
 use crate::components::menu::{Menu, MenuCheckItem};
 use crate::components::table::{Table, TableSize};
@@ -1319,6 +1323,26 @@ pub fn ServerDataTable(
     #[prop(into, default = Signal::stored("Filter {column} by text".to_owned()))]
     text_filter_label: Signal<String>,
 
+    /// Stable DOM identity prefix for every framework-owned control this table
+    /// renders — the search box, the rows-per-page select, the column-tools
+    /// popover, each column filter, the current-slice selection checkbox and
+    /// every row-selection checkbox (ldui-j6sh).
+    ///
+    /// Per-column controls append the encoded column id and per-row controls
+    /// append the encoded **stable row key**, never the visual index, so a
+    /// row's identity survives sorting, filtering and paging and can never
+    /// alias onto a different row when the slice changes. When omitted a
+    /// process-unique prefix is minted, so an existing caller still gets
+    /// non-empty, mutually unique ids — but only a caller-supplied value is
+    /// stable enough for deterministic browser automation, because the minted
+    /// one depends on mount order.
+    ///
+    /// The value is normalized once: trimmed, and any character outside
+    /// `[A-Za-z0-9_-]` escaped. The `ldui-` namespace is reserved for minted
+    /// prefixes; supply your own name.
+    #[prop(optional, into)]
+    control_id: MaybeProp<String>,
+
     /// Additional CSS classes for container
     #[prop(optional, into)]
     class: &'static str,
@@ -1595,10 +1619,20 @@ pub fn ServerDataTable(
             current.with(|preferences| save_column_tools_preferences(persistence, preferences));
         });
     }
+    // One resolved identity prefix per mounted table (ldui-j6sh): every
+    // framework-owned control below derives its `id`/`name` from it, so a
+    // consumer names the table once instead of patching descendants after
+    // mount. The minted fallback is created once per instance, so two
+    // `ServerDataTable`s on one page cannot collide.
+    let minted_control_id = next_data_table_control_id();
+    let table_control_id =
+        Signal::derive(move || resolve_control_id(control_id.get(), &minted_control_id));
+
     let column_tools_open = RwSignal::new(false);
     let column_tools_trigger_ref = NodeRef::<leptos::html::Button>::new();
-    let column_tools_menu_id = format!("{}-column-tools", next_data_table_search_id());
-    let column_tools_controls_id = column_tools_menu_id.clone();
+    let column_tools_menu_id =
+        Signal::derive(move || column_tools_control_id(&table_control_id.get()));
+    let column_tools_controls_id = column_tools_menu_id;
 
     // Row activation, forwarded to the shared body exactly like the
     // client-paged DataTable (ldui-1gp): a plain click/Enter/Space activates;
@@ -2398,6 +2432,10 @@ pub fn ServerDataTable(
     // resolved cleanly, so an unconfigured or rejected table renders exactly
     // the markup it always did.
     let selection_header_ref = NodeRef::<leptos::html::Input>::new();
+    // A fixed role segment, so exactly one control per table can hold it and
+    // it can never be minted for a row (ldui-j6sh).
+    let selection_header_id =
+        Signal::derive(move || selection_header_control_id(&table_control_id.get()));
     let selection_leading_header = multi.map(|model| {
         let texts = model.texts;
         view! {
@@ -2418,6 +2456,8 @@ pub fn ServerDataTable(
                     node_ref=selection_header_ref
                     class="align-middle"
                     disabled=Signal::derive(move || slice_state.get().is_disabled())
+                    attr:id=move || selection_header_id.get()
+                    attr:name=move || selection_header_id.get()
                     attr:data-server-selection-toggle="slice"
                     attr:aria-label=move || {
                         let state = slice_state.get();
@@ -2462,6 +2502,18 @@ pub fn ServerDataTable(
         Callback::new(move |key: String| {
             let checkbox_ref = NodeRef::<leptos::html::Input>::new();
 
+            // Identity from the STABLE ROW KEY, never the row's position in
+            // the current slice (ldui-j6sh, following ldui-nz6d/ldui-px06).
+            // A slice index re-points at a different row the moment the table
+            // sorts, filters or pages, so an index-derived id would silently
+            // start naming someone else's row -- worse than having no id.
+            // The key is escape-encoded, so two distinct keys can never share
+            // an id and no key can produce the header's fixed role segment.
+            let identity_key = key.clone();
+            let row_control_id = Signal::derive(move || {
+                selection_row_control_id(&table_control_id.get(), &identity_key)
+            });
+
             // Looked up by key on every read rather than captured once, so a
             // reactive row update (a renamed subject, a newly-blocked row)
             // reaches the accessible name without re-mounting the checkbox
@@ -2494,6 +2546,8 @@ pub fn ServerDataTable(
                     size=CheckboxSize::Sm
                     node_ref=checkbox_ref
                     class="align-middle"
+                    attr:id=move || row_control_id.get()
+                    attr:name=move || row_control_id.get()
                     attr:data-server-selection-row=key
                     attr:data-server-selection-blocked=move || {
                         blocked_facts().1.is_some().then_some("true")
@@ -2538,8 +2592,8 @@ pub fn ServerDataTable(
         })
     });
 
-    let search_input_id = next_data_table_search_id();
-    let page_size_input_id = format!("{search_input_id}-page-size");
+    let search_input_id = Signal::derive(move || search_control_id(&table_control_id.get()));
+    let page_size_input_id = Signal::derive(move || page_size_control_id(&table_control_id.get()));
     let query_ownership_marker = if cursor_pagination || controlled_offset_query {
         "controlled"
     } else {
@@ -2606,21 +2660,22 @@ pub fn ServerDataTable(
             </Show>
             {move || {
                 if has_search || has_page_size {
-                    let label_target = search_input_id.clone();
-                    let control_id = search_input_id.clone();
-                    let page_size_label_target = page_size_input_id.clone();
-                    let page_size_control_id = page_size_input_id.clone();
                     Some(view! {
                         <div class="mb-3 flex min-w-0 flex-wrap items-end justify-between gap-3">
                             {has_search.then(|| view! {
                                 <div class="min-w-0 flex-1">
-                                    <label class="sr-only" r#for=label_target>
+                                    <label class="sr-only" r#for=move || search_input_id.get()>
                                         {move || texts.with(|t| t.search_label.clone())}
                                     </label>
                                     <input
                                         node_ref=search_input
-                                        id=control_id
+                                        id=move || search_input_id.get()
+                                        name=move || search_input_id.get()
+                                        data-table-search-control="true"
                                         type="text"
+                                        // See DataTable: a named table filter must
+                                        // not attract the browser's autofill.
+                                        autocomplete="off"
                                         class="input input-bordered input-sm w-full max-w-xs"
                                         placeholder=move || texts.with(|t| t.search_placeholder.clone())
                                         aria-label=move || texts.with(|t| t.search_label.clone())
@@ -2632,13 +2687,16 @@ pub fn ServerDataTable(
                             {has_page_size.then(|| view! {
                                 <label
                                     class="flex shrink-0 items-center gap-2 text-sm"
-                                    r#for=page_size_label_target
+                                    r#for=move || page_size_input_id.get()
                                 >
                                     <span>{move || texts.with(|t| t.page_size_label.clone())}</span>
                                     <select
                                         node_ref=page_size_select
-                                        id=page_size_control_id
+                                        id=move || page_size_input_id.get()
+                                        name=move || page_size_input_id.get()
+                                        data-table-page-size-control="true"
                                         class="select select-bordered select-sm w-24"
+                                        autocomplete="off"
                                         aria-label=move || texts.with(|t| t.page_size_label.clone())
                                         prop:value=move || query_state.get().page_size().to_string()
                                         on:change=move |event| {
@@ -2973,6 +3031,7 @@ pub fn ServerDataTable(
                                         filter_label=effective_filter_label
                                         text_filter_label=text_filter_label
                                         leading_column=selection_leading_cell.is_some()
+                                        control_id=table_control_id
                                     />
                                 })
                             }}

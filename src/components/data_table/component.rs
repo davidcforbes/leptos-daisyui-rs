@@ -26,7 +26,9 @@ use crate::components::data_table::types::{
     CellRenderer, Column, ColumnFilterKind, DataTableClasses, DataTableSortTexts, DataTableTexts,
     RowDetailRenderer, SortOrder, TableRow, TypedCellFn,
 };
-use crate::components::data_table::{TABLE_SCROLL_WRAPPER_CLASS, next_data_table_search_id};
+use crate::components::data_table::{
+    TABLE_SCROLL_WRAPPER_CLASS, next_data_table_control_id, resolve_control_id, search_control_id,
+};
 use crate::components::table::{Table, TableSize};
 use crate::merge_classes;
 use leptos::{html::Div, prelude::*};
@@ -270,6 +272,25 @@ pub fn DataTable(
     /// `{column}` is replaced with the live header.
     #[prop(into, default = Signal::stored("Filter {column} by text".to_owned()))]
     text_filter_label: Signal<String>,
+
+    /// Stable DOM identity prefix for every framework-owned control this table
+    /// renders — the search box and each column filter (ldui-j6sh).
+    ///
+    /// Each control's `id` and `name` are this prefix plus a fixed role
+    /// segment plus, for per-column controls, the encoded column id, so the
+    /// identity is deterministic across builds and survives sorting,
+    /// filtering, paging and re-renders. When omitted a process-unique prefix
+    /// is minted instead, so an existing caller still gets non-empty, mutually
+    /// unique ids — but only a caller-supplied value is stable enough for
+    /// deterministic browser automation, because the minted one depends on
+    /// mount order.
+    ///
+    /// The value is normalized once: trimmed, and any character outside
+    /// `[A-Za-z0-9_-]` escaped, since an `id` may not contain whitespace and
+    /// a `.` or `#` would break every selector built from it. The `ldui-`
+    /// namespace is reserved for minted prefixes; supply your own name.
+    #[prop(optional, into)]
+    control_id: MaybeProp<String>,
 
     /// Additional CSS classes for container
     #[prop(optional, into)]
@@ -1145,7 +1166,13 @@ pub fn DataTable(
     let table_wrapper_style =
         move || is_flex_column().then_some("flex: 1; overflow-y: auto; min-height: 0");
     let controls_style = move || is_flex_column().then_some("flex-shrink: 0; padding: 12px 0");
-    let search_input_id = next_data_table_search_id();
+    // One resolved identity prefix per mounted table (ldui-j6sh). The minted
+    // fallback is created once per instance, so two `DataTable`s on one page
+    // never collide even when neither caller supplies a prefix.
+    let minted_control_id = next_data_table_control_id();
+    let table_control_id =
+        Signal::derive(move || resolve_control_id(control_id.get(), &minted_control_id));
+    let search_input_id = Signal::derive(move || search_control_id(&table_control_id.get()));
 
     view! {
         <div
@@ -1158,19 +1185,22 @@ pub fn DataTable(
                 let show_search = searchable.get();
                 let show_chooser = column_chooser.get();
                 let extra_toolbar = toolbar.clone();
-                let search_input_id = search_input_id.clone();
                 (show_search || show_chooser || extra_toolbar.is_some()).then(|| view! {
                     <div class="mb-3 flex items-center gap-2">
                         {show_search.then(|| {
-                            let label_target = search_input_id.clone();
-                            let control_id = search_input_id.clone();
                             view! {
-                            <label class="sr-only" r#for=label_target>
+                            <label class="sr-only" r#for=move || search_input_id.get()>
                                 {move || texts.with(|t| t.search_label.clone())}
                             </label>
                             <input
-                                id=control_id
+                                id=move || search_input_id.get()
+                                name=move || search_input_id.get()
+                                data-table-search-control="true"
                                 type="text"
+                                // A `name` makes this a real form control, which
+                                // is also what invites the browser's saved-value
+                                // dropdown over a table filter. Opt out.
+                                autocomplete="off"
                                 class="input input-bordered input-sm w-full max-w-xs"
                                 placeholder=move || texts.with(|t| t.search_placeholder.clone())
                                 aria-label=move || texts.with(|t| t.search_label.clone())
@@ -1223,6 +1253,7 @@ pub fn DataTable(
                                             texts.with(|texts| texts.filter_label.clone())
                                         })
                                         text_filter_label=text_filter_label
+                                        control_id=table_control_id
                                     />
                                 })
                             }}

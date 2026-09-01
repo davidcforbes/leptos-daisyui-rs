@@ -2478,6 +2478,13 @@ pub fn DataTableDemo() -> impl IntoView {
                                 ServerTableRowSelectability::Selectable
                             }
                         }))
+                    // A caller-supplied stable identity prefix (ldui-j6sh).
+                    // Every framework-owned control below derives its
+                    // `id`/`name` from it, so the row checkboxes are
+                    // addressable as `conversations-select-row-conv_2d1`
+                    // rather than by slice position -- and stay so across
+                    // paging, filtering and the dataset-scope switch.
+                    control_id="conversations"
                     attr:id="server-multi-select-table"
                 />
             </Section>

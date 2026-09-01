@@ -66,6 +66,7 @@ table-body alert.
 | `texts` | `DataTableTexts` | `Default` | User-facing strings (i18n) |
 | `sort_texts` | `DataTableSortTexts` | `Default` | Reactive current-state and next-action names for sortable header controls |
 | `text_filter_label` | `Signal<String>` | `"Filter {column} by text"` | Reactive accessible-name template for substring filter inputs |
+| `control_id` | `MaybeProp<String>` | minted | Stable DOM identity prefix for every framework-owned control — see [Control identity](#control-identity-idname) |
 | `class` | `&'static str` | `""` | Additional container classes |
 | `table_size` | `Signal<TableSize>` | `Md` | daisyUI table density |
 | `zebra` | `Signal<bool>` | `false` | Zebra striping |
@@ -446,6 +447,7 @@ contract as `data-table-data-mode="server-query"` for runtime audits.
 | `filter_option_entries` | `Option<Signal<DataTableFilterOptions>>` | Population-wide typed choices with separate stable values and reactive display labels; mutually exclusive with `filter_options` |
 | `filter_vocabulary` | `Option<ServerFilterVocabulary>` | Optional explicit vocabulary truth; required as `CurrentSlice` when authoritative `filter_options` are absent |
 | `text_filter_label` | `Signal<String>` | Reactive accessible-name template for substring inputs |
+| `control_id` | `MaybeProp<String>` | Stable DOM identity prefix for every framework-owned control — see [Control identity](#control-identity-idname) |
 | `row_key` | `Option<Callback<TableRow, String>>` | Stable business identity used to reconcile row DOM across server-slice replacement |
 | `selection` | `Option<ServerTableSelection>` | Controlled zero-or-one selected business key and replacement callback; requires `row_key` |
 | `on_row_activate` | `Option<Callback<usize>>` | Plain click or keyboard activation with the current-page row index |
@@ -944,6 +946,72 @@ The status region's type step comes from `.ld-text-small`, which is an
 authored rule in `styles/tokens.css` — do **not** add `ld-text-*` to
 `@source inline(...)`.
 
+## Control identity (`id`/`name`)
+
+An accessible **name** is not a DOM **identity**. Before `ldui-j6sh` the column
+filters and both server-selection checkboxes carried an `aria-label` and nothing
+else, so a consuming page could not reach them from a `label[for]`, a form
+submission, or a deterministic automation selector — and could not repair that
+without reaching into markup this crate owns.
+
+Both tables now accept one optional `control_id`, and every framework-owned
+control derives its `id` **and** `name` from it:
+
+| Control | `id` / `name` |
+|---|---|
+| Search box | `{prefix}-search` |
+| Rows-per-page select (`ServerDataTable`) | `{prefix}-page-size` |
+| Column-tools popover (`id` only — not a form control) | `{prefix}-column-tools` |
+| Exact or substring column filter | `{prefix}-filter-{encoded column id}` |
+| Current-slice selection checkbox | `{prefix}-select-all` |
+| Row selection checkbox | `{prefix}-select-row-{encoded row key}` |
+
+```rust,ignore
+<ServerDataTable
+    control_id="conversations"
+    row_key=Callback::new(|row: TableRow| row.get("id").cloned().unwrap_or_default())
+    multi_selection=/* ... */
+/>
+// -> #conversations-search, #conversations-select-all,
+//    #conversations-select-row-conv_2d1, ...
+```
+
+Four properties are worth knowing, because each is a bug someone has already
+shipped:
+
+- **The row checkbox is keyed by the stable row key, never by the slice
+  index.** An index-derived id re-points at a different row the moment the table
+  sorts, filters or pages — `#…-select-row-0` would silently start naming
+  someone else. `conv-1` keeps `#conversations-select-row-conv_2d1` on page one,
+  page three, and after a re-sort.
+- **The token is escape-encoded, not slugified.** Every byte outside
+  `[A-Za-z0-9]` becomes `_` plus two hex digits (`conv-1` → `conv_2d1`,
+  `a b` → `a_20b`). A slug would collapse `a b`, `a-b` and `a_b` onto one id and
+  hand three rows the same identity. The encoding is decodable, hence injective,
+  and never emits `-`, which is what keeps a per-row id from colliding with a
+  per-column or fixed-role one.
+- **`name` is set as well as `id`, to the same value.** `id` is what
+  `label[for]`, `aria-controls` and `document.getElementById` need; `name` is
+  what makes the element a real form control for submission, `FormData`, and the
+  accessibility/automation tooling that audits for it. Each row checkbox is an
+  independent boolean, so each gets its own `name` rather than sharing a group
+  name. All of these controls also carry `autocomplete="off"`: a `name` is
+  exactly what invites the browser's saved-value dropdown over a table filter.
+- **Omitting `control_id` is safe but weaker.** A process-unique prefix
+  (`ldui-data-table-{n}`) is minted per mounted instance, so existing callers
+  still get non-empty, mutually unique ids and two tables on one page cannot
+  collide. That prefix depends on mount order, though, so supply your own when
+  you want selectors stable across builds. The `ldui-` namespace is reserved for
+  minted prefixes. A supplied value is normalized once — trimmed, with anything
+  outside `[A-Za-z0-9_-]` escaped, since an `id` may not contain whitespace and
+  a `.` or `#` breaks every selector built from it.
+
+Selectors that should **not** be built from the id shape have stable data hooks
+instead, following `EntityTable`'s `data-entity-page-size-control`:
+`data-table-search-control`, `data-table-page-size-control`,
+`data-table-filter-kind`, `data-table-filter-column`,
+`data-server-selection-toggle`, `data-server-selection-row`.
+
 ## Accessibility
 
 - Headers are `role="columnheader"` with `aria-sort` reflecting the current state (`ascending` / `descending` / `none`).
@@ -953,7 +1021,7 @@ authored rule in `styles/tokens.css` — do **not** add `ld-text-*` to
   resize by 16 pixels; Home/End select the allowed bounds. Keyboard and pointer
   paths share the same clamp logic and never activate sorting or scroll the
   page.
-- The search box and every exact or substring filter control have both a localized accessible name and a real associated visually-hidden `<label>`. Placeholder text and physical column position are never the naming mechanism.
+- The search box and every exact or substring filter control have both a localized accessible name and a real associated visually-hidden `<label>`, wired by `for` to the control's own `id` (see [Control identity](#control-identity-idname)). Placeholder text and physical column position are never the naming mechanism.
 - Sort state changes are conveyed through `aria-sort` rather than the `▲`/`▼` glyph alone.
 - **Keyboard operation.** When the table is interactive — `selected_rows` or `on_row_activate` supplied — each row is focusable (`tabindex=0`) and carries `aria-selected`. **Enter** and **Space** do exactly what a plain click does (activate, or select); **Ctrl/Cmd** and **Shift** with Enter/Space toggle and range-extend selection, mirroring the mouse. Space suppresses its default page-scroll. A plain display table (neither prop) adds no tab stops.
 

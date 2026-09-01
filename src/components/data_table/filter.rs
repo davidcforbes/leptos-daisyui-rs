@@ -10,6 +10,7 @@
 //! unit-tested without a DOM, matching `resize.rs`/`auto_page.rs`.
 
 use crate::components::data_table::types::{Column, ColumnFilterKind, TableRow};
+use crate::components::data_table::{filter_control_id, next_data_table_control_id};
 use leptos::html::Input;
 use leptos::prelude::*;
 use std::collections::HashMap;
@@ -310,6 +311,10 @@ fn DataTableTextFilter(
     filters: RwSignal<ColumnFilters>,
     on_filters_change: Option<Callback<ColumnFilters>>,
     #[prop(into)] accessible_label: Signal<String>,
+    /// Resolved `id`/`name` for this one control (ldui-j6sh), already derived
+    /// from the table prefix and this column's stable id by the filter row.
+    #[prop(into)]
+    control_id: Signal<String>,
 ) -> impl IntoView {
     let accepted_value =
         move || filters.with(|active| active.get(col_id).cloned().unwrap_or_default());
@@ -394,10 +399,12 @@ fn DataTableTextFilter(
     });
 
     view! {
-        <label class="block w-full">
+        <label class="block w-full" r#for=move || control_id.get()>
             <span class="sr-only">{move || accessible_label.get()}</span>
             <input
                 node_ref=input_ref
+                id=move || control_id.get()
+                name=move || control_id.get()
                 type="text"
                 class="input input-bordered input-xs w-full bg-table-filter font-normal text-table-filter-content forced-colors:bg-[Canvas] forced-colors:text-[CanvasText]"
                 aria-label=move || accessible_label.get()
@@ -455,6 +462,17 @@ pub fn DataTableFilterRow(
     /// with the header and body, and widens the options-error `colspan`.
     #[prop(optional, into)]
     leading_column: bool,
+
+    /// The owning table's resolved DOM identity prefix (ldui-j6sh). Each
+    /// filter control's `id`/`name` is this prefix plus a `filter` role
+    /// segment plus the encoded column id, so the identity is deterministic
+    /// and cannot move when columns reorder or rows re-render.
+    ///
+    /// Defaults to a freshly minted process-unique prefix, so a
+    /// `DataTableFilterRow` used standalone still emits non-empty, mutually
+    /// unique ids. `DataTable`/`ServerDataTable` always pass their own.
+    #[prop(into, default = Signal::stored(next_data_table_control_id()))]
+    control_id: Signal<String>,
 ) -> impl IntoView {
     let options_error = Memo::new(move |_| validate_filter_options(&options.get()).err());
 
@@ -501,6 +519,11 @@ pub fn DataTableFilterRow(
                     let text_accessible_label = Signal::derive(move || {
                         text_filter_label.get().replace("{column}", &text_header_label)
                     });
+                    // Derived from the column's STABLE id, never its position:
+                    // a reordered or hidden column must not hand its identity
+                    // to whichever column now occupies that cell (ldui-j6sh).
+                    let filter_id =
+                        Signal::derive(move || filter_control_id(&control_id.get(), col_id));
 
                     view! {
                         <th
@@ -517,11 +540,14 @@ pub fn DataTableFilterRow(
                                         options.with(|o| o.get(col_id).cloned().unwrap_or_default())
                                     };
                                     Some(view! {
-                                        <label class="block w-full">
+                                        <label class="block w-full" r#for=move || filter_id.get()>
                                         <span class="sr-only">{move || exact_accessible_label.get()}</span>
                                         <select
+                                            id=move || filter_id.get()
+                                            name=move || filter_id.get()
                                             class="select select-bordered select-xs w-full bg-table-filter font-normal text-table-filter-content forced-colors:bg-[Canvas] forced-colors:text-[CanvasText]"
                                             aria-label=move || exact_accessible_label.get()
+                                            autocomplete="off"
                                             data-table-filter-kind="exact"
                                             prop:value=move || {
                                                 filters.with(|f| {
@@ -607,6 +633,7 @@ pub fn DataTableFilterRow(
                                         filters=filters
                                         on_filters_change=on_filters_change
                                         accessible_label=text_accessible_label
+                                        control_id=filter_id
                                     />
                                 }.into_any()),
                                 None => None,

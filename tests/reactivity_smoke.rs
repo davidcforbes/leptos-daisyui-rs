@@ -3082,7 +3082,7 @@ async fn assert_server_table_cursor_pagination_preserves_slice_truth(h: &pixelpr
         eval_json(
             h,
             r#"(() => {
-                const input = document.querySelector('#cursor-server-table input[id^="ldui-data-table-search-"]');
+                const input = document.querySelector('#cursor-server-table input[data-table-search-control="true"]');
                 input.value = 'User 1';
                 input.dispatchEvent(new Event('input', { bubbles: true }));
                 return true;
@@ -3291,8 +3291,8 @@ async fn assert_server_table_controls_match_declared_query_capabilities(
                     table.dataset.serverQuerySorting,
                     table.dataset.serverQueryFiltering,
                 ],
-                // Scoped to the table-wide search box's own id prefix (the
-                // same selector this file already uses for `#cursor-server-
+                // Scoped by the table-wide search box's own stable data hook
+                // (the same selector this file uses for `#cursor-server-
                 // table` at ~line 2917 and for other tables at ~3677/3702).
                 // A bare `input[type="text"]` also matches the "Name"
                 // column's `Column::filterable_text()` per-column filter
@@ -3300,8 +3300,14 @@ async fn assert_server_table_controls_match_declared_query_capabilities(
                 // present since this table's very first commit), which
                 // inflates this count to 2 and has nothing to do with
                 // whether the search box itself rendered exactly once.
-                search: table.querySelectorAll('input[id^="ldui-data-table-search-"]').length,
-                pageSize: table.querySelectorAll('select[id$="-page-size"]').length,
+                // The hook replaced an `id^="ldui-data-table-search-"` prefix
+                // match when ldui-j6sh made the id derivable from a
+                // caller-supplied `control_id` -- an id-shape selector stops
+                // matching the moment a consumer names its own table, which is
+                // precisely what a stable hook is for (cf. 59d765b's
+                // `data-entity-page-size-control`).
+                search: table.querySelectorAll('input[data-table-search-control="true"]').length,
+                pageSize: table.querySelectorAll('select[data-table-page-size-control="true"]').length,
                 filters: table.querySelectorAll('[data-table-filter-row]').length,
                 sorts: table.querySelectorAll('[data-table-sort-state]').length,
             };
@@ -3834,7 +3840,7 @@ async fn data_table_control_names_relocalize_without_resetting_state() {
         &h,
         r#"(() => {
             const root = document.querySelector('#filter-row-table');
-            const search = root?.querySelector('input[id^="ldui-data-table-search-"]');
+            const search = root?.querySelector('input[data-table-search-control="true"]');
             const textFilter = root?.querySelector('[data-table-filter-column="name"] input[data-table-filter-kind="contains"]');
             const filter = root?.querySelector('tr.data-table-filter-row select');
             if (!search || !textFilter || !filter) return false;
@@ -3859,7 +3865,7 @@ async fn data_table_control_names_relocalize_without_resetting_state() {
         format!(
             r#"(() => {{
                 const root = document.querySelector('{root}');
-                const search = root.querySelector('input[id^="ldui-data-table-search-"]');
+                const search = root.querySelector('input[data-table-search-control="true"]');
                 const textFilter = root.querySelector('[data-table-filter-column="name"] input[data-table-filter-kind="contains"]');
                 const filter = root.querySelector('tr.data-table-filter-row select');
                 const labelText = element => Array.from(element.labels || [])

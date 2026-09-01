@@ -61,6 +61,7 @@ mod controls;
 mod filter;
 mod geometry;
 mod header;
+mod identity;
 mod pagination;
 mod resize;
 mod selection;
@@ -68,18 +69,10 @@ mod server_column_tools;
 mod server_component;
 mod server_selection;
 
-use std::sync::atomic::{AtomicU64, Ordering};
-
-/// Process-wide sequence for the real `<label for>` / search-control wiring
-/// shared by client and server table variants.
-static DATA_TABLE_SEARCH_ID: AtomicU64 = AtomicU64::new(0);
-
-pub(super) fn next_data_table_search_id() -> String {
-    format!(
-        "ldui-data-table-search-{}",
-        DATA_TABLE_SEARCH_ID.fetch_add(1, Ordering::Relaxed)
-    )
-}
+pub(super) use identity::{
+    column_tools_control_id, filter_control_id, next_data_table_control_id, page_size_control_id,
+    resolve_control_id, search_control_id, selection_header_control_id, selection_row_control_id,
+};
 
 /// Every DataTable variant keeps wide columns reachable instead of clipping
 /// the right-hand side of the table at constrained viewport widths.
