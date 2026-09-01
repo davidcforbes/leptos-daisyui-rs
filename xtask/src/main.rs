@@ -400,6 +400,20 @@ fn selectable_summary_step() -> Step {
 /// contract (ldui-y2ed): bars extending from a zero baseline in both
 /// directions, the hidden category/value table, roving keyboard focus, and
 /// activation keyed by category rather than array index.
+/// Focused browser proof for `Heatmap`'s accessible matrix contract
+/// (ldui-8d94): two-axis roving keyboard focus, the hidden row/column-header
+/// table that lets a value be located by its headers rather than by counting,
+/// and activation keyed by the (row, column) PAIR rather than array position.
+fn heatmap_step() -> Step {
+    Step {
+        name: "test-heatmap-matrix",
+        run: Run::BrowserSuite {
+            test: "heatmap_matrix_smoke",
+            html_target: None,
+        },
+    }
+}
+
 fn bar_chart_step() -> Step {
     Step {
         name: "test-bar-chart-divergence",
@@ -544,6 +558,7 @@ fn full_steps() -> Vec<Step> {
     steps.push(result_list_step());
     steps.push(modal_close_proposal_step());
     steps.push(bar_chart_step());
+    steps.push(heatmap_step());
     steps.push(selectable_summary_step());
     steps.push(section_heading_step());
     steps.push(search_picker_dialog_step());
@@ -2137,6 +2152,7 @@ fn main() -> ExitCode {
         "test-keyed-result-list" => run_steps(&[result_list_step()]),
         "test-modal-close-proposal" => run_steps(&[modal_close_proposal_step()]),
         "test-bar-chart-divergence" => run_steps(&[bar_chart_step()]),
+        "test-heatmap-matrix" => run_steps(&[heatmap_step()]),
         "test-selectable-summary" => run_steps(&[selectable_summary_step()]),
         "test-section-heading" => run_steps(&[section_heading_step()]),
         "test-search-picker-dialog" => run_steps(&[search_picker_dialog_step()]),
@@ -2158,7 +2174,7 @@ fn main() -> ExitCode {
         other => {
             eprintln!("xtask: unknown subcommand {other:?}");
             eprintln!(
-                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-selectable-summary|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-server-table-column-tools|gen-tokens|check-sibling-tokens|bump>"
+                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-selectable-summary|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-server-table-column-tools|gen-tokens|check-sibling-tokens|bump>"
             );
             ExitCode::from(2)
         }
