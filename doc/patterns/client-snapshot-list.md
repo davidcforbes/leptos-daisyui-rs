@@ -181,7 +181,7 @@ express as pure behavior is a typed builder instead (`ldui-myhh` /
 |---|---|---|
 | `with_page_reset_key` | `EntityTable::page_reset_key` | Resets pagination on a caller-owned local-filter identity, distinct from the page's own dataset/access generation. |
 | `with_viewport_fit` | `EntityTable::viewport_fit` | Framework-measured adaptive row capacity from a definite parent or CSS height budget. |
-| `with_toolbar_actions` | `EntityTable::toolbar_actions` | Caller-rendered table utilities (Export, Refresh) placed after page size and before the column chooser. |
+| `with_toolbar_actions` | `EntityTable::toolbar_actions` | Caller-rendered table utilities (Export, Refresh) placed in the top toolbar before the column chooser. (Page size moved to the footer in ldui-z0n1, so the toolbar now holds only these actions and the chooser.) |
 | `on_display_projection` / `with_projection_action_columns` | `EntityTable::on_display_projection` / `projection_action_columns` | Atomic read-only display projection for caller-owned export encoding, plus its action-column policy. |
 | `with_column_chooser_trigger` | `EntityTable::column_chooser_trigger` | Text (default) or compact icon presentation of the framework-owned chooser; both keep identical accessible semantics. |
 
