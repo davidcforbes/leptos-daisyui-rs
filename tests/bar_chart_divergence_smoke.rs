@@ -102,6 +102,28 @@ async fn press_on(harness: &pixelproof_web::Harness, key: &str, dom_key: &str) {
     tokio::time::sleep(std::time::Duration::from_millis(harness.config().settle_ms)).await;
 }
 
+/// The bar the ROVING TAB STOP points at.
+///
+/// Deliberately not `document.activeElement`: clicking a control outside the
+/// chart -- the sort or remove button -- necessarily moves DOM focus to that
+/// control, and the component neither can nor should hold focus on a bar the
+/// user clicked away from. What must survive a data change is where a reader
+/// LANDS when they tab back in, which is the roving tab stop (ldui-y2ed).
+async fn roving_key(harness: &pixelproof_web::Harness) -> Value {
+    eval_json(
+        harness,
+        &format!(
+            r#"(() => {{
+                const el = document.querySelector(
+                    "{CHART} [data-bar-chart-focus][tabindex='0']"
+                );
+                return el ? (el.dataset.barKey ?? null) : null;
+            }})()"#
+        ),
+    )
+    .await
+}
+
 async fn focused_key(harness: &pixelproof_web::Harness) -> Value {
     eval_json(
         harness,
@@ -202,7 +224,15 @@ async fn a_missing_value_draws_no_bar_and_a_zero_draws_a_reachable_one() {
         .iter()
         .find(|bar| bar["key"] == json!("central"))
         .expect("the zero office is drawn");
-    assert_eq!(zero["width"], json!(0.0));
+    // Compared numerically, not as JSON values: the DOM reports a width of 0
+    // as the integer 0, and serde_json treats Number(0) and Number(0.0) as
+    // different variants, so json!(0.0) never matches however correct the
+    // rendering is.
+    assert_eq!(
+        zero["width"].as_f64(),
+        Some(0.0),
+        "a zero-valued bar draws no width: {zero}"
+    );
 
     let reachable: Value = eval_json(
         &harness,
@@ -306,10 +336,18 @@ async fn a_chart_with_no_callback_claims_no_button_and_legacy_charts_claim_nothi
         &format!(
             r#"(() => {{
                 const neutral = document.querySelector("{NEUTRAL}");
-                const legacy = Array.from(document.querySelectorAll('svg')).filter(
-                    (svg) => !svg.hasAttribute('data-bar-chart-plot')
-                        && !svg.closest('[data-testid="bar-chart"]')
-                );
+                // Legacy = a BarChart still fed the positional Vec<(String,
+                // f64)>, i.e. a data-testid="bar-chart" plot that is NOT one of
+                // this page's two typed fixtures. Scoping by "every svg that is
+                // not a bar chart" instead swept in the interactive LineChart
+                // and Heatmap, whose targets carry tabindex by design, and
+                // reported their 60 tab stops as this component's regression.
+                const typed = ['diverging-bar-chart', 'neutral-bar-chart'];
+                const legacy = Array.from(
+                    document.querySelectorAll('[data-testid="bar-chart"]')
+                ).filter((el) => !typed.some((id) =>
+                    el.closest('[data-testid="' + id + '"]')
+                ));
                 return {{
                     targetRoles: Array.from(new Set(
                         Array.from(neutral.querySelectorAll('[data-bar-chart-focus]'))
@@ -450,13 +488,13 @@ async fn focus_follows_a_bar_through_a_sort_and_moves_predictably_after_removal(
 
     click(&harness, "[data-testid='bar-chart-sort']").await;
     assert_eq!(
-        focused_key(&harness).await,
+        roving_key(&harness).await,
         json!("north"),
         "a sort must not hand focus to whatever now sits at the old index"
     );
 
     click(&harness, "[data-testid='bar-chart-remove']").await;
-    let after = focused_key(&harness).await;
+    let after = roving_key(&harness).await;
     assert_ne!(
         after,
         json!("north"),
