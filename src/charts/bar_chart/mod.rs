@@ -198,6 +198,19 @@ pub fn BarChart(
         let previous = previous_keys.get_value();
         previous_keys.set_value(Some(next.clone()));
         let Some(previous) = previous else {
+            // FIRST RUN. Returning here leaves `roving_key` unset, and the tab
+            // stop is rendered from it -- so NO bar would carry `tabindex="0"`
+            // and a keyboard user could not enter the chart at all until the
+            // data happened to change. `reduce`'s trailing fallback already
+            // lands the tab stop on the first navigable bar; it simply never
+            // ran at mount. Reconciling the keys against themselves moves
+            // nothing and seeds it (ldui-y2ed; the same defect was in Heatmap,
+            // ldui-8d94 -- both effects were written to this shape).
+            let old = state.get_untracked();
+            let seeded = interaction::reduce(&old, Action::ReconcileData, &next, &next);
+            if seeded != old {
+                state.set(seeded);
+            }
             return;
         };
         if previous == next {

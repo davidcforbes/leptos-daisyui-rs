@@ -30,7 +30,11 @@ async fn eval_json(harness: &pixelproof_web::Harness, expression: &str) -> Value
         .await
         .expect("evaluate bar-chart fixture")
         .into_value()
-        .expect("bar-chart expression returns JSON")
+        // A JS `null` is a legitimate answer -- the focus reader returns it
+        // when nothing is focused, and chromiumoxide surfaces that as
+        // "No value found". Mapping it to `Value::Null` lets the helper
+        // express its own empty case rather than panicking (ldui-y2ed).
+        .unwrap_or(Value::Null)
 }
 
 /// Reads every drawn bar's rectangle and key straight out of the DOM.
@@ -352,7 +356,7 @@ async fn enter_activates_the_focused_bar_and_emits_its_stable_key() {
     press_on(&harness, "west", "Enter").await;
 
     let state = oracle(&harness).await;
-    let activation = &state["state"]["state"]["bar_chart.activation"];
+    let activation = &state["state"]["bar_chart.activation"];
     assert_eq!(activation["categoryKey"], json!("west"));
     assert_eq!(activation["categoryLabel"], json!("West"));
     assert_eq!(activation["value"], json!(9.5));
@@ -360,7 +364,7 @@ async fn enter_activates_the_focused_bar_and_emits_its_stable_key() {
     assert_eq!(activation["status"], json!("favorable"));
     assert_eq!(activation["source"], json!("keyboard"));
     assert_eq!(
-        state["state"]["state"]["bar_chart.activation_count"],
+        state["state"]["bar_chart.activation_count"],
         json!(1),
         "one key press is one activation"
     );
@@ -386,7 +390,7 @@ async fn a_pointer_click_activates_the_same_bar_with_a_pointer_source() {
     .await;
 
     let state = oracle(&harness).await;
-    let activation = &state["state"]["state"]["bar_chart.activation"];
+    let activation = &state["state"]["bar_chart.activation"];
     assert_eq!(activation["categoryKey"], json!("north"));
     assert_eq!(activation["value"], json!(-12.5));
     assert_eq!(

@@ -329,6 +329,19 @@ pub fn Heatmap(
         let previous = previous_axes.get_value();
         previous_axes.set_value(Some(next.clone()));
         let Some(previous) = previous else {
+            // FIRST RUN. There is nothing to reconcile against, but returning
+            // here would leave `roving_key` unset -- and the tab stop is
+            // rendered from it, so NO cell would carry `tabindex="0"` and a
+            // keyboard user could not enter the grid at all until the data
+            // happened to change. `reduce`'s trailing fallback already lands
+            // the tab stop on the first cell; it simply never ran at mount.
+            // Reconciling the axes against themselves moves nothing and seeds
+            // it (ldui-8d94).
+            let old = state.get_untracked();
+            let seeded = interaction::reduce(&old, Action::ReconcileData, &next, &next);
+            if seeded != old {
+                state.set(seeded);
+            }
             return;
         };
         if previous == next {
