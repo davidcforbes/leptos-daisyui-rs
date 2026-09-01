@@ -435,6 +435,14 @@ pub fn AppShellHeader(
 /// external state in manual mode). The active item also gets
 /// `aria-current="page"`.
 ///
+/// ### Deliberately unstyled: no `.btn`
+/// This is a designed unstyled action, not an omission -- a compact
+/// icon-and-label rail item has none of `.btn`'s padding, min-height,
+/// background, or shadow. The button carries `data-pressable="true"`, the
+/// marker [`Pressable`](crate::components::Pressable) defines for exactly
+/// this case, so the `ldui-audit` `button-without-btn` drift rule
+/// recognizes the item as intentional rather than flagging it.
+///
 /// ### Add to `input.css`
 /// ```css
 /// @source inline("relative flex flex-col items-center justify-center gap-1 p-2 w-full cursor-pointer");
@@ -513,6 +521,7 @@ pub fn AppShellIconNavItem(
     view! {
         <button
             type="button"
+            data-pressable="true"
             node_ref=node_ref
             class=move || {
                 merge_classes!(
