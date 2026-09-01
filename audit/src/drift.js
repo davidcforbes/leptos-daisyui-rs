@@ -61,7 +61,19 @@ for (const el of els) {
   }
 
   // 2. table-without-table-class: a <table> whose classList lacks .table.
-  if (tag === 'TABLE' && !el.classList.contains('table')) {
+  //
+  // `.sr-only` is exempt. This rule exists to catch a table that LOOKS
+  // undesigned, and a screen-reader-only table has no appearance to get
+  // wrong -- every chart in this library ships one as its accessible data
+  // equivalent, so without the exemption a consumer's audit reports one
+  // finding per chart for markup they neither wrote nor can see. That is the
+  // same failure ldui-zl58 documented for the nav rail: our own markup
+  // drowning a consumer's real signal.
+  if (
+    tag === 'TABLE' &&
+    !el.classList.contains('table') &&
+    !el.classList.contains('sr-only')
+  ) {
     push(path(el), 'table-without-table-class: raw <table> lacks .table');
   }
 

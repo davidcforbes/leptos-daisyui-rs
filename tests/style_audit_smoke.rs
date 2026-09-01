@@ -231,17 +231,26 @@ const PAGES: &[(&str, &[(&str, usize)])] = &[
             (family::TYPOGRAPHY, 78),
             (family::SHAPE, 0),
             (family::DEPTH, 0),
-            // 16, was 14: the two interactive categorical LineChart fixtures
-            // (ldui-9tr) add scaled-viewBox tick/label text distances — the
-            // same not-workable-on-the-4px-grid class as the rest of this
-            // page (see the module doc note above).
-            (family::GRID, 16),
+            // 23, was 16: ldui-j0mt's dual-axis chart is the third
+            // categorical LineChart fixture, and a secondary axis adds a
+            // second column of tick text plus its own axis title. Every one
+            // of these findings is an `svg > text` distance — scaled-viewBox
+            // tick/label geometry, which is not workable on the 4px grid and
+            // is the same class as the rest of this page (see the module doc
+            // note above), not new page debt.
+            (family::GRID, 23),
             (family::INTERNAL, 0),
-            // The categorical charts' screen-reader data tables are raw
-            // <table class="sr-only"> by design — the daisyUI .table drift
-            // heuristic flags them, but they are invisible, so there is no
-            // visual drift to fix (ldui-9tr.7). Exactly the two fixtures.
-            (family::COMPONENT_DRIFT, 2),
+            // 0, was 2. The categorical charts' screen-reader data tables
+            // are raw <table class="sr-only"> by design, and the daisyUI
+            // .table drift heuristic used to flag every one of them. Rather
+            // than ratchet that to 3 for the new dual-axis chart, the rule
+            // itself now exempts .sr-only (audit/src/drift.js): the check
+            // exists to catch a table that LOOKS undesigned, and an
+            // invisible table has no appearance to get wrong. Fixed at
+            // source, so a consumer's audit no longer carries one finding
+            // per chart for markup they cannot see — the same reasoning as
+            // ldui-zl58's nav rail. Kept listed at 0 as a tripwire.
+            (family::COMPONENT_DRIFT, 0),
         ],
     ),
 ];

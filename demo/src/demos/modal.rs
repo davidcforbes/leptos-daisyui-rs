@@ -160,7 +160,18 @@ pub fn ModalDemo() -> impl IntoView {
                         </p>
                         <ModalAction>
                             <form method="dialog">
+                                // `button_type=Submit` is REQUIRED here, and is
+                                // the whole point of this fixture. daisyUI's
+                                // documented close idiom is a raw <button>
+                                // inside a `method="dialog"` form, which submits
+                                // by default -- but this library's `Button`
+                                // defaults to `type="button"` (ldui-9vs), so the
+                                // same markup with `Button` submits nothing, the
+                                // dialog never closes, and no close proposal is
+                                // ever emitted. The failure is silent: the
+                                // button simply does nothing.
                                 <Button
+                                    button_type=ButtonType::Submit
                                     style=ButtonStyle::Ghost
                                     attr:data-testid="controlled-modal-dialog-form-close"
                                 >

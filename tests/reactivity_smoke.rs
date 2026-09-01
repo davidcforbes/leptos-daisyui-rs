@@ -1614,7 +1614,11 @@ async fn line_chart_semantic_graph() {
     )
     .await;
     let graph = s["graph"].as_array().expect("graph");
-    assert_eq!(graph.len(), 2, "two categorical fixtures: {s}");
+    // Three since ldui-j0mt added the dual-axis chart. The sibling rootCount
+    // assertion in this suite was updated with it; this one was not, so the
+    // lane failed on its first run after that change - the same stale-count
+    // shape as the xtask check-count pin.
+    assert_eq!(graph.len(), 3, "three categorical fixtures: {s}");
     for (index, chart) in graph.iter().enumerate() {
         assert_eq!(
             chart["role"],
