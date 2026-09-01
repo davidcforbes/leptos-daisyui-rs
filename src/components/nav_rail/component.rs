@@ -152,6 +152,15 @@ pub fn NavRailGroup(
 /// mirroring [`AppShellIconNavItem`](crate::components::AppShellIconNavItem)'s
 /// `badge` prop (and d2d-ui's `NavItem::with_badge`).
 ///
+/// ### Deliberately unstyled: no `.btn`
+/// This is a designed unstyled action, not an omission -- a compact icon
+/// rail item has none of `.btn`'s padding, min-height, background, or
+/// shadow. The button carries `data-pressable="true"`, the marker
+/// [`Pressable`](crate::components::Pressable) defines for exactly this
+/// case, so the `ldui-audit` `button-without-btn` drift rule recognizes the
+/// item as intentional rather than flagging it (`ldui-2e7a`, following the
+/// identical fix for `AppShellIconNavItem` in `ldui-zl58`).
+///
 /// ### Add to `input.css`
 /// ```css
 /// @source inline("badge badge-error badge-sm absolute -top-1 -right-1");
@@ -226,6 +235,7 @@ pub fn NavRailItem(
     view! {
         <button
             type="button"
+            data-pressable="true"
             node_ref=node_ref
             class=move || merge_classes!(item_class(is_active()), class)
             aria-label=move || {

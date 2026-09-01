@@ -217,13 +217,17 @@ fn tree_item(node: FlatNode, ctx: Ctx) -> AnyView {
     let hover = ctx.hover;
 
     // Expander: a real <button type="button"> for branches (chevron / spinner),
-    // an inert spacer for leaves so labels line up.
+    // an inert spacer for leaves so labels line up. Deliberately unstyled (no
+    // .btn -- a compact 16x16 chevron toggle wants none of .btn's padding or
+    // background), so it carries data-pressable="true" for the ldui-audit
+    // button-without-btn drift rule (ldui-2e7a).
     let expander = if is_branch {
         let ctx_click = ctx.clone();
         let key_click = key.clone();
         view! {
             <button
                 type="button"
+                data-pressable="true"
                 class="shrink-0 w-4 h-4 flex items-center justify-center text-base-content/50 hover:text-base-content"
                 aria-hidden="true"
                 tabindex="-1"

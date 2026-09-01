@@ -35,6 +35,10 @@ pub fn JsonTreeViewer(
     }
 }
 
+/// The array/object disclosure toggle is deliberately unstyled (no `.btn` --
+/// it is inline text, not a button-shaped control), so it carries
+/// `data-pressable="true"` for the `ldui-audit` `button-without-btn` drift
+/// rule (`ldui-2e7a`).
 #[component]
 fn JsonNode(value: Value, depth: usize, #[prop(default = false)] collapsed: bool) -> impl IntoView {
     let open = RwSignal::new(!collapsed || depth == 0);
@@ -63,6 +67,8 @@ fn JsonNode(value: Value, depth: usize, #[prop(default = false)] collapsed: bool
             view! {
                 <div style=indent.clone()>
                     <button
+                        type="button"
+                        data-pressable="true"
                         class="text-xs font-mono cursor-pointer hover:underline"
                         on:click=move |_| open.update(|o| *o = !*o)
                     >
@@ -89,6 +95,8 @@ fn JsonNode(value: Value, depth: usize, #[prop(default = false)] collapsed: bool
             view! {
                 <div style=indent.clone()>
                     <button
+                        type="button"
+                        data-pressable="true"
                         class="text-xs font-mono cursor-pointer hover:underline"
                         on:click=move |_| open.update(|o| *o = !*o)
                     >

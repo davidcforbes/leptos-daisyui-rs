@@ -462,7 +462,11 @@ pub fn MarkdownEditor(
     let on_set_source = move |_ev: ev::MouseEvent| mode_signal.set(Mode::Source);
     let on_set_split = move |_ev: ev::MouseEvent| mode_signal.set(Mode::Split);
     // Reactive style functions for the toggle buttons — highlight the
-    // currently-selected mode with a darker background.
+    // currently-selected mode with a darker background. Deliberately
+    // unstyled (fully inline-CSS, no daisyUI/.btn classes at all -- this
+    // toolbar predates and stays independent of the Tailwind/daisyUI face),
+    // so each button carries data-pressable="true" for the ldui-audit
+    // button-without-btn drift rule (ldui-2e7a).
     let style_for = move |target: Mode| -> String {
         let selected = mode_signal.get() == target;
         format!(
@@ -483,6 +487,7 @@ pub fn MarkdownEditor(
             <div class="lds-mode-toggle" style=toggle_row_style>
                 <button
                     type="button"
+                    data-pressable="true"
                     style=graphic_btn_style
                     title="Graphic — WYSIWYG editing"
                     on:click=on_set_graphic
@@ -491,6 +496,7 @@ pub fn MarkdownEditor(
                 </button>
                 <button
                     type="button"
+                    data-pressable="true"
                     style=source_btn_style
                     title="Source — textarea + live preview"
                     on:click=on_set_source
@@ -499,6 +505,7 @@ pub fn MarkdownEditor(
                 </button>
                 <button
                     type="button"
+                    data-pressable="true"
                     style=split_btn_style
                     title="Split — graphic + source side-by-side"
                     on:click=on_set_split

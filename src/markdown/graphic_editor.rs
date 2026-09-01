@@ -1105,22 +1105,26 @@ pub fn MarkdownGraphicEditor(
                 style=menu_style
                 on:contextmenu=move |ev: MouseEvent| ev.prevent_default()
             >
-                <button type="button" style=ITEM_STYLE on:mousedown=on_row_above>
+                // Every item below is deliberately unstyled (a native-look
+                // context menu drawn entirely in inline CSS, not daisyUI), so
+                // each carries data-pressable="true" for the ldui-audit
+                // button-without-btn drift rule (ldui-2e7a).
+                <button type="button" data-pressable="true" style=ITEM_STYLE on:mousedown=on_row_above>
                     "Insert row above"
                 </button>
-                <button type="button" style=ITEM_STYLE on:mousedown=on_row_below>
+                <button type="button" data-pressable="true" style=ITEM_STYLE on:mousedown=on_row_below>
                     "Insert row below"
                 </button>
-                <button type="button" style=ITEM_STYLE on:mousedown=on_col_left>
+                <button type="button" data-pressable="true" style=ITEM_STYLE on:mousedown=on_col_left>
                     "Insert column left"
                 </button>
-                <button type="button" style=ITEM_STYLE on:mousedown=on_col_right>
+                <button type="button" data-pressable="true" style=ITEM_STYLE on:mousedown=on_col_right>
                     "Insert column right"
                 </button>
-                <button type="button" style=ITEM_STYLE on:mousedown=on_row_delete>
+                <button type="button" data-pressable="true" style=ITEM_STYLE on:mousedown=on_row_delete>
                     "Delete row"
                 </button>
-                <button type="button" style=ITEM_STYLE on:mousedown=on_col_delete>
+                <button type="button" data-pressable="true" style=ITEM_STYLE on:mousedown=on_col_delete>
                     "Delete column"
                 </button>
             </div>
@@ -1141,7 +1145,12 @@ pub fn MarkdownGraphicEditor(
                     on:keydown=on_overlay_keydown
                 ></textarea>
                 <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:6px;">
+                    // Deliberately unstyled (inline CSS, matching the floating
+                    // table-edit overlay's own look, not daisyUI) -- carries
+                    // data-pressable="true" for the ldui-audit
+                    // button-without-btn drift rule (ldui-2e7a).
                     <button type="button"
+                        data-pressable="true"
                         style="padding:4px 12px;border:1px solid #ccc;background:#f5f5f5;\
                                border-radius:3px;cursor:pointer;font:inherit;"
                         on:mousedown=on_cancel_button
@@ -1149,6 +1158,7 @@ pub fn MarkdownGraphicEditor(
                         "Cancel"
                     </button>
                     <button type="button"
+                        data-pressable="true"
                         style="padding:4px 12px;border:1px solid #2563eb;background:#2563eb;\
                                color:white;border-radius:3px;cursor:pointer;font:inherit;"
                         on:mousedown=on_commit_button

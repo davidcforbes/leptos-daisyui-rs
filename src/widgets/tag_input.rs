@@ -17,6 +17,11 @@ use crate::components::{Badge, BadgeColor, BadgeSize, Input, InputSize};
 /// * `tags`       — the signal storing the current list of tag values.
 /// * `placeholder`— text shown in the input box.
 /// * `color`      — badge color (defaults to Primary).
+///
+/// Each badge's "x" removal button is deliberately unstyled (no `.btn` --
+/// it is an inline glyph inside the badge, not a button-shaped control), so
+/// it carries `data-pressable="true"` for the `ldui-audit` `button-without-btn`
+/// drift rule (`ldui-2e7a`).
 #[component]
 pub fn TagInput(
     /// Signal holding the current list of tag values.
@@ -57,6 +62,7 @@ pub fn TagInput(
                                 <span>{label}</span>
                                 <button
                                     type="button"
+                                    data-pressable="true"
                                     class="text-xs opacity-70 hover:opacity-100"
                                     on:click=move |_| {
                                         tags.update(|list| {

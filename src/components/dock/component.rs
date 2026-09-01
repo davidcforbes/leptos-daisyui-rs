@@ -53,6 +53,14 @@ pub fn Dock(
 /// An individual navigation button within the dock. Can be marked as active
 /// and supports click handling.
 ///
+/// ### Deliberately unstyled: no `.btn`
+/// daisyUI's `.dock` styles its `<button>` children directly (no `.dock-item`
+/// class exists) -- adding `.btn` would double up padding and background
+/// against `.dock`'s own rules. The button carries `data-pressable="true"`,
+/// the marker [`Pressable`](crate::components::Pressable) defines for a
+/// designed unstyled action, so the `ldui-audit` `button-without-btn` drift
+/// rule recognizes it as intentional rather than flagging it (`ldui-2e7a`).
+///
 /// ## Node References
 /// - `node_ref` - References the item `<button>` element ([HTMLButtonElement](https://developer.mozilla.org/en-US/docs/Web/API/HTMLButtonElement))
 #[component]
@@ -73,7 +81,7 @@ pub fn DockItem(
     children: Children,
 ) -> impl IntoView {
     view! {
-        <button node_ref=node_ref class=class class:dock-active=active>
+        <button node_ref=node_ref data-pressable="true" class=class class:dock-active=active>
             {children()}
         </button>
     }
