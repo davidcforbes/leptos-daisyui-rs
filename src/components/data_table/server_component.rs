@@ -1,4 +1,5 @@
 use crate::components::button::Button;
+use crate::components::checkbox::{Checkbox, CheckboxSize};
 use crate::components::data_table::auto_page::{
     DEFAULT_AUTO_MIN_ROWS, FALLBACK_HEADER_HEIGHT, FALLBACK_ROW_HEIGHT, RowHeightEra,
     auto_page_size_for_height, max_row_height,
@@ -19,6 +20,12 @@ use crate::components::data_table::server_column_tools::{
     ServerTableColumnToolsTexts, ServerTableDisplayedSlice, apply_column_tools_presentation,
     format_server_move_label, save_column_tools_preferences, server_table_displayed_slice,
 };
+use crate::components::data_table::server_selection::{
+    DisplayedSelectionRow, ResolvedSelectionMode, ServerTableMultiSelection,
+    ServerTableRowSelectability, ServerTableSelectionCause, ServerTableSelectionProposal,
+    displayed_keys, off_slice_selected_count, propose_row_toggle, propose_slice_toggle,
+    resolve_selection_mode, selectable_keys, slice_selection_state,
+};
 use crate::components::data_table::types::{
     CellRenderer, Column, ColumnFilterKind, DataTableClasses, DataTableSortTexts, DataTableTexts,
     RowDetailRenderer, SortOrder, TableRow, TypedCellFn,
@@ -34,7 +41,15 @@ use web_sys::wasm_bindgen::JsCast;
 
 const KEYED_CALLBACK_WITHOUT_ROW_KEY_CONFIGURATION: &str =
     "ServerDataTable keyed row callbacks require row_key";
-const SELECTION_WITHOUT_ROW_KEY_CONFIGURATION: &str =
+/// Track id for the leading multi-selection control column. Prefixed so it
+/// can never collide with a caller's `Column::id`.
+const SELECTION_COLUMN_TRACK_ID: &str = "__ldui-server-selection";
+
+/// Fixed width of the selection control column, in px. A canonical-scale
+/// 48px hit target that never participates in column resizing.
+const SELECTION_COLUMN_TRACK_WIDTH: u32 = 48;
+
+pub(crate) const SELECTION_WITHOUT_ROW_KEY_CONFIGURATION: &str =
     "ServerDataTable controlled selection requires row_key";
 const MISSING_FILTER_VOCABULARY_CONFIGURATION: &str = "ServerDataTable exact filter columns require authoritative filter_options or an explicit current-slice vocabulary";
 const CONFLICTING_FILTER_VOCABULARY_CONFIGURATION: &str =
@@ -98,6 +113,57 @@ fn selected_server_row_indices(
     rows.iter()
         .enumerate()
         .filter_map(|(index, row)| (key_of(row) == selected_key).then_some(index))
+        .collect()
+}
+
+/// Displayed-row indices whose STABLE KEY is in the caller's accepted set.
+///
+/// Keyed, never positional: a replaced page whose row 0 is a different entity
+/// must not inherit "row 0 is selected". Accepted keys that are not on this
+/// page simply match nothing here — they are neither lost nor rendered.
+fn selected_server_multi_row_indices(
+    rows: &[TableRow],
+    accepted: &BTreeSet<String>,
+    key_of: impl Fn(&TableRow) -> String,
+) -> BTreeSet<usize> {
+    rows.iter()
+        .enumerate()
+        .filter_map(|(index, row)| accepted.contains(&key_of(row)).then_some(index))
+        .collect()
+}
+
+/// Stable `<col>` tracks for a server table, including the optional leading
+/// selection control track.
+///
+/// The control track is declared here rather than derived from `columns`
+/// because it is not a column: it carries a fixed width, never resizes, and
+/// can never be the flexible sink (that stays the last non-resizable DATA
+/// column, exactly as before).
+fn server_stable_tracks(
+    has_selection_column: bool,
+    widths: &HashMap<&'static str, f64>,
+    columns: Vec<Column>,
+) -> Vec<StableColumnTrack> {
+    let flexible_column = columns
+        .iter()
+        .rev()
+        .find(|column| !column.resizable)
+        .map(|column| column.id);
+    let leading = has_selection_column
+        .then(|| StableColumnTrack::new(SELECTION_COLUMN_TRACK_ID, SELECTION_COLUMN_TRACK_WIDTH));
+    leading
+        .into_iter()
+        .chain(columns.into_iter().map(|column| {
+            let track = StableColumnTrack::new(
+                column.id,
+                stable_column_width(widths.get(column.id).copied(), column.min_width),
+            );
+            if flexible_column == Some(column.id) {
+                track.flexible()
+            } else {
+                track
+            }
+        }))
         .collect()
 }
 
@@ -1421,6 +1487,21 @@ pub fn ServerDataTable(
     #[prop(optional)]
     selection: Option<ServerTableSelection>,
 
+    /// Optional controlled checkbox MULTI-selection, keyed by `row_key`
+    /// (`ldui-px06`). Renders a leading checkbox column plus a header
+    /// checkbox that covers only the current displayed server slice.
+    ///
+    /// Mutually exclusive with `selection`: supplying both is a configuration
+    /// error that renders a `role="alert"` panel rather than silently
+    /// resolving to one model. Omitting this prop leaves the historical
+    /// rendering and single-selection behaviour exactly as they were.
+    ///
+    /// See [`ServerTableMultiSelection`] for why the header checkbox can only
+    /// ever mean "the rows on this page", and how accepted keys for rows that
+    /// are not on the current page survive paging.
+    #[prop(optional)]
+    multi_selection: Option<ServerTableMultiSelection>,
+
     /// Optional callback fired on a **plain** row click (no Ctrl/Shift) or a
     /// keyboard Enter/Space, receiving the row's index **within the current
     /// page** (the server variant renders one page at a time; combine with
@@ -1529,8 +1610,82 @@ pub fn ServerDataTable(
     // it the same way DataTable's own forwarding does — passing an Option
     // here is the E0308 trap the ldui-tmr CI fix documented.
     let has_row_activation = on_row_activate.is_some() || on_row_activate_keyed.is_some();
-    let selected_rows = Signal::derive(move || match (selection, row_key) {
-        (Some(selection), Some(key_of)) => {
+
+    // -- Controlled selection model (ldui-px06) --
+    //
+    // Resolved ONCE, up front, and a conflict is an error rather than a
+    // precedence rule: a table asked for both single and multi selection has
+    // been given two incompatible workflows, and picking one silently would
+    // make a bulk-assignment gesture act on a single row (or the reverse).
+    let selection_mode = resolve_selection_mode(
+        selection.is_some(),
+        multi_selection.is_some(),
+        row_key.is_some(),
+    );
+    let multi = match selection_mode {
+        Ok(ResolvedSelectionMode::Multi) => multi_selection,
+        _ => None,
+    };
+
+    // Every selection fact about the CURRENT DISPLAYED SLICE, resolved once
+    // per rows change: the stable key, the human label its checkbox is named
+    // after, and the caller's blocked reason (if any). Nothing here can name
+    // a row the caller did not render.
+    let displayed_selection = Memo::new(move |_| match (multi, row_key) {
+        (Some(model), Some(key_of)) => rows.with(|rows| {
+            rows.iter()
+                .map(|row| {
+                    let key = key_of.run(row.clone());
+                    let label = model
+                        .row_label
+                        .map(|callback| callback.run(row.clone()))
+                        .filter(|label| !label.trim().is_empty())
+                        .unwrap_or_else(|| key.clone());
+                    let selectability = model
+                        .selectable
+                        .map(|callback| callback.run(row.clone()))
+                        .unwrap_or(ServerTableRowSelectability::Selectable);
+                    DisplayedSelectionRow {
+                        key,
+                        label,
+                        blocked_reason: selectability.reason().map(str::to_owned),
+                    }
+                })
+                .collect::<Vec<_>>()
+        }),
+        _ => Vec::new(),
+    });
+    // Accepted truth, read straight from the caller. The component holds no
+    // selection state of its own, so there is nothing that can drift.
+    let accepted_keys = Signal::derive(move || {
+        multi
+            .map(|model| model.selected_keys.get())
+            .unwrap_or_default()
+    });
+    let selectable_slice_keys =
+        Memo::new(move |_| displayed_selection.with(|rows| selectable_keys(rows)));
+    let slice_state = Memo::new(move |_| {
+        accepted_keys.with(|accepted| {
+            selectable_slice_keys.with(|keys| slice_selection_state(keys, accepted))
+        })
+    });
+    // Accepted keys the client cannot see. Reported as its own explicit line
+    // of copy instead of being smuggled into the header checkbox's state.
+    let off_slice_count = Memo::new(move |_| {
+        accepted_keys.with(|accepted| {
+            displayed_selection
+                .with(|rows| off_slice_selected_count(accepted, &displayed_keys(rows)))
+        })
+    });
+
+    let selected_rows = Signal::derive(move || match (selection, multi, row_key) {
+        (_, Some(_), Some(key_of)) => {
+            let accepted = accepted_keys.get();
+            rows.with(|rows| {
+                selected_server_multi_row_indices(rows, &accepted, |row| key_of.run(row.clone()))
+            })
+        }
+        (Some(selection), None, Some(key_of)) => {
             let selected_key = selection.selected_key.get();
             rows.with(|rows| {
                 selected_server_row_indices(rows, selected_key.as_deref(), |row| {
@@ -1589,26 +1744,26 @@ pub fn ServerDataTable(
     // configured, independently of `row_interactive` below (ldui-cyhz): an
     // activate/inspect-only server table is interactive (focusable,
     // Enter/Space works) but has no selection concept to report.
-    let row_has_selection = selection.is_some();
+    let row_has_selection = selection.is_some() || multi.is_some();
     // Inspect alone still needs focusable rows for its Shift+Enter path.
+    //
+    // Multi-selection deliberately does NOT make rows focusable: its gesture
+    // lives on a real focusable checkbox inside the row, and adding a second
+    // tab stop per row would double the keyboard cost of every table without
+    // adding a reachable action.
     let row_interactive = row_is_interactive(
         false,
-        row_has_selection
+        selection.is_some()
             || has_row_activation
             || on_row_inspect.is_some()
             || on_row_inspect_keyed.is_some(),
     );
     let container_class = merge_classes!(classes.container, class);
 
-    let row_key_configuration_error = if row_key.is_none() && selection.is_some() {
-        Some(SELECTION_WITHOUT_ROW_KEY_CONFIGURATION)
-    } else if row_key.is_none()
-        && (on_row_activate_keyed.is_some() || on_row_inspect_keyed.is_some())
-    {
-        Some(KEYED_CALLBACK_WITHOUT_ROW_KEY_CONFIGURATION)
-    } else {
-        None
-    };
+    let row_key_configuration_error = selection_mode.err().or_else(|| {
+        (row_key.is_none() && (on_row_activate_keyed.is_some() || on_row_inspect_keyed.is_some()))
+            .then_some(KEYED_CALLBACK_WITHOUT_ROW_KEY_CONFIGURATION)
+    });
     if let Some(message) = row_key_configuration_error {
         return view! {
             <div
@@ -2201,27 +2356,11 @@ pub fn ServerDataTable(
         move || is_flex_column().then_some("flex: 1; overflow-y: auto; min-height: 0");
     let controls_style = move || is_flex_column().then_some("flex-shrink: 0; padding: 12px 0");
     let stable_tracks = Signal::derive(move || {
-        let widths = column_widths.get();
-        let columns = effective_columns.get();
-        let flexible_column = columns
-            .iter()
-            .rev()
-            .find(|column| !column.resizable)
-            .map(|column| column.id);
-        columns
-            .into_iter()
-            .map(|column| {
-                let track = StableColumnTrack::new(
-                    column.id,
-                    stable_column_width(widths.get(column.id).copied(), column.min_width),
-                );
-                if flexible_column == Some(column.id) {
-                    track.flexible()
-                } else {
-                    track
-                }
-            })
-            .collect::<Vec<_>>()
+        server_stable_tracks(
+            multi.is_some(),
+            &column_widths.get(),
+            effective_columns.get(),
+        )
     });
     let body_loading = Signal::derive(move || {
         let retain_rows = match pagination {
@@ -2252,6 +2391,152 @@ pub fn ServerDataTable(
             ));
         });
     }
+
+    // -- The rendered selection column (ldui-px06) --
+    //
+    // Both halves are `None` unless multi-selection was configured AND
+    // resolved cleanly, so an unconfigured or rejected table renders exactly
+    // the markup it always did.
+    let selection_header_ref = NodeRef::<leptos::html::Input>::new();
+    let selection_leading_header = multi.map(|model| {
+        let texts = model.texts;
+        view! {
+            <th
+                class=merge_classes!(
+                    classes.header_cell,
+                    "border border-table-grid bg-table-header p-2 text-center text-table-header-content forced-colors:border-[CanvasText] forced-colors:bg-[Canvas] forced-colors:text-[CanvasText]"
+                )
+                scope="col"
+                data-server-selection-header="true"
+                data-server-selection-slice-state=move || slice_state.get().as_str()
+            >
+                <span class="sr-only">
+                    {move || texts.with(|texts| texts.column_header.clone())}
+                </span>
+                <Checkbox
+                    size=CheckboxSize::Sm
+                    node_ref=selection_header_ref
+                    class="align-middle"
+                    disabled=Signal::derive(move || slice_state.get().is_disabled())
+                    attr:data-server-selection-toggle="slice"
+                    attr:aria-label=move || {
+                        let state = slice_state.get();
+                        let count = selectable_slice_keys.with(Vec::len);
+                        texts.with(|texts| texts.slice_label(state, count))
+                    }
+                    prop:checked=move || slice_state.get().is_checked()
+                    // `indeterminate` has no HTML attribute at all -- it is a
+                    // DOM property only, so it MUST be written as one or the
+                    // partial state is simply never exposed.
+                    prop:indeterminate=move || slice_state.get().is_indeterminate()
+                    on:change=move |_| {
+                        let state = slice_state.get_untracked();
+                        // Controlled: re-assert accepted truth on the element
+                        // the browser just toggled, BEFORE proposing. A
+                        // declined or delayed proposal then leaves no
+                        // optimistic divergence to reconcile.
+                        if let Some(input) = selection_header_ref.get_untracked() {
+                            input.set_checked(state.is_checked());
+                            input.set_indeterminate(state.is_indeterminate());
+                        }
+                        let keys = selectable_slice_keys.get_untracked();
+                        if keys.is_empty() {
+                            return;
+                        }
+                        let selected = state.toggles_to_selected();
+                        let accepted = accepted_keys.get_untracked();
+                        model.on_change.run(ServerTableSelectionProposal {
+                            keys: propose_slice_toggle(&accepted, &keys, selected),
+                            cause: ServerTableSelectionCause::CurrentSlice { selected, keys },
+                            scope: model.scope_value_untracked(),
+                        });
+                    }
+                />
+            </th>
+        }
+        .into_any()
+    });
+
+    let selection_leading_cell = multi.map(|model| {
+        let texts = model.texts;
+        Callback::new(move |key: String| {
+            let checkbox_ref = NodeRef::<leptos::html::Input>::new();
+
+            // Looked up by key on every read rather than captured once, so a
+            // reactive row update (a renamed subject, a newly-blocked row)
+            // reaches the accessible name without re-mounting the checkbox
+            // and stealing keyboard focus from under the user.
+            let facts_key = key.clone();
+            let row_facts = move || {
+                displayed_selection.with(|rows| {
+                    rows.iter()
+                        .find(|row| row.key == facts_key)
+                        .map(|row| (row.label.clone(), row.blocked_reason.clone()))
+                        .unwrap_or_else(|| (facts_key.clone(), None))
+                })
+            };
+            let accepted_key = key.clone();
+            let is_accepted =
+                move || accepted_keys.with(|accepted| accepted.contains(&accepted_key));
+
+            let label_facts = row_facts.clone();
+            let title_facts = row_facts.clone();
+            let blocked_facts = row_facts.clone();
+            let aria_disabled_facts = row_facts.clone();
+            let change_facts = row_facts;
+            let label_accepted = is_accepted.clone();
+            let checked_accepted = is_accepted.clone();
+            let change_accepted = is_accepted;
+            let change_key = key.clone();
+
+            view! {
+                <Checkbox
+                    size=CheckboxSize::Sm
+                    node_ref=checkbox_ref
+                    class="align-middle"
+                    attr:data-server-selection-row=key
+                    attr:data-server-selection-blocked=move || {
+                        blocked_facts().1.is_some().then_some("true")
+                    }
+                    // `aria-disabled`, not `disabled`: a blocked row's reason
+                    // is only useful if the user can reach it, and a natively
+                    // disabled input is removed from the tab order entirely.
+                    attr:aria-disabled=move || {
+                        aria_disabled_facts().1.is_some().then_some("true")
+                    }
+                    attr:title=move || title_facts().1
+                    attr:aria-label=move || {
+                        let (label, blocked) = label_facts();
+                        texts.with(|texts| {
+                            texts.row_label(&label, label_accepted(), blocked.as_deref())
+                        })
+                    }
+                    prop:checked=checked_accepted
+                    on:change=move |_| {
+                        let accepted_now = change_accepted();
+                        // Same controlled re-assertion as the header.
+                        if let Some(input) = checkbox_ref.get_untracked() {
+                            input.set_checked(accepted_now);
+                        }
+                        if change_facts().1.is_some() {
+                            return;
+                        }
+                        let selected = !accepted_now;
+                        let accepted = accepted_keys.get_untracked();
+                        model.on_change.run(ServerTableSelectionProposal {
+                            keys: propose_row_toggle(&accepted, &change_key, selected),
+                            cause: ServerTableSelectionCause::Row {
+                                key: change_key.clone(),
+                                selected,
+                            },
+                            scope: model.scope_value_untracked(),
+                        });
+                    }
+                />
+            }
+            .into_any()
+        })
+    });
 
     let search_input_id = next_data_table_search_id();
     let page_size_input_id = format!("{search_input_id}-page-size");
@@ -2606,6 +2891,49 @@ pub fn ServerDataTable(
                 </div>
             })}
 
+            {multi.map(|model| {
+                let texts = model.texts;
+                view! {
+                    <div
+                        data-server-selection="controlled-multi"
+                        data-server-selection-scope=move || model.scope_value()
+                        data-server-selection-off-slice=move || off_slice_count.get().to_string()
+                        data-server-selection-slice-state=move || slice_state.get().as_str()
+                    >
+                        // Always mounted, even at zero, so the live region
+                        // exists before its text changes -- a `role="status"`
+                        // that is inserted along with its content is not
+                        // reliably announced.
+                        <p
+                            // Visually collapsed rather than unmounted when
+                            // there is nothing to say: the live region has to
+                            // already exist for its later text to be
+                            // announced, but an always-visible empty line
+                            // would push every server table down by one row
+                            // of leading.
+                            class=move || {
+                                if off_slice_count.get() > 0 {
+                                    "ld-text-small mb-3 text-base-content/75"
+                                } else {
+                                    "sr-only"
+                                }
+                            }
+                            role="status"
+                            data-server-selection-off-slice-notice="true"
+                        >
+                            {move || {
+                                let count = off_slice_count.get();
+                                if count > 0 {
+                                    texts.with(|texts| texts.off_slice_label(count))
+                                } else {
+                                    String::new()
+                                }
+                            }}
+                        </p>
+                    </div>
+                }
+            })}
+
             <div class=TABLE_SCROLL_WRAPPER_CLASS style=table_wrapper_style node_ref=table_wrapper_ref>
                 <div style=move || stable_table_content_style(&stable_tracks.get())>
                     <Table
@@ -2632,6 +2960,7 @@ pub fn ServerDataTable(
                             on_sort=on_sort
                             header_cell_class=classes.header_cell
                             column_widths=column_widths
+                            leading_header=selection_leading_header
                         >
                             {move || {
                                 show_filter_row.get().then(|| view! {
@@ -2643,6 +2972,7 @@ pub fn ServerDataTable(
                                         all_label=effective_filter_all_label
                                         filter_label=effective_filter_label
                                         text_filter_label=text_filter_label
+                                        leading_column=selection_leading_cell.is_some()
                                     />
                                 })
                             }}
@@ -2670,6 +3000,7 @@ pub fn ServerDataTable(
                             row_key=row_key
                             interactive=row_interactive
                             has_selection=row_has_selection
+                            leading_cell=selection_leading_cell
                         />
                     </Table>
                 </div>
@@ -3044,6 +3375,117 @@ mod tests {
                 .clone())
             .is_empty(),
             "an absent key must not select the replacement at its old index"
+        );
+    }
+
+    fn accepted(keys: &[&str]) -> BTreeSet<String> {
+        keys.iter().map(|key| (*key).to_owned()).collect()
+    }
+
+    #[test]
+    fn multi_selection_marks_rows_by_accepted_key_not_page_position() {
+        let first = vec![identified_row("desk-1"), identified_row("desk-2")];
+        let reordered = vec![identified_row("desk-2"), identified_row("desk-1")];
+
+        assert_eq!(
+            selected_server_multi_row_indices(&first, &accepted(&["desk-1", "desk-2"]), |row| row
+                ["id"]
+                .clone()),
+            BTreeSet::from([0, 1])
+        );
+        assert_eq!(
+            selected_server_multi_row_indices(&reordered, &accepted(&["desk-1"]), |row| row["id"]
+                .clone()),
+            BTreeSet::from([1]),
+            "selection follows the accepted key rather than page position"
+        );
+    }
+
+    #[test]
+    fn a_replaced_server_page_cannot_inherit_selection_by_index() {
+        // The exact hazard a server table invites: page 2 arrives with the
+        // same POSITIONS and entirely different entities.
+        let page_two = vec![identified_row("desk-9"), identified_row("desk-10")];
+        assert!(
+            selected_server_multi_row_indices(&page_two, &accepted(&["desk-1", "desk-2"]), |row| {
+                row["id"].clone()
+            })
+            .is_empty(),
+            "accepted keys from a previous page must not select this page's rows"
+        );
+    }
+
+    #[test]
+    fn accepted_keys_for_rows_that_are_not_displayed_are_simply_not_rendered() {
+        let page = vec![identified_row("desk-1")];
+        // "desk-77" is accepted and off-page: it selects nothing here, and
+        // nothing in this mapping can drop it from the caller's set either.
+        let selected = accepted(&["desk-1", "desk-77"]);
+        assert_eq!(
+            selected_server_multi_row_indices(&page, &selected, |row| row["id"].clone()),
+            BTreeSet::from([0])
+        );
+        assert_eq!(
+            selected.len(),
+            2,
+            "the accepted set itself is never mutated"
+        );
+    }
+
+    #[test]
+    fn the_selection_control_track_leads_without_becoming_the_flexible_sink() {
+        let columns = vec![
+            Column::new("name", "Name"),
+            Column::new_non_sortable("actions", "Actions").non_resizable(),
+        ];
+        let widths = HashMap::new();
+
+        let without = server_stable_tracks(false, &widths, columns.clone());
+        let with = server_stable_tracks(true, &widths, columns);
+
+        assert_eq!(with.len(), without.len() + 1);
+        assert_eq!(with[0].id, SELECTION_COLUMN_TRACK_ID);
+        assert_eq!(with[0].width, SELECTION_COLUMN_TRACK_WIDTH);
+        assert!(
+            !with[0].flexible,
+            "a fixed-width control column must never absorb spare table width"
+        );
+        assert_eq!(
+            with[1..].to_vec(),
+            without,
+            "declaring a selection column must not disturb any data column's track"
+        );
+        assert!(
+            with.last().expect("tracks").flexible,
+            "the flexible sink stays the last non-resizable DATA column"
+        );
+    }
+
+    #[test]
+    fn the_selection_control_track_id_is_namespaced_out_of_caller_reach() {
+        assert!(SELECTION_COLUMN_TRACK_ID.starts_with("__ldui-"));
+        // 48px: a canonical-scale hit target, not an ad-hoc number.
+        assert_eq!(SELECTION_COLUMN_TRACK_WIDTH, 48);
+    }
+
+    #[test]
+    fn the_selection_column_never_reaches_the_column_or_export_model() {
+        // The control column is not a `Column`, so it is structurally absent
+        // from the chooser, the filter vocabulary, the sort model, and the
+        // displayed-slice export projection -- rather than being filtered out
+        // of four places that could each be forgotten.
+        let source = include_str!("server_component.rs");
+        // Assembled at runtime so this assertion's own text cannot satisfy
+        // the search it performs.
+        let forbidden = format!("Column::new({}", "SELECTION_COLUMN_TRACK_ID");
+        assert!(
+            !source.contains(&forbidden),
+            "the selection control column must never be synthesized as a data Column"
+        );
+        assert!(
+            source.contains("leading_header=selection_leading_header")
+                && source.contains("leading_cell=selection_leading_cell"),
+            "the selection column must render through the shared leading-cell contract"
         );
     }
 

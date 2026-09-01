@@ -1,5 +1,12 @@
-//! Real-browser proof for `ServerDataTable`'s opt-in presentation tools
-//! (ldui-9j16): the compact gear column chooser stays inside the viewport
+//! Real-browser proof for `ServerDataTable`'s opt-in opinionated capabilities.
+//!
+//! Two independent contracts share this lane because they share a demo page
+//! and a release server: the presentation tools (`ldui-9j16`) below, and the
+//! controlled checkbox multi-selection (`ldui-px06`) at the end of the file.
+//!
+//! # Presentation tools (ldui-9j16)
+//!
+//! The compact gear column chooser stays inside the viewport
 //! and closes on `Escape` with focus restored, a required column can never
 //! be hidden or even offered in the chooser list, the caller's toolbar
 //! Export action sits beside the chooser, and the atomic
@@ -224,4 +231,310 @@ async fn column_tools_chooser_projection_and_required_column_contract() {
     );
 
     assert_no_browser_errors(&harness, "server-table column-tools chooser/projection").await;
+}
+
+// ---------------------------------------------------------------------------
+// ldui-px06: controlled checkbox multi-selection over a server slice
+// ---------------------------------------------------------------------------
+
+const MULTI: &str = "#server-multi-select-table";
+
+async fn selection_snapshot(harness: &pixelproof_web::Harness) -> Value {
+    eval_json(
+        harness,
+        r#"(() => {
+            const root = document.querySelector('#server-multi-select-table');
+            const header = root.querySelector('[data-server-selection-toggle="slice"]');
+            const status = root.querySelector('[data-server-selection]');
+            const notice = root.querySelector('[data-server-selection-off-slice-notice]');
+            const rowBoxes = Array.from(
+                root.querySelectorAll('tbody [data-server-selection-row]')
+            );
+            const active = document.activeElement;
+            return {
+                sliceState: status ? status.dataset.serverSelectionSliceState : null,
+                scope: status ? status.dataset.serverSelectionScope : null,
+                offSlice: status ? status.dataset.serverSelectionOffSlice : null,
+                noticeText: notice ? notice.textContent.trim() : null,
+                headerChecked: header ? header.checked : null,
+                headerIndeterminate: header ? header.indeterminate : null,
+                headerDisabled: header ? header.disabled : null,
+                headerLabel: header ? header.getAttribute('aria-label') : null,
+                headerColumnName: (() => {
+                    const cell = root.querySelector('[data-server-selection-header="true"]');
+                    return cell ? cell.textContent.trim() : null;
+                })(),
+                rows: rowBoxes.map(box => ({
+                    key: box.dataset.serverSelectionRow,
+                    checked: box.checked,
+                    blocked: box.dataset.serverSelectionBlocked ?? null,
+                    ariaDisabled: box.getAttribute('aria-disabled'),
+                    label: box.getAttribute('aria-label'),
+                    title: box.getAttribute('title'),
+                })),
+                ariaSelectedRows: Array.from(root.querySelectorAll('tbody tr[data-row-key]'))
+                    .filter(tr => tr.getAttribute('aria-selected') === 'true')
+                    .map(tr => tr.dataset.rowKey),
+                // One leading control cell per rendered row, and a matching
+                // extra <col> track: alignment is part of the contract.
+                leadingCells: root.querySelectorAll('tbody [data-table-leading-cell]').length,
+                bodyRows: root.querySelectorAll('tbody tr[data-row-key]').length,
+                colTracks: root.querySelectorAll('colgroup col').length,
+                headerCells: root.querySelectorAll('thead tr:first-child th').length,
+                focusedSelectionKey: active
+                    ? (active.dataset ? (active.dataset.serverSelectionRow ?? null) : null)
+                    : null,
+            };
+        })()"#,
+    )
+    .await
+}
+
+fn keys_of(snapshot: &Value) -> Vec<String> {
+    snapshot["rows"]
+        .as_array()
+        .expect("row checkboxes")
+        .iter()
+        .map(|row| row["key"].as_str().unwrap_or_default().to_owned())
+        .collect()
+}
+
+fn checked_keys(snapshot: &Value) -> Vec<String> {
+    snapshot["rows"]
+        .as_array()
+        .expect("row checkboxes")
+        .iter()
+        .filter(|row| row["checked"] == json!(true))
+        .map(|row| row["key"].as_str().unwrap_or_default().to_owned())
+        .collect()
+}
+
+async fn focus_selector(harness: &pixelproof_web::Harness, selector: &str) {
+    let _ = eval_json(
+        harness,
+        &format!(
+            r#"(() => {{
+                const el = document.querySelector({selector:?});
+                if (el) {{ el.focus(); }}
+                return document.activeElement === el;
+            }})()"#
+        ),
+    )
+    .await;
+}
+
+/// `ldui-px06` binding acceptance in a real browser: the header checkbox
+/// means the current page and only the current page (including its
+/// `indeterminate` DOM property), accepted keys for rows that are not
+/// displayed survive a cursor transition without relabelling anything on the
+/// new slice, a declined proposal leaves no optimistic divergence, `Space`
+/// operates a row checkbox without losing its focus, a blocked row stays
+/// focusable and says why, and an atomic dataset-scope change clears
+/// selection.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-server-table-column-tools)"]
+async fn controlled_multi_selection_is_page_scoped_and_never_optimistic() {
+    let harness = harness_at("/components/data-table").await;
+    wait_for_selector(&harness, &format!("{MULTI} tbody tr")).await;
+    begin_browser_error_capture(&harness).await;
+
+    // Page one: conv-1, conv-2 selectable; conv-3 archived and blocked.
+    let initial = selection_snapshot(&harness).await;
+    assert_eq!(initial["sliceState"], json!("none"));
+    assert_eq!(initial["headerChecked"], json!(false));
+    assert_eq!(initial["headerIndeterminate"], json!(false));
+    assert_eq!(initial["headerDisabled"], json!(false));
+    assert_eq!(initial["offSlice"], json!("0"));
+    assert_eq!(initial["scope"], json!("conversations/v1"));
+    assert_eq!(keys_of(&initial), vec!["conv-1", "conv-2", "conv-3"]);
+    assert_eq!(
+        initial["leadingCells"], initial["bodyRows"],
+        "every rendered row needs exactly one leading control cell: {initial}"
+    );
+    assert_eq!(
+        initial["colTracks"].as_u64(),
+        initial["headerCells"].as_u64(),
+        "the control column must have its own <col> track: {initial}"
+    );
+    // Copy names the page, not "all".
+    let header_label = initial["headerLabel"].as_str().expect("header label");
+    assert!(
+        header_label.to_lowercase().contains("this page"),
+        "header checkbox must name the current page: {header_label:?}"
+    );
+    // The blocked row is focusable (aria-disabled, not `disabled`) and its
+    // reason is in the accessible name AND the tooltip.
+    let blocked = initial["rows"][2].clone();
+    assert_eq!(blocked["blocked"], json!("true"));
+    assert_eq!(blocked["ariaDisabled"], json!("true"));
+    assert!(
+        blocked["label"]
+            .as_str()
+            .is_some_and(|label| label.contains("cannot be selected")),
+        "a blocked row must say why in its accessible name: {blocked}"
+    );
+    assert!(blocked["title"].as_str().is_some_and(|t| !t.is_empty()));
+
+    // One row: partial, and `indeterminate` is a DOM PROPERTY -- an attribute
+    // would leave assistive tech with no partial state at all.
+    click(
+        &harness,
+        &format!("{MULTI} [data-server-selection-row=\"conv-1\"]"),
+    )
+    .await;
+    let partial = selection_snapshot(&harness).await;
+    assert_eq!(partial["sliceState"], json!("partial"));
+    assert_eq!(partial["headerChecked"], json!(false));
+    assert_eq!(partial["headerIndeterminate"], json!(true));
+    assert_eq!(checked_keys(&partial), vec!["conv-1"]);
+    assert_eq!(partial["ariaSelectedRows"], json!(["conv-1"]));
+
+    // Header: covers exactly the SELECTABLE rows on this page. conv-3 is
+    // blocked, so the page reads `all` with two of three rows checked --
+    // a blocked row must not hold the header at `partial` forever.
+    click(
+        &harness,
+        &format!("{MULTI} [data-server-selection-toggle=\"slice\"]"),
+    )
+    .await;
+    let all = selection_snapshot(&harness).await;
+    assert_eq!(all["sliceState"], json!("all"));
+    assert_eq!(all["headerChecked"], json!(true));
+    assert_eq!(all["headerIndeterminate"], json!(false));
+    assert_eq!(checked_keys(&all), vec!["conv-1", "conv-2"]);
+    assert_eq!(all["offSlice"], json!("0"));
+
+    // Cursor transition. The two accepted keys are now OFF-slice: they must
+    // not relabel anything on the new page, the header must read `none`
+    // rather than `partial`, and the count must be stated out loud.
+    click(
+        &harness,
+        &format!("{MULTI} [data-server-cursor-action=\"next\"]"),
+    )
+    .await;
+    let page_two = selection_snapshot(&harness).await;
+    assert_eq!(keys_of(&page_two), vec!["conv-4", "conv-5", "conv-6"]);
+    assert_eq!(
+        page_two["sliceState"],
+        json!("none"),
+        "off-slice keys must never tint this page's header: {page_two}"
+    );
+    assert_eq!(page_two["headerIndeterminate"], json!(false));
+    assert!(checked_keys(&page_two).is_empty());
+    assert_eq!(page_two["ariaSelectedRows"], json!([]));
+    assert_eq!(page_two["offSlice"], json!("2"));
+    assert!(
+        page_two["noticeText"]
+            .as_str()
+            .is_some_and(|text| text.contains('2') && text.contains("not on this page")),
+        "the off-slice count must be stated, not implied: {page_two}"
+    );
+
+    // Selecting this page adds to -- never replaces -- the accepted set.
+    click(
+        &harness,
+        &format!("{MULTI} [data-server-selection-toggle=\"slice\"]"),
+    )
+    .await;
+    let page_two_all = selection_snapshot(&harness).await;
+    assert_eq!(page_two_all["sliceState"], json!("all"));
+    assert_eq!(checked_keys(&page_two_all), vec!["conv-4", "conv-5"]);
+    assert_eq!(
+        page_two_all["offSlice"],
+        json!("2"),
+        "page one's accepted keys must still be accepted: {page_two_all}"
+    );
+
+    // Back: page one's keys survived the round trip untouched.
+    click(
+        &harness,
+        &format!("{MULTI} [data-server-cursor-action=\"previous\"]"),
+    )
+    .await;
+    let back = selection_snapshot(&harness).await;
+    assert_eq!(keys_of(&back), vec!["conv-1", "conv-2", "conv-3"]);
+    assert_eq!(back["sliceState"], json!("all"));
+    assert_eq!(checked_keys(&back), vec!["conv-1", "conv-2"]);
+    assert_eq!(back["offSlice"], json!("2"));
+
+    // Keyboard: Space operates the checkbox, and the checkbox keeps focus
+    // through the accepted-state change (it is keyed by business identity,
+    // so a data change never re-mounts it out from under the user).
+    focus_selector(
+        &harness,
+        &format!("{MULTI} [data-server-selection-row=\"conv-1\"]"),
+    )
+    .await;
+    harness
+        .press_key_sequence(&[pixelproof_web::Key::Space])
+        .await
+        .expect("Space toggles a row checkbox");
+    let after_space = selection_snapshot(&harness).await;
+    assert_eq!(checked_keys(&after_space), vec!["conv-2"]);
+    assert_eq!(after_space["sliceState"], json!("partial"));
+    assert_eq!(
+        after_space["focusedSelectionKey"],
+        json!("conv-1"),
+        "the toggled checkbox must keep keyboard focus: {after_space}"
+    );
+
+    // Rejection: the proposal is emitted, and NOTHING moves. This is the
+    // assertion that proves the checkbox is controlled rather than merely
+    // reported -- a native checkbox flips itself on click, so a component
+    // that does not re-assert would silently diverge here.
+    let before_reject: u64 = text_of(&harness, "[data-testid=\"multi-proposal-count\"]")
+        .await
+        .parse()
+        .expect("proposal count is numeric");
+    click(&harness, "[data-testid=\"multi-accept-toggle\"]").await;
+    click(
+        &harness,
+        &format!("{MULTI} [data-server-selection-row=\"conv-1\"]"),
+    )
+    .await;
+    let rejected = selection_snapshot(&harness).await;
+    let after_reject: u64 = text_of(&harness, "[data-testid=\"multi-proposal-count\"]")
+        .await
+        .parse()
+        .expect("proposal count is numeric");
+    assert_eq!(
+        after_reject,
+        before_reject + 1,
+        "a declined gesture must still emit exactly one proposal"
+    );
+    assert_eq!(
+        checked_keys(&rejected),
+        vec!["conv-2"],
+        "a declined proposal must leave the DOM on accepted truth: {rejected}"
+    );
+    assert_eq!(rejected["sliceState"], json!("partial"));
+
+    // A blocked row emits nothing at all, accepted or not.
+    let before_blocked = after_reject;
+    click(
+        &harness,
+        &format!("{MULTI} [data-server-selection-row=\"conv-3\"]"),
+    )
+    .await;
+    let after_blocked: u64 = text_of(&harness, "[data-testid=\"multi-proposal-count\"]")
+        .await
+        .parse()
+        .expect("proposal count is numeric");
+    assert_eq!(
+        after_blocked, before_blocked,
+        "a blocked row must not propose anything"
+    );
+
+    // An atomic dataset change: the caller moves the scope and clears the
+    // accepted set together, so no key can be carried into a dataset where
+    // it means something else.
+    click(&harness, "[data-testid=\"multi-accept-toggle\"]").await;
+    click(&harness, "[data-testid=\"multi-change-scope\"]").await;
+    let rescoped = selection_snapshot(&harness).await;
+    assert_eq!(rescoped["scope"], json!("conversations/v2"));
+    assert_eq!(rescoped["sliceState"], json!("none"));
+    assert_eq!(rescoped["offSlice"], json!("0"));
+    assert!(checked_keys(&rescoped).is_empty());
+
+    assert_no_browser_errors(&harness, "server-table controlled multi-selection").await;
 }

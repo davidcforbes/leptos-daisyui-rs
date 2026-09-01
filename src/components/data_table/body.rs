@@ -282,8 +282,30 @@ pub fn DataTableBody(
     /// forwards its own already-`Option`-wrapped prop straight through.
     #[prop(optional_no_strip)]
     row_class_fn: Option<Callback<(usize, TableRow), String>>,
+
+    /// Optional leading control cell rendered before every data column,
+    /// invoked with the row's STABLE KEY -- currently `ServerDataTable`'s
+    /// controlled multi-selection checkbox (`ldui-px06`). Requires `row_key`;
+    /// rows without a stable key render an empty leading cell.
+    ///
+    /// Keyed by the stable key rather than by the reactive row so the control
+    /// it renders is created once per business identity: a row-data update
+    /// re-renders the data cells without tearing down and re-mounting a
+    /// focused checkbox. Everything reactive about the control (its checked
+    /// state, its accessible name, whether it is blocked) is therefore the
+    /// renderer's own business, looked up by key.
+    #[prop(optional_no_strip)]
+    leading_cell: Option<Callback<String, AnyView>>,
 ) -> impl IntoView {
     let resolved_rows = Memo::new(move |_| resolve_body_rows(rows.get(), row_key));
+    // One extra rendered column when a leading control cell is present, so
+    // every full-width `colspan` below still spans the whole table.
+    let leading_columns = usize::from(leading_cell.is_some());
+    let full_colspan = move || {
+        columns
+            .with(|columns| columns.len() + leading_columns)
+            .max(1)
+    };
     let cell_renderers = StoredValue::new(cell_renderers);
     let typed_cells = StoredValue::new(typed_cells);
 
@@ -388,7 +410,7 @@ pub fn DataTableBody(
             <Show when=move || loading.get()>
                 <tr class=loading_row_class>
                     <td
-                        colspan=move || columns.with(|columns| columns.len().max(1))
+                        colspan=full_colspan
                         class="border border-table-grid py-8 text-center forced-colors:border-[CanvasText]"
                     >
                         {move || texts.with(|texts| texts.loading.clone())}
@@ -400,7 +422,7 @@ pub fn DataTableBody(
             }>
                 <tr class=empty_row_class>
                     <td
-                        colspan=move || columns.with(|columns| columns.len().max(1))
+                        colspan=full_colspan
                         class="border border-table-grid py-8 text-center forced-colors:border-[CanvasText]"
                     >
                         {move || texts.with(|texts| texts.empty.clone())}
@@ -412,7 +434,7 @@ pub fn DataTableBody(
             }>
                 <tr data-table-row-key-error="true">
                     <td
-                        colspan=move || columns.with(|columns| columns.len().max(1))
+                        colspan=full_colspan
                         role="alert"
                         class="border border-error bg-error/10 px-3 py-4 text-error forced-colors:border-[CanvasText] forced-colors:text-[CanvasText]"
                     >
@@ -436,6 +458,7 @@ pub fn DataTableBody(
                     })
                     key=|(render_key, _)| render_key.clone()
                     children=move |(render_key, stable_key)| {
+                        let leading_stable_key = stable_key.clone();
                         let current_row = Memo::new(move |_| {
                             resolved_rows.with(|rows| match rows {
                                 ResolvedBodyRows::Valid(rows) => rows
@@ -534,6 +557,25 @@ pub fn DataTableBody(
                                         }
                                     }
                                 >
+                                    {leading_cell.map(|render| {
+                                        let leading_key = leading_stable_key;
+                                        view! {
+                                            <td
+                                                class="border border-table-grid p-2 align-middle forced-colors:border-[CanvasText]"
+                                                data-table-leading-cell="control"
+                                                // Same containment as an
+                                                // `is_action` column: a
+                                                // control cell must never
+                                                // reach the row's own
+                                                // activate/inspect handlers.
+                                                on:click=move |event: web_sys::MouseEvent| event.stop_propagation()
+                                                on:dblclick=move |event: web_sys::MouseEvent| event.stop_propagation()
+                                                on:keydown=move |event: web_sys::KeyboardEvent| event.stop_propagation()
+                                            >
+                                                {leading_key.map(|key| render.run(key))}
+                                            </td>
+                                        }
+                                    })}
                                     {move || current_row.get().map(|current| {
                                         columns.get().iter().map(|column| {
                                             let cell_value = current.row.get(column.id).cloned().unwrap_or_default();
@@ -625,7 +667,7 @@ pub fn DataTableBody(
                                                 on:keydown=move |event| event.stop_propagation()
                                             >
                                                 <td
-                                                    colspan=move || columns.with(|columns| columns.len().max(1))
+                                                    colspan=full_colspan
                                                     class="border border-table-grid px-3 py-2 text-sm text-base-content/80 forced-colors:border-[CanvasText]"
                                                 >
                                                     {detail}

@@ -942,6 +942,85 @@ pub fn DataTableDemo() -> impl IntoView {
         .into_any()
     };
 
+    // ---- ldui-px06: controlled checkbox multi-selection over a server slice ----
+    //
+    // A cursor-backed dataset paged three rows at a time. Everything the
+    // component shows is derived from `multi_accepted`, which this fixture
+    // owns: the table proposes, the fixture decides. "Reject proposals" makes
+    // that separation visible -- every gesture still emits, and nothing moves.
+    let multi_population = RwSignal::new(vec![
+        ("conv-1", "Ticket 1 \u{2014} billing dispute", "Open"),
+        ("conv-2", "Ticket 2 \u{2014} refund request", "Open"),
+        ("conv-3", "Ticket 3 \u{2014} address change", "Archived"),
+        ("conv-4", "Ticket 4 \u{2014} contract review", "Open"),
+        ("conv-5", "Ticket 5 \u{2014} escalation", "Open"),
+        ("conv-6", "Ticket 6 \u{2014} intake", "Archived"),
+    ]);
+    let multi_page_index = RwSignal::new(0_usize);
+    let multi_open_only = RwSignal::new(false);
+    let multi_accepted = RwSignal::new(BTreeSet::<String>::new());
+    let multi_accept_proposals = RwSignal::new(true);
+    let multi_proposal_count = RwSignal::new(0_u32);
+    let multi_last_cause = RwSignal::new("(none)".to_owned());
+    let multi_last_scope = RwSignal::new("(none)".to_owned());
+    let multi_scope = RwSignal::new("conversations/v1".to_owned());
+
+    const MULTI_PAGE_SIZE: usize = 3;
+    let multi_matching = Memo::new(move |_| {
+        let open_only = multi_open_only.get();
+        multi_population.with(|population| {
+            population
+                .iter()
+                .filter(|(_, _, status)| !open_only || *status == "Open")
+                .copied()
+                .collect::<Vec<_>>()
+        })
+    });
+    let multi_rows = Memo::new(move |_| {
+        let page = multi_page_index.get();
+        multi_matching.with(|matching| {
+            matching
+                .iter()
+                .skip(page * MULTI_PAGE_SIZE)
+                .take(MULTI_PAGE_SIZE)
+                .map(|(id, subject, status)| {
+                    HashMap::from([
+                        ("id", (*id).to_owned()),
+                        ("subject", (*subject).to_owned()),
+                        ("status", (*status).to_owned()),
+                    ])
+                })
+                .collect::<Vec<TableRow>>()
+        })
+    });
+    let multi_columns = RwSignal::new(vec![
+        Column::new_non_sortable("subject", "Subject"),
+        Column::new_non_sortable("status", "Status").non_resizable(),
+    ]);
+    let multi_cursor_query = RwSignal::new(ServerCursorQuery::first_slice(MULTI_PAGE_SIZE as i64));
+    let multi_pagination = ServerTablePagination::cursor(ServerCursorPagination::controlled(
+        multi_cursor_query.into(),
+        Signal::derive(move || {
+            let page = multi_page_index.get();
+            let total = multi_matching.with(Vec::len);
+            ServerCursorPage::new(
+                (page > 0).then(|| ServerCursorToken::from(format!("page-{}", page - 1))),
+                ((page + 1) * MULTI_PAGE_SIZE < total)
+                    .then(|| ServerCursorToken::from(format!("page-{}", page + 1))),
+            )
+        }),
+        Callback::new(move |query: ServerCursorQuery| {
+            match &query.request {
+                ServerCursorRequest::First => multi_page_index.set(0),
+                ServerCursorRequest::Previous(_) => {
+                    multi_page_index.update(|page| *page = page.saturating_sub(1));
+                }
+                ServerCursorRequest::Next(_) => multi_page_index.update(|page| *page += 1),
+            }
+            multi_cursor_query.set(query);
+        }),
+    ));
+
     view! {
         <ContentLayout
             title="DataTable"
@@ -2259,6 +2338,148 @@ pub fn DataTableDemo() -> impl IntoView {
                         {move || widget_bulk.with(|s| s.len().to_string())}
                     </span>
                 </p>
+            </Section>
+
+            // ldui-px06
+            <Section title="Server Slice Multi-Selection (controlled checkboxes)">
+                <p class="text-sm text-base-content/75 mb-2">
+                    "A cursor-backed dataset paged three rows at a time. The header "
+                    "checkbox means "
+                    <strong>"the rows on this page"</strong>
+                    " and nothing else: it is checked only when every selectable "
+                    "displayed row is accepted, and indeterminate only when some of "
+                    "them are. Keys accepted on other pages never tint it \u{2014} they "
+                    "are reported separately, below the toolbar, and they survive "
+                    "paging because every proposal is a complete key set that carries "
+                    "them through untouched."
+                </p>
+                <p class="text-sm text-base-content/75 mb-3">
+                    "Archived conversations are not selectable and say why; their "
+                    "checkboxes stay focusable so the reason is reachable by keyboard. "
+                    "Accepted truth is this page's own signal \u{2014} switch to "
+                    "\"Reject proposals\" and every gesture still emits while nothing "
+                    "moves."
+                </p>
+                <p class="text-sm text-base-content/75 mb-3">
+                    "Accepted: "
+                    <code class="font-sans" data-testid="multi-accepted-keys">
+                        {move || multi_accepted.with(|keys| {
+                            if keys.is_empty() {
+                                "(none)".to_owned()
+                            } else {
+                                keys.iter().cloned().collect::<Vec<_>>().join(",")
+                            }
+                        })}
+                    </code>
+                    " \u{00b7} Proposals: "
+                    <code class="font-sans" data-testid="multi-proposal-count">
+                        {move || multi_proposal_count.get().to_string()}
+                    </code>
+                    " \u{00b7} Last cause: "
+                    <code class="font-sans" data-testid="multi-last-cause">
+                        {move || multi_last_cause.get()}
+                    </code>
+                    " \u{00b7} Proposal scope: "
+                    <code class="font-sans" data-testid="multi-last-scope">
+                        {move || multi_last_scope.get()}
+                    </code>
+                </p>
+                <div class="mb-3 flex flex-wrap gap-2">
+                    <Button
+                        on:click=move |_| {
+                            multi_accept_proposals.update(|accept| *accept = !*accept)
+                        }
+                        attr:data-testid="multi-accept-toggle"
+                    >
+                        {move || if multi_accept_proposals.get() {
+                            "Reject proposals"
+                        } else {
+                            "Accept proposals"
+                        }}
+                    </Button>
+                    <Button
+                        on:click=move |_| {
+                            multi_open_only.update(|open_only| *open_only = !*open_only);
+                            multi_page_index.set(0);
+                        }
+                        attr:data-testid="multi-filter-toggle"
+                    >
+                        {move || if multi_open_only.get() {
+                            "Show all conversations"
+                        } else {
+                            "Filter to open only"
+                        }}
+                    </Button>
+                    <Button
+                        on:click=move |_| {
+                            multi_population.update(|population| {
+                                population.retain(|(id, _, _)| *id != "conv-1");
+                            });
+                        }
+                        attr:data-testid="multi-remove-row"
+                    >
+                        "Remove conv-1 server-side"
+                    </Button>
+                    <Button
+                        on:click=move |_| {
+                            // A dataset change is an ATOMIC caller action:
+                            // move the scope and clear the accepted set in the
+                            // same update, so no key can be relabelled.
+                            multi_scope.set("conversations/v2".to_owned());
+                            multi_accepted.set(BTreeSet::new());
+                            multi_page_index.set(0);
+                        }
+                        attr:data-testid="multi-change-scope"
+                    >
+                        "Switch dataset scope"
+                    </Button>
+                </div>
+                <ServerDataTable
+                    rows=multi_rows
+                    columns=multi_columns
+                    pagination=multi_pagination
+                    query_capabilities=ServerQueryCapabilities::navigation_only()
+                    row_key=Callback::new(|row: TableRow| {
+                        row.get("id").cloned().unwrap_or_default()
+                    })
+                    multi_selection=ServerTableMultiSelection::controlled(
+                        multi_accepted.into(),
+                        Callback::new(move |proposal: ServerTableSelectionProposal| {
+                            multi_proposal_count.update(|count| *count += 1);
+                            multi_last_scope.set(proposal.scope.clone());
+                            multi_last_cause.set(match &proposal.cause {
+                                ServerTableSelectionCause::Row { key, selected } => {
+                                    format!("row:{key}:{selected}")
+                                }
+                                ServerTableSelectionCause::CurrentSlice { selected, keys } => {
+                                    format!("slice:{}:{selected}", keys.len())
+                                }
+                            });
+                            // Stale-scope proposals are refused outright, which
+                            // is the whole point of stamping them.
+                            if proposal.scope != multi_scope.get_untracked() {
+                                return;
+                            }
+                            if multi_accept_proposals.get_untracked() {
+                                multi_accepted.set(proposal.keys);
+                            }
+                        }),
+                    )
+                        .with_scope(multi_scope.into())
+                        .with_row_label(Callback::new(|row: TableRow| {
+                            row.get("subject").cloned().unwrap_or_default()
+                        }))
+                        .with_row_selectable(Callback::new(|row: TableRow| {
+                            if row.get("status").is_some_and(|status| status == "Archived") {
+                                ServerTableRowSelectability::blocked(
+                                    "Archived conversations cannot be reassigned",
+                                )
+                            } else {
+                                ServerTableRowSelectability::Selectable
+                            }
+                        }))
+                    attr:id="server-multi-select-table"
+                />
             </Section>
         </ContentLayout>
     }

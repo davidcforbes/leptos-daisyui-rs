@@ -62,6 +62,20 @@ pub fn DataTableHeader(
     /// `column_widths` prop.
     column_widths: RwSignal<HashMap<&'static str, f64>>,
 
+    /// Optional leading `<th>` rendered before every declared column, for a
+    /// non-data control column that is not part of `columns` -- currently
+    /// `ServerDataTable`'s controlled multi-selection checkbox (`ldui-px06`).
+    ///
+    /// Deliberately NOT a synthesized [`Column`]: a control column must not
+    /// reach the column chooser, the filter vocabulary, the sort model, or
+    /// the displayed-slice export projection, and keeping it out of `columns`
+    /// makes all four true by construction rather than by four separate
+    /// filters that could each be forgotten.
+    ///
+    /// Must resolve to a single `<th>`.
+    #[prop(optional_no_strip)]
+    leading_header: Option<AnyView>,
+
     /// Extra rows rendered inside this `<thead>` beneath the sortable header
     /// row -- `DataTable` passes its filter row here when any column is
     /// [`filterable`](Column::filterable).
@@ -77,6 +91,7 @@ pub fn DataTableHeader(
     view! {
         <thead>
             <tr>
+                {leading_header}
                 <For
                     each=move || columns.get()
                     key=|col| (

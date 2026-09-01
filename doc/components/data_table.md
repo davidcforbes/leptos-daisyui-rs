@@ -695,6 +695,130 @@ is emitted first and the explicit activation callback then fires from the same
 plain gesture. Double-click keeps the existing contract: its first click takes
 the plain path once, its repeat click is swallowed, and inspection fires once.
 
+### Controlled checkbox multi-selection (`ldui-px06`)
+
+`ServerTableSelection` above is deliberately single-select. For a bulk
+workflow — select several visible rows, then act on all of them through one
+caller-owned mutation — supply `multi_selection` instead. It renders a leading
+checkbox column plus a header checkbox, keyed by the `row_key` the table
+already requires.
+
+```rust,no_run
+let accepted = RwSignal::new(BTreeSet::<String>::new());
+
+view! {
+    <ServerDataTable
+        rows=rows
+        columns=columns
+        pagination=pagination
+        row_key=Callback::new(|row: TableRow| row["conversation_id"].clone())
+        multi_selection=ServerTableMultiSelection::controlled(
+            accepted.into(),
+            Callback::new(move |proposal: ServerTableSelectionProposal| {
+                if proposal.scope != current_dataset.get_untracked() {
+                    return; // a proposal minted against the previous dataset
+                }
+                accepted.set(proposal.keys);
+            }),
+        )
+            .with_scope(current_dataset.into())
+            .with_row_label(Callback::new(|row: TableRow| row["subject"].clone()))
+            .with_row_selectable(Callback::new(|row: TableRow| {
+                if row["status"] == "Archived" {
+                    ServerTableRowSelectability::blocked("Archived conversations cannot be reassigned")
+                } else {
+                    ServerTableRowSelectability::Selectable
+                }
+            }))
+    />
+}
+```
+
+#### What the header checkbox means
+
+It means **the rows on this page**, and nothing else. A server table only ever
+holds one slice, so a "select all" that appeared to reach rows the client has
+never seen — followed by a bulk mutation applied to them — is the hazard this
+model exists to make unrepresentable. The behaviour, the state machine
+(`ServerTableSliceSelectionState`), the default copy, and the emitted
+`ServerTableSelectionCause::CurrentSlice { keys }` payload all say *current
+slice*; nothing in the component can name a row the caller did not render.
+
+| Header state | Meaning | DOM |
+|---|---|---|
+| `NoSelectableRows` | the slice has no selectable rows at all | unchecked, `disabled` |
+| `None` | no selectable displayed row is accepted | unchecked |
+| `Partial` | *some but not all* selectable displayed rows are accepted | `indeterminate` |
+| `All` | *every* selectable displayed row is accepted | checked |
+
+**Accepted keys that are not on the current page never affect this.** They do
+not force `Partial`, and they do not stop a fully-selected page reading as
+`All`. Letting unseen rows tint the header would be the component asserting
+something about a population it does not hold. They are surfaced instead as
+their own explicit line of copy in a `role="status"` region
+(`data-server-selection-off-slice-notice`), defaulting to *"N selected rows are
+not on this page"*, alongside `data-server-selection-off-slice` on the
+selection status wrapper. Every default string names *this page*; none of them
+says "all".
+
+Activating the header checkbox adds the slice's selectable keys when the state
+is anything but `All`, and removes exactly those keys when it is `All`. Either
+way, keys outside the slice are carried through untouched — which is how a
+selection built across several pages survives paging without a preservation
+step that could be forgotten.
+
+#### Accepted truth is caller-owned
+
+The component holds no selection state. `selected_keys` is displayed truth and
+every gesture emits one `ServerTableSelectionProposal` carrying the **complete**
+proposed set (not a delta), which the caller applies or declines wholesale.
+Both checkboxes re-assert the accepted value onto the DOM element the browser
+just toggled *before* emitting, so a declined or delayed proposal leaves no
+optimistic divergence: the rendered checkbox, `aria-selected`, and the row
+styling all stay aligned with the caller's signal.
+
+#### Dataset identity
+
+`with_scope` stamps every proposal with the dataset identity it was computed
+against (`ServerTableSelectionProposal::scope`, also mirrored to
+`data-server-selection-scope`). When the meaning of a key changes — a different
+tenant, a re-scoped query, a new cursor stream — move the scope and clear the
+accepted set in the **same** caller update, and reject any proposal whose
+`scope` no longer matches. The component never clears the caller's set itself,
+because clearing is exactly the atomic decision the caller owns.
+
+Selection is keyed by stable business identity, never by page position, so a
+replaced page whose row 0 is a different entity cannot inherit "row 0 is
+selected". An accepted key for a row the server no longer returns simply stops
+matching anything on screen and is counted in the off-slice notice; it is never
+silently dropped and never aliased onto another row.
+
+#### Accessibility
+
+The header checkbox exposes checked / unchecked / `indeterminate` (a DOM
+property, not an attribute — it is written as one), is disabled only when the
+slice has nothing selectable, and is named for the slice
+(*"Select all N rows on this page"*). Every row checkbox is named for its row
+via `with_row_label` (falling back to the stable key), and toggles with `Space`
+like any native checkbox — the leading cell stops click/keydown propagation, so
+a checkbox gesture never also fires `on_row_activate`. A blocked row's
+checkbox uses `aria-disabled` rather than the native `disabled` attribute, so
+it stays in the tab order and its reason (`title`, and folded into the
+accessible name) is reachable by keyboard as well as by pointer. Multi-selection
+does not make rows themselves focusable: the gesture already lives on a real
+focusable control inside the row, and a second tab stop per row would double the
+keyboard cost of the table without adding a reachable action.
+
+#### Configuration errors are rejected, not resolved
+
+Supplying `selection` and `multi_selection` together renders a `role="alert"`
+panel (`data-server-row-key-config-error`) instead of quietly honouring one of
+them — silently picking would make a bulk-assignment gesture act on a single
+row, or the reverse. `multi_selection` without `row_key` is rejected the same
+way. Omitting `multi_selection` leaves rendering and single-selection behaviour
+byte-for-byte as they were: no checkbox column, no status region, no extra
+column track.
+
 ### Column tools (chooser, toolbar actions, displayed-slice projection)
 
 `ServerDataTable` can opt into `EntityTable`-style presentation without
@@ -806,6 +930,19 @@ dynamically:
 /* Per-column filter row */
 @source inline("select select-bordered select-xs input input-bordered input-xs w-full font-normal p-1");
 ```
+
+### `multi_selection` classes
+
+The leading selection column reuses the `Checkbox` component, so a consumer
+that already lists the checkbox classes needs nothing new:
+
+```css
+@source inline("checkbox checkbox-sm");
+```
+
+The status region's type step comes from `.ld-text-small`, which is an
+authored rule in `styles/tokens.css` — do **not** add `ld-text-*` to
+`@source inline(...)`.
 
 ## Accessibility
 

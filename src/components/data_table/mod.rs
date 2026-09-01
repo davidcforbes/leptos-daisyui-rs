@@ -66,6 +66,7 @@ mod resize;
 mod selection;
 mod server_column_tools;
 mod server_component;
+mod server_selection;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -122,6 +123,11 @@ pub use server_column_tools::{
     ServerTableDisplayRow, ServerTableDisplayedSlice,
 };
 pub use server_component::*;
+pub use server_selection::{
+    ServerTableMultiSelection, ServerTableRowSelectability, ServerTableSelectionCause,
+    ServerTableSelectionProposal, ServerTableSelectionTexts, ServerTableSliceSelectionState,
+    off_slice_selected_count, propose_row_toggle, propose_slice_toggle, slice_selection_state,
+};
 pub use sort::{SortAs, column_sort_as, compare_cells, parse_date, parse_number};
 pub use types::*;
 

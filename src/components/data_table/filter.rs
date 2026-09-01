@@ -448,6 +448,13 @@ pub fn DataTableFilterRow(
     /// with the live header.
     #[prop(into, default = Signal::stored("Filter {column} by text".to_owned()))]
     text_filter_label: Signal<String>,
+
+    /// Whether the surrounding table renders a leading non-data control
+    /// column (`ServerDataTable`'s selection checkbox, `ldui-px06`). Adds one
+    /// empty aligned cell so the filter row keeps its one-to-one alignment
+    /// with the header and body, and widens the options-error `colspan`.
+    #[prop(optional, into)]
+    leading_column: bool,
 ) -> impl IntoView {
     let options_error = Memo::new(move |_| validate_filter_options(&options.get()).err());
 
@@ -456,7 +463,9 @@ pub fn DataTableFilterRow(
         <Show when=move || options_error.get().is_some()>
             <tr data-table-filter-options-error="true">
                 <th
-                    colspan=move || columns.with(|columns| columns.len().max(1))
+                    colspan=move || {
+                        columns.with(|columns| columns.len() + usize::from(leading_column)).max(1)
+                    }
                     role="alert"
                     class="border border-error bg-error/10 px-3 py-2 text-sm text-error forced-colors:border-[CanvasText] forced-colors:text-[CanvasText]"
                 >
@@ -472,6 +481,12 @@ pub fn DataTableFilterRow(
             class="data-table-filter-row bg-table-filter text-table-filter-content forced-colors:bg-[Canvas] forced-colors:text-[CanvasText]"
             data-table-filter-row="true"
         >
+            {leading_column.then(|| view! {
+                <th
+                    class="border border-table-grid bg-table-filter p-1 forced-colors:border-[CanvasText] forced-colors:bg-[Canvas]"
+                    data-table-filter-leading="control"
+                ></th>
+            })}
             <For
                 each=move || columns.get()
                 key=|col| (col.id, col.header.clone(), col.filterable, col.filter_kind)
