@@ -2,9 +2,10 @@ use leptos::prelude::*;
 use leptos_daisyui_rs::components::{
     BadgeColor, Button, EntityBadgePresentation, EntityColumn, EntityColumnChooserTrigger,
     EntityColumnFilter, EntityColumnFilterOption, EntityDate, EntityDateFilter,
-    EntityDateFilterProposal, EntityGroupCollapseProposal, EntityIconColor, EntityIconPresentation,
-    EntityNullOrder, EntityPageSize, EntityRowAction, EntityRowEmphasis, EntityRowGroup,
-    EntityRowGrouping, EntityTable, EntityTableDisplayProjection, EntityTableMultiSelection,
+    EntityDateFilterProposal, EntityFocusRequest, EntityFocusRequestResolution,
+    EntityGroupCollapseProposal, EntityIconColor, EntityIconPresentation, EntityNullOrder,
+    EntityPageSize, EntityRowAction, EntityRowEmphasis, EntityRowGroup, EntityRowGrouping,
+    EntityTable, EntityTableDisplayProjection, EntityTableMultiSelection,
     EntityTablePreferenceOwnership, EntityTablePreferencePersistence, EntityTableProjectionScope,
     EntityTableSelection, EntityTableSelectionCause, EntityTableSelectionProposal,
     EntityTableTexts, EntityTableViewportFit,
@@ -1877,6 +1878,439 @@ pub fn EntityTableGroupingFixture() -> impl IntoView {
                     );
                 })
                 attr:id="entity-grouping-table"
+            />
+        </section>
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct GroupPagingRow {
+    id: String,
+    office: String,
+    measure: String,
+    status: String,
+    value: u32,
+}
+
+/// Three 17-row offices -- the exact Office Coordinator Activity shape -- plus
+/// one 30-row office that cannot fit a 25-row page by any packing.
+fn group_paging_rows() -> Rc<Vec<GroupPagingRow>> {
+    let offices = [
+        ("charlotte", "Charlotte", 17_u32),
+        ("durham", "Durham", 17),
+        ("raleigh", "Raleigh", 17),
+        ("statewide", "Statewide", 30),
+    ];
+    Rc::new(
+        offices
+            .into_iter()
+            .flat_map(|(key, label, count)| {
+                (1..=count).map(move |index| GroupPagingRow {
+                    id: format!("{key}-{index:02}"),
+                    office: key.to_owned(),
+                    measure: format!("{label} intake {index:02}"),
+                    status: if index % 2 == 0 { "Open" } else { "Closed" }.to_owned(),
+                    value: index,
+                })
+            })
+            .collect(),
+    )
+}
+
+fn group_paging_columns() -> Vec<EntityColumn<GroupPagingRow>> {
+    vec![
+        EntityColumn::text("measure", "Measure", |row: &GroupPagingRow| {
+            row.measure.clone()
+        })
+        .required()
+        .with_min_width(240),
+        EntityColumn::text("status", "Status", |row: &GroupPagingRow| {
+            row.status.clone()
+        })
+        .with_min_width(140),
+        EntityColumn::new("value", "Value", |row: &GroupPagingRow| {
+            row.value.to_string()
+        })
+        .sortable_by_key(|row: &GroupPagingRow| row.value)
+        .numeric()
+        .with_width(120),
+    ]
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct NeighborRow {
+    id: String,
+    label: String,
+}
+
+/// Group-aware pagination, empty-state semantics and control identity
+/// (`ldui-5in5`, `ldui-g4nw`, `ldui-izkq`).
+///
+/// At a 25-row page the three 17-row offices each own a page: filling the
+/// remainder of page 1 with eight Durham rows is exactly the defect. Statewide
+/// holds 30 rows and therefore CANNOT be kept whole, so it degrades to the
+/// previous fill-first behavior under the existing continuation heading -- both
+/// branches of the rule are reachable on one page.
+///
+/// The same fixture carries the other two beads because they need the same
+/// shape: a status filter that can select nothing (filtered-empty) beside a
+/// control that empties the provider (provider-empty), and a second mounted
+/// table proving two `EntityTable`s never mint the same control id.
+#[component]
+pub fn EntityTableGroupPagingFixture() -> impl IntoView {
+    let source = RwSignal::new_local(group_paging_rows());
+    let status_filter = RwSignal::new(String::new());
+    let accepted = RwSignal::new(BTreeSet::<String>::new());
+    let neighbor_accepted = RwSignal::new(BTreeSet::<String>::new());
+
+    let filtered = Signal::derive_local(move || {
+        let status = status_filter.get();
+        let rows = source.get();
+        if status.is_empty() {
+            return rows;
+        }
+        Rc::new(
+            rows.iter()
+                .filter(|row| row.status == status)
+                .cloned()
+                .collect::<Vec<_>>(),
+        )
+    });
+
+    let groups = Signal::derive_local(|| {
+        vec![
+            EntityRowGroup::new("charlotte", "Charlotte"),
+            EntityRowGroup::new("durham", "Durham"),
+            EntityRowGroup::new("raleigh", "Raleigh"),
+            EntityRowGroup::new("statewide", "Statewide"),
+        ]
+    });
+
+    // Only `no_rows` is overridden, exactly as a consumer that predates
+    // `no_matching_rows` would have it: the provider-empty sentence stays this
+    // one, and the filtered-empty case inherits the framework default instead
+    // of asserting the provider is empty when it is not.
+    let texts = Signal::stored(EntityTableTexts {
+        no_rows: "No activity is present in this snapshot.".to_owned(),
+        ..EntityTableTexts::default()
+    });
+
+    let filters = vec![EntityColumnFilter::select(
+        "status",
+        "entity-group-paging-status-filter",
+        Signal::stored("Status".to_owned()),
+        Signal::derive(move || status_filter.get()),
+        Signal::stored("All statuses".to_owned()),
+        Signal::stored(vec![
+            EntityColumnFilterOption::new("Open", "Open"),
+            EntityColumnFilterOption::new("Closed", "Closed"),
+            // Matches nothing, so the projection empties while the provider
+            // stays full -- the only way to reach the filtered-empty copy.
+            EntityColumnFilterOption::new("Void", "Void"),
+        ]),
+        Callback::new(move |value: String| status_filter.set(value)),
+    )];
+
+    let neighbors = Signal::stored_local(Rc::new(
+        (1..=3)
+            .map(|index| NeighborRow {
+                id: format!("neighbor-{index}"),
+                label: format!("Neighboring table row {index}"),
+            })
+            .collect::<Vec<_>>(),
+    ));
+
+    view! {
+        <section
+            id="entity-table-group-paging-fixture"
+            class="mx-auto max-w-4xl space-y-3 bg-base-100 p-4"
+        >
+            <h1 class="ld-text-display font-semibold">"Group-aware pagination"</h1>
+            <p class="ld-text-body text-base-content/75">
+                "Three seventeen-row offices and one thirty-row office. A group that fits a page is never split to fill the previous page's remainder; one that cannot fit keeps its continuation heading."
+            </p>
+            <div class="flex flex-wrap items-center gap-3 text-sm">
+                <span>
+                    "Source rows: "
+                    <code data-testid="entity-group-paging-source-count">
+                        {move || source.with(|rows| rows.len()).to_string()}
+                    </code>
+                </span>
+                <span>
+                    "Selected: "
+                    <code data-testid="entity-group-paging-selected-count">
+                        {move || accepted.with(BTreeSet::len).to_string()}
+                    </code>
+                </span>
+            </div>
+            <div class="flex flex-wrap gap-2">
+                <Button
+                    on:click=move |_| source.set(Rc::new(Vec::new()))
+                    attr:data-testid="entity-group-paging-drain-provider"
+                >
+                    "Drain the provider"
+                </Button>
+                <Button
+                    on:click=move |_| source.set(group_paging_rows())
+                    attr:data-testid="entity-group-paging-restore-provider"
+                >
+                    "Restore the provider"
+                </Button>
+            </div>
+            <EntityTable
+                data=filtered
+                source_data=source.into()
+                columns=group_paging_columns()
+                row_key=Rc::new(|row: &GroupPagingRow| row.id.clone())
+                dataset_identity="entity-table-group-paging-fixture"
+                page_reset_key=Signal::derive(move || status_filter.get())
+                viewport_fit=EntityTableViewportFit::max_height("22rem").with_min_rows(3)
+                column_filters=filters
+                texts=texts
+                control_id="group-paging-table"
+                row_grouping=EntityRowGrouping::controlled(
+                    Rc::new(|row: &GroupPagingRow| row.office.clone()),
+                    groups,
+                )
+                multi_selection=EntityTableMultiSelection::controlled(
+                    accepted.into(),
+                    Callback::new(move |proposal: EntityTableSelectionProposal| {
+                        accepted.set(proposal.keys);
+                    }),
+                )
+                attr:id="entity-group-paging-table"
+            />
+            // A second mounted table with NO `control_id`: its minted prefix
+            // must not collide with the one above, which is the "multiple
+            // tables on one page" half of ldui-izkq.
+            <EntityTable
+                data=neighbors
+                columns=vec![
+                    EntityColumn::text("label", "Neighbor", |row: &NeighborRow| row.label.clone())
+                        .required()
+                        .with_min_width(240),
+                ]
+                row_key=Rc::new(|row: &NeighborRow| row.id.clone())
+                dataset_identity="entity-table-group-paging-neighbor"
+                multi_selection=EntityTableMultiSelection::controlled(
+                    neighbor_accepted.into(),
+                    Callback::new(move |proposal: EntityTableSelectionProposal| {
+                        neighbor_accepted.set(proposal.keys);
+                    }),
+                )
+                attr:id="entity-group-paging-neighbor-table"
+            />
+        </section>
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct NoteRow {
+    id: String,
+    title: String,
+    status: String,
+}
+
+fn note_rows() -> Rc<Vec<NoteRow>> {
+    Rc::new(
+        (1..=5)
+            .map(|index| NoteRow {
+                id: format!("ON-100{index}"),
+                title: format!("Office note {index}"),
+                status: if index == 2 { "Archived" } else { "Active" }.to_owned(),
+            })
+            .collect(),
+    )
+}
+
+/// Typed focus requests for mutations the table never sees (`ldui-o0iw`).
+///
+/// The Delete button lives in the editor panel BESIDE the table, so it is
+/// destroyed along with the row it deletes and focus falls to `<body>`. The
+/// page supplies the stable successor as a typed request; the table resolves it
+/// against the rows it is painting and reports what it actually did.
+#[component]
+pub fn EntityTableExternalFocusFixture() -> impl IntoView {
+    let source = RwSignal::new_local(note_rows());
+    let selected = RwSignal::new(Some("ON-1003".to_owned()));
+    let status_filter = RwSignal::new(String::new());
+    let generation = RwSignal::new(1_u32);
+    let request_id = RwSignal::new(0_u64);
+    let focus_request = RwSignal::new(Option::<EntityFocusRequest>::None);
+    let resolution = RwSignal::new("(none)".to_owned());
+
+    let focus_scope = Signal::derive(move || format!("gen-{}", generation.get()));
+    let filtered = Signal::derive_local(move || {
+        let status = status_filter.get();
+        let rows = source.get();
+        if status.is_empty() {
+            return rows;
+        }
+        Rc::new(
+            rows.iter()
+                .filter(|row| row.status == status)
+                .cloned()
+                .collect::<Vec<_>>(),
+        )
+    });
+
+    let issue = move |row_key: String, action: Option<&'static str>, scope: String| {
+        request_id.update(|id| *id += 1);
+        let id = request_id.get_untracked();
+        focus_request.set(Some(match action {
+            Some(action_id) => EntityFocusRequest::row_action(id, scope, row_key, action_id),
+            None => EntityFocusRequest::row(id, scope, row_key),
+        }));
+    };
+
+    // The editor's own Delete: the central data is replaced and the page
+    // supplies the stable successor. Issued ONLY because the mutation was
+    // accepted -- a declined one issues nothing and leaves editor focus alone.
+    let delete_selected = move |action: Option<&'static str>| {
+        let Some(key) = selected.get_untracked() else {
+            return;
+        };
+        let rows = source.get_untracked();
+        let Some(position) = rows.iter().position(|row| row.id == key) else {
+            return;
+        };
+        let mut replacement = rows.as_ref().clone();
+        replacement.remove(position);
+        let successor = replacement
+            .get(position)
+            .or_else(|| replacement.get(position.saturating_sub(1)))
+            .map(|row| row.id.clone());
+        source.set(Rc::new(replacement));
+        selected.set(successor.clone());
+        if let Some(successor) = successor {
+            issue(successor, action, focus_scope.get_untracked());
+        }
+    };
+
+    let columns = vec![
+        EntityColumn::text("title", "Note", |row: &NoteRow| row.title.clone())
+            .required()
+            .with_min_width(240),
+        EntityColumn::text("status", "Status", |row: &NoteRow| row.status.clone())
+            .with_min_width(140),
+        EntityColumn::action("open", "Action", |_row: &NoteRow| String::new()).render_with(
+            move |row: &NoteRow| {
+                let key = row.id.clone();
+                view! {
+                    <EntityRowAction action_id="open">
+                        <Button
+                            attr:data-testid="entity-external-focus-open"
+                            attr:data-entity-row-action-id=key
+                        >
+                            "Open"
+                        </Button>
+                    </EntityRowAction>
+                }
+                .into_any()
+            },
+        ),
+    ];
+
+    let filters = vec![EntityColumnFilter::select(
+        "status",
+        "entity-external-focus-status-filter",
+        Signal::stored("Status".to_owned()),
+        Signal::derive(move || status_filter.get()),
+        Signal::stored("All statuses".to_owned()),
+        Signal::stored(vec![
+            EntityColumnFilterOption::new("Active", "Active"),
+            EntityColumnFilterOption::new("Archived", "Archived"),
+        ]),
+        Callback::new(move |value: String| status_filter.set(value)),
+    )];
+
+    view! {
+        <section
+            id="entity-table-external-focus-fixture"
+            class="mx-auto max-w-4xl space-y-3 bg-base-100 p-4"
+        >
+            <h1 class="ld-text-display font-semibold">"External editor focus requests"</h1>
+            <div class="flex flex-wrap items-center gap-3 text-sm">
+                <span>
+                    "Selected: "
+                    <code data-testid="entity-external-focus-selected">
+                        {move || selected.get().unwrap_or_else(|| "(none)".to_owned())}
+                    </code>
+                </span>
+                <span>
+                    "Scope: "
+                    <code data-testid="entity-external-focus-scope">{move || focus_scope.get()}</code>
+                </span>
+                <span>
+                    "Resolution: "
+                    <code data-testid="entity-external-focus-resolution">
+                        {move || resolution.get()}
+                    </code>
+                </span>
+            </div>
+            <div
+                class="flex flex-wrap gap-2 rounded border border-base-300 p-3"
+                data-testid="entity-external-focus-editor"
+            >
+                <Button
+                    on:click=move |_| delete_selected(None)
+                    attr:data-testid="entity-external-focus-delete"
+                >
+                    "Delete selected note"
+                </Button>
+                <Button
+                    on:click=move |_| delete_selected(Some("open"))
+                    attr:data-testid="entity-external-focus-delete-to-action"
+                >
+                    "Delete and focus the successor's action"
+                </Button>
+                <Button
+                    on:click=move |_| issue(
+                        "ON-1002".to_owned(),
+                        None,
+                        focus_scope.get_untracked(),
+                    )
+                    attr:data-testid="entity-external-focus-request-hidden"
+                >
+                    "Request a row that may be filtered away"
+                </Button>
+                <Button
+                    on:click=move |_| issue(
+                        "ON-1001".to_owned(),
+                        None,
+                        "gen-stale".to_owned(),
+                    )
+                    attr:data-testid="entity-external-focus-request-stale"
+                >
+                    "Request with a stale scope"
+                </Button>
+                <Button
+                    on:click=move |_| generation.update(|value| *value += 1)
+                    attr:data-testid="entity-external-focus-bump-scope"
+                >
+                    "Bump the access scope"
+                </Button>
+            </div>
+            <EntityTable
+                data=filtered
+                source_data=source.into()
+                columns=columns
+                row_key=Rc::new(|row: &NoteRow| row.id.clone())
+                dataset_identity="entity-table-external-focus-fixture"
+                page_reset_key=Signal::derive(move || status_filter.get())
+                column_filters=filters
+                focus_scope=focus_scope
+                focus_request=focus_request
+                on_focus_request_resolved=Callback::new(
+                    move |resolved: EntityFocusRequestResolution| {
+                        resolution.set(resolved.to_string());
+                    },
+                )
+                selection=EntityTableSelection::controlled(
+                    selected.into(),
+                    Callback::new(move |proposed: Option<String>| selected.set(proposed)),
+                )
+                attr:id="entity-external-focus-table"
             />
         </section>
     }

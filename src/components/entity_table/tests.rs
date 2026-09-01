@@ -3245,8 +3245,11 @@ fn the_display_projection_carries_the_group_identity_the_table_stopped_repeating
         &columns,
         &preferences,
         &order.indices,
-        0,
-        25,
+        EntityPagePlan::grouped(
+            &super::paging::entity_displayed_run_lengths(&order.group_keys),
+            25,
+        )
+        .bounds(0),
         &|row: &ActivityRow| row.id.to_owned(),
         EntityTableActionColumnPolicy::default(),
         Some(super::model::EntityProjectionGrouping {

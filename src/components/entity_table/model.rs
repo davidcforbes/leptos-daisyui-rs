@@ -12,6 +12,7 @@ use crate::components::data_table::{
     effective_min_width, page_bounds, resized_width,
 };
 use std::collections::BTreeSet;
+use std::ops::Range;
 use std::rc::Rc;
 
 /// Supported row counts for client-snapshot tables.
@@ -236,13 +237,13 @@ pub fn entity_table_display_projection<T>(
     action_columns: EntityTableActionColumnPolicy,
 ) -> EntityTableDisplayProjection {
     let indices = sorted_indices(rows, columns, &preferences.sort);
+    let bounds = page_bounds(current_page, effective_page_size.max(1), indices.len());
     entity_table_display_projection_from_indices(
         rows,
         columns,
         preferences,
         &indices,
-        current_page,
-        effective_page_size,
+        bounds,
         row_key,
         action_columns,
         None,
@@ -272,8 +273,12 @@ pub(crate) fn entity_table_display_projection_from_indices<T>(
     columns: &[EntityColumn<T>],
     preferences: &EntityTablePreferences,
     indices: &[usize],
-    current_page: usize,
-    effective_page_size: usize,
+    // The window the body is ACTUALLY painting, handed in rather than
+    // recomputed: a grouped table's pages deliberately stop short of capacity
+    // (ldui-5in5), so `page * capacity` no longer names the same rows and an
+    // export that recomputed it would describe a different page than the
+    // screen.
+    page_bounds: Range<usize>,
     row_key: &dyn Fn(&T) -> String,
     action_columns: EntityTableActionColumnPolicy,
     grouping: Option<EntityProjectionGrouping<'_>>,
@@ -323,8 +328,9 @@ pub(crate) fn entity_table_display_projection_from_indices<T>(
             }
         })
         .collect::<Vec<_>>();
-    let bounds = page_bounds(current_page, effective_page_size, projected_rows.len());
-    EntityTableDisplayProjection::from_parts(descriptors, projected_rows, bounds.start, bounds.end)
+    let start = page_bounds.start.min(projected_rows.len());
+    let end = page_bounds.end.clamp(start, projected_rows.len());
+    EntityTableDisplayProjection::from_parts(descriptors, projected_rows, start, end)
 }
 
 enum PreparedSort<T> {

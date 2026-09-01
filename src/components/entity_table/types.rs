@@ -2094,8 +2094,68 @@ pub struct EntityTableTexts {
     pub next: String,
     /// Row-range template with `{start}`, `{end}`, and `{total}` placeholders.
     pub row_range: String,
-    /// Empty-table message used when the component is rendered directly.
+    /// Message shown when the **authoritative source dataset** holds no rows
+    /// at all — the provider genuinely has nothing to show (`ldui-g4nw`).
+    ///
+    /// This is where a domain sentence belongs ("No contribution credits are
+    /// present in this snapshot."), because it is the only case in which such
+    /// a sentence is true.
     pub no_rows: String,
+    /// Message shown when source rows exist but the current projection is
+    /// empty — every row was filtered, searched, date-bounded or collapsed
+    /// away (`ldui-g4nw`).
+    ///
+    /// Kept separate from [`Self::no_rows`] because reusing one string makes
+    /// the table assert the provider is empty when it is not, which reads as
+    /// missing data rather than an over-narrow filter. A caller that overrides
+    /// only `no_rows` keeps that copy for the provider-empty case and inherits
+    /// this default for the filtered case, so the distinction costs an
+    /// existing consumer nothing.
+    pub no_matching_rows: String,
+}
+
+/// Which empty state a table is in (`ldui-g4nw`).
+///
+/// The table already knows both counts, so the choice is a total function of
+/// the authoritative source row count — never a guess, and never the same
+/// sentence for both.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum EntityEmptyState {
+    /// The authoritative source dataset itself is empty.
+    #[default]
+    Provider,
+    /// Source rows exist; the current filtered/searched/collapsed projection
+    /// selected none of them.
+    Filtered,
+}
+
+impl EntityEmptyState {
+    /// Classifies from the authoritative source row count.
+    ///
+    /// `source_row_count` is the count of the **source** snapshot — the
+    /// `source_data` prop when supplied, otherwise the rendered `data`
+    /// snapshot, which is the same fallback focus recovery already uses.
+    #[must_use]
+    pub const fn from_source_rows(source_row_count: usize) -> Self {
+        if source_row_count == 0 {
+            Self::Provider
+        } else {
+            Self::Filtered
+        }
+    }
+
+    /// Stable `data-entity-empty-state` value.
+    ///
+    /// A stable attribute rather than a copy comparison: the copy is
+    /// localizable, so asserting on it would make a browser proof fail the
+    /// moment a consumer translates the table.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Provider => "provider",
+            Self::Filtered => "filtered",
+        }
+    }
 }
 
 impl Default for EntityTableTexts {
@@ -2133,6 +2193,18 @@ impl Default for EntityTableTexts {
             next: "Next".to_owned(),
             row_range: "Showing {start}-{end} of {total}".to_owned(),
             no_rows: "No rows".to_owned(),
+            no_matching_rows: "No rows match the current filters".to_owned(),
+        }
+    }
+}
+
+impl EntityTableTexts {
+    /// The one empty-state sentence for the state the table is actually in.
+    #[must_use]
+    pub fn empty_state_message(&self, state: EntityEmptyState) -> &str {
+        match state {
+            EntityEmptyState::Provider => &self.no_rows,
+            EntityEmptyState::Filtered => &self.no_matching_rows,
         }
     }
 }

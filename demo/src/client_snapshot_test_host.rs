@@ -17,7 +17,8 @@ use leptos::prelude::*;
 use leptos_daisyui_rs::test_mode;
 use leptos_daisyui_rs::tokens::{UiAnimationsPreamble, UiTokensPreamble};
 use snapshot_table_page::{
-    EntityTableEmphasisFixture, EntityTableGroupingFixture, EntityTableMultiSelectionFixture,
+    EntityTableEmphasisFixture, EntityTableExternalFocusFixture, EntityTableGroupPagingFixture,
+    EntityTableGroupingFixture, EntityTableMultiSelectionFixture,
     EntityTablePageSizeIdentityFixture, EntityTablePresentationFixture,
     EntityTableSelectionFixture, EntityTableViewportFitFixture, SnapshotTablePageControlsFixture,
     SnapshotTablePageFixture,
@@ -69,11 +70,21 @@ fn main() {
         let grouping_fixture = web_sys::window()
             .and_then(|window| window.location().pathname().ok())
             .is_some_and(|path| path.ends_with("/entity-table-grouping"));
+        let group_paging_fixture = web_sys::window()
+            .and_then(|window| window.location().pathname().ok())
+            .is_some_and(|path| path.ends_with("/entity-table-group-paging"));
+        let external_focus_fixture = web_sys::window()
+            .and_then(|window| window.location().pathname().ok())
+            .is_some_and(|path| path.ends_with("/entity-table-external-focus"));
         view! {
             <UiTokensPreamble />
             <UiAnimationsPreamble />
             <main class="min-h-screen bg-base-200 p-4 sm:p-6">
-                {if grouping_fixture {
+                {if external_focus_fixture {
+                    view! { <EntityTableExternalFocusFixture /> }.into_any()
+                } else if group_paging_fixture {
+                    view! { <EntityTableGroupPagingFixture /> }.into_any()
+                } else if grouping_fixture {
                     view! { <EntityTableGroupingFixture /> }.into_any()
                 } else if multi_selection_fixture {
                     view! { <EntityTableMultiSelectionFixture /> }.into_any()

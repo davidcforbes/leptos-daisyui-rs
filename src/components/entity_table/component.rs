@@ -4,6 +4,10 @@ use super::emphasis::{
     EntityRowEmphasis, EntityRowEmphasisClassifier, entity_row_emphasis_cell_class,
     entity_row_emphasis_for, entity_row_emphasis_row_class,
 };
+use super::focus_request::{
+    EntityFocusRequest, EntityFocusRequestOutcome, EntityFocusRequestResolution,
+    entity_focus_request_outcome,
+};
 use super::grouping::{
     EntityGroupActions, EntityGroupCollapseCause, EntityGroupCollapseProposal, EntityGroupKey,
     EntityGroupOrder, EntityGroupRun, EntityGroupTexts, EntityGroupedSection, EntityRowGroup,
@@ -11,13 +15,17 @@ use super::grouping::{
     entity_grouped_order, entity_grouped_page_sections, entity_previous_group_key,
     propose_entity_group_collapse,
 };
+use super::identity::{
+    entity_page_size_control_id, entity_selection_header_control_id,
+    entity_selection_row_control_id, next_entity_control_id, normalize_entity_control_id,
+    resolve_entity_control_id,
+};
 use super::model::{
     ENTITY_PAGE_SIZE_CHOICES, EntityColumnMove, EntityFocusRecord, EntityFocusTarget,
     EntityProjectionGrouping, SortedIndexCache, emit_normalized_preference_change,
     entity_table_display_projection_from_indices, focus_target, move_column, next_sort,
     next_sort_additive, normalize_preferences, ordered_columns, page_after_dataset_change,
-    page_after_row_delta, reset_columns, reset_sort, resolve_entity_page_size, set_preferred_width,
-    toggle_hidden_column,
+    reset_columns, reset_sort, resolve_entity_page_size, set_preferred_width, toggle_hidden_column,
 };
 use super::multi_selection::{
     EntityTableMultiSelection, EntityTableSelectionCause, EntityTableSelectionProposal,
@@ -25,6 +33,7 @@ use super::multi_selection::{
     displayed_row_label, off_page_selected_count, propose_entity_displayed_page_toggle,
     propose_entity_row_toggle, resolve_entity_selection_mode,
 };
+use super::paging::{EntityPagePlan, entity_displayed_run_lengths};
 use super::selection::{
     EntityTableSelection, entity_row_aria_selected, entity_row_hover_class, entity_row_is_selected,
     entity_selection_proposal,
@@ -33,11 +42,11 @@ use super::storage::{load_preferences, save_preferences};
 use super::types::{
     ENTITY_PAGE_SIZE_AUTO_VALUE, EntityCellPresentation, EntityColumn, EntityColumnAlignment,
     EntityColumnChooserTrigger, EntityColumnFilter, EntityColumnFilterPlacement,
-    EntityColumnFilters, EntityColumnKind, EntityColumns, EntityCompactRow, EntityPageSize,
-    EntityPageSizeIntent, EntityRowKey, EntityRowRenderer, EntitySort, EntitySortDirection,
-    EntityTableActionColumnPolicy, EntityTableDisplayProjection, EntityTablePreferenceOwnership,
-    EntityTablePreferencePersistence, EntityTablePreferences, EntityTableTexts,
-    EntityTableViewportFit, EntityTextOverflow, entity_alignment_class,
+    EntityColumnFilters, EntityColumnKind, EntityColumns, EntityCompactRow, EntityEmptyState,
+    EntityPageSize, EntityPageSizeIntent, EntityRowKey, EntityRowRenderer, EntitySort,
+    EntitySortDirection, EntityTableActionColumnPolicy, EntityTableDisplayProjection,
+    EntityTablePreferenceOwnership, EntityTablePreferencePersistence, EntityTablePreferences,
+    EntityTableTexts, EntityTableViewportFit, EntityTextOverflow, entity_alignment_class,
     entity_compact_alignment_class, entity_header_justify_class, entity_text_overflow_style,
     normalize_entity_secondary_text,
 };
@@ -47,8 +56,7 @@ use crate::components::checkbox::{Checkbox, CheckboxSize};
 use crate::components::data_table::{
     FALLBACK_HEADER_HEIGHT, FALLBACK_ROW_HEIGHT, MAX_COLUMN_WIDTH, PageSlot, StableColumnTrack,
     StableTableColGroup, auto_page_size_for_height, clamp_page, effective_min_width,
-    keyboard_resized_width, page_bounds, page_count, page_window, row_range, stable_column_width,
-    stable_table_content_style,
+    keyboard_resized_width, page_window, stable_column_width, stable_table_content_style,
 };
 use crate::components::icon::{Icon, IconSize};
 use crate::components::menu::{Menu, MenuCheckItem};
@@ -582,6 +590,33 @@ pub fn EntityTable<T>(
     /// When omitted, the dataset identity is used as the focus scope.
     #[prop(optional, into)]
     focus_scope: Option<Signal<String>>,
+    /// Optional typed focus request for mutations this table never sees
+    /// (`ldui-o0iw`).
+    ///
+    /// An editor beside the table that deletes the selected row destroys the
+    /// control that had focus, so focus falls to `<body>` and the table's own
+    /// `focusin`-seeded recovery has nothing to recover from. Supplying the
+    /// stable successor here is how a page says "focus this row" without
+    /// querying and focusing DOM this crate owns.
+    ///
+    /// Each [`EntityFocusRequest::id`] is applied at most once, so a signal
+    /// that keeps reporting the same request cannot take focus back from the
+    /// user later. The request is resolved against the rows this table is
+    /// actually painting — after filtering, sorting, paging, grouping and
+    /// collapse — and never against source order; a row that is not on screen
+    /// takes the documented table-region fallback instead of a positional
+    /// guess. A stale `scope` is rejected outright.
+    ///
+    /// Issue one only for a mutation that was **accepted**: it is an
+    /// instruction to move focus, so a failed or declined mutation should
+    /// issue nothing and leave the editor's own focus alone.
+    #[prop(optional, into)]
+    focus_request: Option<Signal<Option<EntityFocusRequest>>>,
+    /// Reports what the table actually did with each `focus_request`, so a
+    /// consumer can announce or log the real outcome rather than assume the
+    /// request succeeded.
+    #[prop(optional)]
+    on_focus_request_resolved: Option<Callback<EntityFocusRequestResolution>>,
     /// Optional callback that makes rows mouse- and keyboard-operable.
     #[prop(optional)]
     on_row_activate: Option<Callback<String>>,
@@ -701,6 +736,27 @@ pub fn EntityTable<T>(
     /// stays stable across re-renders.
     #[prop(optional, into)]
     page_size_control_id: MaybeProp<String>,
+    /// Stable prefix every other framework-owned control derives its `id` and
+    /// `name` from (`ldui-izkq`) — today the select-all checkbox and each
+    /// row's selection checkbox.
+    ///
+    /// Row identity is the prefix plus the escape-encoded **stable row key**,
+    /// never the row's position: an index-derived id re-points at a different
+    /// row the moment the table sorts, filters, pages, groups or collapses,
+    /// and an id that silently aliases to another row is worse than no id.
+    ///
+    /// When omitted, a process-unique prefix is minted per mounted instance,
+    /// so two tables on one page still never share a control id. Supply your
+    /// own when you want an id that is stable across builds — a mount-order
+    /// counter is not. A supplied value is trimmed and escaped into
+    /// `[A-Za-z0-9_-]`, because an `id` may not contain whitespace and a `.`
+    /// or `#` breaks every selector built from it.
+    ///
+    /// `page_size_control_id` predates this prop and still wins outright for
+    /// the rows-per-page select; supplying only `control_id` names that select
+    /// too, and supplying neither leaves its own minted id untouched.
+    #[prop(optional, into)]
+    control_id: MaybeProp<String>,
     /// Emits the resolved rows-per-page decision whenever it changes.
     ///
     /// This is how a consumer learns the effective page size without measuring
@@ -840,12 +896,30 @@ where
     // mounted instance, so two or more `EntityTable`s on one page never
     // collide even without a caller-supplied override (ldui-kl55).
     let default_page_size_control_id = next_entity_page_size_id();
+    // ── The one table control prefix (ldui-izkq) ──
+    //
+    // Minted ONCE per mounted instance, outside every reactive closure: a
+    // prefix re-minted on each render would hand the same checkbox a new
+    // `id`/`name` on every keystroke, which is worse than having none.
+    let minted_control_id = next_entity_control_id();
+    let table_control_id: Signal<String> =
+        Signal::derive(move || resolve_entity_control_id(control_id.get(), &minted_control_id));
     let page_size_select_id: Signal<Option<String>> = Signal::derive(move || {
-        Some(
-            page_size_control_id
+        Some(page_size_control_id.get().unwrap_or_else(|| {
+            // A table that supplies neither prop keeps the exact id it has
+            // always minted (ldui-kl55); only a usable `control_id` renames
+            // this control, and it renames it into the same one scheme.
+            if control_id
                 .get()
-                .unwrap_or_else(|| default_page_size_control_id.clone()),
-        )
+                .as_deref()
+                .and_then(normalize_entity_control_id)
+                .is_some()
+            {
+                entity_page_size_control_id(&table_control_id.get())
+            } else {
+                default_page_size_control_id.clone()
+            }
+        }))
     });
     let configured_page_size =
         Signal::derive(move || preferences.with(|preferences| preferences.page_size.max(1)));
@@ -1040,10 +1114,46 @@ where
     // the page count.
     let total_rows =
         Signal::derive_local(move || displayed_order.with(|order| order.indices.len()));
-    let total_pages = Signal::derive(move || page_count(total_rows.get(), page_size.get().rows()));
-    let page_bounds_signal = Signal::derive_local(move || {
-        page_bounds(current_page.get(), page_size.get().rows(), total_rows.get())
+    // ── Provider-empty vs filtered-empty (ldui-g4nw) ──
+    //
+    // The table already knows both counts, so it never has to spend one
+    // sentence on two different facts. `source_data` falls back to the
+    // rendered snapshot, which keeps an ungoverned table correct: with no
+    // separate source, a zero-row render genuinely IS provider-empty.
+    let empty_state = Signal::derive_local(move || {
+        EntityEmptyState::from_source_rows(source_data.with(|rows| rows.len()))
     });
+    let empty_state_message = Signal::derive_local(move || {
+        let state = empty_state.get();
+        texts.with(|texts| texts.empty_state_message(state).to_owned())
+    });
+    // ── The one page plan (ldui-5in5, extending ldui-5p06) ──
+    //
+    // Page BOUNDARIES, like the page size before them, resolve exactly once.
+    // A grouped table keeps a fitting group whole, so some pages deliberately
+    // stop short of capacity and `page * capacity` stops naming the rows the
+    // body paints; the pager, the footer range, the selection population, the
+    // focus window and the export all read this plan instead of recomputing
+    // that arithmetic. An ungrouped table gets the uniform plan, which is the
+    // arithmetic it always had.
+    let page_plan: Signal<Rc<EntityPagePlan>, LocalStorage> = Signal::derive_local(move || {
+        let capacity = page_size.get().rows();
+        displayed_order.with(|order| {
+            if !has_grouping {
+                return Rc::new(EntityPagePlan::uniform(order.indices.len(), capacity));
+            }
+            // Run lengths come from the DISPLAYED keys, so collapse and
+            // filtering have already been applied -- group boundaries are
+            // recomputed before paging, never after it.
+            Rc::new(EntityPagePlan::grouped(
+                &entity_displayed_run_lengths(&order.group_keys),
+                capacity,
+            ))
+        })
+    });
+    let total_pages = Signal::derive_local(move || page_plan.with(|plan| plan.page_count()));
+    let page_bounds_signal =
+        Signal::derive_local(move || page_plan.with(|plan| plan.bounds(current_page.get())));
     let page_row_keys = Signal::derive_local(move || {
         let rows = data.get();
         let bounds = page_bounds_signal.get();
@@ -1096,10 +1206,10 @@ where
     // groups that held the current page's rows lands on a real page instead of
     // an empty one past the end.
     Effect::new(move |_| {
-        let displayed = total_rows.get();
-        let rows_per_page = page_size.get().rows();
-        let next_page =
-            page_after_row_delta(current_page.get_untracked(), rows_per_page, displayed);
+        // Clamped against the PLAN, so a page that only existed under the old
+        // group shape (or before a collapse removed its rows) lands on a real
+        // page instead of an empty one past the end.
+        let next_page = page_plan.with(|plan| plan.clamp(current_page.get_untracked()));
         if next_page != current_page.get_untracked() {
             current_page.set(next_page);
         }
@@ -1136,6 +1246,8 @@ where
     // renders exactly the markup it always did -- no leading track, no
     // leading cells, no live region.
     let selection_header_ref = NodeRef::<leptos::html::Input>::new();
+    let selection_header_id: Signal<String> =
+        Signal::derive(move || entity_selection_header_control_id(&table_control_id.get()));
     let selection_header = multi_selection.map(|model| {
         let selection_texts = model.texts;
         view! {
@@ -1162,6 +1274,12 @@ where
                         displayed_page_state.get().is_disabled().then_some("true")
                     }
                     attr:data-entity-selection-toggle="page"
+                    // An accessible NAME is not a DOM IDENTITY: without these
+                    // the control is a form field with neither id nor name,
+                    // unreferenceable from a `label[for]`, an `aria-controls`,
+                    // or a form submission (ldui-izkq).
+                    attr:id=move || selection_header_id.get()
+                    attr:name=move || selection_header_id.get()
                     attr:aria-label=move || {
                         let state = displayed_page_state.get();
                         let count = page_row_keys.with(Vec::len);
@@ -1249,8 +1367,7 @@ where
                 &columns,
                 &preferences_value,
                 order.indices.as_slice(),
-                current_page.get(),
-                page_size.get().rows(),
+                page_bounds_signal.get(),
                 row_key.get_value().as_ref(),
                 projection_action_columns,
                 grouping,
@@ -1314,6 +1431,57 @@ where
             }
         }
     });
+
+    // ── Caller-issued focus requests (ldui-o0iw) ──
+    //
+    // Deliberately a SECOND, independent path from the `focus_record` recovery
+    // above: that one answers a mutation the table observed, this one answers a
+    // mutation it never saw. Neither reads the other's state, so an external
+    // request cannot disturb internal row-action recovery, and a request that
+    // is refused leaves no residue behind.
+    if let Some(focus_request) = focus_request {
+        let applied_request = StoredValue::new(Option::<u64>::None);
+        Effect::new(move |_| {
+            let Some(request) = focus_request.get() else {
+                return;
+            };
+            // One id, one application. A controlled signal that keeps reporting
+            // the honored request must not take focus back from the user.
+            if applied_request.get_value() == Some(request.id) {
+                return;
+            }
+            applied_request.set_value(Some(request.id));
+            let request_id = request.id;
+            let report = move |outcome: EntityFocusRequestOutcome| {
+                if let Some(on_focus_request_resolved) = on_focus_request_resolved {
+                    on_focus_request_resolved.run(EntityFocusRequestResolution {
+                        request_id,
+                        outcome,
+                    });
+                }
+            };
+            // The keys the body is painting right now -- the same signal the
+            // `<tbody>` iterates -- so the request is answered against the
+            // filtered, sorted, paged, grouped presentation and never against
+            // source order.
+            let intent = entity_focus_request_outcome(
+                &request,
+                &focus_scope.get_untracked(),
+                &page_row_keys.get_untracked(),
+            );
+            if matches!(intent, EntityFocusRequestOutcome::StaleScope) {
+                report(intent);
+                return;
+            }
+            // Focus as it stood when the request was observed, compared again
+            // after the replacement paints. The element it names may well be
+            // destroyed by then, which is exactly the case this serves.
+            let focused_at_request = entity_active_element();
+            request_animation_frame(move || {
+                apply_entity_focus_request(table_region, intent, focused_at_request, 1, report);
+            });
+        });
+    }
 
     let measure_rows = move || {
         if !viewport_fit_enabled {
@@ -2252,9 +2420,10 @@ where
                                 <tr>
                                     <td
                                         colspan=move || body_colspan.get()
+                                        data-entity-empty-state=move || empty_state.get().as_str()
                                         class="border border-table-grid py-10 text-center text-base-content/65 forced-colors:border-[CanvasText]"
                                     >
-                                        {texts.with(|texts| texts.no_rows.clone())}
+                                        {move || empty_state_message.get()}
                                     </td>
                                 </tr>
                             })}
@@ -2276,6 +2445,7 @@ where
                                         accepted_keys,
                                         selection_scope,
                                         row_emphasis,
+                                        table_control_id,
                                     },
                                 ),
                             )}
@@ -2310,6 +2480,7 @@ where
                                 accepted_keys,
                                 selection_scope,
                                 row_emphasis,
+                                table_control_id,
                             },
                         };
                         view! {
@@ -2318,9 +2489,10 @@ where
                                     <tr>
                                         <td
                                             colspan=move || body_colspan.get()
+                                            data-entity-empty-state=move || empty_state.get().as_str()
                                             class="border border-table-grid py-10 text-center text-base-content/65 forced-colors:border-[CanvasText]"
                                         >
-                                            {texts.with(|texts| texts.no_rows.clone())}
+                                            {move || empty_state_message.get()}
                                         </td>
                                     </tr>
                                 </tbody>
@@ -2412,8 +2584,16 @@ where
                             if total == 0 {
                                 return String::new();
                             }
-                            let rows_per_page = page_size.get().rows();
-                            let (start, end) = row_range(current_page.get(), rows_per_page, total);
+                            // Read off the plan, never multiplied out of the
+                            // page index: a grouped page can hold fewer rows
+                            // than the capacity, and reciting `page * capacity`
+                            // there is how a truthful count becomes a lie.
+                            let (start, end) = page_plan.with(|plan| {
+                                plan.row_range(current_page.get())
+                            });
+                            if start == 0 {
+                                return String::new();
+                            }
                             texts
                                 .with(|texts| texts.row_range.clone())
                                 .replace("{start}", &start.to_string())
@@ -2745,6 +2925,7 @@ struct KeyedRowContext<T: 'static> {
     accepted_keys: Signal<BTreeSet<String>>,
     selection_scope: Signal<String>,
     row_emphasis: StoredValue<Option<EntityRowEmphasisClassifier<T>>, LocalStorage>,
+    table_control_id: Signal<String>,
 }
 
 impl<T: 'static> Clone for KeyedRowContext<T> {
@@ -2772,6 +2953,7 @@ fn render_keyed_row<T: Clone + 'static>(
         accepted_keys,
         selection_scope,
         row_emphasis,
+        table_control_id,
     } = context;
     // A table with only `selection` (no `on_row_activate`) is still
     // keyboard-operable, mirroring `data_table::row_is_interactive`.
@@ -2886,6 +3068,13 @@ fn render_keyed_row<T: Clone + 'static>(
         };
         let accepted_key = key.clone();
         let is_accepted = move || accepted_keys.with(|accepted| accepted.contains(&accepted_key));
+        // Identity from the STABLE ROW KEY, never the rendered position: the
+        // leading cell is built per key, so there is no page index in scope to
+        // reach for even by accident (ldui-izkq).
+        let identity_key = key.clone();
+        let row_control_id: Signal<String> = Signal::derive(move || {
+            entity_selection_row_control_id(&table_control_id.get(), &identity_key)
+        });
 
         let label_name = row_name;
         let label_accepted = is_accepted.clone();
@@ -2906,6 +3095,8 @@ fn render_keyed_row<T: Clone + 'static>(
                     node_ref=checkbox_ref
                     class="align-middle"
                     attr:data-entity-selection-row=dom_key
+                    attr:id=move || row_control_id.get()
+                    attr:name=move || row_control_id.get()
                     attr:aria-label=move || {
                         let name = label_name();
                         selection_texts.with(|texts| texts.row_label(&name, label_accepted()))
@@ -3185,6 +3376,115 @@ fn focus_table_region(region: NodeRef<leptos::html::Div>) {
     if let Some(region) = region.get_untracked() {
         let _ = region.focus();
     }
+}
+
+/// Focuses one row by stable key, if the table made that row focusable.
+///
+/// A display-only table has no focusable rows, so this returns `false` rather
+/// than minting a tab stop the keyboard model never had; the caller then takes
+/// the documented table-region fallback.
+fn focus_row(region: NodeRef<leptos::html::Div>, row_key: &str) -> bool {
+    let Some(region) = region.get_untracked() else {
+        return false;
+    };
+    // Iterated and compared by attribute rather than interpolated into a
+    // selector: a row key is an arbitrary consumer string, and building a
+    // selector from one is a quoting bug waiting for the first key with a
+    // quote or a bracket in it.
+    let Ok(rows) = region.query_selector_all("[data-entity-row-key]") else {
+        return false;
+    };
+    for index in 0..rows.length() {
+        let Some(row) = rows
+            .item(index)
+            .and_then(|node| node.dyn_into::<web_sys::Element>().ok())
+        else {
+            continue;
+        };
+        if row.get_attribute("data-entity-row-key").as_deref() != Some(row_key) {
+            continue;
+        }
+        if row.get_attribute("tabindex").is_none() {
+            return false;
+        }
+        if let Ok(row) = row.dyn_into::<web_sys::HtmlElement>() {
+            return row.focus().is_ok();
+        }
+    }
+    false
+}
+
+fn entity_active_element() -> Option<web_sys::Element> {
+    web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.active_element())
+}
+
+/// Whether focus has moved to another meaningful target since a request was
+/// observed.
+///
+/// `<body>` (and a detached element) is not a meaningful target: it is where
+/// focus lands when the element that had it was destroyed, which is precisely
+/// the situation a focus request exists to repair.
+fn entity_focus_moved_since(at_request: Option<&web_sys::Element>) -> bool {
+    let Some(active) = entity_active_element() else {
+        return false;
+    };
+    if !active.is_connected() || active.tag_name().eq_ignore_ascii_case("body") {
+        return false;
+    }
+    at_request != Some(&active)
+}
+
+/// Applies one resolved focus request after the accepted projection paints.
+///
+/// Re-queries by stable key rather than holding an element reference across the
+/// replacement, and tries again on the following frame before falling back —
+/// the requested row has just been destroyed and recreated, so the first frame
+/// can legitimately arrive before its new element exists.
+fn apply_entity_focus_request<F>(
+    region: NodeRef<leptos::html::Div>,
+    intent: EntityFocusRequestOutcome,
+    focused_at_request: Option<web_sys::Element>,
+    retries: usize,
+    report: F,
+) where
+    F: Fn(EntityFocusRequestOutcome) + Clone + 'static,
+{
+    if entity_focus_moved_since(focused_at_request.as_ref()) {
+        report(EntityFocusRequestOutcome::Declined);
+        return;
+    }
+    let honored = match &intent {
+        EntityFocusRequestOutcome::Row { row_key } => focus_row(region, row_key),
+        EntityFocusRequestOutcome::RowAction { row_key, action_id } => {
+            focus_row_action(region, row_key, action_id)
+        }
+        // The row is already known to be off the page: retrying cannot make it
+        // appear, so take the fallback now.
+        EntityFocusRequestOutcome::TableRegion
+        | EntityFocusRequestOutcome::StaleScope
+        | EntityFocusRequestOutcome::Declined => {
+            focus_table_region(region);
+            report(EntityFocusRequestOutcome::TableRegion);
+            return;
+        }
+    };
+    if honored {
+        report(intent);
+        return;
+    }
+    if retries > 0 {
+        let next = intent;
+        let next_focused = focused_at_request;
+        let next_report = report.clone();
+        request_animation_frame(move || {
+            apply_entity_focus_request(region, next, next_focused, retries - 1, next_report);
+        });
+        return;
+    }
+    focus_table_region(region);
+    report(EntityFocusRequestOutcome::TableRegion);
 }
 
 fn current_header(descriptors: &RwSignal<Vec<EntityHeaderDescriptor>>, column_id: &str) -> String {

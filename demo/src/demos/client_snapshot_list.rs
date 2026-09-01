@@ -407,6 +407,9 @@ pub fn ClientSnapshotListDemo() -> impl IntoView {
                 next: "Siguiente".to_owned(),
                 row_range: "Mostrando {start}-{end} de {total}".to_owned(),
                 no_rows: "Sin filas".to_owned(),
+                // Provider-empty and filtered-empty are different facts and
+                // get different sentences (ldui-g4nw).
+                no_matching_rows: "Ninguna fila coincide con los filtros".to_owned(),
             }
         } else {
             EntityTableTexts {

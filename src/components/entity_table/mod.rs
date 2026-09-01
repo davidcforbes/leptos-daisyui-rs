@@ -3,9 +3,12 @@
 mod component;
 mod date_filter;
 mod emphasis;
+mod focus_request;
 mod grouping;
+mod identity;
 mod model;
 mod multi_selection;
+mod paging;
 mod selection;
 mod storage;
 mod types;
@@ -15,6 +18,10 @@ pub use date_filter::{
     EntityDateFilterStatus, EntityDateParseError,
 };
 pub use emphasis::{EntityRowEmphasis, EntityRowEmphasisClassifier};
+pub use focus_request::{
+    EntityFocusRequest, EntityFocusRequestOutcome, EntityFocusRequestResolution,
+    EntityFocusRequestTarget, entity_focus_request_outcome,
+};
 pub use grouping::{
     ENTITY_GROUP_COLUMN_ID, EntityGroupActions, EntityGroupCollapseCause,
     EntityGroupCollapseProposal, EntityGroupKey, EntityGroupOrder, EntityGroupTexts,
@@ -33,17 +40,18 @@ pub use multi_selection::{
     displayed_page_selection_state, off_page_selected_count, propose_entity_displayed_page_toggle,
     propose_entity_row_toggle,
 };
+pub use paging::EntityPagePlan;
 pub use selection::EntityTableSelection;
 pub use storage::{decode_preferences, encode_preferences};
 pub use types::{
     ENTITY_PAGE_SIZE_AUTO_VALUE, EntityBadgeCell, EntityBadgePresentation, EntityCellPresentation,
     EntityCellRenderer, EntityColumn, EntityColumnAlignment, EntityColumnChooserTrigger,
     EntityColumnFilter, EntityColumnFilterOption, EntityColumnFilterRenderer, EntityColumnFilters,
-    EntityColumnKind, EntityColumns, EntityCompactRow, EntityComparator, EntityIconCell,
-    EntityIconColor, EntityIconPresentation, EntityNullOrder, EntityPageSize, EntityPageSizeIntent,
-    EntityPreparedSortComparator, EntityPrimaryTextCell, EntityRowKey, EntityRowRenderer,
-    EntitySecondaryTextCell, EntitySort, EntitySortColumn, EntitySortDirection, EntitySortKey,
-    EntitySortKeyFactory, EntityTableActionColumnPolicy, EntityTableDisplayColumn,
+    EntityColumnKind, EntityColumns, EntityCompactRow, EntityComparator, EntityEmptyState,
+    EntityIconCell, EntityIconColor, EntityIconPresentation, EntityNullOrder, EntityPageSize,
+    EntityPageSizeIntent, EntityPreparedSortComparator, EntityPrimaryTextCell, EntityRowKey,
+    EntityRowRenderer, EntitySecondaryTextCell, EntitySort, EntitySortColumn, EntitySortDirection,
+    EntitySortKey, EntitySortKeyFactory, EntityTableActionColumnPolicy, EntityTableDisplayColumn,
     EntityTableDisplayProjection, EntityTableDisplayRow, EntityTablePreferenceOwnership,
     EntityTablePreferencePersistence, EntityTablePreferences, EntityTableProjectionScope,
     EntityTableTexts, EntityTableViewportFit, EntityTextOverflow,

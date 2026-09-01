@@ -5028,3 +5028,561 @@ async fn entity_table_date_filter_is_controlled_localized_and_never_silently_emp
 
     assert_no_browser_errors(&harness, "EntityTable date filter").await;
 }
+
+// ── ldui-5in5 / ldui-g4nw / ldui-izkq ──
+
+async fn choose_group_paging_page_size(harness: &pixelproof_web::Harness, value: &str) {
+    let expression = format!(
+        r#"(() => {{
+            const select = document.querySelector('#group-paging-table-page-size');
+            select.value = {value:?};
+            select.dispatchEvent(new Event('change', {{ bubbles: true }}));
+            return select.value;
+        }})()"#
+    );
+    assert_eq!(
+        eval_json(harness, &expression).await,
+        json!(value),
+        "the rows-per-page control did not accept `{value}`"
+    );
+    tokio::time::sleep(Duration::from_millis(250)).await;
+}
+
+async fn choose_group_paging_status(harness: &pixelproof_web::Harness, value: &str) {
+    let expression = format!(
+        r#"(() => {{
+            const select = document.querySelector('#entity-group-paging-status-filter');
+            select.value = {value:?};
+            select.dispatchEvent(new Event('change', {{ bubbles: true }}));
+            return select.value;
+        }})()"#
+    );
+    assert_eq!(eval_json(harness, &expression).await, json!(value));
+    tokio::time::sleep(Duration::from_millis(250)).await;
+}
+
+/// Everything one page of the grouped table currently shows.
+///
+/// Located entirely by stable data attributes: a positional query does not fail
+/// when the layout changes, it silently starts describing a different element.
+async fn group_paging_page_state(harness: &pixelproof_web::Harness) -> Value {
+    eval_json(
+        harness,
+        r#"(() => {
+            const root = document.querySelector('#entity-group-paging-table');
+            const table = root.querySelector('[data-entity-table-grid]');
+            const sections = Array.from(table.querySelectorAll('tbody[data-entity-group]'));
+            const meta = section => {
+                const cell = section.querySelector('[data-entity-group-meta]');
+                const match = cell ? cell.textContent.trim().match(/\d+/) : null;
+                return match ? Number(match[0]) : null;
+            };
+            return {
+                rows: table.querySelectorAll('tbody tr[data-entity-row-key]').length,
+                groups: sections.map(section => section.dataset.entityGroup),
+                continued: sections.map(section =>
+                    section
+                        .querySelector('tr[data-entity-group-header]')
+                        .getAttribute('data-entity-group-continued') === 'true'),
+                group_totals: sections.map(meta),
+                range: root.querySelector('[data-entity-row-range]').textContent.trim(),
+                pages: Array.from(root.querySelectorAll('[data-entity-page]'))
+                    .map(button => button.dataset.entityPage)
+                    .filter(value => /^\d+$/.test(value)),
+            };
+        })()"#,
+    )
+    .await
+}
+
+async fn go_to_group_paging_page(harness: &pixelproof_web::Harness, page: usize) {
+    click(
+        harness,
+        &format!("#entity-group-paging-table [data-entity-page=\"{page}\"]"),
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+}
+
+fn page_rows(state: &Value) -> f64 {
+    state["rows"]
+        .as_f64()
+        .unwrap_or_else(|| panic!("missing row count: {state}"))
+}
+
+/// ldui-5in5: a group that fits inside one page capacity is never split merely
+/// to fill the previous page's remainder; one that cannot fit keeps the
+/// existing continuation heading, and every count stays truthful either way.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
+async fn grouped_pages_keep_a_fitting_group_whole_and_stay_truthful() {
+    let harness = harness_at("/components/entity-table-group-paging").await;
+    begin_browser_error_capture(&harness).await;
+    wait_for_selector(
+        &harness,
+        "#entity-group-paging-table tbody[data-entity-group] tr[data-entity-row-key]",
+    )
+    .await;
+    // An explicit capacity, so the expected packing is arithmetic rather than a
+    // measurement: 17 + 17 + 17 + 30 rows at 25 per page.
+    choose_group_paging_page_size(&harness, "25").await;
+
+    let first = group_paging_page_state(&harness).await;
+    assert_eq!(
+        first["pages"],
+        json!(["1", "2", "3", "4"]),
+        "expected four pages: {first}"
+    );
+    // 17 rows, not 25: the eight leftover slots stay empty because Durham fits
+    // a page and must not be split to fill them. This is the whole bead.
+    assert_eq!(page_rows(&first), 17.0, "{first}");
+    assert_eq!(first["groups"], json!(["charlotte"]), "{first}");
+    assert_eq!(first["continued"], json!([false]), "{first}");
+    assert_eq!(
+        first["range"], "Showing 1-17 of 81",
+        "the footer must describe the rows actually rendered: {first}"
+    );
+
+    go_to_group_paging_page(&harness, 2).await;
+    let second = group_paging_page_state(&harness).await;
+    assert_eq!(page_rows(&second), 17.0, "{second}");
+    assert_eq!(second["groups"], json!(["durham"]), "{second}");
+    assert_eq!(
+        second["continued"],
+        json!([false]),
+        "Durham starts whole, so its heading is not a continuation: {second}"
+    );
+    assert_eq!(second["range"], "Showing 18-34 of 81", "{second}");
+
+    go_to_group_paging_page(&harness, 3).await;
+    let third = group_paging_page_state(&harness).await;
+    // Statewide holds 30 rows and CANNOT fit a 25-row page under any packing,
+    // so it degrades honestly: it fills this page's remainder rather than
+    // wasting eight rows for a split it cannot avoid.
+    assert_eq!(page_rows(&third), 25.0, "{third}");
+    assert_eq!(third["groups"], json!(["raleigh", "statewide"]), "{third}");
+    assert_eq!(third["continued"], json!([false, false]), "{third}");
+    assert_eq!(third["range"], "Showing 35-59 of 81", "{third}");
+
+    go_to_group_paging_page(&harness, 4).await;
+    let fourth = group_paging_page_state(&harness).await;
+    assert_eq!(page_rows(&fourth), 22.0, "{fourth}");
+    assert_eq!(fourth["groups"], json!(["statewide"]), "{fourth}");
+    assert_eq!(
+        fourth["continued"],
+        json!([true]),
+        "an oversized group keeps its clearly marked continuation heading: {fourth}"
+    );
+    assert_eq!(fourth["range"], "Showing 60-81 of 81", "{fourth}");
+
+    // Filtering recomputes the group boundaries BEFORE paging: 8 + 8 + 8 open
+    // rows fill 24 of 25, and Statewide's 15 open rows fit a page, so they move
+    // whole rather than spending the single leftover slot.
+    choose_group_paging_status(&harness, "Open").await;
+    let filtered = group_paging_page_state(&harness).await;
+    assert_eq!(filtered["pages"], json!(["1", "2"]), "{filtered}");
+    assert_eq!(page_rows(&filtered), 24.0, "{filtered}");
+    assert_eq!(
+        filtered["groups"],
+        json!(["charlotte", "durham", "raleigh"]),
+        "{filtered}"
+    );
+    assert_eq!(filtered["range"], "Showing 1-24 of 39", "{filtered}");
+    go_to_group_paging_page(&harness, 2).await;
+    let filtered_second = group_paging_page_state(&harness).await;
+    assert_eq!(page_rows(&filtered_second), 15.0, "{filtered_second}");
+    assert_eq!(
+        filtered_second["groups"],
+        json!(["statewide"]),
+        "{filtered_second}"
+    );
+    assert_eq!(
+        filtered_second["continued"],
+        json!([false]),
+        "{filtered_second}"
+    );
+    assert_eq!(
+        filtered_second["range"], "Showing 25-39 of 39",
+        "{filtered_second}"
+    );
+    choose_group_paging_status(&harness, "").await;
+
+    // Selection is computed over the resulting grouped page, not a second
+    // recomputed window: the header checkbox selects exactly the 17 rows this
+    // page renders.
+    click(
+        &harness,
+        "#entity-group-paging-table [data-entity-selection-toggle=\"page\"]",
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    let selected = eval_json(
+        &harness,
+        r#"document.querySelector('[data-testid="entity-group-paging-selected-count"]').textContent.trim()"#,
+    )
+    .await;
+    assert_eq!(selected, json!("17"), "{selected}");
+
+    // Auto paging obeys the same rule at whatever capacity it measures. The
+    // capacity is a measurement, so the assertion is the RULE rather than a
+    // hard-coded shape: a continuation may only ever belong to a group that is
+    // larger than a page.
+    choose_group_paging_page_size(&harness, "auto").await;
+    let mut states = vec![group_paging_page_state(&harness).await];
+    let page_count = states[0]["pages"]
+        .as_array()
+        .map_or(0, |pages| pages.len())
+        .max(1);
+    for page in 2..=page_count {
+        go_to_group_paging_page(&harness, page).await;
+        states.push(group_paging_page_state(&harness).await);
+    }
+    let capacity = states
+        .iter()
+        .map(page_rows)
+        .fold(0.0_f64, f64::max);
+    assert!(capacity > 0.0, "auto paging rendered no rows");
+    let mut seen_rows = 0.0;
+    for state in &states {
+        seen_rows += page_rows(state);
+        let continued = state["continued"].as_array().expect("continued flags");
+        let totals = state["group_totals"].as_array().expect("group totals");
+        for (index, flag) in continued.iter().enumerate() {
+            if flag != &json!(true) {
+                continue;
+            }
+            let total = totals[index]
+                .as_f64()
+                .unwrap_or_else(|| panic!("group total missing: {state}"));
+            assert!(
+                total > capacity,
+                "a group of {total} rows was split at a capacity of {capacity}, although it fits: \
+                 {state}"
+            );
+        }
+    }
+    assert_eq!(
+        seen_rows, 81.0,
+        "the auto pages must still partition every displayed row"
+    );
+
+    assert_no_browser_errors(&harness, "grouped page planning").await;
+}
+
+/// ldui-g4nw: a table with source rows and no matches must not claim the
+/// provider is empty. The fixture overrides ONLY `no_rows`, exactly as a caller
+/// that predates `no_matching_rows` does.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
+async fn an_empty_projection_never_claims_the_provider_is_empty() {
+    let harness = harness_at("/components/entity-table-group-paging").await;
+    begin_browser_error_capture(&harness).await;
+    wait_for_selector(
+        &harness,
+        "#entity-group-paging-table tbody[data-entity-group] tr[data-entity-row-key]",
+    )
+    .await;
+
+    let empty_state = r#"(() => {
+        const root = document.querySelector('#entity-group-paging-table');
+        const cell = root.querySelector('[data-entity-empty-state]');
+        const source = document
+            .querySelector('[data-testid="entity-group-paging-source-count"]')
+            .textContent.trim();
+        return {
+            present: cell !== null,
+            kind: cell ? cell.dataset.entityEmptyState : null,
+            text: cell ? cell.textContent.trim() : null,
+            source,
+            rows: root.querySelectorAll('tbody tr[data-entity-row-key]').length,
+        };
+    })()"#;
+
+    let populated = eval_json(&harness, empty_state).await;
+    assert_eq!(
+        populated["present"],
+        json!(false),
+        "a populated table renders no empty state: {populated}"
+    );
+
+    // Source rows exist; the filter selects none of them.
+    choose_group_paging_status(&harness, "Void").await;
+    let filtered = eval_json(&harness, empty_state).await;
+    assert_eq!(filtered["rows"].as_f64(), Some(0.0), "{filtered}");
+    assert_eq!(filtered["source"], json!("81"), "{filtered}");
+    assert_eq!(
+        filtered["kind"],
+        json!("filtered"),
+        "source rows exist, so this is not provider-empty: {filtered}"
+    );
+    assert_eq!(
+        filtered["text"],
+        json!("No rows match the current filters"),
+        "an overridden `no_rows` must not be reused for the filtered case: {filtered}"
+    );
+
+    // Now the provider itself is empty, and the caller's own sentence -- the
+    // only string this fixture overrides -- is the one that appears.
+    choose_group_paging_status(&harness, "").await;
+    click(
+        &harness,
+        "[data-testid=\"entity-group-paging-drain-provider\"]",
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let drained = eval_json(&harness, empty_state).await;
+    assert_eq!(drained["source"], json!("0"), "{drained}");
+    assert_eq!(drained["kind"], json!("provider"), "{drained}");
+    assert_eq!(
+        drained["text"],
+        json!("No activity is present in this snapshot."),
+        "the caller's single overridden string still owns the provider-empty case: {drained}"
+    );
+
+    click(
+        &harness,
+        "[data-testid=\"entity-group-paging-restore-provider\"]",
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_no_browser_errors(&harness, "empty-state semantics").await;
+}
+
+/// ldui-izkq: every generated selection checkbox carries a deterministic,
+/// collision-safe `id` AND `name`, derived from the stable row key rather than
+/// its position, across two tables mounted on one page.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
+async fn selection_checkboxes_carry_deterministic_ids_and_names() {
+    let harness = harness_at("/components/entity-table-group-paging").await;
+    begin_browser_error_capture(&harness).await;
+    wait_for_selector(
+        &harness,
+        "#entity-group-paging-table tbody[data-entity-group] tr[data-entity-row-key]",
+    )
+    .await;
+
+    let identity = r#"(() => {
+        const describe = rootId => {
+            const root = document.querySelector(rootId);
+            const header = root.querySelector('[data-entity-selection-toggle="page"]');
+            const rows = Array.from(root.querySelectorAll('[data-entity-selection-row]'));
+            return {
+                header_id: header.getAttribute('id'),
+                header_name: header.getAttribute('name'),
+                rows: rows.map(box => ({
+                    key: box.dataset.entitySelectionRow,
+                    id: box.getAttribute('id'),
+                    name: box.getAttribute('name'),
+                })),
+            };
+        };
+        const primary = describe('#entity-group-paging-table');
+        const neighbor = describe('#entity-group-paging-neighbor-table');
+        const all = [primary, neighbor]
+            .flatMap(table => [table.header_id, ...table.rows.map(row => row.id)]);
+        return {
+            primary,
+            neighbor,
+            total: all.length,
+            unique: new Set(all).size,
+            all_named: [primary, neighbor].every(table =>
+                table.header_id === table.header_name &&
+                table.rows.every(row => !!row.id && row.id === row.name)),
+        };
+    })()"#;
+
+    let before = eval_json(&harness, identity).await;
+    assert_eq!(
+        before["all_named"],
+        json!(true),
+        "an id without a name leaves the control unaddressable as a form field: {before}"
+    );
+    assert_eq!(
+        before["unique"], before["total"],
+        "two controls on one page minted the same id: {before}"
+    );
+    assert_eq!(
+        before["primary"]["header_id"],
+        json!("group-paging-table-select-all"),
+        "a caller-supplied prefix must win verbatim: {before}"
+    );
+    assert_eq!(
+        before["primary"]["rows"][0]["id"],
+        json!("group-paging-table-select-row-charlotte_2d01"),
+        "a row id is the prefix plus the escape-encoded stable row key: {before}"
+    );
+    let neighbor_header = before["neighbor"]["header_id"]
+        .as_str()
+        .expect("neighbor header id");
+    assert!(
+        neighbor_header.starts_with("ldui-entity-table-"),
+        "a table with no `control_id` must still mint a unique prefix: {before}"
+    );
+
+    // Sorting re-points every rendered position at a different row. The ids
+    // must follow the KEYS, not the positions.
+    click(
+        &harness,
+        "#entity-group-paging-table th[data-entity-column=\"value\"] [data-entity-sort-column]",
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let after = eval_json(&harness, identity).await;
+    let pairs = after["primary"]["rows"]
+        .as_array()
+        .expect("row identities after sorting");
+    for row in pairs {
+        let key = row["key"].as_str().expect("row key");
+        let expected = format!("group-paging-table-select-row-{}", key.replace('-', "_2d"));
+        assert_eq!(
+            row["id"].as_str(),
+            Some(expected.as_str()),
+            "a row id stopped following its stable key after sorting: {after}"
+        );
+    }
+
+    assert_no_browser_errors(&harness, "selection control identity").await;
+}
+
+/// ldui-o0iw: an external editor deletes the selected row and names the
+/// successor; focus lands on it rather than falling to `<body>`.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
+async fn an_external_editor_can_request_focus_for_a_stable_successor() {
+    let harness = harness_at("/components/entity-table-external-focus").await;
+    begin_browser_error_capture(&harness).await;
+    wait_for_selector(
+        &harness,
+        "#entity-external-focus-table tbody tr[data-entity-row-key]",
+    )
+    .await;
+
+    let focus_state = r#"(() => {
+        const active = document.activeElement;
+        const row = active ? active.closest('[data-entity-row-key]') : null;
+        const action = active ? active.closest('[data-entity-row-action]') : null;
+        return {
+            tag: active ? active.tagName.toLowerCase() : null,
+            row: row ? row.dataset.entityRowKey : null,
+            action: action ? action.getAttribute('data-entity-row-action') : null,
+            region: active
+                ? active.getAttribute('data-entity-focus-region') === 'true'
+                : false,
+            testid: active ? active.getAttribute('data-testid') : null,
+            resolution: document
+                .querySelector('[data-testid="entity-external-focus-resolution"]')
+                .textContent.trim(),
+            selected: document
+                .querySelector('[data-testid="entity-external-focus-selected"]')
+                .textContent.trim(),
+            visible: Array.from(
+                document.querySelectorAll('#entity-external-focus-table tbody tr[data-entity-row-key]')
+            ).map(row => row.dataset.entityRowKey),
+        };
+    })()"#;
+
+    // The editor's Delete button is destroyed with nothing -- it lives outside
+    // the table -- but the ROW it deleted is, so without a request focus would
+    // simply stay on the editor and the successor would never be reachable.
+    click(&harness, "[data-testid=\"entity-external-focus-delete\"]").await;
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    let after_delete = eval_json(&harness, focus_state).await;
+    assert_eq!(after_delete["selected"], json!("ON-1004"), "{after_delete}");
+    assert_eq!(
+        after_delete["row"],
+        json!("ON-1004"),
+        "focus must land on the accepted successor, not on <body>: {after_delete}"
+    );
+    assert_eq!(after_delete["tag"], json!("tr"), "{after_delete}");
+    assert_eq!(after_delete["resolution"], json!("1|row"), "{after_delete}");
+
+    // Deleting the LAST row of the list falls back to the previous row, and the
+    // request still resolves against the painted order.
+    click(&harness, "[data-testid=\"entity-external-focus-delete\"]").await;
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    let after_second = eval_json(&harness, focus_state).await;
+    assert_eq!(after_second["selected"], json!("ON-1005"), "{after_second}");
+    assert_eq!(after_second["row"], json!("ON-1005"), "{after_second}");
+    assert_eq!(after_second["resolution"], json!("2|row"), "{after_second}");
+
+    // A named row action is a distinct target and must be focused by identity.
+    click(
+        &harness,
+        "[data-testid=\"entity-external-focus-delete-to-action\"]",
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    let after_action = eval_json(&harness, focus_state).await;
+    assert_eq!(after_action["selected"], json!("ON-1002"), "{after_action}");
+    assert_eq!(after_action["row"], json!("ON-1002"), "{after_action}");
+    assert_eq!(after_action["action"], json!("open"), "{after_action}");
+    assert_eq!(
+        after_action["resolution"],
+        json!("3|row-action"),
+        "{after_action}"
+    );
+
+    // A stale dataset/access scope is refused outright: nothing is focused, so
+    // the control the user activated keeps focus.
+    click(
+        &harness,
+        "[data-testid=\"entity-external-focus-request-stale\"]",
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    let after_stale = eval_json(&harness, focus_state).await;
+    assert_eq!(
+        after_stale["resolution"],
+        json!("4|stale-scope"),
+        "{after_stale}"
+    );
+    assert_eq!(
+        after_stale["testid"],
+        json!("entity-external-focus-request-stale"),
+        "a rejected request must not move focus: {after_stale}"
+    );
+
+    // Filtered away: the documented table-region fallback, never a positional
+    // guess at whichever row now occupies that source index.
+    choose_external_focus_status(&harness, "Active").await;
+    let visible = eval_json(&harness, focus_state).await;
+    assert_eq!(visible["visible"], json!(["ON-1001"]), "{visible}");
+    click(
+        &harness,
+        "[data-testid=\"entity-external-focus-request-hidden\"]",
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    let after_hidden = eval_json(&harness, focus_state).await;
+    assert_eq!(
+        after_hidden["resolution"],
+        json!("5|table-region"),
+        "{after_hidden}"
+    );
+    assert_eq!(
+        after_hidden["region"],
+        json!(true),
+        "the fallback focuses the named table region: {after_hidden}"
+    );
+    assert_eq!(
+        after_hidden["row"],
+        Value::Null,
+        "the fallback must never focus a row chosen by position: {after_hidden}"
+    );
+
+    assert_no_browser_errors(&harness, "external focus requests").await;
+}
+
+async fn choose_external_focus_status(harness: &pixelproof_web::Harness, value: &str) {
+    let expression = format!(
+        r#"(() => {{
+            const select = document.querySelector('#entity-external-focus-status-filter');
+            select.value = {value:?};
+            select.dispatchEvent(new Event('change', {{ bubbles: true }}));
+            return select.value;
+        }})()"#
+    );
+    assert_eq!(eval_json(harness, &expression).await, json!(value));
+    tokio::time::sleep(Duration::from_millis(250)).await;
+}

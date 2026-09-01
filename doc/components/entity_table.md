@@ -549,6 +549,65 @@ or failed action that leaves the row present retains native focus, and focus
 already moved by the user is never stolen. Consumers must not reproduce this
 with DOM queries or source-order guesses.
 
+### Typed focus requests for external mutations (ldui-o0iw)
+
+Recovery above begins with a `focusin` inside the table's own region, so it
+serves only a mutation the table observed. An editor panel *beside* the table
+whose Delete button removes the selected row is destroyed along with the row it
+deleted: focus falls to `<body>` and there is no record to recover from. The
+`focus_request` prop is how that page says "focus this row" without querying
+DOM this crate owns.
+
+```rust,ignore
+let request = RwSignal::new(Option::<EntityFocusRequest>::None);
+
+// After the central API accepted the delete and re-read:
+request.set(Some(EntityFocusRequest::row(next_id, scope, successor_key)));
+// ...or, to land on a named action inside that row:
+request.set(Some(EntityFocusRequest::row_action(next_id, scope, key, "open")));
+
+view! {
+    <EntityTable
+        // ...
+        focus_scope=scope
+        focus_request=request
+        on_focus_request_resolved=Callback::new(move |resolved: EntityFocusRequestResolution| {
+            log::debug!("focus request {} -> {}", resolved.request_id, resolved.outcome.as_str());
+        })
+    />
+}
+```
+
+The contract:
+
+- **Resolved against the presentation, never source order.** The request names
+  a stable row key and is answered against the rows the table is painting right
+  now -- after filtering, sorting, paging, grouping and collapse.
+- **Documented fallback, never a positional guess.** A row that is filtered
+  away, paged away, removed, collapsed or not focusable (a display-only table
+  has no focusable rows), or a named action that is absent or disabled, focuses
+  the named table region and reports
+  `EntityFocusRequestOutcome::TableRegion`. It never focuses "whatever row now
+  sits where that one used to".
+- **Stale scopes are rejected.** A `scope` the table has since left reports
+  `StaleScope` and moves nothing.
+- **One id, one application.** A signal that keeps reporting an honored request
+  cannot take focus back from the user later; bump `EntityFocusRequest::id` for
+  each new request.
+- **Focus the user moved is not stolen.** If focus rests on another meaningful
+  target when the replacement paints, the request reports `Declined`. `<body>`
+  is not a meaningful target -- it is where focus lands when the element that
+  had it was destroyed, which is the case this exists to repair.
+- **It survives the element being recreated.** The row is re-queried by stable
+  key on the next animation frame, and once more on the frame after that,
+  before falling back; no element reference is held across the replacement.
+- **A request states that a mutation was accepted.** Issue nothing for a failed
+  or declined mutation: there is nothing to move focus to, and the editor that
+  still owns focus should keep it.
+
+Internal row-action recovery is untouched by all of this: the two paths read
+none of each other's state.
+
 ## Controlled single-row selection
 
 `selection` wires one proposal-first, single-row selection to `EntityTable`,
@@ -790,6 +849,41 @@ visible row with its children on the next page -- unrepresentable rather than
 merely avoided. When a group's rows straddle a page boundary, the next page
 opens with a continuation heading (`"{group} (continued)"`).
 
+### A group that fits is kept whole (ldui-5in5)
+
+Pagination is group-aware. **A group whose complete row count fits within one
+page capacity is never split merely to fill the remainder of the previous
+page**: the page ends early, leaving those slots empty, and the group starts
+whole on the next page. Three seventeen-row coordinators at a capacity of
+eighteen therefore render one coordinator per page, instead of seventeen rows
+plus the next coordinator's heading and one orphaned row.
+
+**A group larger than the whole capacity cannot be kept whole by any packing**,
+so it degrades honestly to the previous fill-first behavior: it fills the
+current page's remainder and resumes on the next under the existing
+continuation heading. Deferring it to a fresh page would still split it, would
+still need the continuation heading, and would waste a page of rows for
+nothing.
+
+Two invariants keep the rule total. Every page holds **at least one row** (the
+early break only fires when the page already holds one), so no empty page can
+be emitted and paging always advances. And the pages **partition** the
+displayed rows exactly -- contiguous, disjoint, complete -- so counts stay
+truthful: the `Showing x-y of z` summary is read off the resulting page
+window, never multiplied out of `page * capacity`, which is simply the wrong
+number once a page can stop short.
+
+The plan is computed from the displayed order, so filtering, sorting, collapse
+and a dataset swap all recompute the group boundaries *before* paging. It is
+the single source of page boundaries -- the body, the pager, the footer range,
+the displayed-page selection population, focus recovery and the export
+projection all read it -- exactly as `ldui-5p06` made the page *size* single.
+An ungrouped table is unaffected: it delegates to the same
+`page_count`/`page_bounds`/`row_range` arithmetic it always used.
+
+Nothing about this asks the consumer to pick a magic page size. Capacity is
+still whatever `viewport_fit` measures or the rows-per-page control selects.
+
 ### Collapse is optional, controlled, and a filter
 
 The default exposes every filtered row. `EntityRowGrouping::collapsible`
@@ -879,6 +973,67 @@ tests and styling as `data-entity-group`, `data-entity-group-header`,
 `data-entity-group-continued`, `data-entity-group-collapsed`,
 `data-entity-group-toggle`, `data-entity-group-meta`, and
 `data-entity-group-actions`.
+
+## Provider-empty is not filtered-empty (ldui-g4nw)
+
+`EntityTableTexts` carries two empty-state sentences, because they are two
+different facts and the table already knows which one is true:
+
+| field | shown when | default |
+| --- | --- | --- |
+| `no_rows` | the authoritative source dataset holds no rows | `"No rows"` |
+| `no_matching_rows` | source rows exist, the current projection selected none | `"No rows match the current filters"` |
+
+Source membership is `source_data` when supplied, otherwise the rendered `data`
+snapshot -- the same fallback focus recovery uses, and the reason a table with
+no separate source still classifies a zero-row render as provider-empty. Local
+filtering, searching, a bounded date filter and collapsed groups all reach the
+*filtered* state; collapse counts because it removes rows from the displayed
+model outright.
+
+The rendered cell carries `data-entity-empty-state="provider" | "filtered"`, so
+a test or a consumer can assert on the state rather than on localizable copy.
+
+A caller that overrides only `no_rows` -- every caller written before this
+existed -- is unchanged: their domain sentence ("No contribution credits are
+present in this snapshot.") still owns the provider-empty case and stops being
+asserted over a merely over-narrow filter, which is the bug. Override
+`no_matching_rows` too when the filtered case wants domain copy of its own.
+
+## Deterministic control identity (ldui-izkq)
+
+An accessible *name* is not a DOM *identity*. The generated select-all and
+per-row selection checkboxes now carry an `id` **and** a `name` alongside their
+localized `aria-label`, so a consuming page can reference them from a
+`label[for]`, an `aria-controls`, a form submission or a deterministic
+automation selector without reaching into markup this crate owns. `name` is not
+optional decoration: it is what makes the input a real form control.
+
+The scheme is the one `DataTable` established in `ldui-j6sh`, restated for
+`EntityTable` rather than imported across a module boundary:
+
+- One **table control prefix** per mounted table. `control_id` supplies it;
+  omitting it mints a process-unique `ldui-entity-table-N`, so two tables on one
+  page never collide even with no configuration. Supply your own when you want a
+  prefix stable across builds -- a mount-order counter is not. A supplied value
+  is trimmed and escaped into `[A-Za-z0-9_-]`, because an `id` may not contain
+  whitespace and a `.` or `#` breaks every selector built from it.
+- The select-all checkbox is `{prefix}-select-all`; a row's checkbox is
+  `{prefix}-select-row-{encoded row key}`.
+- The token is **escape-encoded, not slugified**: every byte outside
+  `[A-Za-z0-9]` (including `_`) becomes `_` plus two hex digits. A slug is not
+  injective -- `a b`, `a-b` and `a_b` all collapse to `a-b` -- so three distinct
+  rows would share one id. The encoding is decodable, hence injective, and
+  contains no `-`, which keeps the `-`-joined id segments unambiguous.
+- **Row identity is the stable row key, never the position.** An index-derived
+  id re-points at a different row the moment the table sorts, filters, pages,
+  groups or collapses, and an id that silently aliases to another row is worse
+  than no id.
+
+`page_size_control_id` predates this prop and still wins outright for the
+rows-per-page select. Supplying only `control_id` names that select too
+(`{prefix}-page-size`); supplying neither leaves its own minted
+`ldui-entity-page-size-N` exactly as it was.
 
 ## Typed summary-row emphasis
 
