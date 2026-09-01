@@ -66,7 +66,7 @@ async fn profile(h: &ldui_audit::Harness) -> ldui_audit::StyleProfile {
 /// live.
 ///
 /// `/components/charts` (ldui-40g) is the SVG tier, and its ceilings behave
-/// differently from the rest: all 23 GRID findings are distances between
+/// differently from the rest: all 33 GRID findings are distances between
 /// `<text>` nodes laid out in a chart's own viewBox coordinate space and then
 /// scaled by `w-full h-auto`, so they are not spacing debt anyone can work off
 /// on the 4px grid — the page's own DOM markup reports nothing. The count
@@ -90,7 +90,7 @@ const PAGES: &[(&str, usize, usize)] = &[
     // non-workable finding the doc comment above describes. Overlap
     // stays 0 (an edge-tick label collision was found and fixed at the
     // source in visible_tick_indices rather than absorbed here).
-    ("/components/charts", 23, 0),
+    ("/components/charts", 33, 0),
 ];
 
 async fn audit_page(path: &str, max_grid: usize, max_internal: usize) {

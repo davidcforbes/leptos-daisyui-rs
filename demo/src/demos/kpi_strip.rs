@@ -181,7 +181,7 @@ pub fn KpiStripDemo() -> impl IntoView {
             </Section>
 
             <Section title="Compact, with comparisons">
-                <div data-testid="kpi-strip-dashboard-compact">
+                <div class="w-full" data-testid="kpi-strip-dashboard-compact">
                     <KpiStrip
                         items=Signal::derive(dashboard_kpis)
                         compact=true
@@ -208,7 +208,7 @@ pub fn KpiStripDemo() -> impl IntoView {
             </Section>
 
             <Section title="Balanced six: exactly one row">
-                <div data-testid="kpi-strip-balanced-six-six">
+                <div class="w-full" data-testid="kpi-strip-balanced-six-six">
                     <KpiStrip
                         items=Signal::derive(|| dashboard_kpis().into_iter().take(6).collect::<Vec<_>>())
                         layout=KpiStripLayout::BalancedSix
@@ -221,7 +221,7 @@ pub fn KpiStripDemo() -> impl IntoView {
             // because stretching them would make a five-card strip's cards a
             // different size from a six-card strip's.
             <Section title="Balanced six: a count that does not divide">
-                <div data-testid="kpi-strip-balanced-six-five">
+                <div class="w-full" data-testid="kpi-strip-balanced-six-five">
                     <KpiStrip
                         items=Signal::derive(|| dashboard_kpis().into_iter().take(5).collect::<Vec<_>>())
                         layout=KpiStripLayout::BalancedSix
@@ -230,7 +230,7 @@ pub fn KpiStripDemo() -> impl IntoView {
             </Section>
 
             <Section title="Balanced six: no items">
-                <div data-testid="kpi-strip-balanced-six-empty">
+                <div class="w-full" data-testid="kpi-strip-balanced-six-empty">
                     <KpiStrip
                         items=Signal::derive(Vec::<KpiItem>::new)
                         layout=KpiStripLayout::BalancedSix
@@ -242,7 +242,7 @@ pub fn KpiStripDemo() -> impl IntoView {
             // twelve cards must step DOWN here rather than asking how wide
             // the window is.
             <Section title="Balanced six in a narrow column">
-                <div class="max-w-md" data-testid="kpi-strip-balanced-six-narrow">
+                <div class="w-full max-w-md" data-testid="kpi-strip-balanced-six-narrow">
                     <KpiStrip
                         items=Signal::derive(dashboard_kpis)
                         layout=KpiStripLayout::BalancedSix
@@ -252,13 +252,13 @@ pub fn KpiStripDemo() -> impl IntoView {
             </Section>
 
             <Section title="Eight KPIs, wide-to-narrow responsive">
-                <div data-testid="kpi-strip-wide">
+                <div class="w-full" data-testid="kpi-strip-wide">
                     <KpiStrip items=Signal::derive(office_kpis) />
                 </div>
             </Section>
 
             <Section title="Compact">
-                <div data-testid="kpi-strip-compact">
+                <div class="w-full" data-testid="kpi-strip-compact">
                     <KpiStrip items=Signal::derive(office_kpis) compact=true />
                 </div>
             </Section>

@@ -1060,18 +1060,18 @@ fn magnitude_cells() -> Vec<HeatmapCell> {
 /// re-ordering or hiding a column cannot re-point a drill.
 fn kpi_columns() -> Vec<HeatmapCategory> {
     [
+        // Six, not twelve. Slanted headers rise at 45 degrees, so the space
+        // between adjacent labels is the column width divided by root two:
+        // twelve columns across this chart left ~57px of pitch for labels up
+        // to seventeen characters, which crowds them into each other and trips
+        // the layout audit's OVERLAP check (a hard failure, never ratcheted).
+        // Six columns give ~113px of pitch, which the same labels clear.
         ("closed", "Matters closed"),
         ("sla", "SLA met"),
         ("handle", "Handle time"),
         ("intake", "Intake conversion"),
         ("backlog", "Backlog age"),
         ("first-touch", "First touch"),
-        ("reopened", "Reopened"),
-        ("billable", "Billable hours"),
-        ("no-show", "No shows"),
-        ("escalated", "Escalated"),
-        ("satisfaction", "Satisfaction"),
-        ("overdue", "Overdue tasks"),
     ]
     .iter()
     .map(|(key, label)| HeatmapCategory::new(*key, *label))

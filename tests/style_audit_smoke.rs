@@ -244,7 +244,14 @@ const PAGES: &[(&str, &[(&str, usize)])] = &[
     (
         "/components/charts",
         &[
-            (family::TYPOGRAPHY, 78),
+            // 122, was 78. ldui-y2ed's diverging BarChart and ldui-8d94's two
+            // typed Heatmaps add tick, axis and cell labels at the charts' own
+            // 10px size. VERIFIED exhaustively rather than sampled, because the
+            // report caps at 20 per family: sweeping every leaf text node on the
+            // page found 122 off-ramp sizes, ALL of them inside an <svg> and none
+            // outside it -- the same not-on-the-ramp class already declared here,
+            // scaled by two more charts, not new page debt.
+            (family::TYPOGRAPHY, 122),
             (family::SHAPE, 0),
             (family::DEPTH, 0),
             // 23, was 16: ldui-j0mt's dual-axis chart is the third
@@ -254,7 +261,8 @@ const PAGES: &[(&str, &[(&str, usize)])] = &[
             // tick/label geometry, which is not workable on the 4px grid and
             // is the same class as the rest of this page (see the module doc
             // note above), not new page debt.
-            (family::GRID, 23),
+            // 33, was 23: the same two new charts, same svg > text distance class.
+            (family::GRID, 33),
             (family::INTERNAL, 0),
             // 0, was 2. The categorical charts' screen-reader data tables
             // are raw <table class="sr-only"> by design, and the daisyUI

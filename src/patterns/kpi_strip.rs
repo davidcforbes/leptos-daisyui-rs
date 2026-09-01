@@ -1752,6 +1752,18 @@ pub fn KpiStrip(
         // container query, so the `@sm`/`@lg`/`@4xl`/`@5xl` steps on the grid
         // below need a container ancestor to measure (ldui-tnyq). It carries
         // no spacing of its own, so it cannot affect the strip's geometry.
+        //
+        // ⚠️ GIVE THE STRIP'S PARENT A WIDTH. `@container` sets
+        // `container-type: inline-size`, which makes this element's inline
+        // size independent of its own contents. Put the strip in a parent
+        // that sizes to its content -- a bare `<div>` inside a `flex` row,
+        // say -- and that parent measures the strip as contributing nothing,
+        // collapses to zero, and `w-full` here then resolves to zero too. The
+        // cards render about 2px wide and no container step ever fires. It
+        // fails silently: nothing errors, the markup is correct, and the
+        // classes are all present. Six demo fixtures hit exactly this
+        // (ldui-k3ip); the fix is `w-full` or an explicit width on the
+        // PARENT, which this component cannot supply for you.
         <div class="@container w-full" data-kpi-strip-container="true">
         <div
             node_ref=node_ref
