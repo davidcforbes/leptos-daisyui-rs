@@ -5,10 +5,11 @@ use leptos::prelude::*;
 // rather than glob because `charts` also exports a `Sparkline`, which would
 // collide with the reactive daisyUI-framed `components::Sparkline`.
 use leptos_daisyui_rs::charts::{
-    AreaChart, BarChart, ChartSeries, HeatScale, Heatmap, HeatmapCell, LineAxisOptions,
-    LineCategory, LineChart, LineChartActivation, LineChartActivationSource, LineChartData,
-    LinePattern, LinePoint, LineSeries, LineValueAxis, MarkerShape, MarkerStyle, PieChart,
-    PieSlice, Sparkline, StackedAreaChart, StackedBarChart,
+    AreaChart, BarChart, BarChartActivation, BarChartActivationSource, BarChartData, BarChartItem,
+    BarChartLayout, BarChartTexts, BarStatus, BarValueFormat, ChartSeries, HeatScale, Heatmap,
+    HeatmapCell, LineAxisOptions, LineCategory, LineChart, LineChartActivation,
+    LineChartActivationSource, LineChartData, LinePattern, LinePoint, LineSeries, LineValueAxis,
+    MarkerShape, MarkerStyle, PieChart, PieSlice, Sparkline, StackedAreaChart, StackedBarChart,
 };
 
 /// Every chart in `leptos_daisyui_rs::charts`, each shown with at least one
@@ -53,6 +54,49 @@ pub fn ChartsDemo() -> impl IntoView {
                 "source": match activation.source {
                     LineChartActivationSource::Pointer => "pointer",
                     LineChartActivationSource::Keyboard => "keyboard",
+                },
+                "modifiers": {
+                    "shift": activation.modifiers.shift,
+                    "ctrl": activation.modifiers.ctrl,
+                    "alt": activation.modifiers.alt,
+                    "meta": activation.modifiers.meta,
+                },
+            }),
+        );
+    });
+
+    // Typed diverging fixture: reactive so the sort/remove/restore controls
+    // exercise reconciliation by key, and the locale control proves the copy
+    // reacts EN -> ES -> EN without disturbing keys, values or order.
+    let bar_data = RwSignal::new(divergence_data());
+    let bar_spanish = RwSignal::new(false);
+    let bar_texts = Signal::derive(move || {
+        if bar_spanish.get() {
+            spanish_bar_texts()
+        } else {
+            BarChartTexts::default()
+        }
+    });
+    let bar_activation_count = RwSignal::new(0_u64);
+    let on_bar_activate = Callback::new(move |activation: BarChartActivation| {
+        let count = bar_activation_count.get_untracked() + 1;
+        bar_activation_count.set(count);
+        debug_state::set("bar_chart.activation_count", count);
+        debug_state::set(
+            "bar_chart.activation",
+            serde_json::json!({
+                "categoryKey": activation.category_key,
+                "categoryLabel": activation.category_label,
+                "value": activation.value,
+                "displayValue": activation.display_value,
+                "status": match activation.status {
+                    BarStatus::Neutral => "neutral",
+                    BarStatus::Favorable => "favorable",
+                    BarStatus::Unfavorable => "unfavorable",
+                },
+                "source": match activation.source {
+                    BarChartActivationSource::Pointer => "pointer",
+                    BarChartActivationSource::Keyboard => "keyboard",
                 },
                 "modifiers": {
                     "shift": activation.modifiers.shift,
@@ -215,6 +259,54 @@ pub fn ChartsDemo() -> impl IntoView {
                         height=180
                     />
                 </div>
+
+                <p class="text-sm text-base-content/75">
+                    "Typed data replaces both positional vectors at once: each BarChartItem carries its own stable key, localized label, signed value, formatted display text, caller-owned status and optional colour, so sorting the rows cannot pair a value with a neighbour's judgement. layout=BarChartLayout::DivergingHorizontal draws every bar from one visible zero rule -- negative left, non-negative right, equal magnitudes equal length -- and a missing measurement draws no bar rather than a fabricated zero. Status is the caller's: an outcome measure judges, an activity measure stays neutral, and judged bars carry a solid or dashed end cap so the distinction survives forced colours."
+                </p>
+                <div class="w-full max-w-2xl" data-testid="diverging-bar-chart">
+                    <BarChart
+                        data=bar_data
+                        layout=BarChartLayout::DivergingHorizontal
+                        accessible_label="Current minus trailing baseline by office".to_string()
+                        description="Signed delta to the trailing 12-week baseline, most dragging first.".to_string()
+                        value_format=BarValueFormat::default().with_unit(" pts")
+                        texts=bar_texts
+                        width=560
+                        height=260
+                        on_bar_activate=on_bar_activate
+                    />
+                </div>
+                <div class="flex flex-wrap gap-2">
+                    <button class="btn btn-sm" data-testid="bar-chart-sort"
+                        on:click=move |_| bar_data.update(|data| *data = sorted_divergence(data))>
+                        "Sort most dragging first"
+                    </button>
+                    <button class="btn btn-sm" data-testid="bar-chart-remove"
+                        on:click=move |_| bar_data.update(|data| *data = remove_office(data, "north"))>
+                        "Remove North"
+                    </button>
+                    <button class="btn btn-sm" data-testid="bar-chart-restore"
+                        on:click=move |_| bar_data.set(divergence_data())>
+                        "Restore data"
+                    </button>
+                    <button class="btn btn-sm" data-testid="bar-chart-locale"
+                        on:click=move |_| bar_spanish.update(|spanish| *spanish = !*spanish)>
+                        "Toggle locale"
+                    </button>
+                </div>
+
+                <p class="text-sm text-base-content/75">
+                    "The same layout with an activity measure -- a count of things that happened, where neither direction is a verdict. Every item is neutral, so no bar is capped or coloured by judgement, and without an activation callback the chart claims no button role at all: it still navigates and describes itself, but nothing pretends to be actionable."
+                </p>
+                <div class="w-full max-w-2xl" data-testid="neutral-bar-chart">
+                    <BarChart
+                        data=activity_data()
+                        layout=BarChartLayout::DivergingHorizontal
+                        accessible_label="Net change in open matters by office".to_string()
+                        width=560
+                        height=220
+                    />
+                </div>
             </Section>
 
             <Section title="StackedBarChart" col=true>
@@ -316,6 +408,80 @@ pub fn ChartsDemo() -> impl IntoView {
                 </p>
             </Section>
         </ContentLayout>
+    }
+}
+
+/// The signed decomposition shape the bead describes: one selected measure's
+/// current value minus its trailing baseline, per office. Deliberately carries
+/// a negative, an exact zero, a positive, and a missing measurement, plus a
+/// pair of equal magnitudes with opposite signs so the symmetry is visible.
+fn divergence_data() -> BarChartData {
+    BarChartData::categorical(vec![
+        BarChartItem::new("north", "North", -12.5)
+            .with_display_value("-12.5 pts")
+            .with_status(BarStatus::Unfavorable),
+        BarChartItem::new("harbour", "Harbour", -4.0).with_status(BarStatus::Unfavorable),
+        BarChartItem::missing("riverside", "Riverside"),
+        BarChartItem::new("central", "Central", 0.0),
+        BarChartItem::new("east", "East", 4.0).with_status(BarStatus::Favorable),
+        BarChartItem::new("west", "West", 9.5).with_status(BarStatus::Favorable),
+    ])
+}
+
+/// The caller owns the sort, not the chart. Most dragging first: the lowest
+/// signed delta at the top, missing measurements last.
+fn sorted_divergence(data: &BarChartData) -> BarChartData {
+    let BarChartData::Categorical(items) = data else {
+        return data.clone();
+    };
+    let mut items = items.clone();
+    items.sort_by(|a, b| match (a.value, b.value) {
+        (Some(a), Some(b)) => a.total_cmp(&b),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => std::cmp::Ordering::Equal,
+    });
+    BarChartData::Categorical(items)
+}
+
+/// Removes one office by key, so the removal journey can prove focus moves
+/// predictably rather than vanishing.
+fn remove_office(data: &BarChartData, key: &str) -> BarChartData {
+    let BarChartData::Categorical(items) = data else {
+        return data.clone();
+    };
+    BarChartData::Categorical(
+        items
+            .iter()
+            .filter(|item| item.key != key)
+            .cloned()
+            .collect(),
+    )
+}
+
+/// The activity-neutral variant: signed values with no judgement attached,
+/// because a net change in open matters is not good or bad on its own.
+fn activity_data() -> BarChartData {
+    BarChartData::categorical(vec![
+        BarChartItem::new("north", "North", -6.0),
+        BarChartItem::new("harbour", "Harbour", -2.0),
+        BarChartItem::new("central", "Central", 2.0),
+        BarChartItem::new("east", "East", 6.0),
+    ])
+}
+
+/// Every string the chart produces itself, in a second locale. Switching to
+/// these must change the words and nothing else.
+fn spanish_bar_texts() -> BarChartTexts {
+    BarChartTexts {
+        empty: "Sin datos".to_string(),
+        category_header: "Categoria".to_string(),
+        value_header: "Valor".to_string(),
+        status_header: "Estado".to_string(),
+        no_value: "Sin dato".to_string(),
+        status_neutral: "Neutral".to_string(),
+        status_favorable: "Favorable".to_string(),
+        status_unfavorable: "Desfavorable".to_string(),
     }
 }
 

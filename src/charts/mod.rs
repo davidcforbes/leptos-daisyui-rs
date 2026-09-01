@@ -17,7 +17,11 @@ mod stacked_area_chart;
 mod stacked_bar_chart;
 
 pub use area_chart::AreaChart;
-pub use bar_chart::BarChart;
+pub use bar_chart::{
+    BarChart, BarChartActivation, BarChartActivationSource, BarChartData, BarChartDataSource,
+    BarChartItem, BarChartLayout, BarChartModifiers, BarChartTexts, BarInteractionMode, BarStatus,
+    BarValueFormat,
+};
 pub use heatmap::{HeatScale, Heatmap, HeatmapCell};
 pub use line_chart::{
     LineAxisOptions, LineCategory, LineChart, LineChartActivation, LineChartActivationSource,
