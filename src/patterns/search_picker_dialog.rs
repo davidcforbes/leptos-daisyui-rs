@@ -27,7 +27,7 @@
 use super::{PageStatePanel, PageStatePanelKind, PageStatePanelTexts};
 use crate::components::{
     Button, ButtonStyle, Field, Input, InputType, KeyedResultList, Modal, ModalAction, ModalBox,
-    ModalSearchRow, ResultListItem,
+    ModalCloseProposal, ModalSearchRow, ResultListItem,
 };
 use leptos::{
     html::{Dialog, Div, Input as HtmlInput},
@@ -171,9 +171,10 @@ fn is_forwarded_navigation_key(key: &str) -> bool {
 /// keyboard-navigable result list, composed from [`Modal`], [`Field`] +
 /// [`Input`], [`KeyedResultList`], and [`PageStatePanel`]. The caller
 /// controls `query`, `status`, and `items`; this component controls dialog
-/// semantics (focus trap, opening focuses the search field, Escape or
-/// Cancel closes and returns focus to the trigger via the dialog's own
-/// native `close()` -- see [`Modal`]), state presentation, and forwarding
+/// semantics (focus trap, opening focuses the search field; Escape, a
+/// backdrop click, or Cancel all close and return focus to the trigger via
+/// the dialog's own native `close()`, through [`Modal`]'s controlled-close
+/// contract -- see [`Modal`]), state presentation, and forwarding
 /// `ArrowUp`/`ArrowDown`/`Home`/`End`/`Enter` from the search field to the
 /// list so results can be navigated without leaving the field.
 ///
@@ -256,8 +257,9 @@ pub fn SearchPickerDialog<T>(
     #[prop(optional)]
     on_select: Option<Callback<ResultListItem<T>>>,
 
-    /// Fired when the dialog should close: `Escape`, or the Cancel button.
-    /// The caller owns `open`; this only requests that it become `false`.
+    /// Fired when the dialog should close: `Escape`, a backdrop click, or
+    /// the Cancel button. The caller owns `open`; this only requests that it
+    /// become `false`.
     #[prop(optional)]
     on_close: Option<Callback<()>>,
 
@@ -321,18 +323,19 @@ where
         search_picker_render_decision(status.get(), !items.with(Vec::is_empty))
     });
 
-    // The browser's own default action for Escape on an open modal dialog
-    // is to fire a cancelable `cancel` event and, unless it is prevented, to
-    // close the dialog itself -- see MDN's `HTMLDialogElement`: "cancel"
-    // event. `preventDefault` here (not on the key event -- a keydown
-    // `preventDefault` does NOT suppress this; only the dialog's own
-    // `cancel` event does) stops that native close, so the caller's
-    // controlled `open` signal -- the single source of truth `Modal` itself
-    // reads -- is always what actually closes the dialog, keeping `open`
-    // from desyncing from the DOM and leaving room for a future
-    // confirm-before-close policy to veto the close entirely.
-    let handle_dialog_cancel = move |event: web_sys::Event| {
-        event.prevent_default();
+    // Escape fires a cancelable `cancel` and a backdrop click submits a
+    // `method="dialog"` form, which fires no `cancel` at all -- see
+    // `Modal`'s controlled-close contract (`ldui-e0fw`). Both, plus any
+    // in-content `method="dialog"` submit, are vetoed by `Modal` itself
+    // (`on_close_request` switches it into controlled mode) and re-emitted
+    // here as one typed `ModalCloseProposal` per gesture. Routing every
+    // cause through the same `request_close` callback that already backs
+    // Cancel keeps the caller's controlled `open` signal -- the single
+    // source of truth `Modal` reads -- as the only thing that ever actually
+    // closes the dialog, so `open` can never desync from the DOM the way a
+    // hand-rolled `on:cancel` veto (which only ever saw Escape, and never a
+    // backdrop click) allowed.
+    let handle_close_request = move |_proposal: ModalCloseProposal| {
         request_close();
     };
 
@@ -364,10 +367,11 @@ where
     view! {
         <Modal
             open=open
+            backdrop=true
             labelled_by=heading_id
             node_ref=node_ref
             class=class
-            on:cancel=handle_dialog_cancel
+            on_close_request=Callback::new(handle_close_request)
         >
             <ModalBox attr:data-search-picker-dialog="true" class="w-full max-w-2xl">
                 <h3 id=title_heading_id class="text-lg font-bold">

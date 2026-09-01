@@ -1,9 +1,9 @@
 //! Real-browser proof for `SearchPickerDialog` (ldui-i95p): opening focuses
-//! the search field, Escape/Cancel closes and restores focus to the
-//! trigger, typed activation resolves the exact current keyed payload
-//! (including duplicate-titled rows), a superseded async response never
-//! lands, loading/empty/retained-error presentation and retry work, and two
-//! independent dialog instances never collide.
+//! the search field, Escape/Cancel/backdrop all close and restore focus to
+//! the trigger (`ldui-rolc`), typed activation resolves the exact current
+//! keyed payload (including duplicate-titled rows), a superseded async
+//! response never lands, loading/empty/retained-error presentation and
+//! retry work, and two independent dialog instances never collide.
 //!
 //! Drives the general demo app (`html_target: None`, like
 //! `reactivity_smoke.rs`/`keyed_result_list_smoke.rs`/
@@ -61,6 +61,24 @@ async fn open_dialog(h: &pixelproof_web::Harness, instance: &str) {
     settle(150).await;
 }
 
+/// Activates the backdrop the way a pointer does -- by submitting the
+/// `method="dialog"` form `Modal` renders for it under `backdrop=true`.
+/// Located by the component's own `data-modal-backdrop` marker, scoped to
+/// this instance's dialog, exactly like `modal_close_proposal_smoke.rs`'s
+/// own `activate_backdrop`.
+async fn activate_backdrop(h: &pixelproof_web::Harness, instance: &str) {
+    let dialog = dialog_selector(instance);
+    let script = format!(
+        r#"(() => {{
+            const dialogEl = document.querySelector('{dialog}').closest('dialog');
+            const backdrop = dialogEl.querySelector('[data-modal-backdrop="true"]');
+            backdrop.querySelector('button').click();
+        }})()"#
+    );
+    let _ = h.page().evaluate(script.as_str()).await;
+    settle(200).await;
+}
+
 async fn type_query(h: &pixelproof_web::Harness, instance: &str, text: &str) {
     let dialog = dialog_selector(instance);
     let script = format!(
@@ -92,6 +110,7 @@ async fn snapshot(h: &pixelproof_web::Harness, instance: &str) -> Value {
                 return {{
                     statusText: status ? status.textContent.trim() : null,
                     dialogOpen: dialogEl ? dialogEl.open : null,
+                    hasBackdrop: !!(dialogEl && dialogEl.querySelector('[data-modal-backdrop="true"]')),
                     panel: panel ? panel.getAttribute('data-page-state-panel') : null,
                     rowKeys: rows,
                     activeIsSearchInput: active
@@ -145,6 +164,50 @@ async fn opening_focuses_search_and_escape_closes_and_restores_focus() {
     );
 
     assert_no_browser_errors(&h, "search-picker-dialog focus/escape journey").await;
+}
+
+/// A backdrop click closes the dialog and returns focus to the trigger, the
+/// same as `Escape` -- the regression `ldui-rolc` fixes. The dialog used to
+/// hand-roll only `on:cancel`, which fires for Escape alone; the backdrop is
+/// a `method="dialog"` form, so activating it submits rather than cancels,
+/// and used to close the dialog with no event the pattern was listening for
+/// at all, leaving the caller's `open` signal `true` behind a shut dialog.
+/// Migrating onto `Modal`'s `on_close_request` contract (`ldui-e0fw`) routes
+/// the backdrop's proposal through the same `request_close` path as
+/// Escape/Cancel, so this must now behave identically to both.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-search-picker-dialog)"]
+async fn backdrop_click_closes_and_restores_focus() {
+    let h = harness_at(PAGE).await;
+    begin_browser_error_capture(&h).await;
+
+    open_dialog(&h, "dialog-a").await;
+    let opened = snapshot(&h, "dialog-a").await;
+    assert_eq!(
+        opened["dialogOpen"],
+        json!(true),
+        "dialog is open: {opened}"
+    );
+    assert_eq!(
+        opened["hasBackdrop"],
+        json!(true),
+        "SearchPickerDialog renders Modal's backdrop=true form: {opened}"
+    );
+
+    activate_backdrop(&h, "dialog-a").await;
+    let closed = snapshot(&h, "dialog-a").await;
+    assert_eq!(
+        closed["dialogOpen"],
+        json!(false),
+        "backdrop click closes: {closed}"
+    );
+    assert_eq!(
+        closed["activeIsTrigger"],
+        json!(true),
+        "focus returns to the element that opened the dialog: {closed}"
+    );
+
+    assert_no_browser_errors(&h, "search-picker-dialog backdrop journey").await;
 }
 
 /// The Cancel button closes the dialog and returns focus to the trigger,
