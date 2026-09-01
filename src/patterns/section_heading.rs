@@ -35,7 +35,12 @@ impl HeadingLevel {
     }
 
     /// The `.ld-text-*` type-ramp step used for this level's title text.
-    const fn text_class(self) -> &'static str {
+    ///
+    /// `pub(crate)` so sibling patterns that render their own heading at a
+    /// caller-chosen [`HeadingLevel`] -- [`RecordHeader`](super::RecordHeader)
+    /// -- step down the same ramp instead of re-deriving a second mapping
+    /// that could drift.
+    pub(crate) const fn text_class(self) -> &'static str {
         match self {
             Self::H2 => "ld-text-title",
             Self::H3 => "ld-text-subtitle",

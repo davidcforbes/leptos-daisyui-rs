@@ -12,6 +12,7 @@ mod macros;
 mod page_header;
 mod page_quick_actions;
 mod page_state_panel;
+mod record_header;
 mod search_picker_dialog;
 mod section_heading;
 mod server_cursor_history;
@@ -55,6 +56,11 @@ pub use page_quick_actions::{
     PageQuickActionContent, PageQuickActionLabelVisibility, PageQuickActions,
 };
 pub use page_state_panel::{PageStatePanel, PageStatePanelTexts};
+pub use record_header::{
+    RecordActionFeedback, RecordAvatar, RecordBadge, RecordHeader, RecordHeaderState,
+    RecordHeaderTexts, RecordMetaItem, RecordQuickAction, RecordQuickActionState, RecordStatus,
+    RecordStatusTone,
+};
 pub use search_picker_dialog::{
     SearchPickerDialog, SearchPickerDialogTexts, SearchPickerRenderDecision, SearchPickerStatus,
     search_picker_render_decision,

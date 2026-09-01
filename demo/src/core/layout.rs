@@ -744,6 +744,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     value: "page_quick_actions",
                 },
                 ComponentItem {
+                    name: "Record Header",
+                    href: "/components/record_header",
+                    value: "record_header",
+                },
+                ComponentItem {
                     name: "Section Heading",
                     href: "/components/section_heading",
                     value: "section_heading",

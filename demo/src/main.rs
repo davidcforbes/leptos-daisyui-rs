@@ -165,6 +165,7 @@ fn AppInner() -> impl IntoView {
                     <Route path=path!("/radio") view=RadioDemo />
                     <Route path=path!("/range") view=RangeDemo />
                     <Route path=path!("/rating") view=RatingDemo />
+                    <Route path=path!("/record_header") view=RecordHeaderDemo />
                     <Route path=path!("/result-list") view=ResultListDemo />
                     <Route path=path!("/search_picker_dialog") view=SearchPickerDialogDemo />
                     <Route path=path!("/section_heading") view=SectionHeadingDemo />
