@@ -396,6 +396,20 @@ fn selectable_summary_step() -> Step {
     }
 }
 
+/// Focused browser proof for `BarChart`'s signed divergence and accessible
+/// contract (ldui-y2ed): bars extending from a zero baseline in both
+/// directions, the hidden category/value table, roving keyboard focus, and
+/// activation keyed by category rather than array index.
+fn bar_chart_step() -> Step {
+    Step {
+        name: "test-bar-chart-divergence",
+        run: Run::BrowserSuite {
+            test: "bar_chart_divergence_smoke",
+            html_target: None,
+        },
+    }
+}
+
 fn modal_close_proposal_step() -> Step {
     Step {
         name: "test-modal-close-proposal",
@@ -529,6 +543,7 @@ fn full_steps() -> Vec<Step> {
     steps.push(style_step());
     steps.push(result_list_step());
     steps.push(modal_close_proposal_step());
+    steps.push(bar_chart_step());
     steps.push(selectable_summary_step());
     steps.push(section_heading_step());
     steps.push(search_picker_dialog_step());
@@ -2121,6 +2136,7 @@ fn main() -> ExitCode {
         "test-style" => run_steps(&[style_step()]),
         "test-keyed-result-list" => run_steps(&[result_list_step()]),
         "test-modal-close-proposal" => run_steps(&[modal_close_proposal_step()]),
+        "test-bar-chart-divergence" => run_steps(&[bar_chart_step()]),
         "test-selectable-summary" => run_steps(&[selectable_summary_step()]),
         "test-section-heading" => run_steps(&[section_heading_step()]),
         "test-search-picker-dialog" => run_steps(&[search_picker_dialog_step()]),
@@ -2142,7 +2158,7 @@ fn main() -> ExitCode {
         other => {
             eprintln!("xtask: unknown subcommand {other:?}");
             eprintln!(
-                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-selectable-summary|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-server-table-column-tools|gen-tokens|check-sibling-tokens|bump>"
+                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-selectable-summary|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-server-table-column-tools|gen-tokens|check-sibling-tokens|bump>"
             );
             ExitCode::from(2)
         }
