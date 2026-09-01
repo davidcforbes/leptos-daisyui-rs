@@ -504,6 +504,116 @@ deleted it -- simply selects nothing until the caller supplies a key that is
 visible again; `EntityTable` never falls back to selecting whatever renders
 in the same position. `row_emphasis` below uses the same fail-safe shape.
 
+## Controlled checkbox multi-selection (ldui-nz6d)
+
+`multi_selection` is the bulk-action counterpart to `selection`. Supplying it
+renders a leading checkbox column plus a header checkbox, keyed by the same
+mandatory `row_key`.
+
+```rust,no_run
+use std::collections::BTreeSet;
+use leptos::prelude::*;
+use leptos_daisyui_rs::components::{
+    EntityTableMultiSelection, EntityTableSelectionProposal,
+};
+
+let accepted = RwSignal::new(BTreeSet::<String>::new());
+let multi_selection = EntityTableMultiSelection::controlled(
+    accepted.into(),
+    Callback::new(move |proposal: EntityTableSelectionProposal| {
+        // One atomic event carrying the COMPLETE resulting set.
+        accepted.set(proposal.keys);
+    }),
+);
+// Pass `multi_selection` through EntityTable's `multi_selection` prop.
+```
+
+### The callback is atomic
+
+Every gesture -- one row checkbox, or a header checkbox covering a hundred
+rows -- emits exactly ONE `EntityTableSelectionProposal`. Its `keys` field is
+the complete proposed set, not a delta and not a patch: apply it wholesale or
+decline it wholesale. There is never a stream of per-row events for the caller
+to reassemble. `cause` says which gesture produced it
+(`EntityTableSelectionCause::Row` or `::DisplayedPage`, the latter carrying
+the exact keys it covered), and `scope` stamps the dataset identity the
+proposal was computed against.
+
+Accepted truth stays caller-owned. Both checkboxes re-assert the accepted
+state onto the element the browser just toggled *before* emitting, so a
+declined or delayed proposal leaves no optimistic divergence to reconcile.
+
+### What the header checkbox governs
+
+**Exactly the rows currently displayed, and nothing else.** `EntityTable`
+holds the complete dataset, so it *could* offer a genuine "select every row"
+affordance; it deliberately does not, and the type says so.
+`EntityTableDisplayedPageSelection` is computed over
+`EntityTableDisplayedPage` -- the stable keys the table is painting right now,
+after filtering, sorting and paging have all been applied. That population is
+the body's own `page_row_keys`, itself derived from the one resolved
+`EntityPageSize` every other part of the render reads (`ldui-5p06`); the
+header does not recompute a second page window, so it cannot come to mean a
+different set of rows than the body shows.
+
+| Header state | Meaning | Rendered as |
+| --- | --- | --- |
+| `NoRows` | The table is displaying nothing | unchecked, `aria-disabled` |
+| `None` | No displayed row is selected | unchecked |
+| `Partial` | Some but not all displayed rows are selected | `indeterminate` |
+| `All` | Every displayed row is selected | checked |
+
+`indeterminate` therefore has one precise meaning: *some but not all of the
+rows currently displayed are selected*. Accepted keys on another page never
+tint the header checkbox and can never turn it checked -- that would tell a
+user the rows in front of them are all selected when they are not. Their count
+is announced separately, in a `role="status"` live region, through
+`EntityTableSelectionTexts::selection_summary`.
+
+`indeterminate` is a **DOM property with no HTML attribute at all**. Writing
+`indeterminate="true"` in markup does nothing. `EntityTable` binds it with
+`prop:indeterminate` and re-writes it with `set_indeterminate` inside the
+change handler, because the browser clears the property the moment the user
+clicks the box.
+
+### Off-page keys and aliasing
+
+Selection is keyed by stable business identity, never by row position. Every
+proposal is a pure set operation over named keys that carries all other
+accepted keys through untouched, so off-page keys survive paging, filtering
+and sorting *by construction* rather than by a preservation step someone could
+forget. Removing a row, replacing the dataset, or re-sorting can only stop a
+key from being rendered -- there is no index anywhere for a different entity to
+slide into. `EntityTableSelectionProposal::scope` (the table's
+`dataset_identity` by default, overridable with `with_scope`) lets a caller
+refuse a proposal minted against a previous dataset rather than have keys
+silently relabelled.
+
+### Accessibility
+
+Each row checkbox is named after its own row -- the leading visible cell's
+text by default, the stable key when that is blank, or whatever
+`with_row_label` resolves from the key -- never the bare word "checkbox". The
+header checkbox is named from `EntityTableSelectionTexts` and every default
+string says *this page*, so no rendered copy can be read as a claim about rows
+the user is not looking at. State is carried by the native checkbox glyph and
+by `aria-selected` on the row, never by colour alone. The checkbox cell stops
+click and keydown propagation, so ticking a box never also fires
+`on_row_activate`; multi-selection does not make the row itself a click
+target, because its gesture already lives in a native, keyboard-operable
+control.
+
+### Incompatible configuration is refused, not resolved
+
+`selection` and `multi_selection` are mutually exclusive. Supplying both
+**panics at construction** with
+`EntityTable configuration cannot combine selection with multi_selection`,
+the same way `preference_ownership` plus `storage_key` already fails closed.
+Silently honouring one would make a bulk-assignment workflow act on a single
+row, or a single-row workflow act on a set. Omitting `multi_selection`
+entirely renders exactly the markup a table that predates it rendered: no
+leading track, no leading cells, no live region.
+
 ## Typed summary-row emphasis
 
 `row_emphasis` classifies each row into `EntityRowEmphasis` -- `Standard`,

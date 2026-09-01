@@ -2090,3 +2090,194 @@ fn no_row_emphasis_classifier_renders_every_row_identically_to_a_table_without_t
         ""
     );
 }
+
+// ── ldui-nz6d: controlled checkbox multi-selection wiring ──
+//
+// The state machine itself is covered exhaustively in `multi_selection.rs`.
+// These cover the parts only the component owns: the leading track, the
+// empty-state colspan, the construction-time refusal, and the render-path
+// facts that a pure function cannot express.
+
+#[test]
+fn the_selection_control_track_leads_without_becoming_the_flexible_sink() {
+    use crate::components::data_table::StableColumnTrack;
+
+    let data_tracks = vec![
+        StableColumnTrack::new("client", 220),
+        StableColumnTrack::new("rank", 120),
+    ];
+    let without = super::component::entity_stable_tracks(false, data_tracks.clone());
+    let with = super::component::entity_stable_tracks(true, data_tracks.clone());
+
+    assert_eq!(without, data_tracks);
+    assert_eq!(with.len(), without.len() + 1);
+    assert_eq!(with[0].id, "__ldui-entity-selection");
+    assert_eq!(with[0].width, 48);
+    assert!(
+        !with[0].flexible,
+        "a fixed-width control column must never absorb spare table width"
+    );
+    assert_eq!(
+        with[1..].to_vec(),
+        without,
+        "declaring a selection column must not disturb any data column's track"
+    );
+}
+
+#[test]
+fn the_empty_state_message_spans_the_selection_cell_too() {
+    // Without the extra span the message row is one cell short, leaving a
+    // ragged grid line under the checkbox column.
+    assert_eq!(super::component::entity_empty_state_colspan(3, false), 3);
+    assert_eq!(super::component::entity_empty_state_colspan(3, true), 4);
+    // The pre-existing `.max(1)` floor for a table with no visible columns
+    // is preserved in both modes.
+    assert_eq!(super::component::entity_empty_state_colspan(0, false), 1);
+    assert_eq!(super::component::entity_empty_state_colspan(0, true), 2);
+}
+
+#[test]
+fn the_selection_column_is_never_synthesized_as_a_data_column() {
+    // Structurally absent from the chooser, the sort model, the filter
+    // vocabulary and the display projection -- rather than filtered out of
+    // four places that could each be forgotten.
+    let source = include_str!("component.rs");
+    // Assembled at runtime so this assertion's own text cannot satisfy the
+    // search it performs.
+    for forbidden in [
+        format!("EntityColumn::new({}", "SELECTION_COLUMN_TRACK_ID"),
+        format!("EntityColumn::text({}", "SELECTION_COLUMN_TRACK_ID"),
+    ] {
+        assert!(
+            !source.contains(&forbidden),
+            "the selection control column must never be synthesized as a data EntityColumn"
+        );
+    }
+}
+
+#[test]
+fn the_header_checkbox_writes_indeterminate_as_a_dom_property() {
+    // `indeterminate` has NO HTML attribute: `indeterminate="true"` in
+    // markup does nothing at all. It must be written through `prop:` AND
+    // re-written with `set_indeterminate` in the change handler, because the
+    // browser clears the property the moment the user clicks the box.
+    let source = include_str!("component.rs");
+    assert!(
+        source.contains("prop:indeterminate=move || displayed_page_state.get().is_indeterminate()"),
+        "the header checkbox must bind indeterminate as a DOM property"
+    );
+    assert!(
+        source.contains("input.set_indeterminate(state.is_indeterminate())"),
+        "the change handler must re-assert the indeterminate property the browser just cleared"
+    );
+    assert!(
+        !source.contains("attr:indeterminate"),
+        "indeterminate is not an attribute and must never be written as one"
+    );
+}
+
+#[test]
+fn the_header_governs_the_same_keys_the_body_renders() {
+    // The one-truthful-page-size rule (ldui-5p06) applied to selection: the
+    // header state and the rendered rows both read `page_row_keys`, which is
+    // itself derived from the single resolved `page_size` memo. Recomputing
+    // a second page window for the header is exactly the bug 5p06 fixed.
+    let source = include_str!("component.rs");
+    let derivation = source
+        .split_once("let displayed_page_state =")
+        .expect("header state derivation")
+        .1;
+    let derivation = &derivation[..derivation.find("});").expect("derivation end")];
+    assert!(
+        derivation.contains("page_row_keys"),
+        "header state must be derived from page_row_keys, not a recomputed page window"
+    );
+    assert!(
+        !derivation.contains("page_bounds") && !derivation.contains("page_size"),
+        "header state must not recompute its own page window"
+    );
+    assert!(
+        source.contains("let keys = page_row_keys.get_untracked();"),
+        "the header gesture must cover exactly the rendered keys"
+    );
+    assert!(
+        source.contains("move || page_row_keys.get(),"),
+        "the body must iterate the same signal the header state reads"
+    );
+}
+
+#[test]
+fn every_selection_checkbox_carries_an_accessible_name() {
+    let source = include_str!("component.rs");
+    assert_eq!(
+        source
+            .matches("data-entity-selection-toggle=\"page\"")
+            .count(),
+        1,
+        "exactly one header checkbox"
+    );
+    assert!(
+        source.contains("texts.page_label(state, count)"),
+        "the header checkbox is named from the localized Texts struct"
+    );
+    assert!(
+        source.contains("texts.row_label(&name, label_accepted())"),
+        "each row checkbox is named after its own row, never \"checkbox\""
+    );
+}
+
+#[test]
+fn selection_state_is_never_conveyed_by_colour_alone() {
+    // The native checked/indeterminate glyph is the non-colour indicator; a
+    // row's `aria-selected` is the programmatic one. The row tint is purely
+    // supplementary, and there is no colour-only affordance anywhere.
+    let source = include_str!("component.rs");
+    assert!(
+        source.contains("prop:checked=checked_accepted"),
+        "each row's state must render as a real checkbox glyph"
+    );
+    assert!(
+        source.contains("aria-selected=move || entity_row_aria_selected("),
+        "selected rows must expose aria-selected"
+    );
+}
+
+#[test]
+fn the_selection_checkbox_owns_its_own_gesture() {
+    // Without stopping propagation the same click would reach the row's
+    // `on_row_activate` handler as well, so ticking a box would also
+    // navigate.
+    let source = include_str!("component.rs");
+    let cell = source
+        .split("data-entity-selection-cell=\"true\"")
+        .nth(1)
+        .expect("selection cell markup");
+    let cell = &cell[..cell.find("</td>").expect("selection cell end")];
+    assert!(cell.contains("on:click=move |event: web_sys::MouseEvent| event.stop_propagation()"));
+    assert!(
+        cell.contains("on:keydown=move |event: web_sys::KeyboardEvent| event.stop_propagation()")
+    );
+}
+
+#[test]
+fn multi_selection_does_not_make_the_whole_row_a_click_target() {
+    // Row interactivity stays exactly what it was: `on_row_activate` or
+    // single `selection`. Adding multi-selection to that predicate would
+    // mean a plain click both activated the row and toggled its checkbox.
+    let source = include_str!("component.rs");
+    assert!(
+        source.contains("let interactive = on_row_activate.is_some() || selection.is_some();"),
+        "multi_selection must not widen the row-interactivity predicate"
+    );
+}
+
+#[test]
+#[should_panic(
+    expected = "EntityTable configuration cannot combine selection with multi_selection"
+)]
+fn combining_both_selection_models_fails_closed_at_construction() {
+    // Construction-time refusal with both prop names in the message -- not a
+    // precedence rule that silently picks one.
+    let _ = super::multi_selection::resolve_entity_selection_mode(true, true)
+        .unwrap_or_else(|message| panic!("{message}"));
+}

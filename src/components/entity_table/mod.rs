@@ -3,6 +3,7 @@
 mod component;
 mod emphasis;
 mod model;
+mod multi_selection;
 mod selection;
 mod storage;
 mod types;
@@ -14,6 +15,12 @@ pub use model::{
     normalize_preferences, ordered_columns, page_after_dataset_change, page_after_row_delta,
     reset_columns, reset_sort, resolve_entity_page_size, set_preferred_width, sorted_indices,
     toggle_hidden_column, valid_page_size,
+};
+pub use multi_selection::{
+    EntityTableDisplayedPage, EntityTableDisplayedPageSelection, EntityTableMultiSelection,
+    EntityTableSelectionCause, EntityTableSelectionProposal, EntityTableSelectionTexts,
+    displayed_page_selection_state, off_page_selected_count, propose_entity_displayed_page_toggle,
+    propose_entity_row_toggle,
 };
 pub use selection::EntityTableSelection;
 pub use storage::{decode_preferences, encode_preferences};

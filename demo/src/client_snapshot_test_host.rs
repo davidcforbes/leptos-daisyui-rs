@@ -17,7 +17,8 @@ use leptos::prelude::*;
 use leptos_daisyui_rs::test_mode;
 use leptos_daisyui_rs::tokens::{UiAnimationsPreamble, UiTokensPreamble};
 use snapshot_table_page::{
-    EntityTableEmphasisFixture, EntityTablePageSizeIdentityFixture, EntityTablePresentationFixture,
+    EntityTableEmphasisFixture, EntityTableMultiSelectionFixture,
+    EntityTablePageSizeIdentityFixture, EntityTablePresentationFixture,
     EntityTableSelectionFixture, EntityTableViewportFitFixture, SnapshotTablePageControlsFixture,
     SnapshotTablePageFixture,
 };
@@ -59,6 +60,9 @@ fn main() {
         let selection_fixture = web_sys::window()
             .and_then(|window| window.location().pathname().ok())
             .is_some_and(|path| path.ends_with("/entity-table-selection"));
+        let multi_selection_fixture = web_sys::window()
+            .and_then(|window| window.location().pathname().ok())
+            .is_some_and(|path| path.ends_with("/entity-table-multi-selection"));
         let emphasis_fixture = web_sys::window()
             .and_then(|window| window.location().pathname().ok())
             .is_some_and(|path| path.ends_with("/entity-table-emphasis"));
@@ -66,7 +70,9 @@ fn main() {
             <UiTokensPreamble />
             <UiAnimationsPreamble />
             <main class="min-h-screen bg-base-200 p-4 sm:p-6">
-                {if emphasis_fixture {
+                {if multi_selection_fixture {
+                    view! { <EntityTableMultiSelectionFixture /> }.into_any()
+                } else if emphasis_fixture {
                     view! { <EntityTableEmphasisFixture /> }.into_any()
                 } else if selection_fixture {
                     view! { <EntityTableSelectionFixture /> }.into_any()

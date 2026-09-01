@@ -3,8 +3,9 @@ use leptos_daisyui_rs::components::{
     BadgeColor, Button, EntityBadgePresentation, EntityColumn, EntityColumnChooserTrigger,
     EntityColumnFilter, EntityIconColor, EntityIconPresentation, EntityNullOrder, EntityPageSize,
     EntityRowAction, EntityRowEmphasis, EntityTable, EntityTableDisplayProjection,
-    EntityTablePreferenceOwnership, EntityTablePreferencePersistence, EntityTableProjectionScope,
-    EntityTableSelection, EntityTableTexts, EntityTableViewportFit,
+    EntityTableMultiSelection, EntityTablePreferenceOwnership, EntityTablePreferencePersistence,
+    EntityTableProjectionScope, EntityTableSelection, EntityTableSelectionCause,
+    EntityTableSelectionProposal, EntityTableTexts, EntityTableViewportFit,
 };
 use leptos_daisyui_rs::patterns::{
     ActionFeedbackContent, ActionFeedbackState, PageHeader, PageHeaderNavigationLayout,
@@ -12,6 +13,7 @@ use leptos_daisyui_rs::patterns::{
     SnapshotDeltaHandle, SnapshotEntityTableConfig, SnapshotLocalRowProjection,
     SnapshotRequestHandle, SnapshotTablePage, SnapshotTableState, SnapshotTransitionDisposition,
 };
+use std::collections::BTreeSet;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -1399,6 +1401,184 @@ pub fn EntityTableEmphasisFixture() -> impl IntoView {
                 // own alternating-row background CSS.
                 zebra=true
                 attr:id="entity-emphasis-table"
+            />
+        </section>
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct BulkRow {
+    id: String,
+    client: String,
+    status: String,
+}
+
+fn bulk_rows(dataset: &str) -> Rc<Vec<BulkRow>> {
+    Rc::new(
+        (1..=30)
+            .map(|index| BulkRow {
+                id: format!("{dataset}-{index:02}"),
+                client: format!("{dataset} conversation {index:02}"),
+                status: if index % 3 == 0 {
+                    "Assigned"
+                } else {
+                    "Unassigned"
+                }
+                .to_owned(),
+            })
+            .collect(),
+    )
+}
+
+fn bulk_columns() -> Vec<EntityColumn<BulkRow>> {
+    vec![
+        EntityColumn::text("client", "Conversation", |row: &BulkRow| row.client.clone())
+            .required()
+            .with_min_width(240),
+        EntityColumn::text("status", "Status", |row: &BulkRow| row.status.clone())
+            .with_min_width(140),
+    ]
+}
+
+/// Controlled checkbox multi-selection over a client snapshot (`ldui-nz6d`).
+///
+/// Thirty rows against a 25-row default page, so page 2 is a genuine second
+/// page: selecting page 1, paging forward and selecting page 2 proves both
+/// that the header governs only what is displayed and that off-page keys
+/// survive untouched.
+#[component]
+pub fn EntityTableMultiSelectionFixture() -> impl IntoView {
+    let dataset = RwSignal::new("office-mx".to_owned());
+    let data = RwSignal::new_local(bulk_rows("office-mx"));
+    let accepted = RwSignal::new(BTreeSet::<String>::new());
+    let accept_proposals = RwSignal::new(true);
+    let proposal_count = RwSignal::new(0_u32);
+    let last_cause = RwSignal::new("(none)".to_owned());
+    let last_scope = RwSignal::new("(none)".to_owned());
+    let unassigned_only = RwSignal::new(false);
+
+    Effect::new(move |_| {
+        let identity = dataset.get();
+        let only_unassigned = unassigned_only.get();
+        let mut rows = bulk_rows(&identity).as_ref().clone();
+        if only_unassigned {
+            rows.retain(|row| row.status == "Unassigned");
+        }
+        data.set(Rc::new(rows));
+    });
+
+    let remove_selected = move |_: web_sys::MouseEvent| {
+        let selected = accepted.get_untracked();
+        data.update(|rows| {
+            let mut replacement = rows.as_ref().clone();
+            replacement.retain(|row| !selected.contains(&row.id));
+            *rows = Rc::new(replacement);
+        });
+    };
+
+    view! {
+        <section
+            id="entity-table-multi-selection-fixture"
+            class="mx-auto max-w-4xl space-y-3 bg-base-100 p-4"
+        >
+            <h1 class="ld-text-display font-semibold">"Entity table bulk selection"</h1>
+            <div class="flex flex-wrap items-center gap-3 text-sm">
+                <span>
+                    "Selected: "
+                    <code data-testid="entity-multi-selected-count">
+                        {move || accepted.with(BTreeSet::len).to_string()}
+                    </code>
+                </span>
+                <span>
+                    "Keys: "
+                    <code data-testid="entity-multi-selected-keys">
+                        {move || {
+                            let keys = accepted
+                                .with(|keys| keys.iter().cloned().collect::<Vec<_>>())
+                                .join(",");
+                            if keys.is_empty() { "(none)".to_owned() } else { keys }
+                        }}
+                    </code>
+                </span>
+                <span>
+                    "Proposals: "
+                    <code data-testid="entity-multi-proposals">
+                        {move || proposal_count.get().to_string()}
+                    </code>
+                </span>
+                <span>
+                    "Last cause: "
+                    <code data-testid="entity-multi-last-cause">{move || last_cause.get()}</code>
+                </span>
+                <span>
+                    "Last scope: "
+                    <code data-testid="entity-multi-last-scope">{move || last_scope.get()}</code>
+                </span>
+            </div>
+            <div class="flex flex-wrap gap-2">
+                <Button
+                    on:click=move |_| accept_proposals.update(|accept| *accept = !*accept)
+                    attr:data-testid="entity-multi-accept"
+                >
+                    {move || if accept_proposals.get() {
+                        "Reject selection proposals"
+                    } else {
+                        "Accept selection proposals"
+                    }}
+                </Button>
+                <Button
+                    on:click=move |_| unassigned_only.update(|only| *only = !*only)
+                    attr:data-testid="entity-multi-filter"
+                >
+                    {move || if unassigned_only.get() {
+                        "Show every conversation"
+                    } else {
+                        "Show unassigned only"
+                    }}
+                </Button>
+                <Button
+                    on:click=move |_| dataset.update(|identity| {
+                        *identity = if identity == "office-mx" { "office-in" } else { "office-mx" }
+                            .to_owned();
+                    })
+                    attr:data-testid="entity-multi-replace-dataset"
+                >
+                    "Replace dataset"
+                </Button>
+                <Button on:click=remove_selected attr:data-testid="entity-multi-remove-selected">
+                    "Remove selected rows"
+                </Button>
+                <Button
+                    on:click=move |_| accepted.set(BTreeSet::new())
+                    attr:data-testid="entity-multi-clear"
+                >
+                    "Clear selection"
+                </Button>
+            </div>
+            <EntityTable
+                data=data
+                columns=bulk_columns()
+                row_key=Rc::new(|row: &BulkRow| row.id.clone())
+                dataset_identity=Signal::derive(move || dataset.get())
+                multi_selection=EntityTableMultiSelection::controlled(
+                    accepted.into(),
+                    Callback::new(move |proposal: EntityTableSelectionProposal| {
+                        proposal_count.update(|count| *count += 1);
+                        last_scope.set(proposal.scope.clone());
+                        last_cause.set(match &proposal.cause {
+                            EntityTableSelectionCause::Row { key, selected } => {
+                                format!("row:{key}:{selected}")
+                            }
+                            EntityTableSelectionCause::DisplayedPage { selected, keys } => {
+                                format!("page:{}:{selected}", keys.len())
+                            }
+                        });
+                        if accept_proposals.get_untracked() {
+                            accepted.set(proposal.keys);
+                        }
+                    }),
+                )
+                attr:id="entity-multi-selection-table"
             />
         </section>
     }

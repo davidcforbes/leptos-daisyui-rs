@@ -12,6 +12,12 @@ use super::model::{
     page_after_row_delta, reset_columns, reset_sort, resolve_entity_page_size, set_preferred_width,
     sorted_indices, toggle_hidden_column,
 };
+use super::multi_selection::{
+    EntityTableMultiSelection, EntityTableSelectionCause, EntityTableSelectionProposal,
+    SELECTION_COLUMN_TRACK_ID, SELECTION_COLUMN_TRACK_WIDTH, displayed_page_selection_state,
+    displayed_row_label, off_page_selected_count, propose_entity_displayed_page_toggle,
+    propose_entity_row_toggle, resolve_entity_selection_mode,
+};
 use super::selection::{
     EntityTableSelection, entity_row_aria_selected, entity_row_hover_class, entity_row_is_selected,
     entity_selection_proposal,
@@ -30,6 +36,7 @@ use super::types::{
 };
 use crate::components::badge::{Badge, BadgeSize};
 use crate::components::button::Button;
+use crate::components::checkbox::{Checkbox, CheckboxSize};
 use crate::components::data_table::{
     FALLBACK_HEADER_HEIGHT, FALLBACK_ROW_HEIGHT, MAX_COLUMN_WIDTH, PageSlot, StableColumnTrack,
     StableTableColGroup, auto_page_size_for_height, clamp_page, effective_min_width,
@@ -43,7 +50,7 @@ use crate::components::select::Select;
 use crate::merge_classes;
 use leptos::prelude::*;
 use leptos::tachys::reactive_graph::OwnedView;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use web_sys::wasm_bindgen::JsCast;
@@ -90,6 +97,40 @@ pub(super) fn resolved_page_size(
         preferences.page_size.max(1),
         measured_rows,
     )
+}
+
+/// Prepends the leading selection control track to the data-column tracks.
+///
+/// The control track is declared here rather than derived from `columns`
+/// because it is not a column: it carries a fixed width, never resizes, and
+/// can never become the flexible sink (that stays whichever data column
+/// [`entity_flexible_column_id`] picked). It is likewise invisible to the
+/// column chooser, the sort model, the filter vocabulary and the display
+/// projection, because none of those ever see a track.
+pub(super) fn entity_stable_tracks(
+    has_selection_column: bool,
+    data_tracks: Vec<StableColumnTrack>,
+) -> Vec<StableColumnTrack> {
+    let leading = has_selection_column
+        .then(|| StableColumnTrack::new(SELECTION_COLUMN_TRACK_ID, SELECTION_COLUMN_TRACK_WIDTH));
+    leading.into_iter().chain(data_tracks).collect()
+}
+
+/// Columns the empty-state message must span.
+///
+/// The leading selection control cell is not a column, but it IS a cell: the
+/// message row is short by one without it, which leaves a ragged grid line
+/// under the checkbox column.
+pub(super) const fn entity_empty_state_colspan(
+    visible_columns: usize,
+    has_selection_column: bool,
+) -> usize {
+    let columns = if visible_columns == 0 {
+        1
+    } else {
+        visible_columns
+    };
+    columns + if has_selection_column { 1 } else { 0 }
 }
 
 /// Marks one stable, repeatable row action for framework-owned focus recovery.
@@ -544,6 +585,29 @@ pub fn EntityTable<T>(
     /// and `aria-selected="false"` on every row would wrongly claim it does.
     #[prop(optional)]
     selection: Option<EntityTableSelection>,
+    /// Optional controlled checkbox multi-selection for bulk page actions
+    /// (`ldui-nz6d`), keyed by the table's mandatory `row_key`.
+    ///
+    /// Supplying it renders a leading checkbox column plus a header checkbox.
+    /// Every gesture emits exactly ONE
+    /// [`EntityTableSelectionProposal`](super::EntityTableSelectionProposal)
+    /// carrying the complete resulting key set -- never a stream of per-row
+    /// deltas -- and nothing is applied until the caller's own signal changes.
+    ///
+    /// **The header checkbox governs the rows currently displayed, and only
+    /// those.** Its state is computed over the keys this table is rendering
+    /// right now, after filtering, sorting and paging: checked when every
+    /// displayed row is selected, `indeterminate` when some but not all are,
+    /// unchecked otherwise. Selected keys on other pages never tint it, and
+    /// are carried through every proposal untouched; their count is announced
+    /// in a live region instead.
+    ///
+    /// Mutually exclusive with `selection`. Supplying both is refused at
+    /// construction rather than resolved by precedence, because silently
+    /// honouring one would make a bulk-assignment workflow act on a single
+    /// row, or a single-row workflow act on a set.
+    #[prop(optional)]
+    multi_selection: Option<EntityTableMultiSelection>,
     /// Optional per-row semantic classification into a narrow,
     /// framework-owned [`EntityRowEmphasis`] -- `Standard`, `Summary`,
     /// `Muted`, or `Attention` -- never an unrestricted class-string hook.
@@ -628,6 +692,16 @@ pub fn EntityTable<T>(
 where
     T: Clone + 'static,
 {
+    // Refused at construction, before a single node is built, with the
+    // conflicting prop names in the message -- never resolved to one model by
+    // an invisible precedence rule. This mirrors `resolve_preference_ownership`
+    // below, which is how `EntityTable` already refuses its other incompatible
+    // configuration.
+    if let Err(message) =
+        resolve_entity_selection_mode(selection.is_some(), multi_selection.is_some())
+    {
+        panic!("{message}");
+    }
     let (column_store, reactive_columns) = match columns {
         EntityColumns::Static(columns) => {
             (ColumnStore::Static(StoredValue::new_local(columns)), None)
@@ -792,9 +866,10 @@ where
     let flexible_column_id = Signal::derive(move || {
         header_descriptors.with(|columns| entity_flexible_column_id(columns))
     });
+    let has_selection_column = multi_selection.is_some();
     let stable_tracks = Signal::derive(move || {
         let widths = column_widths.get();
-        header_descriptors
+        let data_tracks = header_descriptors
             .get()
             .into_iter()
             .map(|column| {
@@ -810,7 +885,8 @@ where
                     track
                 }
             })
-            .collect::<Vec<_>>()
+            .collect::<Vec<_>>();
+        entity_stable_tracks(has_selection_column, data_tracks)
     });
 
     let total_rows = Signal::derive_local(move || data.get().len());
@@ -835,6 +911,120 @@ where
             .iter()
             .map(|index| row_key(&rows[*index]))
             .collect::<Vec<_>>()
+    });
+
+    // ── Controlled checkbox multi-selection (ldui-nz6d) ──
+    //
+    // "The rows currently displayed" is `page_row_keys` and nothing else --
+    // the same signal the `<tbody>` iterates to paint rows, which is itself
+    // derived from the one resolved `page_size` memo (ldui-5p06). Deriving
+    // the header checkbox's population from a second, independently
+    // recomputed page window is exactly the class of bug 5p06 fixed, so the
+    // header and the body physically cannot disagree about which rows they
+    // mean.
+    let accepted_keys: Signal<BTreeSet<String>> = multi_selection.map_or_else(
+        || Signal::stored(BTreeSet::new()),
+        EntityTableMultiSelection::selected_keys,
+    );
+    let displayed_page_state = Signal::derive_local(move || {
+        page_row_keys.with(|keys| {
+            accepted_keys.with(|accepted| displayed_page_selection_state(keys, accepted))
+        })
+    });
+    let off_page_selected = Signal::derive_local(move || {
+        page_row_keys
+            .with(|keys| accepted_keys.with(|accepted| off_page_selected_count(accepted, keys)))
+    });
+    // Defaults to the table's own dataset identity, so a dataset swap already
+    // stamps a distinguishable scope without the caller wiring anything.
+    let selection_scope: Signal<String> = multi_selection
+        .and_then(|model| model.scope)
+        .unwrap_or(dataset_identity);
+    // `None` unless multi-selection was configured, so an unconfigured table
+    // renders exactly the markup it always did -- no leading track, no
+    // leading cells, no live region.
+    let selection_header_ref = NodeRef::<leptos::html::Input>::new();
+    let selection_header = multi_selection.map(|model| {
+        let selection_texts = model.texts;
+        view! {
+            <th
+                class="w-12 border border-table-grid bg-table-header p-2 text-center text-table-header-content forced-colors:border-[CanvasText] forced-colors:bg-[Canvas] forced-colors:text-[CanvasText]"
+                scope="col"
+                data-entity-selection-header="true"
+                data-entity-selection-page-state=move || displayed_page_state.get().as_str()
+            >
+                <span class="sr-only">
+                    {move || selection_texts.with(|texts| texts.column_header.clone())}
+                </span>
+                <Checkbox
+                    size=CheckboxSize::Sm
+                    node_ref=selection_header_ref
+                    class="align-middle"
+                    // `aria-disabled`, not the native `disabled`: an empty
+                    // table's header checkbox stays in the tab order so a
+                    // keyboard user still reaches it and hears WHY it is
+                    // inert ("No rows are displayed"). The `on:change`
+                    // handler below is the enforcement -- it returns without
+                    // proposing when no rows are displayed.
+                    attr:aria-disabled=move || {
+                        displayed_page_state.get().is_disabled().then_some("true")
+                    }
+                    attr:data-entity-selection-toggle="page"
+                    attr:aria-label=move || {
+                        let state = displayed_page_state.get();
+                        let count = page_row_keys.with(Vec::len);
+                        selection_texts.with(|texts| texts.page_label(state, count))
+                    }
+                    prop:checked=move || displayed_page_state.get().is_checked()
+                    // `indeterminate` has NO HTML attribute -- it exists only
+                    // as a DOM property, so writing `indeterminate="true"` in
+                    // markup would do nothing at all. `prop:` writes the
+                    // property, and the `on:change` handler re-writes it via
+                    // `set_indeterminate` because the browser clears it as
+                    // soon as the user clicks.
+                    prop:indeterminate=move || displayed_page_state.get().is_indeterminate()
+                    on:change=move |_| {
+                        let state = displayed_page_state.get_untracked();
+                        // Controlled: re-assert accepted truth onto the
+                        // element the browser just toggled, BEFORE proposing,
+                        // so a declined or delayed proposal leaves no
+                        // optimistic divergence to reconcile.
+                        if let Some(input) = selection_header_ref.get_untracked() {
+                            input.set_checked(state.is_checked());
+                            input.set_indeterminate(state.is_indeterminate());
+                        }
+                        let keys = page_row_keys.get_untracked();
+                        if keys.is_empty() {
+                            return;
+                        }
+                        let selected = state.toggles_to_selected();
+                        let accepted = accepted_keys.get_untracked();
+                        model.on_change.run(EntityTableSelectionProposal {
+                            keys: propose_entity_displayed_page_toggle(&accepted, &keys, selected),
+                            cause: EntityTableSelectionCause::DisplayedPage { selected, keys },
+                            scope: selection_scope.get_untracked(),
+                        });
+                    }
+                />
+            </th>
+        }
+    });
+    let selection_status = multi_selection.map(|model| {
+        let selection_texts = model.texts;
+        view! {
+            <p
+                class="sr-only"
+                role="status"
+                aria-live="polite"
+                data-entity-selection-summary="true"
+            >
+                {move || {
+                    let total = accepted_keys.with(BTreeSet::len);
+                    let off_page = off_page_selected.get();
+                    selection_texts.with(|texts| texts.summary_label(total, off_page))
+                }}
+            </p>
+        }
     });
 
     if let Some(on_display_projection) = on_display_projection {
@@ -1468,6 +1658,7 @@ where
                     })
                 })}
             </p>
+            {selection_status}
 
             <div
                 node_ref=table_region
@@ -1511,6 +1702,7 @@ where
                     }}
                     <thead class="hidden lg:table-header-group">
                         <tr>
+                            {selection_header}
                             <For
                                 each=move || header_descriptors.get()
                                 key=|column| (
@@ -1813,6 +2005,17 @@ where
                                     class="data-table-filter-row bg-table-filter text-table-filter-content forced-colors:bg-[Canvas] forced-colors:text-[CanvasText]"
                                     data-entity-column-filter-row="true"
                                 >
+                                    {has_selection_column.then(|| view! {
+                                        // Structural spacer: the selection
+                                        // control column has no filter
+                                        // vocabulary, and must not shift the
+                                        // data columns' filters out from
+                                        // under their own headers.
+                                        <th
+                                            class="border border-table-grid bg-table-filter p-1 forced-colors:border-[CanvasText] forced-colors:bg-[Canvas]"
+                                            data-entity-selection-filter-cell="true"
+                                        ></th>
+                                    })}
                                     {header_descriptors
                                         .get()
                                         .into_iter()
@@ -1843,7 +2046,7 @@ where
                     </thead>
                     <tbody>
                         {move || page_row_keys.with(|keys| keys.is_empty()).then(|| {
-                            let colspan = column_store.with_value(|columns| {
+                            let visible_columns = column_store.with_value(|columns| {
                                 let preferences_value = preferences.get();
                                 ordered_columns(&preferences_value, columns)
                                     .into_iter()
@@ -1851,8 +2054,9 @@ where
                                         !preferences_value.hidden_columns.contains(column.id)
                                     })
                                     .count()
-                                    .max(1)
                             });
+                            let colspan =
+                                entity_empty_state_colspan(visible_columns, has_selection_column);
                             view! {
                                     <tr>
                                         <td
@@ -1878,6 +2082,9 @@ where
                                     compact_row,
                                     on_row_activate,
                                     selection,
+                                    multi_selection,
+                                    accepted_keys,
+                                    selection_scope,
                                     row_emphasis,
                                 },
                             ),
@@ -2047,6 +2254,9 @@ struct KeyedRowContext<T: 'static> {
     compact_row: CompactRowStore<T>,
     on_row_activate: Option<Callback<String>>,
     selection: Option<EntityTableSelection>,
+    multi_selection: Option<EntityTableMultiSelection>,
+    accepted_keys: Signal<BTreeSet<String>>,
+    selection_scope: Signal<String>,
     row_emphasis: StoredValue<Option<EntityRowEmphasisClassifier<T>>, LocalStorage>,
 }
 
@@ -2063,10 +2273,19 @@ fn render_keyed_row<T: Clone + 'static>(
         compact_row,
         on_row_activate,
         selection,
+        multi_selection,
+        accepted_keys,
+        selection_scope,
         row_emphasis,
     } = context;
     // A table with only `selection` (no `on_row_activate`) is still
     // keyboard-operable, mirroring `data_table::row_is_interactive`.
+    //
+    // `multi_selection` deliberately does NOT make the whole row interactive:
+    // its gesture lives entirely in the leading checkbox, which is already a
+    // native, keyboard-operable control. Making the row a click target too
+    // would mean a plain click both activated the row and toggled its
+    // checkbox.
     let interactive = on_row_activate.is_some() || selection.is_some();
     // `aria-selected` and selected styling are gated on `selection` alone,
     // not `interactive`: an activate-only table (no `selection` supplied)
@@ -2075,7 +2294,7 @@ fn render_keyed_row<T: Clone + 'static>(
     // assistive tech the row is selectable when it never was. This keeps
     // every existing `on_row_activate`-only caller's DOM byte-for-byte
     // unchanged.
-    let has_selection = selection.is_some();
+    let has_selection = selection.is_some() || multi_selection.is_some();
     // Mirrors `has_selection`'s gating: with no `row_emphasis` classifier at
     // all, no row emits a `data-entity-row-emphasis` attribute or any
     // emphasis class, restoring the exact DOM of a table that predates this
@@ -2089,7 +2308,12 @@ fn render_keyed_row<T: Clone + 'static>(
     // Focus and selection are deliberately distinct: Tab/roving focus never
     // proposes or paints selection by itself -- only a click or Enter/Space
     // does, via the handlers below.
+    // Both models resolve to the same pure per-row key comparison, so neither
+    // can alias a rendered position onto another entity's selection.
     let is_row_selected = move |current_key: &str| {
+        if multi_selection.is_some() {
+            return accepted_keys.with(|accepted| accepted.contains(current_key));
+        }
         selection.is_some_and(|selection| {
             entity_row_is_selected(current_key, selection.selected_key().get().as_deref())
         })
@@ -2126,6 +2350,93 @@ fn render_keyed_row<T: Clone + 'static>(
         cached_row.set(row);
         if cached_emphasis.get_untracked() != emphasis {
             cached_emphasis.set(emphasis);
+        }
+    });
+
+    // ── The leading selection control cell (ldui-nz6d) ──
+    //
+    // Rendered in BOTH presentations (no `lg:` visibility switch): the wide
+    // and compact layouts share this one `<tr>`, so a mobile user gets the
+    // same checkbox rather than losing the affordance below the `lg`
+    // breakpoint.
+    let selection_cell = multi_selection.map(|model| {
+        let selection_texts = model.texts;
+        let checkbox_ref = NodeRef::<leptos::html::Input>::new();
+        let dom_key = key.clone();
+        let cell_key = key.clone();
+        // Resolved on every read rather than captured once, so a reactive row
+        // update (a renamed client) reaches the accessible name without
+        // remounting the checkbox and stealing focus from under the user.
+        let row_name = move || {
+            if let Some(row_label) = model.row_label {
+                return row_label.run(cell_key.clone());
+            }
+            // Default: the row's leading visible, non-action cell text, so a
+            // screen reader hears the row's own name rather than "checkbox"
+            // or a raw id.
+            let primary = cached_row.with(|row| {
+                let row = row.as_ref()?;
+                let preferences_value = preferences.get();
+                column_store.with_value(|columns| {
+                    ordered_columns(&preferences_value, columns)
+                        .into_iter()
+                        .find(|column| {
+                            !column.is_action
+                                && !preferences_value.hidden_columns.contains(column.id)
+                        })
+                        .map(|column| (column.text)(row))
+                })
+            });
+            displayed_row_label(&cell_key, primary.as_deref())
+        };
+        let accepted_key = key.clone();
+        let is_accepted = move || accepted_keys.with(|accepted| accepted.contains(&accepted_key));
+
+        let label_name = row_name;
+        let label_accepted = is_accepted.clone();
+        let checked_accepted = is_accepted.clone();
+        let change_accepted = is_accepted;
+        let change_key = key.clone();
+        view! {
+            <td
+                class="w-12 border border-table-grid p-2 text-center align-middle forced-colors:border-[CanvasText]"
+                data-entity-selection-cell="true"
+                // The checkbox owns its gesture outright: without this the
+                // same click would also reach the row's activation handler.
+                on:click=move |event: web_sys::MouseEvent| event.stop_propagation()
+                on:keydown=move |event: web_sys::KeyboardEvent| event.stop_propagation()
+            >
+                <Checkbox
+                    size=CheckboxSize::Sm
+                    node_ref=checkbox_ref
+                    class="align-middle"
+                    attr:data-entity-selection-row=dom_key
+                    attr:aria-label=move || {
+                        let name = label_name();
+                        selection_texts.with(|texts| texts.row_label(&name, label_accepted()))
+                    }
+                    prop:checked=checked_accepted
+                    on:change=move |_| {
+                        let accepted_now = change_accepted();
+                        // Same controlled re-assertion as the header: the
+                        // browser already flipped the box, so put accepted
+                        // truth back before proposing anything.
+                        if let Some(input) = checkbox_ref.get_untracked() {
+                            input.set_checked(accepted_now);
+                        }
+                        let selected = !accepted_now;
+                        let accepted = accepted_keys.get_untracked();
+                        model.on_change.run(EntityTableSelectionProposal {
+                            keys: propose_entity_row_toggle(&accepted, &change_key, selected),
+                            cause: EntityTableSelectionCause::Row {
+                                key: change_key.clone(),
+                                selected,
+                            },
+                            scope: selection_scope.get_untracked(),
+                        });
+                    }
+                />
+            </td>
         }
     });
 
@@ -2197,6 +2508,7 @@ fn render_keyed_row<T: Clone + 'static>(
                 }
             }
         >
+            {selection_cell}
             {move || {
                 // Reads the same cached lookup the `<tr>` class and
                 // `data-entity-row-emphasis` attribute above already read --

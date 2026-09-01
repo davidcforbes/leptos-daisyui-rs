@@ -4270,3 +4270,237 @@ async fn compact_layout_fits_the_viewport_and_desktop_colgroup_survives_unchange
 
     assert_no_browser_errors(&harness, "EntityTable compact colgroup viewport fit").await;
 }
+
+/// `ldui-nz6d`: controlled checkbox multi-selection over a client snapshot.
+///
+/// Proves the four facts a pure state-machine test cannot reach: the header
+/// checkbox's `indeterminate` DOM PROPERTY is actually set (it has no HTML
+/// attribute, so a markup-only implementation is silently inert), header
+/// selection covers only the rows currently displayed, accepted keys on
+/// another page survive paging and are announced in the live region, and
+/// keyboard Space operates a row checkbox exactly as a click does.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
+async fn entity_table_multi_selection_governs_only_the_displayed_page() {
+    let harness = harness_at("/components/entity-table-multi-selection").await;
+    begin_browser_error_capture(&harness).await;
+    wait_for_selector(
+        &harness,
+        "#entity-multi-selection-table tbody tr[data-entity-row-key]",
+    )
+    .await;
+
+    // Nothing selected: the header checkbox is unchecked, NOT indeterminate,
+    // and the leading control column exists exactly once in the header.
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => {
+                const header = document.querySelector('#entity-multi-selection-table [data-entity-selection-toggle="page"]');
+                return {
+                    checked: header.checked,
+                    indeterminate: header.indeterminate,
+                    state: header.closest('th').dataset.entitySelectionPageState,
+                    headers: document.querySelectorAll('#entity-multi-selection-table th[data-entity-selection-header]').length,
+                    rows: document.querySelectorAll('#entity-multi-selection-table tbody tr[data-entity-row-key]').length,
+                    rowBoxes: document.querySelectorAll('#entity-multi-selection-table tbody [data-entity-selection-row]').length,
+                    ariaSelected: Array.from(document.querySelectorAll('#entity-multi-selection-table tbody tr[aria-selected="true"]')).length,
+                };
+            })()"#,
+        )
+        .await,
+        json!({
+            "checked": false,
+            "indeterminate": false,
+            "state": "none",
+            "headers": 1,
+            "rows": 25,
+            "rowBoxes": 25,
+            "ariaSelected": 0,
+        }),
+        "an unselected 30-row dataset shows 25 displayed rows and a clean header checkbox"
+    );
+
+    // One row checkbox: ONE atomic proposal, and the header becomes
+    // INDETERMINATE -- the DOM property, which is the only way the partial
+    // state can exist at all.
+    click(
+        &harness,
+        "#entity-multi-selection-table tbody [data-entity-selection-row='office-mx-01']",
+    )
+    .await;
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => {
+                const header = document.querySelector('#entity-multi-selection-table [data-entity-selection-toggle="page"]');
+                return {
+                    checked: header.checked,
+                    indeterminate: header.indeterminate,
+                    state: header.closest('th').dataset.entitySelectionPageState,
+                    proposals: Number(document.querySelector('[data-testid="entity-multi-proposals"]').textContent),
+                    cause: document.querySelector('[data-testid="entity-multi-last-cause"]').textContent.trim(),
+                    keys: document.querySelector('[data-testid="entity-multi-selected-keys"]').textContent.trim(),
+                    ariaSelected: Array.from(document.querySelectorAll('#entity-multi-selection-table tbody tr[aria-selected="true"]')).map(row => row.dataset.entityRowKey),
+                };
+            })()"#,
+        )
+        .await,
+        json!({
+            "checked": false,
+            "indeterminate": true,
+            "state": "partial",
+            "proposals": 1,
+            "cause": "row:office-mx-01:true",
+            "keys": "office-mx-01",
+            "ariaSelected": ["office-mx-01"],
+        }),
+        "one selected row of twenty-five is indeterminate, not checked"
+    );
+
+    // Keyboard Space on a row checkbox behaves exactly as a click: one more
+    // atomic proposal, no row activation.
+    harness
+        .page()
+        .find_element(
+            "#entity-multi-selection-table tbody [data-entity-selection-row='office-mx-02']",
+        )
+        .await
+        .expect("find second row checkbox")
+        .focus()
+        .await
+        .expect("focus second row checkbox");
+    harness
+        .press_key_sequence(&[Key::Space])
+        .await
+        .expect("keyboard-toggle the second row");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => ({
+                proposals: Number(document.querySelector('[data-testid="entity-multi-proposals"]').textContent),
+                count: Number(document.querySelector('[data-testid="entity-multi-selected-count"]').textContent),
+                cause: document.querySelector('[data-testid="entity-multi-last-cause"]').textContent.trim(),
+            }))()"#,
+        )
+        .await,
+        json!({ "proposals": 2, "count": 2, "cause": "row:office-mx-02:true" }),
+        "Space on a row checkbox emits exactly one proposal, like a click"
+    );
+
+    // The header checkbox selects THE DISPLAYED PAGE: 25 keys, one atomic
+    // proposal, and it is now checked rather than indeterminate.
+    click(
+        &harness,
+        "#entity-multi-selection-table [data-entity-selection-toggle='page']",
+    )
+    .await;
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => {
+                const header = document.querySelector('#entity-multi-selection-table [data-entity-selection-toggle="page"]');
+                return {
+                    checked: header.checked,
+                    indeterminate: header.indeterminate,
+                    state: header.closest('th').dataset.entitySelectionPageState,
+                    proposals: Number(document.querySelector('[data-testid="entity-multi-proposals"]').textContent),
+                    count: Number(document.querySelector('[data-testid="entity-multi-selected-count"]').textContent),
+                    cause: document.querySelector('[data-testid="entity-multi-last-cause"]').textContent.trim(),
+                };
+            })()"#,
+        )
+        .await,
+        json!({
+            "checked": true,
+            "indeterminate": false,
+            "state": "all",
+            "proposals": 3,
+            "count": 25,
+            "cause": "page:25:true",
+        }),
+        "the header covers the twenty-five displayed rows in ONE proposal, not twenty-five"
+    );
+
+    // Page 2 holds the remaining five rows. The header must read UNCHECKED
+    // and NOT indeterminate there: twenty-five accepted keys live off this
+    // page, and none of them may tint a checkbox that speaks for the rows in
+    // front of the user. The live region says so out loud.
+    click(&harness, "[data-entity-page='next']").await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => {
+                const header = document.querySelector('#entity-multi-selection-table [data-entity-selection-toggle="page"]');
+                return {
+                    checked: header.checked,
+                    indeterminate: header.indeterminate,
+                    state: header.closest('th').dataset.entitySelectionPageState,
+                    rows: document.querySelectorAll('#entity-multi-selection-table tbody tr[data-entity-row-key]').length,
+                    count: Number(document.querySelector('[data-testid="entity-multi-selected-count"]').textContent),
+                    summary: document.querySelector('#entity-multi-selection-table [data-entity-selection-summary]').textContent.trim(),
+                };
+            })()"#,
+        )
+        .await,
+        json!({
+            "checked": false,
+            "indeterminate": false,
+            "state": "none",
+            "rows": 5,
+            "count": 25,
+            "summary": "25 rows selected, 25 of them not on this page",
+        }),
+        "off-page accepted keys must never tint the header checkbox"
+    );
+
+    // Selecting page 2 adds only its five keys; page 1's twenty-five are
+    // carried through untouched.
+    click(
+        &harness,
+        "#entity-multi-selection-table [data-entity-selection-toggle='page']",
+    )
+    .await;
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => ({
+                count: Number(document.querySelector('[data-testid="entity-multi-selected-count"]').textContent),
+                cause: document.querySelector('[data-testid="entity-multi-last-cause"]').textContent.trim(),
+                summary: document.querySelector('#entity-multi-selection-table [data-entity-selection-summary]').textContent.trim(),
+            }))()"#,
+        )
+        .await,
+        json!({
+            "count": 30,
+            "cause": "page:5:true",
+            "summary": "30 rows selected, 25 of them not on this page",
+        }),
+        "a page toggle preserves every accepted key outside the displayed page"
+    );
+
+    // Every checkbox names its own row, never the widget.
+    let names = eval_json(
+        &harness,
+        r#"(() => ({
+            header: document.querySelector('#entity-multi-selection-table [data-entity-selection-toggle="page"]').getAttribute('aria-label'),
+            row: document.querySelector('#entity-multi-selection-table tbody [data-entity-selection-row]').getAttribute('aria-label'),
+        }))()"#,
+    )
+    .await;
+    assert_eq!(
+        names["header"].as_str().expect("header name"),
+        "Clear the selected rows on this page"
+    );
+    assert!(
+        names["row"]
+            .as_str()
+            .expect("row name")
+            .starts_with("Deselect office-mx conversation"),
+        "a row checkbox must announce its own row: {names}"
+    );
+
+    assert_no_browser_errors(&harness, "entity table multi-selection").await;
+}
