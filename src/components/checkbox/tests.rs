@@ -1,5 +1,87 @@
 use super::*;
 
+/// The rendered view, for the backward-compatibility scans below. This crate
+/// has no native DOM renderer, so the uncontrolled branch's markup is held in
+/// place here and proved against the real DOM by
+/// `reactivity_smoke.rs`'s `a_bare_checkbox_renders_exactly_what_it_always_did`.
+const COMPONENT_SRC: &str = include_str!("component.rs");
+
+/// The uncontrolled branch's source, between the two markers `state.rs` also
+/// splits on.
+fn uncontrolled_branch() -> &'static str {
+    COMPONENT_SRC
+        .split("// ── uncontrolled ──")
+        .nth(1)
+        .and_then(|rest| rest.split("// ── end uncontrolled ──").next())
+        .expect("the uncontrolled branch must stay marked in the source")
+}
+
+#[test]
+fn the_uncontrolled_branch_keeps_the_original_class_expression() {
+    // The exact string the component emitted before `ldui-fqan`. A change here
+    // is a change to every existing caller's rendered classes.
+    assert!(
+        COMPONENT_SRC.contains(r#""checkbox ld-eased ld-focus-ring","#),
+        "the base class list must not drift"
+    );
+    assert!(uncontrolled_branch().contains("class=input_class"));
+    assert!(
+        uncontrolled_branch().contains(r#"type="checkbox""#),
+        "the uncontrolled branch must stay a native checkbox input"
+    );
+}
+
+#[test]
+fn every_attribute_added_to_the_uncontrolled_branch_is_omitted_when_unset() {
+    // Each of these is driven by a prop that defaults to "absent", so a
+    // `<Checkbox />` that opts into none of them renders no new attribute at
+    // all. Anything emitted unconditionally would change existing markup.
+    for attribute in [
+        "id=move || resolved_id.get()",
+        "name=move || resolved_name.get()",
+        "checked=move || default_checked.get().unwrap_or(false)",
+        "aria-label=move || aria_label.get()",
+        "aria-describedby=described_by",
+        "aria-errormessage=error_message",
+        "aria-invalid=aria_invalid",
+    ] {
+        assert!(
+            uncontrolled_branch().contains(attribute),
+            "the uncontrolled branch lost `{attribute}`"
+        );
+    }
+    // `resolve_checkbox_id` returns `None` unless the caller opted in, and
+    // `mint_when_absent` is exactly `has_label` -- so a bare checkbox mints
+    // nothing. (The pure functions are proved in `state.rs`.)
+    assert!(
+        COMPONENT_SRC
+            .contains("resolve_checkbox_id(id.get(), field_id.clone(), has_label, &minted_id)"),
+        "an id must be minted only when the component needs one for its own label"
+    );
+}
+
+#[test]
+fn the_visible_label_is_explicitly_associated_with_its_input() {
+    // The daisyUI 4 wrappers that removal made no-ops are policed globally by
+    // `tests/no_dead_daisyui4_classes.rs` -- naming them here would trip that
+    // scan. What is specific to this component is the association itself:
+    // labelling a checkbox is exactly where the dead idiom tempts you back,
+    // and a wrapper that only *looks* like a label associates nothing.
+    assert!(
+        COMPONENT_SRC.contains("r#for=move || resolved_id.get()"),
+        "the visible label must be explicitly associated with the input"
+    );
+}
+
+#[test]
+fn muted_label_copy_uses_a_token_alpha_rather_than_opacity() {
+    assert!(COMPONENT_SRC.contains("text-base-content/75"));
+    assert!(
+        !COMPONENT_SRC.contains("opacity-"),
+        "muted copy must use `text-base-content/75`, never an opacity utility"
+    );
+}
+
 // CheckboxColor tests
 #[test]
 fn test_checkbox_color_default() {

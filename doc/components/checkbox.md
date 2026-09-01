@@ -1,583 +1,295 @@
 # Checkbox
 
-A flexible checkbox component with various sizes, colors, and states for user selection.
+A daisyUI checkbox that can stay natively uncontrolled (the default) or take
+part in controlled application state through one atomic change proposal
+(`ldui-fqan`).
 
-## Description
+## Ownership: the one thing to decide first
 
-The Checkbox component provides an accessible way to handle boolean selections and multiple choice options. It supports different sizes, colors, and states including indeterminate state for partial selections.
+`Checkbox` follows the contract the rest of this library converged on
+(`EntityTableMultiSelection`, `ServerTableMultiSelection`, `ModalCloseProposal`):
+
+- The **caller owns accepted truth** as a `Signal`.
+- The component emits **one atomic typed proposal** per user gesture.
+- The component **never diverges optimistically** from accepted state.
+
+A checkbox needs one extra step the other three do not. The browser flips
+`input.checked` *natively*, before any handler runs, so "decline to write" is
+not enough — the write already happened. The change handler therefore
+**re-asserts the accepted value onto the element before it proposes anything**,
+which is what makes a declined proposal a visual no-op.
+
+| You want | Use |
+|---|---|
+| A checkbox the browser owns (forms, static markup, no app state) | nothing — or `default_checked` for the initial value |
+| A checkbox whose value is application state (a filter, a setting, a row selection) | `binding=CheckboxBinding::controlled(...)` |
+| A tri-state "some of these are selected" | `.with_indeterminate(...)` on the binding |
+
+Supplying `binding` **and** `default_checked` is refused, not resolved — see
+[Refused configurations](#refused-configurations).
 
 ## Props
 
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|
-| `checked` | `Signal<bool>` | `false` | Whether checkbox is checked |
-| `indeterminate` | `Signal<bool>` | `false` | Whether checkbox is in indeterminate state |
-| `size` | `Signal<CheckboxSize>` | `CheckboxSize::Default` | Size of the checkbox |
-| `color` | `Signal<CheckboxColor>` | `CheckboxColor::Default` | Color theme of the checkbox |
-| `disabled` | `Signal<bool>` | `false` | Whether checkbox is disabled |
-| `class` | `&'static str` | `""` | Additional CSS classes |
-| `on:change` | `Option<EventHandler>` | - | Change event handler |
-| `children` | `Children` | - | Label content (optional) |
+| `color` | `Signal<CheckboxColor>` | `Default` | daisyUI colour variant |
+| `size` | `Signal<CheckboxSize>` | `Md` | daisyUI size variant |
+| `disabled` | `Signal<bool>` | `false` | Native `disabled`; emits no proposals |
+| `id` | `MaybeProp<String>` | minted / none | Stable DOM id. Wins over a surrounding `Field`'s id and over the mint |
+| `name` | `MaybeProp<String>` | derived from `id` | Form key, passed through verbatim |
+| `label` | `MaybeProp<String>` | none | Visible reactive label text; switches the root to a wrapping `<label>` |
+| `aria_label` | `MaybeProp<String>` | none | Accessible name when there is no visible text. Mutually exclusive with `label` |
+| `default_checked` | `MaybeProp<bool>` | none | Uncontrolled initial value. Mutually exclusive with `binding` |
+| `binding` | `Option<CheckboxBinding>` | none | Controlled ownership (accepted signal + proposal callback) |
+| `class` | `&'static str` | `""` | Extra classes, merged onto the `<input>` |
+| `node_ref` | `NodeRef<Input>` | — | Reference to the `<input>` element |
 
-## Style Variants
+### Types
 
-### CheckboxSize
-- `Default` - Standard size
-- `Large` - Large checkbox
-- `Small` - Small checkbox
-- `ExtraSmall` - Extra small checkbox
+- `CheckboxBinding` — `controlled(checked, on_change)`, plus
+  `with_indeterminate(signal)`.
+- `CheckboxChangeProposal` — `{ checked: bool, from: CheckboxState }`. `checked`
+  is the **complete proposed value**, not a delta: apply or decline it wholesale.
+- `CheckboxState` — `Unchecked` / `Checked` / `Mixed`, with `is_checked()`,
+  `is_indeterminate()`, `aria_checked()`, `toggles_to()`, `as_str()`.
 
-### CheckboxColor
-- `Default` - Default color
-- `Primary` - Primary color
-- `Secondary` - Secondary color
-- `Accent` - Accent color
-- `Success` - Success color
-- `Warning` - Warning color
-- `Info` - Info color
-- `Error` - Error color
+## Uncontrolled (the default, unchanged)
 
-## Examples
+Existing call sites keep working exactly as before — same classes, same DOM, no
+`id`, no `name`, no `aria-*`, no change handler.
 
-### Basic Checkboxes
+```rust
+view! {
+    <Checkbox />
+    <Checkbox color=CheckboxColor::Primary size=CheckboxSize::Sm />
+    // Initial value, then the browser owns it:
+    <Checkbox default_checked=true />
+}
+```
 
-<details>
-<summary>View Code</summary>
+## Controlled
 
 ```rust
 use leptos::prelude::*;
 use leptos_daisyui_rs::components::*;
 
 #[component]
-fn BasicCheckboxes() -> impl IntoView {
-    let (checked1, set_checked1) = signal(false);
-    let (checked2, set_checked2) = signal(true);
-    let (checked3, set_checked3) = signal(false);
-    
+fn PastDueFilter() -> impl IntoView {
+    // Accepted truth lives here, in the caller.
+    let past_due_only = RwSignal::new(false);
+
     view! {
-        <div class="space-y-4">
-            <div class="form-control">
-                <label class="label cursor-pointer justify-start space-x-2">
-                    <Checkbox 
-                        checked=Signal::derive(move || checked1.get())
-                        on:change=move |_| set_checked1.update(|c| *c = !*c)
-                    />
-                    <span class="label-text">"Remember me"</span>
-                </label>
-            </div>
-            
-            <div class="form-control">
-                <label class="label cursor-pointer justify-start space-x-2">
-                    <Checkbox 
-                        checked=Signal::derive(move || checked2.get())
-                        on:change=move |_| set_checked2.update(|c| *c = !*c)
-                    />
-                    <span class="label-text">"Accept terms and conditions"</span>
-                </label>
-            </div>
-            
-            <div class="form-control">
-                <label class="label cursor-pointer justify-start space-x-2">
-                    <Checkbox 
-                        checked=Signal::derive(move || checked3.get())
-                        disabled=Signal::derive(|| true)
-                    />
-                    <span class="label-text opacity-50">"Disabled option"</span>
-                </label>
-            </div>
-        </div>
+        <Checkbox
+            id="past-due-only"
+            label="Past due only"
+            binding=CheckboxBinding::controlled(
+                past_due_only.into(),
+                Callback::new(move |proposal: CheckboxChangeProposal| {
+                    past_due_only.set(proposal.checked);
+                }),
+            )
+        />
     }
 }
 ```
 
-</details>
+### Declining or delaying a proposal
 
-### Checkbox Sizes
-
-<details>
-<summary>View Code</summary>
+Nothing is applied until *your* signal changes, so a validation gate, a
+confirmation step or an in-flight request is expressed by simply not applying
+the proposal yet:
 
 ```rust
-use leptos::prelude::*;
-use leptos_daisyui_rs::components::*;
-
-#[component]
-fn CheckboxSizes() -> impl IntoView {
-    let (xs_checked, set_xs_checked) = signal(false);
-    let (sm_checked, set_sm_checked) = signal(true);
-    let (md_checked, set_md_checked) = signal(false);
-    let (lg_checked, set_lg_checked) = signal(true);
-    
-    view! {
-        <div class="space-y-4">
-            <div class="form-control">
-                <label class="label cursor-pointer justify-start space-x-2">
-                    <Checkbox 
-                        size=Signal::derive(|| CheckboxSize::ExtraSmall)
-                        checked=Signal::derive(move || xs_checked.get())
-                        on:change=move |_| set_xs_checked.update(|c| *c = !*c)
-                    />
-                    <span class="label-text">"Extra Small"</span>
-                </label>
-            </div>
-            
-            <div class="form-control">
-                <label class="label cursor-pointer justify-start space-x-2">
-                    <Checkbox 
-                        size=Signal::derive(|| CheckboxSize::Small)
-                        checked=Signal::derive(move || sm_checked.get())
-                        on:change=move |_| set_sm_checked.update(|c| *c = !*c)
-                    />
-                    <span class="label-text">"Small"</span>
-                </label>
-            </div>
-            
-            <div class="form-control">
-                <label class="label cursor-pointer justify-start space-x-2">
-                    <Checkbox 
-                        checked=Signal::derive(move || md_checked.get())
-                        on:change=move |_| set_md_checked.update(|c| *c = !*c)
-                    />
-                    <span class="label-text">"Normal"</span>
-                </label>
-            </div>
-            
-            <div class="form-control">
-                <label class="label cursor-pointer justify-start space-x-2">
-                    <Checkbox 
-                        size=Signal::derive(|| CheckboxSize::Large)
-                        checked=Signal::derive(move || lg_checked.get())
-                        on:change=move |_| set_lg_checked.update(|c| *c = !*c)
-                    />
-                    <span class="label-text">"Large"</span>
-                </label>
-            </div>
-        </div>
+Callback::new(move |proposal: CheckboxChangeProposal| {
+    if saving.get_untracked() {
+        return;                       // ignored: the DOM stays on accepted truth
     }
-}
-```
-
-</details>
-
-### Checkbox Colors
-
-<details>
-<summary>View Code</summary>
-
-```rust
-use leptos::prelude::*;
-use leptos_daisyui_rs::components::*;
-
-#[component]
-fn CheckboxColors() -> impl IntoView {
-    let (primary_checked, set_primary_checked) = signal(true);
-    let (secondary_checked, set_secondary_checked) = signal(true);
-    let (accent_checked, set_accent_checked) = signal(true);
-    let (success_checked, set_success_checked) = signal(true);
-    let (warning_checked, set_warning_checked) = signal(true);
-    let (info_checked, set_info_checked) = signal(true);
-    let (error_checked, set_error_checked) = signal(true);
-    
-    view! {
-        <div class="space-y-4">
-            <div class="form-control">
-                <label class="label cursor-pointer justify-start space-x-2">
-                    <Checkbox 
-                        color=Signal::derive(|| CheckboxColor::Primary)
-                        checked=Signal::derive(move || primary_checked.get())
-                        on:change=move |_| set_primary_checked.update(|c| *c = !*c)
-                    />
-                    <span class="label-text">"Primary"</span>
-                </label>
-            </div>
-            
-            <div class="form-control">
-                <label class="label cursor-pointer justify-start space-x-2">
-                    <Checkbox 
-                        color=Signal::derive(|| CheckboxColor::Secondary)
-                        checked=Signal::derive(move || secondary_checked.get())
-                        on:change=move |_| set_secondary_checked.update(|c| *c = !*c)
-                    />
-                    <span class="label-text">"Secondary"</span>
-                </label>
-            </div>
-            
-            <div class="form-control">
-                <label class="label cursor-pointer justify-start space-x-2">
-                    <Checkbox 
-                        color=Signal::derive(|| CheckboxColor::Accent)
-                        checked=Signal::derive(move || accent_checked.get())
-                        on:change=move |_| set_accent_checked.update(|c| *c = !*c)
-                    />
-                    <span class="label-text">"Accent"</span>
-                </label>
-            </div>
-            
-            <div class="form-control">
-                <label class="label cursor-pointer justify-start space-x-2">
-                    <Checkbox 
-                        color=Signal::derive(|| CheckboxColor::Success)
-                        checked=Signal::derive(move || success_checked.get())
-                        on:change=move |_| set_success_checked.update(|c| *c = !*c)
-                    />
-                    <span class="label-text">"Success"</span>
-                </label>
-            </div>
-            
-            <div class="form-control">
-                <label class="label cursor-pointer justify-start space-x-2">
-                    <Checkbox 
-                        color=Signal::derive(|| CheckboxColor::Warning)
-                        checked=Signal::derive(move || warning_checked.get())
-                        on:change=move |_| set_warning_checked.update(|c| *c = !*c)
-                    />
-                    <span class="label-text">"Warning"</span>
-                </label>
-            </div>
-            
-            <div class="form-control">
-                <label class="label cursor-pointer justify-start space-x-2">
-                    <Checkbox 
-                        color=Signal::derive(|| CheckboxColor::Info)
-                        checked=Signal::derive(move || info_checked.get())
-                        on:change=move |_| set_info_checked.update(|c| *c = !*c)
-                    />
-                    <span class="label-text">"Info"</span>
-                </label>
-            </div>
-            
-            <div class="form-control">
-                <label class="label cursor-pointer justify-start space-x-2">
-                    <Checkbox 
-                        color=Signal::derive(|| CheckboxColor::Error)
-                        checked=Signal::derive(move || error_checked.get())
-                        on:change=move |_| set_error_checked.update(|c| *c = !*c)
-                    />
-                    <span class="label-text">"Error"</span>
-                </label>
-            </div>
-        </div>
-    }
-}
-```
-
-</details>
-
-### Indeterminate State
-
-<details>
-<summary>View Code</summary>
-
-```rust
-use leptos::prelude::*;
-use leptos_daisyui_rs::components::*;
-
-#[component]
-fn IndeterminateCheckbox() -> impl IntoView {
-    let (option1, set_option1) = signal(true);
-    let (option2, set_option2) = signal(false);
-    let (option3, set_option3) = signal(true);
-    
-    let parent_state = move || {
-        let checked_count = [option1.get(), option2.get(), option3.get()]
-            .iter()
-            .filter(|&&x| x)
-            .count();
-        
-        match checked_count {
-            0 => (false, false), // unchecked, not indeterminate
-            3 => (true, false),  // checked, not indeterminate
-            _ => (false, true),  // unchecked, indeterminate
+    spawn_local(async move {
+        if persist(proposal.checked).await.is_ok() {
+            past_due_only.set(proposal.checked);
         }
-    };
-    
-    let toggle_all = move |_| {
-        let (is_checked, _) = parent_state();
-        let new_value = !is_checked;
-        set_option1.set(new_value);
-        set_option2.set(new_value);
-        set_option3.set(new_value);
-    };
-    
-    view! {
-        <div class="space-y-4">
-            <div class="form-control">
-                <label class="label cursor-pointer justify-start space-x-2">
-                    <Checkbox 
-                        checked=Signal::derive(move || parent_state().0)
-                        indeterminate=Signal::derive(move || parent_state().1)
-                        on:change=toggle_all
-                    />
-                    <span class="label-text font-semibold">"Select All Features"</span>
-                </label>
-            </div>
-            
-            <div class="ml-6 space-y-2">
-                <div class="form-control">
-                    <label class="label cursor-pointer justify-start space-x-2">
-                        <Checkbox 
-                            checked=Signal::derive(move || option1.get())
-                            on:change=move |_| set_option1.update(|c| *c = !*c)
-                        />
-                        <span class="label-text">"Email notifications"</span>
-                    </label>
-                </div>
-                
-                <div class="form-control">
-                    <label class="label cursor-pointer justify-start space-x-2">
-                        <Checkbox 
-                            checked=Signal::derive(move || option2.get())
-                            on:change=move |_| set_option2.update(|c| *c = !*c)
-                        />
-                        <span class="label-text">"Push notifications"</span>
-                    </label>
-                </div>
-                
-                <div class="form-control">
-                    <label class="label cursor-pointer justify-start space-x-2">
-                        <Checkbox 
-                            checked=Signal::derive(move || option3.get())
-                            on:change=move |_| set_option3.update(|c| *c = !*c)
-                        />
-                        <span class="label-text">"SMS notifications"</span>
-                    </label>
-                </div>
-            </div>
-        </div>
-    }
-}
+    });
+})
 ```
 
-</details>
+An externally restored value (a reset button, a saved view, a route change)
+reaches the DOM for the same reason: the rendered state follows **only** the
+accepted signal, with no internal mirror to fall out of step.
 
-### Checkbox List with Selection
+### Inside a `FilterBar` or a column filter
 
-<details>
-<summary>View Code</summary>
+Nothing special is required — a controlled `Checkbox` sits beside a controlled
+`Select`/`Input` and reports to the same owner:
 
 ```rust
-use leptos::prelude::*;
-use leptos_daisyui_rs::components::*;
+let filters = RwSignal::new(Filters::default());
 
-#[derive(Clone, PartialEq)]
-struct TodoItem {
-    id: u32,
-    text: String,
-    completed: bool,
-}
-
-#[component]
-fn CheckboxList() -> impl IntoView {
-    let (todos, set_todos) = signal(vec![
-        TodoItem { id: 1, text: "Learn Leptos".to_string(), completed: true },
-        TodoItem { id: 2, text: "Build awesome UI".to_string(), completed: false },
-        TodoItem { id: 3, text: "Deploy to production".to_string(), completed: false },
-        TodoItem { id: 4, text: "Celebrate success".to_string(), completed: false },
-    ]);
-    
-    let toggle_todo = move |id: u32| {
-        set_todos.update(|todos| {
-            if let Some(todo) = todos.iter_mut().find(|t| t.id == id) {
-                todo.completed = !todo.completed;
-            }
-        });
-    };
-    
-    let completed_count = move || {
-        todos.get().iter().filter(|todo| todo.completed).count()
-    };
-    
-    let total_count = move || todos.get().len();
-    
-    view! {
-        <div class="space-y-4">
-            <div class="flex justify-between items-center">
-                <h3 class="text-lg font-semibold">"Todo List"</h3>
-                <div class="text-sm text-gray-600">
-                    {move || format!("{}/{} completed", completed_count(), total_count())}
-                </div>
-            </div>
-            
-            <div class="space-y-2">
-                {move || {
-                    todos.get().into_iter().map(|todo| {
-                        let todo_id = todo.id;
-                        let is_completed = todo.completed;
-                        view! {
-                            <div key=todo_id class="form-control">
-                                <label class="label cursor-pointer justify-start space-x-3 p-3 rounded-lg hover:bg-base-200">
-                                    <Checkbox 
-                                        checked=Signal::derive(move || is_completed)
-                                        color=Signal::derive(|| CheckboxColor::Success)
-                                        on:change=move |_| toggle_todo(todo_id)
-                                    />
-                                    <span class=format!(
-                                        "label-text {}",
-                                        if is_completed { "line-through opacity-60" } else { "" }
-                                    )>
-                                        {todo.text}
-                                    </span>
-                                </label>
-                            </div>
-                        }
-                    }).collect::<Vec<_>>()
-                }}
-            </div>
-            
-            <div class="flex justify-between items-center pt-4 border-t">
-                <span class="text-sm text-gray-600">
-                    {move || {
-                        let remaining = total_count() - completed_count();
-                        format!("{} items remaining", remaining)
-                    }}
-                </span>
-                <Button 
-                    size=Signal::derive(|| ButtonSize::Small)
-                    style=Signal::derive(|| ButtonStyle::Ghost)
-                    on:click=move |_| {
-                        set_todos.update(|todos| {
-                            todos.retain(|todo| !todo.completed);
-                        });
-                    }
-                >
-                    "Clear completed"
-                </Button>
-            </div>
-        </div>
-    }
+view! {
+    <div class="flex flex-wrap items-center gap-4">
+        <Select /* ... */ />
+        <Checkbox
+            id="filters-past-due"
+            label=Signal::derive(move || t("filters.past_due_only"))
+            binding=CheckboxBinding::controlled(
+                Signal::derive(move || filters.get().past_due_only),
+                Callback::new(move |p: CheckboxChangeProposal| {
+                    filters.update(|f| f.past_due_only = p.checked);
+                }),
+            )
+        />
+    </div>
 }
 ```
 
-</details>
+## Indeterminate
 
-### Checkbox Group with Validation
+There is **no `indeterminate` content attribute**. Markup that says
+`indeterminate="true"` sets nothing at all; it is a DOM property only. Worse,
+the browser *clears* the flag while handling a click, so a component that writes
+it once on render silently degrades to a plain checkbox after the first
+interaction (`ldui-nz6d`).
 
-<details>
-<summary>View Code</summary>
+`Checkbox` handles both halves: it writes the property on render *and*
+re-asserts it in the change handler, from the same `CheckboxState` the render
+path reads, so the two cannot drift.
 
 ```rust
-use leptos::prelude::*;
-use leptos_daisyui_rs::components::*;
+let all_selected = RwSignal::new(false);
+let some_selected = RwSignal::new(true);
 
-#[component]
-fn CheckboxGroup() -> impl IntoView {
-    let (selected_interests, set_selected_interests) = signal(Vec::<String>::new());
-    let (submitted, set_submitted) = signal(false);
-    
-    let interests = vec![
-        "Web Development",
-        "Mobile Apps", 
-        "Data Science",
-        "Machine Learning",
-        "DevOps",
-        "UI/UX Design",
-        "Game Development",
-        "Cybersecurity"
-    ];
-    
-    let toggle_interest = move |interest: String| {
-        set_selected_interests.update(|selected| {
-            if selected.contains(&interest) {
-                selected.retain(|i| i != &interest);
-            } else {
-                selected.push(interest);
-            }
-        });
-    };
-    
-    let is_valid = move || selected_interests.get().len() >= 2;
-    
-    let handle_submit = move |_| {
-        if is_valid() {
-            set_submitted.set(true);
-        }
-    };
-    
-    view! {
-        <div class="space-y-6">
-            <div>
-                <h3 class="text-lg font-semibold mb-2">"Select Your Interests"</h3>
-                <p class="text-sm text-gray-600 mb-4">"Choose at least 2 areas of interest"</p>
-                
-                <div class="grid grid-cols-2 gap-2">
-                    {interests.into_iter().map(|interest| {
-                        let interest_clone = interest.to_string();
-                        let interest_check = interest_clone.clone();
-                        view! {
-                            <div class="form-control">
-                                <label class="label cursor-pointer justify-start space-x-2">
-                                    <Checkbox 
-                                        checked=Signal::derive(move || {
-                                            selected_interests.get().contains(&interest_check)
-                                        })
-                                        on:change=move |_| toggle_interest(interest_clone.clone())
-                                    />
-                                    <span class="label-text">{interest}</span>
-                                </label>
-                            </div>
-                        }
-                    }).collect::<Vec<_>>()}
-                </div>
-                
-                <div class="mt-4">
-                    {move || if selected_interests.get().len() > 0 && selected_interests.get().len() < 2 {
-                        view! {
-                            <p class="text-sm text-warning">
-                                {format!("Please select at least {} more interest(s)", 2 - selected_interests.get().len())}
-                            </p>
-                        }.into_any()
-                    } else if selected_interests.get().len() >= 2 {
-                        view! {
-                            <p class="text-sm text-success">
-                                {format!("{} interests selected", selected_interests.get().len())}
-                            </p>
-                        }.into_any()
-                    } else {
-                        view! { <div></div> }.into_any()
-                    }}
-                </div>
-            </div>
-            
-            <div class="flex justify-between items-center">
-                <Button 
-                    style=Signal::derive(|| ButtonStyle::Primary)
-                    disabled=Signal::derive(move || !is_valid())
-                    on:click=handle_submit
-                >
-                    "Continue"
-                </Button>
-                
-                {move || if submitted.get() {
-                    view! {
-                        <div class="text-success text-sm">
-                            "Preferences saved!"
-                        </div>
-                    }.into_any()
-                } else {
-                    view! { <div></div> }.into_any()
-                }}
-            </div>
-        </div>
-    }
+view! {
+    <Checkbox
+        id="select-all-offices"
+        label="Select all offices"
+        binding=CheckboxBinding::controlled(
+            all_selected.into(),
+            Callback::new(move |p: CheckboxChangeProposal| {
+                all_selected.set(p.checked);
+                some_selected.set(false);
+            }),
+        ).with_indeterminate(some_selected.into())
+    />
 }
 ```
 
-</details>
+- Mixed **wins over** checked: two accepted signals that disagree describe a
+  partial selection, and drawing a full tick would claim more than you said.
+- Mixed is announced as `aria-checked="mixed"`. The attribute is emitted *only*
+  for mixed — a native checkbox already computes true/false correctly, and
+  restating it would give assistive technology a second copy to contradict.
+- A gesture from mixed proposes `true` ("select all of it"), matching every
+  native tri-state control. `proposal.from` tells you it came from mixed, so
+  "the user cleared a partial selection" is distinguishable from "the user
+  unticked a full one".
+
+## Identity: `id` and `name`
+
+Following the scheme `ldui-j6sh` established for the table controls:
+
+1. A caller-supplied `id` wins (normalized so it is a valid HTML id and a safe
+   CSS selector: `[A-Za-z0-9_-]` survives, anything else is escaped as `_` plus
+   two hex digits).
+2. Otherwise the id a surrounding [`Field`](#field-integration) minted.
+3. Otherwise — **only when the component needs an id of its own**, i.e. when
+   `label` is supplied and its `<label for=…>` needs a target — a process-unique
+   minted `ldui-checkbox-N`.
+4. Otherwise no `id` attribute at all, which is what keeps existing callers
+   byte-identical.
+
+`name` matters separately from `id`: `name` is what makes the element a real
+form control. A supplied `name` wins and is passed through **verbatim** (a form
+key is the server's vocabulary — `filters[past_due]` — not an HTML id, and
+normalizing it would silently rename the submitted field). Otherwise a supplied
+`id` becomes the `name`.
+
+A **minted** id never becomes a `name`. The mint depends on mount order, so
+using it as a form key would change what the form submits whenever the page's
+component order changed — an unstable `name` is worse than no `name`, because
+the breakage is silent and lands on the server.
+
+## Labelling and localization
+
+`label` renders visible text beside the box; `aria_label` names a checkbox that
+has no visible text (a selection column, a compact toolbar). Both are reactive
+signals owned by the caller, so switching locale replaces the name **in place**
+without re-mounting the input — focus survives.
+
+> **Note:** `label`'s *presence* is structural — read once when the component is
+> created, like `Input`'s `leading_icon` — and when it is present the
+> component's root element is the wrapping `<label>`, so spread attributes land
+> there rather than on the input. Use the typed props in that configuration, and
+> select the input as `[data-testid="…"] input` from tests.
+
+daisyUI 5 removed `.form-control`, `.label-text` and `.label-text-alt`; they do
+nothing and a gate test fails if they reappear. The wrapper is a plain
+`fieldset`/`label` + flex layout.
+
+## `Field` integration
+
+`Checkbox` consumes `FieldContext` exactly as `Input`, `Select` and `Textarea`
+do, so wrapping one in a `Field` yields a fully associated control: the Field's
+`label[for]` points at the checkbox's `id`, the help line is referenced via
+`aria-describedby`, and the error line via `aria-errormessage` plus
+`aria-invalid="true"`. An explicit `id` prop still wins over the Field's minted
+one.
+
+Put **one** control in a `Field` — a `Field` wrapping both a `Checkbox` and an
+`Input` would hand both the same id.
+
+## Refused configurations
+
+Two configurations are ambiguous, and both are **refused rather than resolved**:
+
+| Configuration | Why it is refused |
+|---|---|
+| `binding` + `default_checked` | Two sources of truth for one boolean — exactly the failure this contract exists to remove |
+| `label` + `aria_label` | Different visible and accessible names is a WCAG 2.5.3 (Label in Name) failure and breaks speech control |
+
+Either one renders a visible `role="alert"` panel carrying the reason (plus a
+`data-checkbox-config-error` hook) and **no input at all**, so nothing
+ambiguously-owned can be read back or submitted.
+
+This follows `ServerDataTable`'s fail-closed panel rather than `EntityTable`'s
+panic: a checkbox is a leaf control that may be rendered hundreds of times in a
+list, and a panic in a CSR wasm app takes the whole page down with it.
 
 ## Accessibility
 
-- Proper ARIA attributes for screen readers
-- Keyboard navigation support (Space to toggle)
-- Label association for checkbox accessibility
-- Indeterminate state announced to assistive technology
-- Focus indicators for keyboard users
+- Real label association: a wrapping `<label for=…>` for `label`, `aria-label`
+  otherwise, and the `Field` association above when wrapped.
+- Native keyboard operation: Space toggles, and it goes through the same
+  one-proposal-per-gesture path as a click.
+- `ld-focus-ring` gives a visible focus indicator; `ld-eased` respects
+  `prefers-reduced-motion`. Both come from the framework, not the caller.
+- Mixed state is conveyed by the native `indeterminate` property *and*
+  `aria-checked="mixed"` — never by colour alone.
+- `disabled` keeps native semantics and emits nothing.
 
-## Best Practices
+## Style variants
 
-1. Always provide clear labels for checkboxes
-2. Use indeterminate state for partial selections
-3. Group related checkboxes logically
-4. Provide validation feedback when needed
-5. Consider the visual hierarchy of checkbox groups
-6. Use appropriate colors for different contexts
-7. Test with keyboard navigation and screen readers
+### `CheckboxSize`
+`Xs`, `Sm`, `Md` (default), `Lg`, `Xl`
+
+### `CheckboxColor`
+`Default`, `Primary`, `Secondary`, `Accent`, `Neutral`, `Success`, `Warning`,
+`Info`, `Error`
+
+## Add to `input.css`
+
+```css
+@source inline("checkbox checkbox-primary checkbox-secondary checkbox-accent checkbox-neutral checkbox-success checkbox-warning checkbox-info checkbox-error");
+@source inline("checkbox-xs checkbox-sm checkbox-md checkbox-lg checkbox-xl");
+@source inline("flex items-center gap-2 cursor-pointer cursor-not-allowed text-base-content/75 text-error");
+```
+
+## Coverage
+
+- Native: `src/components/checkbox/state.rs` (state machine, proposals,
+  ownership refusal, id/name derivation, and source scans proving the view is
+  wired to all of it) and `src/components/checkbox/tests.rs` (backward
+  compatibility of the uncontrolled branch, daisyUI 5 markup).
+- Browser: the `ldui-fqan` block in `tests/reactivity_smoke.rs` — bare-checkbox
+  DOM equality, `default_checked`, id/name/label association, external reset,
+  accepted and declined proposals, indeterminate surviving a declined click,
+  mixed transitions, disabled silence, EN↔ES label replacement on the same node,
+  Space operation, and the refused configuration.

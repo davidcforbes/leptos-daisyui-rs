@@ -5172,3 +5172,487 @@ async fn filter_bar_ordinary_search_configuration_still_renders_the_search_wrapp
     assert_eq!(shape["hasActions"], json!(true), "{shape}");
     assert_no_browser_errors(&h, "filter bar ordinary search configuration").await;
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Checkbox controlled checked-state and change-proposal contract (ldui-fqan)
+//
+// The fixture is `/components/checkbox` (demo/src/demos/checkbox.rs). Accepted
+// truth lives in the demo page; the checkbox only ever proposes, so every
+// assertion below reads the DOM *and* the oracle and requires them to agree.
+//
+// Note the selectors: a `Checkbox` given a visible `label` roots at the
+// wrapping `<label>`, so a spread `attr:data-testid` lands there and the input
+// is reached as `[data-testid="…"] input`. A `Checkbox` with no `label` roots
+// at the input itself.
+// ─────────────────────────────────────────────────────────────────────────
+
+const CHECKBOX_PAGE: &str = "/components/checkbox";
+const CONTROLLED_BOX: &str = "[data-testid=\"checkbox-controlled\"] input[type=\"checkbox\"]";
+const PARTIAL_BOX: &str = "[data-testid=\"checkbox-partial\"] input[type=\"checkbox\"]";
+
+/// Everything one controlled checkbox exposes, DOM side, in one read.
+async fn checkbox_dom(h: &pixelproof_web::Harness, selector: &str) -> serde_json::Value {
+    eval_json(
+        h,
+        &format!(
+            r#"(() => {{
+                const el = document.querySelector({selector:?});
+                if (!el) return null;
+                const label = el.closest('label');
+                return {{
+                    checked: el.checked,
+                    indeterminate: el.indeterminate,
+                    ariaChecked: el.getAttribute('aria-checked'),
+                    stateMarker: el.getAttribute('data-checkbox-state'),
+                    id: el.getAttribute('id'),
+                    name: el.getAttribute('name'),
+                    disabled: el.disabled,
+                    labelFor: label ? label.getAttribute('for') : null,
+                    labelText: label ? label.textContent.trim() : null,
+                    stamp: el.__ldFqanStamp ?? null,
+                }};
+            }})()"#
+        ),
+    )
+    .await
+}
+
+/// Flip the demo owner's accept/decline policy to `accept`.
+async fn set_checkbox_accept_policy(h: &pixelproof_web::Harness, accept: bool) {
+    for _ in 0..2 {
+        let s = oracle(h).await;
+        if s["state"]["checkbox.accept_proposals"] == json!(accept) {
+            return;
+        }
+        click(h, "[data-testid=\"checkbox-accept-toggle\"]").await;
+        settle(h).await;
+    }
+    let s = oracle(h).await;
+    assert_eq!(
+        s["state"]["checkbox.accept_proposals"],
+        json!(accept),
+        "could not set the owner's accept policy: {s}"
+    );
+}
+
+/// Backward compatibility, stated as an attribute set rather than a hand-typed
+/// `outerHTML` (attribute order is a browser detail): a `<Checkbox />` that
+/// opts into none of the ldui-fqan props must still render exactly the input
+/// it always did — no `id`, no `name`, no `aria-*`, no `checked`, no state
+/// marker, and the same class list.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn a_bare_checkbox_renders_exactly_what_it_always_did() {
+    let h = harness_at(CHECKBOX_PAGE).await;
+    begin_browser_error_capture(&h).await;
+
+    let shape = eval_json(
+        &h,
+        r#"(() => {
+            const el = document.querySelector('[data-testid="checkbox-bare"]');
+            return {
+                tag: el.tagName,
+                attrs: [...el.attributes].map(a => a.name).sort(),
+                class: el.getAttribute('class'),
+                checked: el.checked,
+                indeterminate: el.indeterminate,
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(shape["tag"], json!("INPUT"), "{shape}");
+    assert_eq!(
+        shape["attrs"],
+        json!(["class", "data-testid", "type"]),
+        "an uncontrolled checkbox must gain no attribute at all: {shape}"
+    );
+    assert_eq!(
+        shape["class"],
+        json!("checkbox ld-eased ld-focus-ring checkbox-md"),
+        "the rendered class list must not drift: {shape}"
+    );
+    assert_eq!(shape["checked"], json!(false), "{shape}");
+    assert_eq!(shape["indeterminate"], json!(false), "{shape}");
+    assert_no_browser_errors(&h, "bare checkbox backward compatibility").await;
+}
+
+/// `default_checked` is the *uncontrolled* seed: it sets the initial value and
+/// then gets out of the way, so the browser keeps owning the state and a user
+/// toggle is not fought by any re-assertion.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn default_checked_seeds_an_uncontrolled_checkbox_and_then_stays_out_of_the_way() {
+    let h = harness_at(CHECKBOX_PAGE).await;
+    begin_browser_error_capture(&h).await;
+
+    let seeded = checkbox_dom(&h, "[data-testid=\"checkbox-default-checked\"]").await;
+    assert_eq!(seeded["checked"], json!(true), "{seeded}");
+    assert_eq!(
+        seeded["stateMarker"],
+        json!(null),
+        "an uncontrolled checkbox carries no controlled state marker: {seeded}"
+    );
+
+    click(&h, "[data-testid=\"checkbox-default-checked\"]").await;
+    settle(&h).await;
+    let toggled = checkbox_dom(&h, "[data-testid=\"checkbox-default-checked\"]").await;
+    assert_eq!(
+        toggled["checked"],
+        json!(false),
+        "nothing may re-assert a value onto an uncontrolled checkbox: {toggled}"
+    );
+    assert_no_browser_errors(&h, "default_checked uncontrolled seed").await;
+}
+
+/// Form identity (ldui-j6sh's scheme): a caller-supplied `id` wins, becomes the
+/// `name` that makes it a real form control, and is what the visible label's
+/// `for` points at.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn a_controlled_checkbox_carries_a_stable_id_name_and_label_association() {
+    let h = harness_at(CHECKBOX_PAGE).await;
+    begin_browser_error_capture(&h).await;
+
+    let dom = checkbox_dom(&h, CONTROLLED_BOX).await;
+    assert_eq!(dom["id"], json!("past-due-only"), "{dom}");
+    assert_eq!(
+        dom["name"],
+        json!("past-due-only"),
+        "a supplied id must also become the form `name`: {dom}"
+    );
+    assert_eq!(
+        dom["labelFor"],
+        json!("past-due-only"),
+        "the visible label must point at the input it names: {dom}"
+    );
+    assert_eq!(dom["labelText"], json!("Past due only"), "{dom}");
+
+    // Every rendered id on the page is unique, which is what makes any of the
+    // above usable as a selector or an `aria-controls` target.
+    let duplicates = eval_json(
+        &h,
+        r#"(() => {
+            const ids = [...document.querySelectorAll('main input[type="checkbox"][id]')]
+                .map(el => el.id);
+            return ids.length - new Set(ids).size;
+        })()"#,
+    )
+    .await;
+    assert_eq!(duplicates, json!(0), "duplicate checkbox ids on one page");
+    assert_no_browser_errors(&h, "checkbox identity").await;
+}
+
+/// External state changes the user never made still reach the DOM, because the
+/// rendered value follows only the accepted signal.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn a_controlled_checkbox_follows_external_reset_without_any_gesture() {
+    let h = harness_at(CHECKBOX_PAGE).await;
+    begin_browser_error_capture(&h).await;
+
+    click(&h, "[data-testid=\"checkbox-external-set\"]").await;
+    settle(&h).await;
+    let set = checkbox_dom(&h, CONTROLLED_BOX).await;
+    assert_eq!(set["checked"], json!(true), "{set}");
+    assert_eq!(set["stateMarker"], json!("checked"), "{set}");
+
+    click(&h, "[data-testid=\"checkbox-external-reset\"]").await;
+    settle(&h).await;
+    let reset = checkbox_dom(&h, CONTROLLED_BOX).await;
+    assert_eq!(
+        reset["checked"],
+        json!(false),
+        "an externally restored value must reach the DOM: {reset}"
+    );
+
+    let s = oracle(&h).await;
+    assert_eq!(
+        s["state"]["checkbox.proposal_count"],
+        json!(0),
+        "external state changes are not user gestures and must propose nothing: {s}"
+    );
+    assert_no_browser_errors(&h, "checkbox external reset").await;
+}
+
+/// One click proposes exactly once, and an accepting owner moves both the
+/// accepted signal and the DOM.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn a_click_proposes_exactly_once_and_an_accepted_proposal_moves_the_dom() {
+    let h = harness_at(CHECKBOX_PAGE).await;
+    begin_browser_error_capture(&h).await;
+    set_checkbox_accept_policy(&h, true).await;
+
+    click(&h, CONTROLLED_BOX).await;
+    settle(&h).await;
+
+    let s = oracle(&h).await;
+    assert_eq!(s["state"]["checkbox.proposal_count"], json!(1), "{s}");
+    assert_eq!(s["state"]["checkbox.accepted"], json!(true), "{s}");
+    assert_eq!(s["state"]["checkbox.last_checked"], json!(true), "{s}");
+    assert_eq!(s["state"]["checkbox.last_from"], json!("unchecked"), "{s}");
+
+    let dom = checkbox_dom(&h, CONTROLLED_BOX).await;
+    assert_eq!(dom["checked"], json!(true), "{dom}");
+    assert_eq!(dom["stateMarker"], json!("checked"), "{dom}");
+    assert_no_browser_errors(&h, "accepted checkbox proposal").await;
+}
+
+/// The core of the contract: the browser toggles the element natively before
+/// any handler runs, so a proposal the owner declines must leave the DOM back
+/// on accepted truth rather than optimistically ticked.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn a_declined_proposal_leaves_the_dom_on_accepted_truth() {
+    let h = harness_at(CHECKBOX_PAGE).await;
+    begin_browser_error_capture(&h).await;
+    set_checkbox_accept_policy(&h, false).await;
+
+    click(&h, CONTROLLED_BOX).await;
+    settle(&h).await;
+
+    let s = oracle(&h).await;
+    assert_eq!(
+        s["state"]["checkbox.proposal_count"],
+        json!(1),
+        "the gesture must still be reported: {s}"
+    );
+    assert_eq!(
+        s["state"]["checkbox.accepted"],
+        json!(false),
+        "the owner declined, so accepted truth must not move: {s}"
+    );
+
+    let dom = checkbox_dom(&h, CONTROLLED_BOX).await;
+    assert_eq!(
+        dom["checked"],
+        json!(false),
+        "a declined proposal must leave no optimistic tick behind: {dom}"
+    );
+    assert_eq!(dom["stateMarker"], json!("unchecked"), "{dom}");
+
+    // And clicking again keeps proposing rather than latching.
+    click(&h, CONTROLLED_BOX).await;
+    settle(&h).await;
+    let s = oracle(&h).await;
+    assert_eq!(s["state"]["checkbox.proposal_count"], json!(2), "{s}");
+    assert_eq!(s["state"]["checkbox.accepted"], json!(false), "{s}");
+    let dom = checkbox_dom(&h, CONTROLLED_BOX).await;
+    assert_eq!(dom["checked"], json!(false), "{dom}");
+    assert_no_browser_errors(&h, "declined checkbox proposal").await;
+}
+
+/// `indeterminate` is a DOM property with no attribute at all, and the browser
+/// *clears* it while handling a click — so a declined gesture is exactly the
+/// case that proves it is re-asserted (ldui-nz6d). Without the re-assertion
+/// the tri-state silently degrades to a plain checkbox after one interaction.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn a_mixed_checkbox_keeps_its_indeterminate_property_across_a_declined_click() {
+    let h = harness_at(CHECKBOX_PAGE).await;
+    begin_browser_error_capture(&h).await;
+    set_checkbox_accept_policy(&h, false).await;
+
+    let before = checkbox_dom(&h, PARTIAL_BOX).await;
+    assert_eq!(before["indeterminate"], json!(true), "{before}");
+    assert_eq!(before["checked"], json!(false), "{before}");
+    assert_eq!(
+        before["ariaChecked"],
+        json!("mixed"),
+        "mixed must be announced, not merely drawn: {before}"
+    );
+    assert_eq!(before["stateMarker"], json!("mixed"), "{before}");
+
+    click(&h, PARTIAL_BOX).await;
+    settle(&h).await;
+
+    let after = checkbox_dom(&h, PARTIAL_BOX).await;
+    assert_eq!(
+        after["indeterminate"],
+        json!(true),
+        "the browser cleared `indeterminate` on click; the component must put it back: {after}"
+    );
+    assert_eq!(after["checked"], json!(false), "{after}");
+    assert_eq!(after["ariaChecked"], json!("mixed"), "{after}");
+
+    let s = oracle(&h).await;
+    assert_eq!(
+        s["state"]["checkbox.last_from"],
+        json!("mixed"),
+        "the proposal must say which state the gesture came from: {s}"
+    );
+    assert_eq!(s["state"]["checkbox.mixed"], json!(true), "{s}");
+    assert_no_browser_errors(&h, "declined mixed checkbox").await;
+}
+
+/// Accepting from mixed proposes `true` and clears the property; restoring the
+/// partial state externally puts it back, both driven only by accepted truth.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn accepting_from_mixed_proposes_true_and_the_partial_state_is_restorable() {
+    let h = harness_at(CHECKBOX_PAGE).await;
+    begin_browser_error_capture(&h).await;
+    set_checkbox_accept_policy(&h, true).await;
+
+    click(&h, PARTIAL_BOX).await;
+    settle(&h).await;
+
+    let accepted = checkbox_dom(&h, PARTIAL_BOX).await;
+    assert_eq!(accepted["checked"], json!(true), "{accepted}");
+    assert_eq!(accepted["indeterminate"], json!(false), "{accepted}");
+    assert_eq!(
+        accepted["ariaChecked"],
+        json!(null),
+        "a resolved checkbox must fall back to native checked semantics: {accepted}"
+    );
+    assert_eq!(accepted["stateMarker"], json!("checked"), "{accepted}");
+
+    click(&h, "[data-testid=\"checkbox-mixed-reset\"]").await;
+    settle(&h).await;
+    let restored = checkbox_dom(&h, PARTIAL_BOX).await;
+    assert_eq!(restored["indeterminate"], json!(true), "{restored}");
+    assert_eq!(restored["checked"], json!(false), "{restored}");
+    assert_eq!(restored["ariaChecked"], json!("mixed"), "{restored}");
+    assert_no_browser_errors(&h, "mixed checkbox transitions").await;
+}
+
+/// A disabled controlled checkbox keeps native semantics and emits nothing.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn a_disabled_controlled_checkbox_emits_no_proposal() {
+    let h = harness_at(CHECKBOX_PAGE).await;
+    begin_browser_error_capture(&h).await;
+
+    let before = checkbox_dom(&h, "[data-testid=\"checkbox-disabled\"] input").await;
+    assert_eq!(before["disabled"], json!(true), "{before}");
+    assert_eq!(before["checked"], json!(true), "{before}");
+
+    click(&h, "[data-testid=\"checkbox-disabled\"]").await;
+    settle(&h).await;
+
+    let s = oracle(&h).await;
+    assert_eq!(
+        s["state"]["checkbox.disabled_proposals"],
+        json!(null),
+        "a disabled checkbox must never propose: {s}"
+    );
+    let after = checkbox_dom(&h, "[data-testid=\"checkbox-disabled\"] input").await;
+    assert_eq!(after["checked"], json!(true), "{after}");
+    assert_no_browser_errors(&h, "disabled controlled checkbox").await;
+}
+
+/// The accessible name is a caller-owned reactive signal, so EN -> ES -> EN
+/// replaces the text on the *same* DOM node rather than re-mounting the
+/// control (which would drop focus mid-interaction).
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn a_checkbox_label_is_replaced_in_place_when_the_locale_changes() {
+    let h = harness_at(CHECKBOX_PAGE).await;
+    begin_browser_error_capture(&h).await;
+
+    eval_json(
+        &h,
+        &format!(
+            "(() => {{ document.querySelector({CONTROLLED_BOX:?}).__ldFqanStamp = 'same-node'; return true; }})()"
+        ),
+    )
+    .await;
+
+    let en = checkbox_dom(&h, CONTROLLED_BOX).await;
+    assert_eq!(en["labelText"], json!("Past due only"), "{en}");
+
+    click(&h, "[data-testid=\"checkbox-locale-toggle\"]").await;
+    settle(&h).await;
+    let es = checkbox_dom(&h, CONTROLLED_BOX).await;
+    assert_eq!(es["labelText"], json!("Solo vencidos"), "{es}");
+    assert_eq!(
+        es["stamp"],
+        json!("same-node"),
+        "the locale swap must not re-mount the input: {es}"
+    );
+
+    click(&h, "[data-testid=\"checkbox-locale-toggle\"]").await;
+    settle(&h).await;
+    let back = checkbox_dom(&h, CONTROLLED_BOX).await;
+    assert_eq!(back["labelText"], json!("Past due only"), "{back}");
+    assert_eq!(back["stamp"], json!("same-node"), "{back}");
+    assert_no_browser_errors(&h, "checkbox locale swap").await;
+}
+
+/// Keyboard operation goes through the same one-proposal-per-gesture path as a
+/// click, and the control really is the focused element while it happens.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn space_operates_a_controlled_checkbox_and_proposes_exactly_once() {
+    let h = harness_at(CHECKBOX_PAGE).await;
+    begin_browser_error_capture(&h).await;
+    set_checkbox_accept_policy(&h, true).await;
+
+    let focused = eval_json(
+        &h,
+        &format!(
+            r#"(() => {{
+                const el = document.querySelector({CONTROLLED_BOX:?});
+                el.focus();
+                return {{
+                    isActive: document.activeElement === el,
+                    hasFocusRingClass: el.classList.contains('ld-focus-ring'),
+                }};
+            }})()"#
+        ),
+    )
+    .await;
+    assert_eq!(focused["isActive"], json!(true), "{focused}");
+    assert_eq!(focused["hasFocusRingClass"], json!(true), "{focused}");
+
+    h.press_key_sequence(&[Key::Space]).await.expect("space");
+    settle(&h).await;
+
+    let s = oracle(&h).await;
+    assert_eq!(
+        s["state"]["checkbox.proposal_count"],
+        json!(1),
+        "Space must propose exactly once, like a click: {s}"
+    );
+    assert_eq!(s["state"]["checkbox.accepted"], json!(true), "{s}");
+    let dom = checkbox_dom(&h, CONTROLLED_BOX).await;
+    assert_eq!(dom["checked"], json!(true), "{dom}");
+    assert_no_browser_errors(&h, "checkbox keyboard operation").await;
+}
+
+/// An ambiguous configuration is refused, not resolved: no input is rendered
+/// at all, so nothing ambiguously-owned can be read back or submitted, and the
+/// reason is visible and announced rather than hidden in a console line.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn a_refused_checkbox_configuration_renders_an_alert_and_no_input() {
+    let h = harness_at(CHECKBOX_PAGE).await;
+    begin_browser_error_capture(&h).await;
+
+    let refused = eval_json(
+        &h,
+        r#"(() => {
+            const el = document.querySelector('[data-testid="checkbox-config-error"]');
+            return {
+                role: el.getAttribute('role'),
+                message: el.getAttribute('data-checkbox-config-error'),
+                text: el.textContent.trim(),
+                hasInput: !!el.querySelector('input'),
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(refused["role"], json!("alert"), "{refused}");
+    assert_eq!(
+        refused["message"],
+        json!("Checkbox accepts either label or aria_label, not both"),
+        "{refused}"
+    );
+    assert_eq!(refused["text"], refused["message"], "{refused}");
+    assert_eq!(
+        refused["hasInput"],
+        json!(false),
+        "a refused configuration must render no control at all: {refused}"
+    );
+    assert_no_browser_errors(&h, "refused checkbox configuration").await;
+}
