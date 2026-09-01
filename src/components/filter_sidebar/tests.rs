@@ -8,7 +8,7 @@
 //! object.
 
 use super::component::filter_sidebar_header_actions_wrapper;
-use super::style::{SidebarSide, join_side_class};
+use super::style::{FilterSidebarTogglePlacement, SidebarSide, join_side_class};
 use leptos::prelude::*;
 use leptos::reactive::owner::Owner;
 
@@ -154,34 +154,159 @@ fn collapse_transition_still_clips_via_the_asides_own_overflow_hidden() {
     );
 }
 
+/// Isolates `filter_sidebar_toggle_button`'s own function body -- the ONE
+/// place the toggle's markup is written (`ldui-vshu`), shared by
+/// `FilterSidebar`'s internal header button and the external
+/// `FilterSidebarToggle`. Bounded at the next doc comment so assertions
+/// about what the button does NOT contain (e.g. a fade class) cannot be
+/// satisfied by unrelated markup later in the file.
+fn toggle_button_fn_body() -> &'static str {
+    VIEW_SRC
+        .split("fn filter_sidebar_toggle_button(")
+        .nth(1)
+        .expect("the shared toggle button function must exist")
+        .split("\n/// # FilterSidebarToggle")
+        .next()
+        .expect("the function must be followed by FilterSidebarToggle's doc comment")
+}
+
 #[test]
 fn the_toggle_survives_collapsing_and_is_labelled() {
     // A control that disappears when you use it is a trap: the toggle is the only
-    // way back from the collapsed state.
-    let header = SRC
-        .split("── expanded content")
-        .next()
-        .expect("the header section must exist");
+    // way back from the collapsed state. The markup lives in ONE shared
+    // function now (`ldui-vshu`), so this asserts against that function
+    // directly rather than the header region.
+    let toggle_fn = toggle_button_fn_body();
     assert!(
-        header.contains("aria-label=move || toggle_label.get()"),
+        toggle_fn.contains("aria-label=move || toggle_label.get()"),
         "the toggle is icon-only, so it needs an accessible label"
     );
     assert!(
-        header.contains("aria-expanded"),
+        toggle_fn.contains("aria-expanded=move || (!collapsed.get()).to_string()"),
         "the toggle must report its state to assistive technology"
     );
-    // The title AND the optional `header_actions` slot (ldui-bx6n) both fade
-    // on collapse; only the button element itself must stay put. Isolate the
-    // button's own markup rather than counting fades across the whole header.
-    let button_markup = header
-        .split("<button")
-        .nth(1)
-        .expect("the toggle button must exist");
     assert!(
-        !button_markup.contains("hidden_when_collapsed()")
-            && !button_markup.contains("opacity-0 pointer-events-none"),
+        !toggle_fn.contains("hidden_when_collapsed()")
+            && !toggle_fn.contains("opacity-0 pointer-events-none"),
         "the toggle itself must stay visible on collapse, even though the \
          title and any header_actions fade"
+    );
+}
+
+// ── externally placed toggle (ldui-vshu) ────────────────────────────────────
+//
+// A consumer with its own page-level Hide/Show action must be able to place
+// the panel's toggle elsewhere without duplicating it or hand-rolling ARIA
+// that could drift from the built-in control. `filter_sidebar_toggle_button`
+// is the single source of truth both paths call through; these guard that
+// (a) it is genuinely the same function on both paths, (b) the internal
+// button is omitted entirely -- not hidden -- for `External` placement, and
+// (c) `FilterSidebarToggle` is a real typed component, not a documented
+// pattern the consumer has to hand-assemble.
+
+#[test]
+fn toggle_placement_defaults_to_internal_so_every_existing_caller_is_unchanged() {
+    assert_eq!(
+        FilterSidebarTogglePlacement::default(),
+        FilterSidebarTogglePlacement::Internal,
+        "omitting `toggle_placement` must reproduce the pre-ldui-vshu \
+         behaviour exactly"
+    );
+}
+
+#[test]
+fn filter_sidebar_toggle_placement_prop_is_typed_and_reactive() {
+    assert!(
+        VIEW_SRC.contains("toggle_placement: Signal<FilterSidebarTogglePlacement>"),
+        "toggle_placement must be a reactive, typed knob -- matching the \
+         `side` prop's own shape -- not a stringly-typed or untyped slot"
+    );
+}
+
+#[test]
+fn internal_toggle_is_gated_on_the_placement_and_calls_the_shared_function() {
+    let filter_sidebar_body = VIEW_SRC
+        .split("pub fn FilterSidebar(")
+        .nth(1)
+        .expect("FilterSidebar must exist");
+    assert!(
+        filter_sidebar_body
+            .contains("matches!(toggle_placement.get(), FilterSidebarTogglePlacement::Internal)"),
+        "the internal toggle must be conditional on the placement, not \
+         unconditionally rendered"
+    );
+    assert!(
+        filter_sidebar_body.contains(".then(|| {")
+            && filter_sidebar_body.contains("filter_sidebar_toggle_button("),
+        "the internal toggle must render through the SAME shared function \
+         `FilterSidebarToggle` uses, so the two paths cannot drift apart"
+    );
+    // `None` for `controls`: the internal toggle's markup must stay
+    // byte-for-byte what it was before ldui-vshu -- no new `aria-controls`
+    // sneaking onto a mode the bead requires stay unchanged.
+    let toggle_call = filter_sidebar_body
+        .split("filter_sidebar_toggle_button(")
+        .nth(1)
+        .expect("the internal call site must exist");
+    // Bounded to the call's own argument list (up to its closing paren) so
+    // this cannot be satisfied by `Some(controls)` further down in
+    // `FilterSidebarToggle`'s own call site.
+    let call_args = toggle_call
+        .split(')')
+        .next()
+        .expect("the call must have a closing paren");
+    assert!(
+        call_args.contains("None"),
+        "the internal toggle must pass `controls: None`, preserving its \
+         pre-ldui-vshu markup exactly"
+    );
+    assert!(
+        !call_args.contains("Some("),
+        "the internal toggle must NOT pass `aria-controls` -- that would be \
+         a behaviour change for the mode the bead requires stay unchanged"
+    );
+}
+
+#[test]
+fn external_placement_leaves_no_toggle_node_for_the_panel_to_render() {
+    // Not merely hidden -- the acceptance criteria require NO
+    // phantom/hidden internal toggle at all when placement is External.
+    // The gate above proves the render is `Option`-conditional
+    // (`bool::then`), which means `None` emits no node whatsoever, matching
+    // how `header_actions` omits its own wrapper when the slot is absent.
+    let filter_sidebar_body = VIEW_SRC
+        .split("pub fn FilterSidebar(")
+        .nth(1)
+        .expect("FilterSidebar must exist");
+    assert!(
+        filter_sidebar_body.contains(".then(|| {"),
+        "the internal toggle must be `Option`-conditional so `External` \
+         placement renders nothing, not something hidden"
+    );
+}
+
+#[test]
+fn filter_sidebar_toggle_is_a_typed_component_sharing_the_button_function() {
+    assert!(
+        VIEW_SRC.contains("pub fn FilterSidebarToggle("),
+        "the external toggle must be a real typed component, not a \
+         documented pattern the consumer hand-assembles"
+    );
+    let component_body = VIEW_SRC
+        .split("pub fn FilterSidebarToggle(")
+        .nth(1)
+        .expect("FilterSidebarToggle must exist");
+    assert!(
+        component_body.contains("controls: Signal<String>"),
+        "FilterSidebarToggle must accept the paired panel's id so its \
+         aria-controls is truthful"
+    );
+    assert!(
+        component_body.contains("filter_sidebar_toggle_button(")
+            && component_body.contains("Some(controls)"),
+        "FilterSidebarToggle must render through the shared function with \
+         `aria-controls` set, matching the built-in toggle in every other \
+         respect"
     );
 }
 
@@ -461,7 +586,16 @@ fn header_actions_sits_between_the_title_and_the_toggle() {
     // row's `flex-row-reverse` (ldui-vh6) reverses whatever is written here,
     // so the slot must be written between the title and the toggle button in
     // source order for both sides to come out correct.
+    //
+    // Scoped to `FilterSidebar`'s OWN body (`ldui-vshu`): the literal
+    // "<button" text now lives earlier in the file, inside the shared
+    // `filter_sidebar_toggle_button` function both this panel's internal
+    // toggle and `FilterSidebarToggle` call through -- searching the whole
+    // preamble for it would find that definition instead of the call site.
     let header = VIEW_SRC
+        .split("pub fn FilterSidebar(")
+        .nth(1)
+        .expect("FilterSidebar must exist")
         .split("── expanded content")
         .next()
         .expect("the header section must exist");
@@ -472,8 +606,8 @@ fn header_actions_sits_between_the_title_and_the_toggle() {
         .find("filter_sidebar_header_actions_wrapper(header_actions, collapsed)")
         .expect("the header_actions wrapper must be called in the header");
     let button_pos = header
-        .find("<button")
-        .expect("the toggle button must exist in the header");
+        .find("filter_sidebar_toggle_button(")
+        .expect("the internal toggle's call site must exist in the header");
     assert!(
         title_pos < actions_pos && actions_pos < button_pos,
         "header_actions must sit between the title and the toggle in DOM order"

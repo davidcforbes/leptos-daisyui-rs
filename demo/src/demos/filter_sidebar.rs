@@ -203,6 +203,91 @@ fn header_actions_slot(model_select_id: String) -> Children {
     })
 }
 
+/// Demonstrates `ldui-vshu`: the panel's toggle rendered OUTSIDE its own
+/// header, in a page-level action row -- 4iiz-Office's Conversation Detail
+/// shape (Back / Active Conversations / Hide panel). `FilterSidebar` itself
+/// renders NO internal toggle at all when `toggle_placement` is `External`
+/// -- not a hidden or `inert` one -- so there is exactly one toggle in the
+/// accessibility tree and DOM.
+///
+/// Takes `side` non-reactively, matching `HeaderActionsWorkspace` above and
+/// for the same reason: this fixture never flips orientation at runtime, so
+/// branching once at build time avoids two mirrored branches fighting over
+/// ownership of the same ids.
+#[component]
+fn ExternalToggleWorkspace(
+    side: SidebarSide,
+    #[prop(into)] title: Signal<String>,
+    #[prop(into)] panel_id: &'static str,
+) -> impl IntoView {
+    let collapsed = RwSignal::new(false);
+    let search = RwSignal::new(String::new());
+    let on_toggle = Callback::new(move |()| collapsed.update(|c| *c = !*c));
+    let toggle_label = Signal::derive(move || {
+        if collapsed.get() {
+            "Show panel".to_string()
+        } else {
+            "Hide panel".to_string()
+        }
+    });
+
+    let action_row = view! {
+        <div class="mb-2 flex items-center justify-between gap-2 rounded-md bg-base-200/60 px-3 py-2">
+            <span class="text-sm font-semibold">"Page action row (the panel's toggle lives here, not in its own header)"</span>
+            // Wired to the SAME `collapsed`/`on_toggle`/`toggle_label`/`side`
+            // signals passed to `FilterSidebar` below, plus `controls`
+            // matching that panel's `attr:id` -- the exact call shape
+            // documented on `FilterSidebarToggle`.
+            <FilterSidebarToggle
+                collapsed=collapsed
+                on_toggle=on_toggle
+                toggle_label=toggle_label
+                side=side
+                controls=panel_id
+            />
+        </div>
+    };
+
+    let panel = view! {
+        <FilterSidebar
+            attr:id=panel_id
+            side=side
+            collapsed=collapsed
+            on_toggle=on_toggle
+            toggle_label=toggle_label
+            toggle_placement=FilterSidebarTogglePlacement::External
+            active_count=2usize
+            title=title
+            search=search
+            search_placeholder="Type to filter…"
+            search_label="Search filters"
+        >
+            <ExampleFilters />
+        </FilterSidebar>
+    };
+    let page_content = view! {
+        <div class="flex min-w-0 flex-1 flex-col gap-2 bg-base-200/40 p-4">
+            <p class="text-sm font-semibold">"Page content"</p>
+            <p class="text-sm opacity-60">
+                "Office's Conversation Detail top row: Back / Active Conversations / Hide panel -- one control, owned by the page, operating the panel below."
+            </p>
+        </div>
+    };
+
+    view! {
+        <div class="flex min-w-0 flex-1 flex-col gap-2">
+            {action_row}
+            <div class="flex h-96 w-full overflow-hidden rounded-lg border border-base-300">
+                {if side == SidebarSide::Left {
+                    vec![panel.into_any(), page_content.into_any()]
+                } else {
+                    vec![page_content.into_any(), panel.into_any()]
+                }}
+            </div>
+        </div>
+    }
+}
+
 #[component]
 pub fn FilterSidebarDemo() -> impl IntoView {
     // Independent state per example: the point of the page is comparing two
@@ -424,6 +509,28 @@ pub fn FilterSidebarDemo() -> impl IntoView {
                         <HeaderActionsWorkspace
                             side=SidebarSide::Right
                             panel_id="fs-header-actions-right"
+                        />
+                    </div>
+                </div>
+            </Section>
+
+            <Section title="Externally placed toggle" col=true>
+                <p class="text-sm opacity-60">
+                    "`toggle_placement=FilterSidebarTogglePlacement::External` (ldui-vshu) is for a consumer with an established page-level Hide/Show action - Office's Conversation Detail Back / Active Conversations / Hide panel row. The panel renders NO toggle of its own; `FilterSidebarToggle` placed in the action row above operates the SAME panel via the same `collapsed`/`on_toggle`/`toggle_label`/`side` signals, plus a `controls` id matching the panel's own. Exactly one toggle exists in the DOM either way."
+                </p>
+                <div class="flex flex-wrap gap-4">
+                    <div class="min-w-0 flex-1">
+                        <ExternalToggleWorkspace
+                            side=SidebarSide::Left
+                            title="Filters"
+                            panel_id="fs-external-toggle-left"
+                        />
+                    </div>
+                    <div class="min-w-0 flex-1">
+                        <ExternalToggleWorkspace
+                            side=SidebarSide::Right
+                            title="Assistant"
+                            panel_id="fs-external-toggle-right"
                         />
                     </div>
                 </div>

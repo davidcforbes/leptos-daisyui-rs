@@ -122,6 +122,41 @@ impl SidebarSide {
     }
 }
 
+/// # Filter Sidebar Toggle Placement
+///
+/// Where a [`FilterSidebar`](super::FilterSidebar)'s collapse/expand control
+/// lives. Filed as `ldui-vshu`: a consumer with its own established
+/// page-level Hide/Show action (4iiz-Office's Conversation Detail top row)
+/// had only two bad choices before this existed -- duplicate the control, or
+/// give up the panel's internal chevron and hand-roll a replacement that
+/// could drift from it in labelling, `aria-expanded`/`aria-controls`, or
+/// focus styling.
+///
+/// ## `#[non_exhaustive]`, for the same reason as [`SidebarSide`]
+///
+/// This is a knob the consumer picks from, not a value handed back through a
+/// callback -- no consumer is ever forced to match on it, so a future third
+/// placement (a compact overflow-menu entry, say) can be added without a
+/// breaking release.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum FilterSidebarTogglePlacement {
+    /// The panel renders its own icon-only toggle in its header -- the
+    /// original and only behaviour before `ldui-vshu`, and the default, so
+    /// every existing call site is unchanged.
+    #[default]
+    Internal,
+    /// The panel renders NO toggle of its own -- not even a hidden or
+    /// `inert` one -- so the header has nothing to leave a gap for. The
+    /// consumer places a
+    /// [`FilterSidebarToggle`](super::component::FilterSidebarToggle)
+    /// wherever their own layout calls for it, wired to the SAME
+    /// `collapsed`/`on_toggle`/`toggle_label`/`side` values passed to this
+    /// panel, plus a `controls` id that matches the panel's own DOM id (see
+    /// that component's docs for the exact call shape).
+    External,
+}
+
 /// Joins a base class list with an orientation class, skipping the separator
 /// when the orientation contributes nothing.
 ///

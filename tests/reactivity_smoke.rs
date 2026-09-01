@@ -4559,6 +4559,126 @@ async fn filter_sidebar_collapsed_content_is_inert_ldui_gae5() {
     assert_no_browser_errors(&h, "FilterSidebar collapsed content inert (ldui-gae5)").await;
 }
 
+/// `ldui-vshu`: a `FilterSidebar` toggle placed OUTSIDE the panel's own
+/// header operates the same panel, with no duplicate/phantom internal
+/// toggle. Proves both `SidebarSide::Left` and `SidebarSide::Right` via the
+/// `fs-external-toggle-*` fixture: exactly one `[data-filter-sidebar-toggle]`
+/// exists in the whole panel+action-row DOM, its `aria-controls` names the
+/// panel, pointer AND keyboard activation both collapse/expand it, the
+/// active-count rail still renders while collapsed, and a repeated
+/// collapse/expand cycle stays coherent.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn filter_sidebar_external_toggle_operates_the_panel_ldui_vshu() {
+    let h = harness_at("/components/filter-sidebar").await;
+    begin_browser_error_capture(&h).await;
+
+    fn measure_js(panel_id: &str) -> String {
+        format!(
+            r#"(() => {{
+                const root = document.getElementById('{panel_id}');
+                const toggles = document.querySelectorAll('[data-filter-sidebar-toggle]');
+                const toggle = Array.from(toggles).find(
+                    (t) => t.getAttribute('aria-controls') === '{panel_id}'
+                );
+                return {{
+                    toggleCountForPanel: Array.from(toggles).filter(
+                        (t) => t.getAttribute('aria-controls') === '{panel_id}'
+                    ).length,
+                    toggleInsidePanel: toggle ? root.contains(toggle) : null,
+                    ariaControls: toggle ? toggle.getAttribute('aria-controls') : null,
+                    ariaExpanded: toggle ? toggle.getAttribute('aria-expanded') : null,
+                    panelHasActiveCount: !!root.querySelector('[role="status"]'),
+                }};
+            }})()"#
+        )
+    }
+
+    for panel_id in ["fs-external-toggle-left", "fs-external-toggle-right"] {
+        let external_toggle_selector =
+            format!("[data-filter-sidebar-toggle][aria-controls=\"{panel_id}\"]");
+
+        let baseline = eval_json(&h, &measure_js(panel_id)).await;
+        assert_eq!(
+            baseline["toggleCountForPanel"],
+            json!(1),
+            "{panel_id}: exactly one toggle must control this panel -- no \
+             duplicate/phantom internal toggle"
+        );
+        assert_eq!(
+            baseline["toggleInsidePanel"],
+            json!(false),
+            "{panel_id}: the toggle must be OUTSIDE the panel's own `<aside>`"
+        );
+        assert_eq!(baseline["ariaControls"], json!(panel_id));
+        assert_eq!(baseline["ariaExpanded"], json!("true"));
+        assert_eq!(
+            baseline["panelHasActiveCount"],
+            json!(true),
+            "{panel_id}: the active-count rail must still be reachable"
+        );
+
+        // Pointer activation.
+        click(&h, &external_toggle_selector).await;
+        settle(&h).await;
+        let after_click = eval_json(&h, &measure_js(panel_id)).await;
+        assert_eq!(
+            after_click["ariaExpanded"],
+            json!("false"),
+            "{panel_id}: a pointer click on the external toggle must \
+             collapse the panel"
+        );
+        assert_eq!(
+            after_click["panelHasActiveCount"],
+            json!(true),
+            "{panel_id}: the collapsed rail must still show the active \
+             filter count"
+        );
+
+        // Keyboard activation: focus the SAME control and press Space, the
+        // native activation key for a `<button>`.
+        h.page()
+            .find_element(&external_toggle_selector)
+            .await
+            .expect("find external toggle")
+            .focus()
+            .await
+            .expect("focus external toggle");
+        h.press_key_sequence(&[Key::Space])
+            .await
+            .expect("space activates the external toggle");
+        settle(&h).await;
+        let after_space = eval_json(&h, &measure_js(panel_id)).await;
+        assert_eq!(
+            after_space["ariaExpanded"],
+            json!("true"),
+            "{panel_id}: keyboard (Space) activation of the external toggle \
+             must re-expand the panel"
+        );
+
+        // Repeated collapse/expand stays coherent and keeps exactly one
+        // toggle for this panel throughout.
+        for _ in 0..2 {
+            click(&h, &external_toggle_selector).await;
+            settle(&h).await;
+        }
+        let after_repeats = eval_json(&h, &measure_js(panel_id)).await;
+        assert_eq!(
+            after_repeats["toggleCountForPanel"],
+            json!(1),
+            "{panel_id}: repeated collapse/expand must not create or lose \
+             the toggle"
+        );
+        assert_eq!(
+            after_repeats["ariaExpanded"],
+            json!("true"),
+            "{panel_id}: an even number of activations must return to expanded"
+        );
+    }
+
+    assert_no_browser_errors(&h, "FilterSidebar external toggle (ldui-vshu)").await;
+}
+
 /// Tabs: controlled selection, roving focus, relationships, localization,
 /// overflow, orientation, disabled skipping, and removal recovery stay coherent.
 #[tokio::test(flavor = "multi_thread")]

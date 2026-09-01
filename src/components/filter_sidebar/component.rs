@@ -1,6 +1,9 @@
-use super::style::{SidebarSide, join_side_class};
+use super::style::{FilterSidebarTogglePlacement, SidebarSide, join_side_class};
 use crate::components::icon::{Icon, IconSize};
-use leptos::{html::Aside, prelude::*};
+use leptos::{
+    html::{Aside, Button},
+    prelude::*,
+};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Process-wide sequence for the search input's `id`/`label[for]` pairing, so
@@ -69,6 +72,153 @@ pub(crate) fn filter_sidebar_header_actions_wrapper(
             </div>
         }
     })
+}
+
+/// Renders the ONE toggle-button markup shared by [`FilterSidebar`]'s own
+/// internal header toggle and the externally placed [`FilterSidebarToggle`]
+/// (`ldui-vshu`) -- a single source of truth so the two can never drift
+/// apart in label, `aria-expanded`, class treatment, or click wiring. The
+/// only thing that differs between the two call sites is `controls`: the
+/// internal toggle has historically carried no `aria-controls` (added here
+/// would be a behaviour change for a mode the bead requires stay
+/// unchanged), while the external one always does, since it is the only
+/// thing telling assistive tech what a *separately placed* button expands.
+fn filter_sidebar_toggle_button(
+    collapsed: Signal<bool>,
+    on_toggle: Callback<()>,
+    toggle_label: Signal<String>,
+    side: Signal<SidebarSide>,
+    controls: Option<Signal<String>>,
+    node_ref: NodeRef<Button>,
+) -> impl IntoView {
+    view! {
+        <button
+            node_ref=node_ref
+            type="button"
+            aria-label=move || toggle_label.get()
+            aria-expanded=move || (!collapsed.get()).to_string()
+            aria-controls=move || controls.map(|c| c.get())
+            // `btn` first so this reads as a real daisyUI button to
+            // style tooling; every utility after it re-asserts the
+            // panel toggle's own geometry and quiet palette.
+            class="btn btn-square btn-xs size-7 shrink-0 rounded-md \
+                   border border-black/[.12] bg-base-100 text-base-content/75 \
+                   shadow-none hover:bg-black/[.06] hover:text-base-content"
+            on:click=move |_| on_toggle.run(())
+            // Unambiguous selector for tests: `header_actions` can itself
+            // contain a `<button aria-label>` (e.g. a setup action), so
+            // `[aria-label]` alone does not uniquely identify the toggle
+            // (`ldui-8hba`).
+            data-filter-sidebar-toggle="true"
+        >
+            // The arrow points where the panel would GO, so it depends on
+            // the side AND the collapsed state - see `SidebarSide::chevron_name`.
+            <Icon
+                name=Signal::derive(move || {
+                    side.get().chevron_name(collapsed.get()).to_string()
+                })
+                size=IconSize::XSmall
+            />
+        </button>
+    }
+}
+
+/// # FilterSidebarToggle
+///
+/// The panel's collapse/expand control, placed OUTSIDE the panel itself.
+/// Pair with `<FilterSidebar toggle_placement=FilterSidebarTogglePlacement::External ...>`
+/// (`ldui-vshu`) when a consumer already has an established page-level
+/// Hide/Show action and must not also render the panel's own internal
+/// chevron -- rendering both would put two controls for one signal in the
+/// accessibility tree, which is exactly what this component exists to avoid.
+///
+/// Renders the identical markup [`FilterSidebar`]'s own internal toggle
+/// would have -- same label wiring, same `aria-expanded`, same hover/focus
+/// treatment, same click handling -- via [`filter_sidebar_toggle_button`],
+/// so the two paths cannot drift apart. The one addition is `controls`,
+/// which becomes this button's `aria-controls`: pass the SAME string you
+/// gave `FilterSidebar` via `attr:id`.
+///
+/// ## Exact consumer call shape (`ldui-vshu` — Office's Conversation Detail)
+///
+/// ```ignore
+/// let collapsed = RwSignal::new(false);
+/// let on_toggle = Callback::new(move |()| collapsed.update(|c| *c = !*c));
+///
+/// view! {
+///     // Wherever the page's own action row lives -- need not be anywhere
+///     // near the panel in the DOM.
+///     <FilterSidebarToggle
+///         collapsed=collapsed
+///         on_toggle=on_toggle
+///         toggle_label="Toggle the assistant panel"
+///         side=SidebarSide::Right
+///         controls="conversation-assistant-panel"
+///     />
+///     // ... the rest of the page ...
+///     <FilterSidebar
+///         attr:id="conversation-assistant-panel"
+///         toggle_placement=FilterSidebarTogglePlacement::External
+///         collapsed=collapsed
+///         on_toggle=on_toggle
+///         toggle_label="Toggle the assistant panel"
+///         side=SidebarSide::Right
+///         active_count=active_count
+///         title="Assistant"
+///     >
+///         { /* filter fields */ }
+///     </FilterSidebar>
+/// }
+/// ```
+///
+/// `collapsed`, `on_toggle`, `toggle_label` and `side` are passed to BOTH
+/// components -- there is nothing to keep in sync beyond reusing the same
+/// variables, since `Signal`/`Callback` are cheap to pass twice. Only
+/// `controls`/`attr:id` are a pair of matching strings the consumer must
+/// keep aligned, exactly like every other `aria-controls` relationship in
+/// this crate (see `Tab`/`TabPanel`).
+///
+/// ## Node References
+/// - `node_ref` - References the button element
+///   ([HTMLButtonElement](https://developer.mozilla.org/en-US/docs/Web/API/HTMLButtonElement)).
+#[component]
+pub fn FilterSidebarToggle(
+    /// Whether the paired panel is collapsed. Pass the SAME signal given to
+    /// that `FilterSidebar`'s own `collapsed` prop.
+    #[prop(into)]
+    collapsed: Signal<bool>,
+    /// Fired when this toggle is activated. Pass the SAME callback given to
+    /// the paired `FilterSidebar`'s own `on_toggle` prop.
+    #[prop(into)]
+    on_toggle: Callback<()>,
+    /// Accessible label for this icon-only button. Pass the SAME text given
+    /// to the paired `FilterSidebar`'s own `toggle_label` prop.
+    #[prop(into)]
+    toggle_label: Signal<String>,
+    /// Which edge the paired panel docks against, so the chevron points the
+    /// way the panel would move. Pass the SAME value given to the paired
+    /// `FilterSidebar`'s own `side` prop. Defaults to [`SidebarSide::Left`],
+    /// matching that prop's own default.
+    #[prop(optional, into)]
+    side: Signal<SidebarSide>,
+    /// The paired `FilterSidebar`'s DOM id (set on that panel via
+    /// `attr:id`), so this button's `aria-controls` truthfully names the
+    /// panel it expands and collapses.
+    #[prop(into)]
+    controls: Signal<String>,
+    /// Reference to the button element
+    /// ([HTMLButtonElement](https://developer.mozilla.org/en-US/docs/Web/API/HTMLButtonElement)).
+    #[prop(optional)]
+    node_ref: NodeRef<Button>,
+) -> impl IntoView {
+    filter_sidebar_toggle_button(
+        collapsed,
+        on_toggle,
+        toggle_label,
+        side,
+        Some(controls),
+        node_ref,
+    )
 }
 
 /// # FilterSidebar
@@ -198,8 +348,21 @@ pub fn FilterSidebar(
     search_label: Signal<String>,
     /// Accessible label for the toggle button. Localise it; the button is
     /// icon-only, so this is the only thing a screen reader announces.
+    /// Read even when [`FilterSidebarTogglePlacement::External`] omits the
+    /// panel's own button, so the SAME string can be passed straight through
+    /// to [`FilterSidebarToggle`]'s own `toggle_label`.
     #[prop(into)]
     toggle_label: Signal<String>,
+    /// Where the collapse/expand control is rendered. Defaults to
+    /// [`FilterSidebarTogglePlacement::Internal`] -- the panel's own header
+    /// button, the only behaviour that existed before `ldui-vshu`, so every
+    /// existing call site is unchanged. Pass
+    /// [`FilterSidebarTogglePlacement::External`] when the consumer places a
+    /// [`FilterSidebarToggle`] elsewhere in their own layout; the panel then
+    /// renders NO toggle of its own -- not a hidden or `inert` one -- so
+    /// there is no phantom control and no gap left in the header for one.
+    #[prop(optional, into)]
+    toggle_placement: Signal<FilterSidebarTogglePlacement>,
     /// Which page edge the panel docks against. See [`SidebarSide`] for the
     /// four things that mirror and the two that deliberately do not. Defaults
     /// to [`SidebarSide::Left`], the only behaviour that existed before, so
@@ -286,33 +449,27 @@ pub fn FilterSidebar(
                     {move || title.get()}
                 </h3>
                 {filter_sidebar_header_actions_wrapper(header_actions, collapsed)}
-                <button
-                    type="button"
-                    aria-label=move || toggle_label.get()
-                    aria-expanded=move || (!collapsed.get()).to_string()
-                    // `btn` first so this reads as a real daisyUI button to
-                    // style tooling; every utility after it re-asserts the
-                    // panel toggle's own geometry and quiet palette.
-                    class="btn btn-square btn-xs size-7 shrink-0 rounded-md \
-                           border border-black/[.12] bg-base-100 text-base-content/75 \
-                           shadow-none hover:bg-black/[.06] hover:text-base-content"
-                    on:click=move |_| on_toggle.run(())
-                    // Unambiguous selector for tests: `header_actions` can
-                    // itself contain a `<button aria-label>` (e.g. a setup
-                    // action), so `[aria-label]` alone does not uniquely
-                    // identify the toggle (`ldui-8hba`).
-                    data-filter-sidebar-toggle="true"
-                >
-                    // The arrow points where the panel would GO, so it depends
-                    // on the side AND the collapsed state - see
-                    // `SidebarSide::chevron_name`.
-                    <Icon
-                        name=Signal::derive(move || {
-                            side.get().chevron_name(collapsed.get()).to_string()
+                // `ldui-vshu`: rendered only for the default
+                // `Internal` placement -- `External` omits this node
+                // entirely, not merely hides it, so there is no
+                // phantom/duplicate toggle and no header gap left behind
+                // for one. `controls=None` preserves the internal toggle's
+                // pre-`ldui-vshu` markup byte-for-byte (no `aria-controls`),
+                // exactly as the "default/internal mode is unchanged"
+                // acceptance criterion requires.
+                {move || {
+                    matches!(toggle_placement.get(), FilterSidebarTogglePlacement::Internal)
+                        .then(|| {
+                            filter_sidebar_toggle_button(
+                                collapsed,
+                                on_toggle,
+                                toggle_label,
+                                side,
+                                None,
+                                NodeRef::new(),
+                            )
                         })
-                        size=IconSize::XSmall
-                    />
-                </button>
+                }}
             </div>
 
             // ── expanded content ────────────────────────────────────────────
