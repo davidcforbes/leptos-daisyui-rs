@@ -170,6 +170,7 @@ fn AppInner() -> impl IntoView {
                     <Route path=path!("/search_picker_dialog") view=SearchPickerDialogDemo />
                     <Route path=path!("/section_heading") view=SectionHeadingDemo />
                     <Route path=path!("/select") view=SelectDemo />
+                    <Route path=path!("/selectable_summary") view=SelectableSummaryDemo />
                     <Route path=path!("/skeleton") view=SkeletonDemo />
                     <Route path=path!("/sla_chip") view=SlaChipDemo />
                     <Route path=path!("/sparkline") view=SparklineDemo />

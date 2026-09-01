@@ -754,6 +754,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     value: "section_heading",
                 },
                 ComponentItem {
+                    name: "Selectable Summary",
+                    href: "/components/selectable_summary",
+                    value: "selectable_summary",
+                },
+                ComponentItem {
                     name: "Stack",
                     href: "/components/stack",
                     value: "stack",

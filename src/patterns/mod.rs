@@ -15,6 +15,7 @@ mod page_state_panel;
 mod record_header;
 mod search_picker_dialog;
 mod section_heading;
+mod selectable_summary;
 mod server_cursor_history;
 mod snapshot_table;
 mod snapshot_table_page;
@@ -66,6 +67,10 @@ pub use search_picker_dialog::{
     search_picker_render_decision,
 };
 pub use section_heading::{HeadingLevel, SectionHeading};
+pub use selectable_summary::{
+    SelectableSummaryCard, SelectableSummaryGroup, SelectableSummaryItem, SelectableSummaryStatus,
+    SelectableSummaryTexts,
+};
 pub use server_cursor_history::{
     ServerCursorHistory, ServerCursorHistoryDisposition, ServerCursorHistoryError,
     ServerCursorHistoryGeneration, ServerCursorHistoryHandle,
