@@ -5237,10 +5237,7 @@ async fn grouped_pages_keep_a_fitting_group_whole_and_stay_truthful() {
         go_to_group_paging_page(&harness, page).await;
         states.push(group_paging_page_state(&harness).await);
     }
-    let capacity = states
-        .iter()
-        .map(page_rows)
-        .fold(0.0_f64, f64::max);
+    let capacity = states.iter().map(page_rows).fold(0.0_f64, f64::max);
     assert!(capacity > 0.0, "auto paging rendered no rows");
     let mut seen_rows = 0.0;
     for state in &states {
