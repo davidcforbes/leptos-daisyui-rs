@@ -100,6 +100,17 @@ pub(crate) fn filter_sidebar_header_actions_wrapper(
 /// position, and means collapsing cannot discard a half-typed filter value.
 /// Unmounting would be less code and worse behaviour.
 ///
+/// **It also goes `inert` (`ldui-gae5`).** `opacity-0 pointer-events-none`
+/// hides paint, not the accessibility tree or the tab order -- a collapsed
+/// panel's search box and every control inside `children` stayed
+/// keyboard-focusable and screen-reader-announced despite being invisible
+/// and unclickable. The main content area is now `inert` (plus `aria-hidden`
+/// belt-and-braces) while collapsed, matching the treatment `header_actions`
+/// already gets (`ldui-8hba`). `inert` changes focusability and
+/// announcement only -- it does not affect layout or paint, so the
+/// `<aside>`'s own `overflow-hidden` keeps clipping the content during the
+/// width transition exactly as before.
+///
 /// ## Composition
 ///
 /// Checked before writing this: the library's `Filter` is a daisyUI radio-button
@@ -305,6 +316,19 @@ pub fn FilterSidebar(
             </div>
 
             // ── expanded content ────────────────────────────────────────────
+            // `ldui-gae5`: `opacity-0 pointer-events-none` alone hides
+            // PAINT, not the accessibility tree or the tab order -- a
+            // collapsed panel's search input and every field/control inside
+            // `children` (a textarea, an action button, anything) stayed
+            // keyboard-focusable and screen-reader-announced. `inert` closes
+            // both gaps at once (a non-focusable, non-announced subtree,
+            // same guarantee `ldui-8hba` already gives `header_actions`
+            // above), with `aria-hidden` alongside it belt-and-braces for a
+            // user agent that does not yet honour `inert`. `overflow-hidden`
+            // on the `<aside>` above stays the thing that CLIPS this content
+            // during the width transition -- `inert` changes focusability
+            // and announcement, nothing about layout or paint, so the
+            // collapse still clips rather than reflows.
             <div
                 class=move || {
                     format!(
@@ -313,6 +337,9 @@ pub fn FilterSidebar(
                         hidden_when_collapsed(),
                     )
                 }
+                inert=move || collapsed.get()
+                aria-hidden=move || collapsed.get().to_string()
+                data-filter-sidebar-content="true"
             >
                 {search
                     .map(|s| {

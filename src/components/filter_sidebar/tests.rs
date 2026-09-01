@@ -80,6 +80,80 @@ fn collapsing_hides_content_without_unmounting_it() {
     );
 }
 
+// ── main content is `inert` and `aria-hidden` while collapsed (ldui-gae5) ──
+//
+// `opacity-0 pointer-events-none` hides PAINT, not the accessibility tree or
+// the tab order: a collapsed panel's search input and every control inside
+// `children` (the bug report's example was a textarea and an action button)
+// stayed keyboard-focusable and screen-reader-announced. These guard the
+// fix the same way `ldui-8hba` guards `header_actions`'s identical
+// treatment: `inert` (which removes a subtree from both focus and the
+// accessibility tree) plus a belt-and-braces `aria-hidden`, scoped to the
+// main content region specifically so a regression there cannot hide behind
+// an unrelated `inert` elsewhere in the file.
+
+/// Isolates the "expanded content" `<div>` -- the main content region
+/// (search box + `children`) -- by its unique `data-filter-sidebar-content`
+/// marker, bounded at the next `<div` so an assertion about what this
+/// region does NOT contain cannot be satisfied by later markup (the
+/// collapsed rail, for instance, has its own unrelated `aria-hidden`).
+fn main_content_div_markup() -> &'static str {
+    let after_marker = VIEW_SRC
+        .split("── expanded content")
+        .nth(1)
+        .expect("the expanded content region must exist");
+    after_marker
+        .split("{search")
+        .next()
+        .expect("the content div's opening tag must precede the search slot")
+}
+
+#[test]
+fn collapsed_main_content_is_inert_and_aria_hidden() {
+    let content = main_content_div_markup();
+    assert!(
+        content.contains("inert=move || collapsed.get()"),
+        "the main content region must go `inert` while collapsed, removing \
+         its search box and every child control (a textarea, an action \
+         button, anything) from both the tab order and the accessibility \
+         tree -- this is the ldui-gae5 fix"
+    );
+    assert!(
+        content.contains("aria-hidden=move || collapsed.get().to_string()"),
+        "belt-and-braces `aria-hidden`, matching `header_actions`'s own \
+         treatment (ldui-8hba), in case a user agent does not yet honour \
+         `inert`"
+    );
+    assert!(
+        content.contains("data-filter-sidebar-content=\"true\""),
+        "a stable data attribute is required to select this region without \
+         relying on document position"
+    );
+}
+
+#[test]
+fn collapse_transition_still_clips_via_the_asides_own_overflow_hidden() {
+    // `inert` changes focusability and announcement, nothing about layout
+    // or paint -- the `<aside>`'s own `overflow-hidden` must still be the
+    // thing that CLIPS the 220px content during the width transition, or
+    // the transition visibly reflows text on every frame (see the `<aside>`
+    // class comment). This must not have moved onto the content div itself,
+    // which would double-clip and is not what was asked for.
+    //
+    // Matched via the aside's class format string directly rather than by
+    // locating its opening tag: the repo checks out with CRLF line endings,
+    // which would break a newline-anchored split, and the type docs also
+    // mention `` `<aside>` `` (closed immediately, no attributes) elsewhere
+    // in the file, which a bare `"<aside"` search would match first instead
+    // of the real multi-line tag. `"flex-col overflow-hidden"` is the literal
+    // head of the aside's own `format!` class string and appears nowhere else.
+    assert!(
+        VIEW_SRC.contains("flex-col overflow-hidden"),
+        "the aside must still own the clip that makes the width transition \
+         non-reflowing"
+    );
+}
+
 #[test]
 fn the_toggle_survives_collapsing_and_is_labelled() {
     // A control that disappears when you use it is a trap: the toggle is the only

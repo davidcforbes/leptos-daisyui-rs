@@ -4433,6 +4433,132 @@ async fn filter_sidebar_collapsed_toggle_stays_inside_its_panel_ldui_8hba() {
     assert_no_browser_errors(&h, "FilterSidebar collapsed toggle hit target (ldui-8hba)").await;
 }
 
+/// `ldui-gae5`, a P1 accessibility bug: a collapsed `FilterSidebar`'s main
+/// content -- its search input and every field inside `children` -- stayed
+/// keyboard-focusable and screen-reader-announced despite `opacity-0
+/// pointer-events-none`, which hides paint, not the accessibility tree.
+/// Proves both `SidebarSide::Left` and `SidebarSide::Right`, using the
+/// `fs-interactive-*` panels whose `children` are real interactive controls
+/// (two `<select>`s and a text `<input>`, via `ExampleFilters`): collapsing
+/// must make the content region `inert` and `aria-hidden`, a real Tab press
+/// starting from the (still-focusable) toggle must not be able to reach
+/// anything inside the collapsed content, and re-expanding must restore
+/// focusability WITHOUT remounting -- proven by a value typed into the
+/// search box before collapsing still being there after re-expanding.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn filter_sidebar_collapsed_content_is_inert_ldui_gae5() {
+    let h = harness_at("/components/filter-sidebar").await;
+    begin_browser_error_capture(&h).await;
+
+    fn measure_js(panel_id: &str) -> String {
+        format!(
+            r#"(() => {{
+                const root = document.getElementById('{panel_id}');
+                const content = root.querySelector('[data-filter-sidebar-content]');
+                const search = root.querySelector('input[type="text"]');
+                return {{
+                    contentInert: content.inert,
+                    contentAriaHidden: content.getAttribute('aria-hidden'),
+                    searchValue: search ? search.value : null,
+                }};
+            }})()"#
+        )
+    }
+
+    for panel_id in ["fs-interactive-left", "fs-interactive-right"] {
+        let toggle_selector = format!("#{panel_id} [data-filter-sidebar-toggle]");
+
+        // Type a value into the search box before collapsing (via a direct
+        // DOM event, matching the pattern the search-accessible-name suite
+        // above uses) so "restores focusability without remounting" has
+        // something concrete to check for after re-expanding.
+        eval_json(
+            &h,
+            &format!(
+                r#"(() => {{
+                    const input = document.getElementById('{panel_id}').querySelector('input[type="text"]');
+                    input.value = 'gae5-probe';
+                    input.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                    return input.value;
+                }})()"#
+            ),
+        )
+        .await;
+
+        let expanded = eval_json(&h, &measure_js(panel_id)).await;
+        assert_eq!(
+            expanded["contentInert"],
+            json!(false),
+            "{panel_id}: content must be interactive while expanded"
+        );
+        assert_eq!(expanded["searchValue"], json!("gae5-probe"));
+
+        click(&h, &toggle_selector).await;
+        settle(&h).await;
+
+        let collapsed = eval_json(&h, &measure_js(panel_id)).await;
+        assert_eq!(
+            collapsed["contentInert"],
+            json!(true),
+            "{panel_id}: collapsed content must be `inert` -- this is the \
+             ldui-gae5 fix"
+        );
+        assert_eq!(
+            collapsed["contentAriaHidden"],
+            json!("true"),
+            "{panel_id}: collapsed content must be `aria-hidden`"
+        );
+
+        // A real Tab press from the toggle must not land on anything inside
+        // the collapsed content -- `inert` removes it from sequential
+        // focus, not merely from `tabindex`.
+        h.page()
+            .find_element(&toggle_selector)
+            .await
+            .expect("find toggle")
+            .focus()
+            .await
+            .expect("focus toggle");
+        h.press_key_sequence(&[Key::Tab]).await.expect("tab");
+        let active_is_content = eval_json(
+            &h,
+            &format!(
+                r#"(() => {{
+                    const content = document.querySelector('#{panel_id} [data-filter-sidebar-content]');
+                    return content.contains(document.activeElement);
+                }})()"#
+            ),
+        )
+        .await;
+        assert_eq!(
+            active_is_content,
+            json!(false),
+            "{panel_id}: Tab from the toggle must not focus anything inside \
+             the collapsed content -- reproduces ldui-gae5 if this fails"
+        );
+
+        // Expand again: the content was made non-focusable/non-announced,
+        // never unmounted, so the typed value must still be there.
+        click(&h, &toggle_selector).await;
+        settle(&h).await;
+        let expanded_after = eval_json(&h, &measure_js(panel_id)).await;
+        assert_eq!(
+            expanded_after["contentInert"],
+            json!(false),
+            "{panel_id}: re-expanding must restore focusability"
+        );
+        assert_eq!(
+            expanded_after["searchValue"],
+            json!("gae5-probe"),
+            "{panel_id}: a half-typed value must survive a collapse/expand \
+             cycle -- the content must never unmount"
+        );
+    }
+
+    assert_no_browser_errors(&h, "FilterSidebar collapsed content inert (ldui-gae5)").await;
+}
+
 /// Tabs: controlled selection, roving focus, relationships, localization,
 /// overflow, orientation, disabled skipping, and removal recovery stay coherent.
 #[tokio::test(flavor = "multi_thread")]
