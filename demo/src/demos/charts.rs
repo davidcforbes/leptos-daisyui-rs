@@ -7,9 +7,11 @@ use leptos::prelude::*;
 use leptos_daisyui_rs::charts::{
     AreaChart, BarChart, BarChartActivation, BarChartActivationSource, BarChartData, BarChartItem,
     BarChartLayout, BarChartTexts, BarStatus, BarValueFormat, ChartSeries, HeatScale, Heatmap,
-    HeatmapCell, LineAxisOptions, LineCategory, LineChart, LineChartActivation,
-    LineChartActivationSource, LineChartData, LinePattern, LinePoint, LineSeries, LineValueAxis,
-    MarkerShape, MarkerStyle, PieChart, PieSlice, Sparkline, StackedAreaChart, StackedBarChart,
+    HeatmapActivation, HeatmapActivationSource, HeatmapCategory, HeatmapCell, HeatmapMatrix,
+    HeatmapSense, HeatmapTexts, HeatmapValue, LineAxisOptions, LineCategory, LineChart,
+    LineChartActivation, LineChartActivationSource, LineChartData, LinePattern, LinePoint,
+    LineSeries, LineValueAxis, MarkerShape, MarkerStyle, PieChart, PieSlice, Sparkline,
+    StackedAreaChart, StackedBarChart,
 };
 
 /// Every chart in `leptos_daisyui_rs::charts`, each shown with at least one
@@ -97,6 +99,52 @@ pub fn ChartsDemo() -> impl IntoView {
                 "source": match activation.source {
                     BarChartActivationSource::Pointer => "pointer",
                     BarChartActivationSource::Keyboard => "keyboard",
+                },
+                "modifiers": {
+                    "shift": activation.modifiers.shift,
+                    "ctrl": activation.modifiers.ctrl,
+                    "alt": activation.modifiers.alt,
+                    "meta": activation.modifiers.meta,
+                },
+            }),
+        );
+    });
+
+    // Typed heatmap fixture: reactive so the sort/remove/clear controls
+    // exercise reconciliation by row key AND by column key, with the locale
+    // control proving every framework-owned word changes while the keys, the
+    // intensities and the activated identity do not.
+    let heatmap_data = RwSignal::new(office_kpi_matrix());
+    let heatmap_spanish = RwSignal::new(false);
+    let heatmap_texts = Signal::derive(move || {
+        if heatmap_spanish.get() {
+            spanish_heatmap_texts()
+        } else {
+            office_heatmap_texts()
+        }
+    });
+    let heatmap_activation_count = RwSignal::new(0_u64);
+    let on_heatmap_activate = Callback::new(move |activation: HeatmapActivation| {
+        let count = heatmap_activation_count.get_untracked() + 1;
+        heatmap_activation_count.set(count);
+        debug_state::set("heatmap.activation_count", count);
+        debug_state::set(
+            "heatmap.activation",
+            serde_json::json!({
+                "rowKey": activation.row_key,
+                "rowLabel": activation.row_label,
+                "columnKey": activation.column_key,
+                "columnLabel": activation.column_label,
+                "intensity": activation.intensity,
+                "displayValue": activation.display_value,
+                "sense": match activation.sense {
+                    HeatmapSense::Neutral => "neutral",
+                    HeatmapSense::Favorable => "favorable",
+                    HeatmapSense::Unfavorable => "unfavorable",
+                },
+                "source": match activation.source {
+                    HeatmapActivationSource::Pointer => "pointer",
+                    HeatmapActivationSource::Keyboard => "keyboard",
                 },
                 "modifiers": {
                     "shift": activation.modifiers.shift,
@@ -393,6 +441,79 @@ pub fn ChartsDemo() -> impl IntoView {
                         pad_left=80.0
                         max_cell_h=48.0
                         height=200
+                    />
+                </div>
+
+                <p class="text-sm text-base-content/75">
+                    "Typed data replaces both label vectors and the positional cells at once: rows and columns are HeatmapCategory values carrying a stable key beside a localized label, and each HeatmapValue names the row and column it belongs to rather than a pair of array indices. The grid is then named, described, and restated as a real row/column matrix for a screen reader, every cell is reachable by arrow keys (Home/End along the row, Ctrl+Home/Ctrl+End to the grid corners), and an activation reports the office and the KPI by key. A judged cell also carries a solid or dashed sense rule, so the verdict survives forced colours."
+                </p>
+                <div class="w-full max-w-3xl" data-testid="typed-heatmap">
+                    <Heatmap
+                        data=heatmap_data
+                        scale=HeatScale::Judgement
+                        accessible_label="Current versus baseline by office and KPI".to_string()
+                        description="Signed deviation from the trailing 12-week baseline; lower-is-better measures are negated by the caller.".to_string()
+                        texts=heatmap_texts
+                        slant_col_labels=true
+                        pad_left=80.0
+                        max_cell_h=44.0
+                        width=760
+                        height=320
+                        on_cell_activate=on_heatmap_activate
+                    />
+                </div>
+                <div class="flex flex-wrap gap-2">
+                    <button
+                        class="btn btn-sm"
+                        data-testid="heatmap-sort"
+                        on:click=move |_| heatmap_data.update(|data| *data = sorted_offices(data))
+                    >
+                        "Sort offices worst first"
+                    </button>
+                    <button
+                        class="btn btn-sm"
+                        data-testid="heatmap-remove-column"
+                        on:click=move |_| heatmap_data.update(|data| *data = remove_kpi(data, "sla"))
+                    >
+                        "Remove SLA column"
+                    </button>
+                    <button
+                        class="btn btn-sm"
+                        data-testid="heatmap-clear"
+                        on:click=move |_| heatmap_data.set(HeatmapMatrix::default())
+                    >
+                        "Clear data"
+                    </button>
+                    <button
+                        class="btn btn-sm"
+                        data-testid="heatmap-restore"
+                        on:click=move |_| heatmap_data.set(office_kpi_matrix())
+                    >
+                        "Restore data"
+                    </button>
+                    <button
+                        class="btn btn-sm"
+                        data-testid="heatmap-locale"
+                        on:click=move |_| heatmap_spanish.update(|spanish| *spanish = !*spanish)
+                    >
+                        "Toggle locale"
+                    </button>
+                </div>
+
+                <p class="text-sm text-base-content/75">
+                    "The consumer's own shape: one office by twelve KPIs, with no activation callback. It still names and describes itself and still publishes the full matrix as a data table, but it claims no button role and adds no tab stop -- a heatmap that only reports is not an interactive control."
+                </p>
+                <div class="w-full max-w-3xl" data-testid="single-office-heatmap">
+                    <Heatmap
+                        data=single_office_matrix()
+                        scale=HeatScale::Judgement
+                        accessible_label="North office scorecard".to_string()
+                        texts=office_heatmap_texts()
+                        slant_col_labels=true
+                        pad_left=80.0
+                        max_cell_h=44.0
+                        width=760
+                        height=160
                     />
                 </div>
             </Section>
@@ -931,6 +1052,151 @@ fn magnitude_cells() -> Vec<HeatmapCell> {
             ..c
         })
         .collect()
+}
+
+/// The twelve KPI columns the consumer's dashboard carries, each with a stable
+/// id beside its localized label. Deliberately a `HeatmapCategory` list rather
+/// than a `Vec<String>` of labels: the id is what an activation reports, so
+/// re-ordering or hiding a column cannot re-point a drill.
+fn kpi_columns() -> Vec<HeatmapCategory> {
+    [
+        ("closed", "Matters closed"),
+        ("sla", "SLA met"),
+        ("handle", "Handle time"),
+        ("intake", "Intake conversion"),
+        ("backlog", "Backlog age"),
+        ("first-touch", "First touch"),
+        ("reopened", "Reopened"),
+        ("billable", "Billable hours"),
+        ("no-show", "No shows"),
+        ("escalated", "Escalated"),
+        ("satisfaction", "Satisfaction"),
+        ("overdue", "Overdue tasks"),
+    ]
+    .iter()
+    .map(|(key, label)| HeatmapCategory::new(*key, *label))
+    .collect()
+}
+
+/// A deterministic signed deviation for `(office, kpi)`, spread across the
+/// whole `-1.0..=1.0` ramp so both hues, both sense rules and an exact zero are
+/// all visible at once.
+fn kpi_intensity(office: usize, kpi: usize) -> f64 {
+    let raw = ((office * 7 + kpi * 5) % 21) as f64 / 10.0 - 1.0;
+    (raw * 10.0).round() / 10.0
+}
+
+/// Builds one office's row of cells. `gap` names the KPI that office did not
+/// report, which stays a missing cell rather than becoming a fabricated zero.
+fn office_row(office: usize, row_key: &str, gap: Option<&str>) -> Vec<HeatmapValue> {
+    kpi_columns()
+        .into_iter()
+        .enumerate()
+        .map(|(index, column)| {
+            if gap == Some(column.key.as_str()) {
+                return HeatmapValue::missing(row_key, column.key);
+            }
+            let intensity = kpi_intensity(office, index);
+            let percent = (intensity * 20.0).round() as i64;
+            HeatmapValue::new(row_key, column.key.clone(), intensity)
+                .with_display_value(format!("{percent:+}%"))
+                .with_accessible_value(format!("{percent:+} percent versus the 12-week baseline"))
+        })
+        .collect()
+}
+
+/// The multirow fixture: three offices by twelve KPIs, one reported gap.
+fn office_kpi_matrix() -> HeatmapMatrix {
+    let rows = vec![
+        HeatmapCategory::new("north", "North"),
+        HeatmapCategory::new("south", "South"),
+        HeatmapCategory::new("east", "East"),
+    ];
+    let values = rows
+        .iter()
+        .enumerate()
+        .flat_map(|(index, row)| {
+            let gap = (row.key == "south").then_some("handle");
+            office_row(index, &row.key, gap)
+        })
+        .collect();
+    HeatmapMatrix::new(rows, kpi_columns(), values)
+}
+
+/// The consumer's exact shape (op-dlfua.7.35): one office by twelve KPIs.
+fn single_office_matrix() -> HeatmapMatrix {
+    HeatmapMatrix::new(
+        vec![HeatmapCategory::new("north", "North")],
+        kpi_columns(),
+        office_row(0, "north", Some("reopened")),
+    )
+}
+
+/// The caller owns the sort, not the chart: worst mean deviation at the top.
+/// Only the row axis moves -- the values name their row by key, so none of them
+/// has to be touched.
+fn sorted_offices(data: &HeatmapMatrix) -> HeatmapMatrix {
+    let mean = |key: &str| {
+        let measured: Vec<f64> = data
+            .values
+            .iter()
+            .filter(|value| value.row_key == key)
+            .filter_map(|value| value.intensity)
+            .collect();
+        if measured.is_empty() {
+            0.0
+        } else {
+            measured.iter().sum::<f64>() / measured.len() as f64
+        }
+    };
+    let mut rows = data.rows.clone();
+    rows.sort_by(|a, b| mean(&a.key).total_cmp(&mean(&b.key)));
+    HeatmapMatrix::new(rows, data.columns.clone(), data.values.clone())
+}
+
+/// Drops one KPI column by key. Its values are left in place: a value naming a
+/// column the axis no longer carries is simply not rendered, which is what
+/// makes hiding a column a one-line change for a consumer.
+fn remove_kpi(data: &HeatmapMatrix, key: &str) -> HeatmapMatrix {
+    HeatmapMatrix::new(
+        data.rows.clone(),
+        data.columns
+            .iter()
+            .filter(|column| column.key != key)
+            .cloned()
+            .collect(),
+        data.values.clone(),
+    )
+}
+
+/// The framework copy named for this page's domain, so the axis names a reader
+/// hears are "Office" and "KPI" rather than the generic defaults.
+fn office_heatmap_texts() -> HeatmapTexts {
+    HeatmapTexts {
+        data_table_caption: "Office by KPI deviation from baseline".to_string(),
+        row_header: "Office".to_string(),
+        column_header: "KPI".to_string(),
+        value_header: "Deviation".to_string(),
+        missing_value: "Not reported".to_string(),
+        ..HeatmapTexts::default()
+    }
+}
+
+/// The same copy in Spanish. Every field is framework- or page-owned; no key,
+/// intensity or caller-supplied label appears here, which is the point of the
+/// EN -> ES -> EN journey.
+fn spanish_heatmap_texts() -> HeatmapTexts {
+    HeatmapTexts {
+        no_data: "Sin datos".to_string(),
+        data_table_caption: "Desviacion por oficina e indicador".to_string(),
+        row_header: "Oficina".to_string(),
+        column_header: "Indicador".to_string(),
+        value_header: "Desviacion".to_string(),
+        missing_value: "No reportado".to_string(),
+        sense_favorable: "Favorable".to_string(),
+        sense_unfavorable: "Desfavorable".to_string(),
+        sense_neutral: "Neutral".to_string(),
+    }
 }
 
 fn spark_values() -> Vec<f64> {

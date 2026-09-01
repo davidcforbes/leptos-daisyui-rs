@@ -22,7 +22,11 @@ pub use bar_chart::{
     BarChartItem, BarChartLayout, BarChartModifiers, BarChartTexts, BarInteractionMode, BarStatus,
     BarValueFormat,
 };
-pub use heatmap::{HeatScale, Heatmap, HeatmapCell};
+pub use heatmap::{
+    HeatScale, Heatmap, HeatmapActivation, HeatmapActivationSource, HeatmapCategory, HeatmapCell,
+    HeatmapDataSource, HeatmapInteractionMode, HeatmapMatrix, HeatmapModifiers, HeatmapSense,
+    HeatmapTexts, HeatmapValue,
+};
 pub use line_chart::{
     LineAxisOptions, LineCategory, LineChart, LineChartActivation, LineChartActivationSource,
     LineChartActivationValue, LineChartData, LineChartDataSource, LineChartModifiers,
