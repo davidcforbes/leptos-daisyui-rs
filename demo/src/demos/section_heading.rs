@@ -1,7 +1,7 @@
 use crate::core::{ContentLayout, Section};
 use leptos::prelude::*;
 use leptos_daisyui_rs::components::*;
-use leptos_daisyui_rs::patterns::{HeadingLevel, SectionHeading};
+use leptos_daisyui_rs::patterns::{HeadingLevel, SectionHeading, SectionHeadingStatusPlacement};
 
 #[component]
 pub fn SectionHeadingDemo() -> impl IntoView {
@@ -112,6 +112,82 @@ pub fn SectionHeadingDemo() -> impl IntoView {
                         actions=Box::new(|| {
                             view! {
                                 <Button size=ButtonSize::Sm>"Export"</Button>
+                            }
+                            .into_any()
+                        })
+                    />
+                </div>
+            </Section>
+
+            <Section title="Trailing status">
+                <div class="w-full max-w-2xl" data-testid="section-heading-trailing-status">
+                    <SectionHeading
+                        id="section-heading-trailing-status-heading"
+                        eyebrow="COMMITMENTS"
+                        title="Commitments"
+                        status_placement=SectionHeadingStatusPlacement::Trailing
+                        status=Box::new(|| {
+                            view! {
+                                <span
+                                    class="ld-text-caption text-base-content/75"
+                                    attr:data-testid="section-heading-trailing-status-text"
+                                >
+                                    "Provisional -- pending measure review"
+                                </span>
+                            }
+                            .into_any()
+                        })
+                    />
+                </div>
+            </Section>
+
+            <Section title="Trailing status with actions">
+                <div class="w-full max-w-2xl" data-testid="section-heading-trailing-status-action">
+                    <SectionHeading
+                        id="section-heading-trailing-status-action-heading"
+                        eyebrow="RESULTS"
+                        title="Results produced"
+                        status_placement=SectionHeadingStatusPlacement::Trailing
+                        status=Box::new(|| {
+                            view! {
+                                <span
+                                    class="ld-text-caption text-base-content/75"
+                                    attr:data-testid="section-heading-trailing-status-action-text"
+                                >
+                                    "Provisional -- pending measure review"
+                                </span>
+                            }
+                            .into_any()
+                        })
+                        actions=Box::new(|| {
+                            view! {
+                                <Button
+                                    size=ButtonSize::Sm
+                                    attr:data-testid="section-heading-trailing-status-action-export"
+                                >
+                                    "Export"
+                                </Button>
+                            }
+                            .into_any()
+                        })
+                    />
+                </div>
+            </Section>
+
+            <Section title="Trailing status, long title">
+                <div class="w-full max-w-2xl" data-testid="section-heading-trailing-long-title">
+                    <SectionHeading
+                        id="section-heading-trailing-long-title-heading"
+                        title="Outstanding invoices across every active matter this quarter"
+                        status_placement=SectionHeadingStatusPlacement::Trailing
+                        status=Box::new(|| {
+                            view! {
+                                <span
+                                    class="ld-text-caption text-base-content/75"
+                                    attr:data-testid="section-heading-trailing-long-title-text"
+                                >
+                                    "Provisional -- pending measure review"
+                                </span>
                             }
                             .into_any()
                         })

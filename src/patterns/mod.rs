@@ -50,7 +50,11 @@ pub use filter_bar::{
     FILTER_BAR_BASE_CLASS, FilterBar, FilterBarTexts, FilterResultSummary, SnapshotDefaultSave,
     SnapshotDefaultSaveState, filter_active_summary, filter_bar_class, filter_result_summary,
 };
-pub use kpi_strip::{KpiCard, KpiItem, KpiStatus, KpiStrip, KpiStripTexts, KpiTrend};
+pub use kpi_strip::{
+    KPI_BASELINE_TRACK_HEADROOM, KpiAction, KpiBaseline, KpiBaselineAvailability, KpiBaselineState,
+    KpiCard, KpiComparison, KpiItem, KpiStatus, KpiStrip, KpiStripTexts, KpiTrend,
+    kpi_card_is_activatable,
+};
 pub use list_page::{LIST_PAGE_BASE_CLASS, ListPage, list_page_class};
 pub use page_header::{PageHeader, PageHeaderDivider, PageHeaderNavigationLayout};
 pub use page_quick_actions::{
@@ -68,7 +72,7 @@ pub use search_picker_dialog::{
     SearchPickerRenderDecision, SearchPickerStatus, resolve_search_picker_confirmation,
     resolve_search_picker_selection, search_picker_confirm_block, search_picker_render_decision,
 };
-pub use section_heading::{HeadingLevel, SectionHeading};
+pub use section_heading::{HeadingLevel, SectionHeading, SectionHeadingStatusPlacement};
 pub use selectable_summary::{
     SelectableSummaryCard, SelectableSummaryGroup, SelectableSummaryItem, SelectableSummaryStatus,
     SelectableSummaryTexts,

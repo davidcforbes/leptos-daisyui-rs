@@ -199,6 +199,199 @@ async fn long_copy_variant_wraps_without_overflowing_its_container() {
     assert_no_browser_errors(&h, "section-heading long-copy variant").await;
 }
 
+/// The default `status_placement` (nobody passes it) still marks the root as
+/// `inline`, and the existing inline status badge is still reachable -- the
+/// new prop's default is provably a no-op for every caller that predates it.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-section-heading)"]
+async fn status_placement_defaults_to_inline_on_a_pre_existing_status_caller() {
+    let h = harness_at(PAGE).await;
+    begin_browser_error_capture(&h).await;
+
+    let placement = eval_json(
+        &h,
+        r#"(() => {
+            const fixture = document.querySelector('[data-testid="section-heading-status"]');
+            const root = fixture.querySelector('[data-section-heading]');
+            return root.getAttribute('data-section-heading-status-placement');
+        })()"#,
+    )
+    .await;
+    assert_eq!(
+        placement,
+        json!("inline"),
+        "a caller that never passes status_placement must render as inline"
+    );
+
+    assert_no_browser_errors(&h, "section-heading default status placement").await;
+}
+
+/// `SectionHeadingStatusPlacement::Trailing` with status only (no actions):
+/// the status renders in its own marked sibling wrapper, distinct from the
+/// (absent) actions wrapper, and is reachable and non-empty.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-section-heading)"]
+async fn trailing_status_only_renders_in_a_distinct_sibling_wrapper() {
+    let h = harness_at(PAGE).await;
+    begin_browser_error_capture(&h).await;
+
+    let s = eval_json(
+        &h,
+        r#"(() => {
+            const fixture = document.querySelector('[data-testid="section-heading-trailing-status"]');
+            const root = fixture.querySelector('[data-section-heading]');
+            const status = root.querySelector('[data-section-heading-status]');
+            const actions = root.querySelector('[data-section-heading-actions]');
+            return {
+                placement: root.getAttribute('data-section-heading-status-placement'),
+                hasStatus: !!status,
+                statusText: status ? status.textContent.trim() : null,
+                hasActions: !!actions,
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(s["placement"], json!("trailing"), "placement marker: {s}");
+    assert_eq!(
+        s["hasStatus"],
+        json!(true),
+        "trailing status wrapper present: {s}"
+    );
+    assert_eq!(
+        s["statusText"],
+        json!("Provisional -- pending measure review"),
+        "trailing status content reached the DOM: {s}"
+    );
+    assert_eq!(
+        s["hasActions"],
+        json!(false),
+        "no actions were supplied for this fixture: {s}"
+    );
+
+    assert_no_browser_errors(&h, "section-heading trailing status only variant").await;
+}
+
+/// Trailing status plus actions together: deterministic DOM order (status
+/// before actions), no duplicated status content, and the two slots stay
+/// distinguishable by their own data attributes.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-section-heading)"]
+async fn trailing_status_plus_actions_have_deterministic_order_and_no_duplication() {
+    let h = harness_at(PAGE).await;
+    begin_browser_error_capture(&h).await;
+
+    let s = eval_json(
+        &h,
+        r#"(() => {
+            const fixture = document.querySelector('[data-testid="section-heading-trailing-status-action"]');
+            const root = fixture.querySelector('[data-section-heading]');
+            const status = root.querySelector('[data-section-heading-status]');
+            const actions = root.querySelector('[data-section-heading-actions]');
+            const order = status.compareDocumentPosition(actions);
+            // Node.DOCUMENT_POSITION_FOLLOWING === 4: actions follows status.
+            const statusBeforeActions = !!(order & 4);
+            const rootText = root.textContent;
+            const occurrences = rootText.split('Provisional').length - 1;
+            return {
+                hasStatus: !!status,
+                hasActions: !!actions,
+                statusBeforeActions,
+                statusOccurrences: occurrences,
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(s["hasStatus"], json!(true), "status wrapper present: {s}");
+    assert_eq!(s["hasActions"], json!(true), "actions wrapper present: {s}");
+    assert_eq!(
+        s["statusBeforeActions"],
+        json!(true),
+        "status must precede actions in DOM order: {s}"
+    );
+    assert_eq!(
+        s["statusOccurrences"],
+        json!(1),
+        "status content must not be duplicated into the actions wrapper: {s}"
+    );
+
+    assert_no_browser_errors(&h, "section-heading trailing status plus actions variant").await;
+}
+
+/// A long title paired with a long trailing status: at desktop width the
+/// status sits beside the title without collapsing it, and at a compact
+/// viewport it wraps onto its own row rather than overlapping the title --
+/// the same wrapping contract `actions` already has, now proven for the new
+/// trailing status placement.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-section-heading)"]
+async fn trailing_status_wraps_at_compact_widths_without_squeezing_a_long_title() {
+    let h = harness_at(PAGE).await;
+    begin_browser_error_capture(&h).await;
+
+    let desktop_boxes = eval_json(
+        &h,
+        r#"(() => {
+            const fixture = document.querySelector('[data-testid="section-heading-trailing-long-title"]');
+            const root = fixture.querySelector('[data-section-heading]');
+            const heading = root.querySelector('h2, h3, h4');
+            const status = root.querySelector('[data-section-heading-status]');
+            const box = el => {
+                const r = el.getBoundingClientRect();
+                return { top: r.top, bottom: r.bottom, width: r.width };
+            };
+            return { heading: box(heading), status: box(status) };
+        })()"#,
+    )
+    .await;
+    let desktop_heading_width = desktop_boxes["heading"]["width"]
+        .as_f64()
+        .expect("desktop heading width");
+    assert!(
+        desktop_heading_width > 40.0,
+        "the long title must not be squeezed to a sliver by a long trailing status at desktop width: {desktop_boxes}"
+    );
+
+    h.set_viewport(ViewportSize::new(390, 844))
+        .await
+        .expect("set compact viewport");
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+    let compact_boxes = eval_json(
+        &h,
+        r#"(() => {
+            const fixture = document.querySelector('[data-testid="section-heading-trailing-long-title"]');
+            const root = fixture.querySelector('[data-section-heading]');
+            const heading = root.querySelector('h2, h3, h4');
+            const status = root.querySelector('[data-section-heading-status]');
+            const box = el => {
+                const r = el.getBoundingClientRect();
+                return { top: r.top, bottom: r.bottom, width: r.width };
+            };
+            return { heading: box(heading), status: box(status) };
+        })()"#,
+    )
+    .await;
+    let heading_bottom = compact_boxes["heading"]["bottom"]
+        .as_f64()
+        .expect("compact heading bottom");
+    let status_top = compact_boxes["status"]["top"]
+        .as_f64()
+        .expect("compact status top");
+    assert!(
+        status_top >= heading_bottom - 1.0,
+        "trailing status must wrap onto its own row at a compact width, not overlap the title: {compact_boxes}"
+    );
+    let compact_heading_width = compact_boxes["heading"]["width"]
+        .as_f64()
+        .expect("compact heading width");
+    assert!(
+        compact_heading_width > 40.0,
+        "the title must not be squeezed to a sliver at a compact width either: {compact_boxes}"
+    );
+
+    assert_no_browser_errors(&h, "section-heading trailing status compact layout").await;
+}
+
 /// The localized variant's eyebrow/title/description are reactive: clicking
 /// the fixture's toggle swaps the rendered text without a route change or
 /// remount, proving the props are live signals rather than one-shot strings.

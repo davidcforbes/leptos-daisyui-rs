@@ -56,6 +56,42 @@ const fn has_text(value: &str) -> bool {
     !value.is_empty()
 }
 
+/// Where [`SectionHeading`]'s optional `status` content renders relative to
+/// the title (`ldui-17rz`).
+///
+/// A `bool` (e.g. `status_trailing`) would name the mechanism but not the
+/// intent, and would leave no room for a third placement later without a
+/// breaking signature change. An enum names what the placement *means* and
+/// is exhaustively matched, so adding a case is a compile-time prompt to
+/// handle it everywhere rather than a silently-ignored flag.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SectionHeadingStatusPlacement {
+    /// Status renders inline with the title, in the same flex row as
+    /// [`HeadingLevel`]'s heading element -- the default, and the only
+    /// placement that existed before `ldui-17rz`. Right for a compact badge
+    /// that belongs immediately beside the heading text.
+    #[default]
+    Inline,
+    /// Status renders as a separate sibling after the title/description
+    /// group and before any `actions`, aligned to the trailing edge at
+    /// desktop widths and wrapping onto its own row at compact widths.
+    /// Right for an established, full-width section header whose
+    /// noninteractive maturity/freshness text belongs at the far right
+    /// instead of crowding the title.
+    Trailing,
+}
+
+impl SectionHeadingStatusPlacement {
+    /// Stable runtime marker, mirrored onto the outer wrapper via
+    /// `data-section-heading-status-placement` for test assertions.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Inline => "inline",
+            Self::Trailing => "trailing",
+        }
+    }
+}
+
 /// Eyebrow/title/description heading for content beneath a `PageHeader`.
 ///
 /// LDUI owns the semantic spacing, typography, heading hierarchy, and
@@ -87,6 +123,31 @@ const fn has_text(value: &str) -> bool {
 ///                 }.into_any())
 ///             />
 ///         </section>
+///     }
+/// }
+/// ```
+///
+/// A noninteractive maturity/freshness note that belongs at the far right of
+/// an established, full-width section header -- rather than crowding the
+/// title -- uses `status_placement=SectionHeadingStatusPlacement::Trailing`.
+/// The `status` slot itself is unchanged; only where it renders moves:
+///
+/// ```rust
+/// use leptos::prelude::*;
+/// use leptos_daisyui_rs::patterns::{SectionHeading, SectionHeadingStatusPlacement};
+///
+/// #[component]
+/// fn Example() -> impl IntoView {
+///     view! {
+///         <SectionHeading
+///             title="Commitments"
+///             status_placement=SectionHeadingStatusPlacement::Trailing
+///             status=Box::new(|| view! {
+///                 <span class="ld-text-caption text-base-content/75">
+///                     "Provisional -- pending measure review"
+///                 </span>
+///             }.into_any())
+///         />
 ///     }
 /// }
 /// ```
@@ -141,9 +202,19 @@ pub fn SectionHeading(
     #[prop(optional)]
     status: Option<Children>,
 
+    /// Where `status` renders. Defaults to
+    /// [`SectionHeadingStatusPlacement::Inline`], which reproduces exactly
+    /// today's rendering -- this prop exists so a caller can opt into
+    /// [`SectionHeadingStatusPlacement::Trailing`] without any change for
+    /// existing callers. See [`SectionHeadingStatusPlacement`].
+    #[prop(optional)]
+    status_placement: SectionHeadingStatusPlacement,
+
     /// Optional action controls (buttons, menus) for this section. Wraps
     /// onto its own row at compact widths instead of shrinking the title
-    /// or description.
+    /// or description. DOM order is always title/description, then
+    /// `status` when [`SectionHeadingStatusPlacement::Trailing`], then
+    /// `actions`.
     #[prop(optional)]
     actions: Option<Children>,
 
@@ -157,6 +228,15 @@ pub fn SectionHeading(
 ) -> impl IntoView {
     let status = status.map(|slot| slot());
     let actions = actions.map(|slot| slot());
+    // Splitting on `status_placement` here -- rather than branching later in
+    // the view -- means the `Inline` arm produces the exact same
+    // `(Some(view), None)` shape this component always has, so the markup
+    // below is untouched for every existing caller (none of whom pass
+    // `status_placement` at all).
+    let (inline_status, trailing_status) = match status_placement {
+        SectionHeadingStatusPlacement::Inline => (status, None),
+        SectionHeadingStatusPlacement::Trailing => (None, status),
+    };
     let heading_id = (!id.is_empty()).then_some(id);
     let heading_class = format!(
         "{} font-semibold tracking-tight text-base-content forced-colors:text-[CanvasText]",
@@ -185,6 +265,7 @@ pub fn SectionHeading(
             )
             data-section-heading="true"
             data-section-heading-level=level.as_str()
+            data-section-heading-status-placement=status_placement.as_str()
         >
             <div class="min-w-0 flex-1 space-y-1">
                 {move || {
@@ -197,7 +278,7 @@ pub fn SectionHeading(
                 }}
                 <div class="flex flex-wrap items-center gap-2">
                     {heading}
-                    {status}
+                    {inline_status}
                 </div>
                 {move || {
                     let text = description.get();
@@ -208,6 +289,11 @@ pub fn SectionHeading(
                     })
                 }}
             </div>
+            {trailing_status.map(|status| view! {
+                <div class="flex flex-wrap items-center gap-2 sm:shrink-0" data-section-heading-status="true">
+                    {status}
+                </div>
+            })}
             {actions.map(|actions| view! {
                 <div class="flex flex-wrap items-center gap-2 sm:shrink-0" data-section-heading-actions="true">
                     {actions}
@@ -282,5 +368,98 @@ mod tests {
             !component.contains("<h1"),
             "SectionHeading must not duplicate PageHeader's <h1>"
         );
+    }
+
+    /// The rendering half of the file only, narrowed the same way
+    /// [`RecordHeader`](super::RecordHeader)'s own `component_source` is
+    /// narrowed: from the component signature to the test module.
+    fn component_source() -> &'static str {
+        let source = include_str!("section_heading.rs");
+        let after_signature = source
+            .split_once("pub fn SectionHeading(")
+            .expect("SectionHeading component source")
+            .1;
+        after_signature
+            .split_once("\n#[cfg(test)]")
+            .map_or(after_signature, |(before, _)| before)
+    }
+
+    // -- SectionHeadingStatusPlacement (ldui-17rz) --------------------------
+
+    #[test]
+    fn status_placement_defaults_to_inline_for_source_compatibility() {
+        assert_eq!(
+            SectionHeadingStatusPlacement::default(),
+            SectionHeadingStatusPlacement::Inline
+        );
+    }
+
+    #[test]
+    fn status_placement_markers_are_distinct() {
+        assert_eq!(SectionHeadingStatusPlacement::Inline.as_str(), "inline");
+        assert_eq!(SectionHeadingStatusPlacement::Trailing.as_str(), "trailing");
+        assert_ne!(
+            SectionHeadingStatusPlacement::Inline.as_str(),
+            SectionHeadingStatusPlacement::Trailing.as_str()
+        );
+    }
+
+    /// The `Inline` arm of the placement match must hand `status` straight
+    /// through untouched and leave `trailing_status` empty -- i.e. the
+    /// default caller (nobody passes `status_placement`) gets back exactly
+    /// the `(Some(view), None)` shape this component always produced, so the
+    /// title-row markup below it is provably unreached by the new branch.
+    #[test]
+    fn inline_placement_passes_status_through_and_trailing_status_stays_empty() {
+        let source = component_source();
+        assert!(
+            source.contains("SectionHeadingStatusPlacement::Inline => (status, None),"),
+            "Inline must forward status unchanged and leave trailing_status empty: {source}"
+        );
+    }
+
+    /// Guards DOM order (title/description, then status, then actions) and
+    /// that the trailing status slot is never duplicated into the actions
+    /// wrapper: the two wrappers use distinct data attributes and status is
+    /// written to source before actions.
+    #[test]
+    fn trailing_status_wrapper_precedes_actions_wrapper_and_uses_a_distinct_attribute() {
+        let source = component_source();
+        let status_pos = source
+            .find(r#"data-section-heading-status="true""#)
+            .expect("trailing status wrapper attribute");
+        let actions_pos = source
+            .find(r#"data-section-heading-actions="true""#)
+            .expect("actions wrapper attribute");
+        assert!(
+            status_pos < actions_pos,
+            "trailing status must be written (and therefore rendered) before actions: {source}"
+        );
+        // Exactly one occurrence each -- neither wrapper is duplicated, and
+        // the status wrapper's own attribute name never collides with the
+        // actions wrapper's.
+        assert_eq!(
+            source
+                .matches(r#"data-section-heading-status="true""#)
+                .count(),
+            1
+        );
+        assert_eq!(
+            source
+                .matches(r#"data-section-heading-actions="true""#)
+                .count(),
+            1
+        );
+    }
+
+    /// Neither the trailing status wrapper nor the actions wrapper may carry
+    /// an interactive role or a tab stop of its own -- status must never
+    /// read to assistive tech as a control, and the two slots must never be
+    /// indistinguishable from one another by role.
+    #[test]
+    fn trailing_status_and_actions_wrappers_carry_no_interactive_role_or_tabindex() {
+        let source = component_source();
+        assert!(!source.contains(r#"role="button""#));
+        assert!(!source.contains("tabindex="));
     }
 }
