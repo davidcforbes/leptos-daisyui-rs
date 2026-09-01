@@ -1059,39 +1059,10 @@ where
                     </section>
                 })
             }}
-            <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
-                <label class="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2 text-sm text-base-content/75">
-                    <span class="min-w-0 break-words">{move || texts.with(|texts| texts.rows_per_page.clone())}</span>
-                    <Select
-                        class="select-sm w-20 shrink-0"
-                        id=page_size_select_id
-                        name=page_size_select_id
-                        label=Signal::derive(move || {
-                            Some(texts.with(|texts| texts.rows_per_page.clone()))
-                        })
-                        value=Signal::derive(move || {
-                            preferences.with(|preferences| preferences.page_size.to_string())
-                        })
-                        node_ref=page_size_select
-                        on_change=Callback::new(move |value: String| {
-                            apply_page_size_change(
-                                preferences,
-                                current_page,
-                                &value,
-                                move |supplied_value| {
-                                    if let Some(select) = page_size_select.get() {
-                                        select.set_value(&supplied_value);
-                                    }
-                                },
-                            );
-                        })
-                    >
-                        {ENTITY_PAGE_SIZE_CHOICES.into_iter().map(|page_size| view! {
-                            <option value=page_size.to_string()>{page_size}</option>
-                        }).collect_view()}
-                    </Select>
-                </label>
-
+            <div
+                class="flex shrink-0 flex-wrap items-center justify-end gap-2"
+                data-entity-table-toolbar="true"
+            >
                 {toolbar_actions.map(|render_actions| view! {
                     <div class="contents" data-entity-toolbar-actions="true">
                         {render_actions()}
@@ -1844,22 +1815,58 @@ where
                 </div>
             </div>
 
-            <div class="flex shrink-0 flex-wrap items-center justify-between gap-3">
-                <span class="text-sm text-base-content/75">
-                    {move || {
-                        let total = total_rows.get();
-                        if total == 0 {
-                            return String::new();
-                        }
-                        let page_size = page_capacity.get();
-                        let (start, end) = row_range(current_page.get(), page_size, total);
-                        texts
-                            .with(|texts| texts.row_range.clone())
-                            .replace("{start}", &start.to_string())
-                            .replace("{end}", &end.to_string())
-                            .replace("{total}", &total.to_string())
-                    }}
-                </span>
+            <div
+                class="flex shrink-0 flex-wrap items-center justify-between gap-3"
+                data-entity-table-footer="true"
+            >
+                <div class="flex min-w-0 flex-wrap items-center gap-3">
+                    <label class="flex min-w-0 max-w-full flex-wrap items-center gap-2 text-sm text-base-content/75">
+                        <span class="min-w-0 break-words">{move || texts.with(|texts| texts.rows_per_page.clone())}</span>
+                        <Select
+                            class="select-sm w-20 shrink-0"
+                            id=page_size_select_id
+                            name=page_size_select_id
+                            label=Signal::derive(move || {
+                                Some(texts.with(|texts| texts.rows_per_page.clone()))
+                            })
+                            value=Signal::derive(move || {
+                                preferences.with(|preferences| preferences.page_size.to_string())
+                            })
+                            node_ref=page_size_select
+                            on_change=Callback::new(move |value: String| {
+                                apply_page_size_change(
+                                    preferences,
+                                    current_page,
+                                    &value,
+                                    move |supplied_value| {
+                                        if let Some(select) = page_size_select.get() {
+                                            select.set_value(&supplied_value);
+                                        }
+                                    },
+                                );
+                            })
+                        >
+                            {ENTITY_PAGE_SIZE_CHOICES.into_iter().map(|page_size| view! {
+                                <option value=page_size.to_string()>{page_size}</option>
+                            }).collect_view()}
+                        </Select>
+                    </label>
+                    <span class="text-sm text-base-content/75">
+                        {move || {
+                            let total = total_rows.get();
+                            if total == 0 {
+                                return String::new();
+                            }
+                            let page_size = page_capacity.get();
+                            let (start, end) = row_range(current_page.get(), page_size, total);
+                            texts
+                                .with(|texts| texts.row_range.clone())
+                                .replace("{start}", &start.to_string())
+                                .replace("{end}", &end.to_string())
+                                .replace("{total}", &total.to_string())
+                        }}
+                    </span>
+                </div>
                 <Pagination class="max-w-full flex flex-wrap items-center justify-end gap-1">
                     <Button
                         class="join-item btn-sm"

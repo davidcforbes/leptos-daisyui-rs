@@ -3811,6 +3811,99 @@ async fn page_size_select_gets_unique_identity_without_an_override_and_honors_on
     assert_no_browser_errors(&harness, "EntityTable page-size select identity").await;
 }
 
+/// ldui-z0n1: the rows-per-page control must render in the footer row,
+/// immediately before the row-range text, and never in the top toolbar --
+/// toolbar actions and the column chooser stay above the table; pagination
+/// metadata (rows-per-page, row range, Previous/page/Next) stays below it.
+/// This proves placement and DOM order by position/containment, not by
+/// class names. The select's id/name derivation, controlled preference
+/// callback, and localized copy are unchanged and are covered separately by
+/// `page_size_select_gets_unique_identity_without_an_override_and_honors_one`
+/// and `controlled_preferences_reorder_columns_and_compose_sort_clauses`.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
+async fn rows_per_page_renders_in_footer_before_row_range_and_never_in_toolbar() {
+    let harness = harness_at("/components/client-snapshot-list").await;
+    wait_for_selector(&harness, "[data-entity-table-grid] tbody tr").await;
+    begin_browser_error_capture(&harness).await;
+
+    let layout = eval_json(
+        &harness,
+        r#"(() => {
+            const root = document.querySelector('[data-entity-table]');
+            const toolbar = root.querySelector('[data-entity-table-toolbar]');
+            const footer = root.querySelector('[data-entity-table-footer]');
+            const group = footer.firstElementChild;
+            const groupChildren = Array.from(group.children);
+            const label = groupChildren[0];
+            const rowRangeSpan = groupChildren[1];
+            const pagination = footer.lastElementChild;
+            const select = label.querySelector('select');
+            return {
+                toolbarHasSelect: toolbar.querySelector('select') !== null,
+                toolbarHasLabel: toolbar.querySelector('label') !== null,
+                groupChildCount: groupChildren.length,
+                labelTag: label.tagName.toLowerCase(),
+                rowRangeTag: rowRangeSpan.tagName.toLowerCase(),
+                labelWrapsSelect: select !== null && label.contains(select),
+                rowRangeText: rowRangeSpan.textContent.trim(),
+                paginationHasJoinClass: pagination.classList.contains('join'),
+                paginationIsAfterGroup: footer.children[1] === pagination,
+            };
+        })()"#,
+    )
+    .await;
+
+    assert_eq!(
+        layout["toolbarHasSelect"],
+        json!(false),
+        "the rows-per-page select must not render in the top toolbar: {layout}"
+    );
+    assert_eq!(
+        layout["toolbarHasLabel"],
+        json!(false),
+        "no rows-per-page label may remain in the top toolbar: {layout}"
+    );
+    assert_eq!(
+        layout["groupChildCount"],
+        json!(2),
+        "the footer's leading group must contain exactly the rows-per-page label and the row-range text: {layout}"
+    );
+    assert_eq!(
+        layout["labelTag"],
+        json!("label"),
+        "the first footer-group child must be the rows-per-page label: {layout}"
+    );
+    assert_eq!(
+        layout["rowRangeTag"],
+        json!("span"),
+        "the second footer-group child must be the row-range text: {layout}"
+    );
+    assert_eq!(
+        layout["labelWrapsSelect"],
+        json!(true),
+        "the rows-per-page label must still wrap its select for label[for] association: {layout}"
+    );
+    assert!(
+        layout["rowRangeText"]
+            .as_str()
+            .is_some_and(|text| text.contains(" of ")),
+        "the second footer-group child must be the row-range text: {layout}"
+    );
+    assert_eq!(
+        layout["paginationHasJoinClass"],
+        json!(true),
+        "the footer's second top-level child must be the Pagination join: {layout}"
+    );
+    assert_eq!(
+        layout["paginationIsAfterGroup"],
+        json!(true),
+        "pagination must follow the rows-per-page/row-range group in the footer: {layout}"
+    );
+
+    assert_no_browser_errors(&harness, "EntityTable footer rows-per-page placement").await;
+}
+
 /// ldui-ibjk: at a 390px viewport `EntityTable` switches to its compact
 /// single-column row renderer, but the desktop `<colgroup>` (and the
 /// `min-width` it drives on the scroll-region content wrapper) used to keep

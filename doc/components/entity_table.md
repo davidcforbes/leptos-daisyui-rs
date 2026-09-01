@@ -53,8 +53,8 @@ erase the compile-time distinction the snapshot component exists to provide.
 | `focus_scope` | Optional opaque dataset/access generation; recovery never crosses a change. |
 | `preference_ownership` | Controlled or uncontrolled preference policy. |
 | `storage_key` | Legacy local-storage compatibility prop; mutually exclusive with `preference_ownership`. |
-| `page_size_control_id` | Optional stable caller-owned DOM ID for the rows-per-page select. |
-| `toolbar_actions` | Optional caller-rendered table utilities placed after page size and immediately before the framework-owned column chooser. |
+| `page_size_control_id` | Optional stable caller-owned DOM ID for the rows-per-page select, which renders in the footer row (see below). |
+| `toolbar_actions` | Optional caller-rendered table utilities placed before the framework-owned column chooser, in the top toolbar. |
 | `on_display_projection` | Optional callback receiving one atomic read-only snapshot of ordered visible columns plus sorted/filtered rows and current-page bounds. |
 | `projection_action_columns` | `Exclude` by default; set `EntityTableActionColumnPolicy::Include` only when action-copy intentionally belongs in the projection. |
 | `column_chooser_trigger` | Reactive `Text` (default) or compact framework-owned `Icon` presentation; the localized accessible name is unchanged. |
@@ -67,6 +67,20 @@ For the canonical page, pass a state-minted
 page supplies its filtered rows as `data` and the complete displayed snapshot
 as `source_data`. Standalone tables should preserve the same distinction and
 give each page-size control a collision-safe `page_size_control_id`.
+
+## Toolbar and footer placement (ldui-z0n1)
+
+`EntityTable` follows the established desktop table grammar: toolbar actions
+and the column chooser render **above** the table; pagination metadata
+renders **below** it. The rows-per-page control lives in the footer, not the
+top toolbar -- the footer's DOM order is Rows per page, then the
+`{start}-{end} of {total}` row-range text, then Previous/page-number/Next.
+The top toolbar (`toolbar_actions` and the column chooser) never contains the
+page-size control. This is purely a placement move: the page-size select's
+`id`/`name` derivation (`page_size_control_id`, or the process-unique
+default from `next_entity_page_size_id` when omitted, ldui-kl55), the
+`label[for]` association, the controlled/uncontrolled preference callback,
+and localized `EntityTableTexts::rows_per_page` copy are all unchanged.
 
 `toolbar_actions` is presentation-only composition. The table owns the
 wrapping toolbar and chooser placement; the caller owns action labels and
