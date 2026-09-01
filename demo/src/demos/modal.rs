@@ -8,6 +8,29 @@ pub fn ModalDemo() -> impl IntoView {
     let (restore_open, set_restore_open) = signal(false);
     let (restore_query, set_restore_query) = signal(String::new());
 
+    // Controlled-close fixture (ldui-e0fw). `accept` lets the browser suite
+    // drive both halves of the contract from one dialog: accepting a
+    // proposal must close it exactly once, declining must leave it open with
+    // the accepted state untouched.
+    let (controlled_open, set_controlled_open) = signal(false);
+    let (accept, set_accept) = signal(true);
+    let (last_cause, set_last_cause) = signal(String::new());
+    let (proposal_count, set_proposal_count) = signal(0usize);
+
+    let on_close_request = Callback::new(move |proposal: ModalCloseProposal| {
+        set_last_cause.set(proposal.cause.as_str().to_string());
+        set_proposal_count.update(|count| *count += 1);
+        crate::debug_state::set("modal.controlled.last_cause", proposal.cause.as_str());
+        crate::debug_state::set(
+            "modal.controlled.proposal_count",
+            proposal_count.get_untracked(),
+        );
+        if accept.get_untracked() {
+            set_controlled_open.set(false);
+            crate::debug_state::set("modal.controlled.open", false);
+        }
+    });
+
     view! {
         <ContentLayout
             title="Modal"
@@ -57,8 +80,110 @@ pub fn ModalDemo() -> impl IntoView {
                 </Modal>
             </Section>
 
+            <Section title="Controlled close proposals">
+                <p class="text-sm text-base-content/75 mb-4">
+                    "Escape, the backdrop, and an in-content "
+                    <code>"method=\"dialog\""</code>
+                    " form each emit a typed proposal instead of closing the dialog behind the owner's back. The owner decides."
+                </p>
+
+                <div class="flex flex-wrap items-center gap-3 mb-4">
+                    <Button
+                        color=ButtonColor::Primary
+                        attr:data-testid="controlled-modal-trigger"
+                        on:click=move |_| {
+                            set_controlled_open.set(true);
+                            crate::debug_state::set("modal.controlled.open", true);
+                        }
+                    >
+                        "Open controlled modal"
+                    </Button>
+
+                    <button
+                        class="btn btn-sm"
+                        data-testid="controlled-modal-accept-toggle"
+                        on:click=move |_| set_accept.update(|value| *value = !*value)
+                    >
+                        {move || {
+                            if accept.get() {
+                                "Accepting proposals"
+                            } else {
+                                "Declining proposals"
+                            }
+                        }}
+                    </button>
+                </div>
+
+                <dl class="flex flex-wrap gap-6 text-sm">
+                    <div class="flex gap-2">
+                        <dt class="text-base-content/75">"Accepted open state:"</dt>
+                        <dd data-testid="controlled-modal-open">
+                            {move || if controlled_open.get() { "true" } else { "false" }}
+                        </dd>
+                    </div>
+                    <div class="flex gap-2">
+                        <dt class="text-base-content/75">"Proposals received:"</dt>
+                        <dd data-testid="controlled-modal-proposal-count">
+                            {move || proposal_count.get()}
+                        </dd>
+                    </div>
+                    <div class="flex gap-2">
+                        <dt class="text-base-content/75">"Last cause:"</dt>
+                        <dd data-testid="controlled-modal-last-cause">
+                            {move || {
+                                let cause = last_cause.get();
+                                if cause.is_empty() { "none".to_string() } else { cause }
+                            }}
+                        </dd>
+                    </div>
+                    <div class="flex gap-2">
+                        <dt class="text-base-content/75">"Policy:"</dt>
+                        <dd data-testid="controlled-modal-policy">
+                            {move || if accept.get() { "accept" } else { "decline" }}
+                        </dd>
+                    </div>
+                </dl>
+
+                <Modal
+                    open=controlled_open
+                    backdrop=true
+                    labelled_by="controlled-modal-title"
+                    described_by="controlled-modal-desc"
+                    on_close_request=on_close_request
+                >
+                    <ModalBox attr:data-testid="controlled-modal-box">
+                        <h3 class="text-lg font-bold" id="controlled-modal-title">
+                            "Reassign matter"
+                        </h3>
+                        <p class="py-4" id="controlled-modal-desc">
+                            "Press Escape, click the backdrop, or use either button below."
+                        </p>
+                        <ModalAction>
+                            <form method="dialog">
+                                <Button
+                                    style=ButtonStyle::Ghost
+                                    attr:data-testid="controlled-modal-dialog-form-close"
+                                >
+                                    "Dialog-form close"
+                                </Button>
+                            </form>
+                            <Button
+                                color=ButtonColor::Primary
+                                attr:data-testid="controlled-modal-programmatic-close"
+                                on:click=move |_| {
+                                    set_controlled_open.set(false);
+                                    crate::debug_state::set("modal.controlled.open", false);
+                                }
+                            >
+                                "Programmatic close"
+                            </Button>
+                        </ModalAction>
+                    </ModalBox>
+                </Modal>
+            </Section>
+
             <Section title="Find & Restore recipe">
-                <p class="text-sm opacity-70 mb-4">
+                <p class="text-sm text-base-content/75 mb-4">
                     <code>"ModalInfoRow"</code>", " <code>"ModalSearchRow"</code>
                     ", and " <code>"ModalStatusRow"</code>
                     " formalise the title \u{2192} info \u{2192} search \u{2192} status \u{2192} body \u{2192} actions pattern."

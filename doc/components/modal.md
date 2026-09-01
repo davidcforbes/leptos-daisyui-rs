@@ -11,11 +11,96 @@ The Modal component creates an overlay dialog that can display forms, confirmati
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|
 | `open` | `Signal<bool>` | `false` | Whether the modal is open |
-| `backdrop_close` | `Signal<bool>` | `true` | Whether clicking backdrop closes modal |
-| `responsive` | `Signal<bool>` | `false` | Whether modal is responsive on mobile |
+| `backdrop` | `Signal<bool>` | `false` | Render a `ModalBackdrop` for click-to-close |
+| `on_close_request` | `Option<Callback<ModalCloseProposal>>` | `None` | Controlled-close proposal sink. Supplying it makes `open` the only thing that can close the dialog — see below |
+| `texts` | `Signal<ModalTexts>` | default | Localized copy for the modal chrome (the backdrop's close control) |
+| `label` | `MaybeProp<String>` | - | Accessible name (`aria-label`) |
+| `labelled_by` | `MaybeProp<String>` | - | Id of the visible heading naming the dialog (`aria-labelledby`); takes precedence over `label` |
+| `described_by` | `MaybeProp<String>` | - | Id of the describing element (`aria-describedby`) |
 | `class` | `&'static str` | `""` | Additional CSS classes |
-| `on_close` | `Option<Callback>` | - | Callback when modal should close |
+| `node_ref` | `NodeRef<Dialog>` | - | Reference to the `<dialog>` element |
 | `children` | `Children` | - | Modal content |
+
+## Controlled close (`ldui-e0fw`)
+
+A native `<dialog>` can close itself, and it does not tell anyone in a way a
+Leptos owner can see:
+
+| Gesture | `cancel` fires? | `close` fires? |
+|---|---|---|
+| Escape | **yes** (cancelable) | yes, unless `cancel` was `preventDefault`ed |
+| `ModalBackdrop` activation (a `method="dialog"` form submit) | **no** | yes |
+| An in-content `<form method="dialog">` submit | **no** | yes |
+| `dialog.close()` — what this component calls when `open` goes false | no | yes |
+
+That table is the whole defect. `cancel`-based workarounds catch Escape only,
+and `close` cannot tell a user dismissal from the owner's own programmatic
+close. So a caller's `open` signal keeps reading `true` over a shut dialog;
+a later `true`-to-`true` change is not a change and cannot reopen it, and
+scoped feedback is never cleared.
+
+Supplying `on_close_request` switches the dialog into **controlled** mode
+(observable as `data-modal-close-mode="controlled"` on the `<dialog>`),
+where the caller's signal is the only thing that ever closes it:
+
+- Escape is vetoed on `cancel` and re-emitted as `ModalCloseCause::Escape`.
+- A backdrop or in-content dialog-form submit is vetoed on `submit` (which
+  bubbles to the dialog) and re-emitted as `ModalCloseCause::Backdrop` or
+  `ModalCloseCause::DialogForm`. A form with any other `method` submits
+  untouched, so a real search or login form inside the modal still works.
+- **Accepting** a proposal means setting `open` to `false`. The component
+  then calls the dialog's own `close()` exactly once.
+- **Ignoring or rejecting** a proposal leaves the dialog open and the
+  accepted state untouched. Nothing optimistic was written, so there is
+  nothing to reconcile — the dialog never enters a state the caller did not
+  ask for.
+- A programmatic `open = false` emits **no** proposal. Proposals only ever
+  originate from a user gesture.
+
+Without `on_close_request` nothing changes: Escape and the backdrop close
+natively and existing `on:close` call sites behave exactly as before.
+
+```rust
+let (open, set_open) = signal(false);
+let (feedback, set_feedback) = signal(None::<String>);
+
+view! {
+    <Modal
+        open=open
+        backdrop=true
+        labelled_by="reassign-title"
+        on_close_request=Callback::new(move |proposal: ModalCloseProposal| {
+            // A dismissal drops scoped feedback; a deliberate dialog-form
+            // confirm keeps it.
+            if proposal.cause != ModalCloseCause::DialogForm {
+                set_feedback.set(None);
+            }
+            set_open.set(false);
+        })
+    >
+        <ModalBox>
+            <h3 id="reassign-title">"Reassign matter"</h3>
+        </ModalBox>
+    </Modal>
+}
+```
+
+### Focus return
+
+Trigger-focus restoration is the **platform's**, not this component's. A
+modal opened with `show_modal()` records the previously focused element and
+restores focus to it when `close()` runs. This component's only job is to
+make sure every close really does go through `close()` — never through a
+removed or hidden dialog — which is exactly what controlled mode guarantees.
+Owning focus here would mean fighting that machinery and would break the
+common case where the trigger has been re-rendered. A caller that wants
+focus somewhere else moves it from `on_close_request`.
+
+### Drift repair
+
+If a `close` ever does reach a controlled dialog while the accepted target is
+still `true`, the component re-shows it rather than reporting the
+inconsistency. The accepted state is the truth; the DOM is made to match it.
 
 ## Subcomponents
 
@@ -34,6 +119,16 @@ Action area for buttons and interactive elements, typically at the bottom.
 |------|------|---------|-------------|
 | `class` | `&'static str` | `""` | Additional CSS classes |
 | `children` | `Children` | - | Action elements |
+
+### ModalBackdrop
+daisyUI's click-to-close backdrop: a `method="dialog"` form covering the area
+outside the modal box. Carries `data-modal-backdrop="true"` as a stable hook.
+
+| Prop | Type | Default | Description |
+|------|------|---------|-------------|
+| `class` | `&'static str` | `""` | Additional CSS classes |
+| `texts` | `Signal<ModalTexts>` | default | Label and accessible name of the close control (`"close"`) |
+| `node_ref` | `NodeRef<Form>` | - | Reference to the `<form>` element |
 
 ## Examples
 
@@ -458,11 +553,13 @@ fn MultiStepModal() -> impl IntoView {
 
 ## Accessibility
 
-- Proper focus management when modal opens/closes
-- Escape key support for closing modal
-- ARIA attributes for screen readers
-- Focus trap within modal content
-- Backdrop click to close (configurable)
+- Native `<dialog>` `show_modal()` focus trap and focus return to the trigger
+- Escape key support for closing the modal — vetoed and re-proposed in
+  controlled mode, so the dialog and the owner's state never disagree
+- Name every dialog: `labelled_by` (preferred, points at the visible heading)
+  or `label`. Without either, `aria-label="Modal"` is the floor, not the goal
+- `described_by` for the summary paragraph under the heading
+- Backdrop click to close (configurable via `backdrop`)
 
 ## Best Practices
 
@@ -472,4 +569,7 @@ fn MultiStepModal() -> impl IntoView {
 4. Disable backdrop close for critical operations
 5. Show loading states for async operations
 6. Use confirmation patterns for destructive actions
+7. When the caller owns `open`, wire `on_close_request` — do not hand-roll
+   `on:cancel` plumbing, and never assume Escape or the backdrop left `open`
+   alone
 7. Keep modal content focused and concise
