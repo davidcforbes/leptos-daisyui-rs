@@ -1,8 +1,9 @@
 use leptos::prelude::*;
 use leptos_daisyui_rs::components::{
     BadgeColor, Button, EntityBadgePresentation, EntityColumn, EntityColumnChooserTrigger,
-    EntityColumnFilter, EntityIconColor, EntityIconPresentation, EntityNullOrder, EntityPageSize,
-    EntityRowAction, EntityRowEmphasis, EntityTable, EntityTableDisplayProjection,
+    EntityColumnFilter, EntityColumnFilterOption, EntityGroupCollapseProposal, EntityIconColor,
+    EntityIconPresentation, EntityNullOrder, EntityPageSize, EntityRowAction, EntityRowEmphasis,
+    EntityRowGroup, EntityRowGrouping, EntityTable, EntityTableDisplayProjection,
     EntityTableMultiSelection, EntityTablePreferenceOwnership, EntityTablePreferencePersistence,
     EntityTableProjectionScope, EntityTableSelection, EntityTableSelectionCause,
     EntityTableSelectionProposal, EntityTableTexts, EntityTableViewportFit,
@@ -1579,6 +1580,233 @@ pub fn EntityTableMultiSelectionFixture() -> impl IntoView {
                     }),
                 )
                 attr:id="entity-multi-selection-table"
+            />
+        </section>
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct CoordinatorActivityRow {
+    id: String,
+    coordinator_id: String,
+    kind: String,
+    measure: String,
+    value: String,
+}
+
+fn coordinator_activity_rows() -> Rc<Vec<CoordinatorActivityRow>> {
+    let coordinators = [("co-1", 1_u32), ("co-2", 2), ("co-3", 3)];
+    let kinds = ["Task", "Goal", "Actual"];
+    Rc::new(
+        coordinators
+            .into_iter()
+            .flat_map(|(coordinator_id, seed)| {
+                kinds.into_iter().enumerate().flat_map(move |(slot, kind)| {
+                    (1..=2).map(move |index| CoordinatorActivityRow {
+                        id: format!("{coordinator_id}-{kind}-{index}"),
+                        coordinator_id: coordinator_id.to_owned(),
+                        kind: kind.to_owned(),
+                        measure: format!("Intake week {index}"),
+                        value: (seed * 10 + slot as u32 * 3 + index).to_string(),
+                    })
+                })
+            })
+            .collect(),
+    )
+}
+
+fn coordinator_activity_columns() -> Vec<EntityColumn<CoordinatorActivityRow>> {
+    vec![
+        // The coordinator is DELIBERATELY not a column. Repeating it in 459
+        // rows is the defect ldui-iyfa removes; the heading carries it once
+        // and the display projection carries it into every export.
+        EntityColumn::text("kind", "Activity", |row: &CoordinatorActivityRow| {
+            row.kind.clone()
+        })
+        .required()
+        .with_min_width(160),
+        EntityColumn::text("measure", "Measure", |row: &CoordinatorActivityRow| {
+            row.measure.clone()
+        })
+        .with_min_width(220),
+        EntityColumn::new("value", "Value", |row: &CoordinatorActivityRow| {
+            row.value.clone()
+        })
+        .sortable_by_key(|row: &CoordinatorActivityRow| {
+            row.value.parse::<u32>().unwrap_or_default()
+        })
+        .numeric()
+        .with_width(120),
+    ]
+}
+
+/// Controlled accessible row groups over a client snapshot (`ldui-iyfa`).
+///
+/// Three coordinator groups, each holding repeated Task / Goal / Actual rows,
+/// under ONE global column header and one controlled filter row -- the shape
+/// Office Coordinator Activity needs and could not previously express without
+/// repeating the coordinator name in every row or forking one table per
+/// coordinator.
+///
+/// The fixture wires the whole contract so a browser lane can prove it:
+/// controlled collapse, a child-row filter that empties a group, controlled
+/// multi-selection (headings must never join the displayed-page population),
+/// and a display-projection readout showing that the exported rows still carry
+/// the group column and the stable group key.
+#[component]
+pub fn EntityTableGroupingFixture() -> impl IntoView {
+    let source = coordinator_activity_rows();
+    let kind_filter = RwSignal::new(String::new());
+    let collapsed = RwSignal::new(BTreeSet::<String>::new());
+    let collapse_proposals = RwSignal::new(0_u32);
+    let accepted = RwSignal::new(BTreeSet::<String>::new());
+    let label_suffix = RwSignal::new(false);
+    let exported_group_cells = RwSignal::new(String::new());
+    let exported_group_keys = RwSignal::new(String::new());
+
+    let filtered = {
+        let source = Rc::clone(&source);
+        Signal::derive_local(move || {
+            let kind = kind_filter.get();
+            if kind.is_empty() {
+                return Rc::clone(&source);
+            }
+            Rc::new(
+                source
+                    .iter()
+                    .filter(|row| row.kind == kind)
+                    .cloned()
+                    .collect::<Vec<_>>(),
+            )
+        })
+    };
+
+    // Labels are display copy and change independently of the keys, which is
+    // what the fixture's "Relabel groups" control proves: nothing repartitions,
+    // nothing reorders, and no collapse flag moves.
+    let groups = Signal::derive_local(move || {
+        let suffix = if label_suffix.get() { " (Field)" } else { "" };
+        vec![
+            EntityRowGroup::new("co-1", format!("Ana Ruiz{suffix}")).with_meta("Weekly cadence"),
+            EntityRowGroup::new("co-2", format!("Beto Cruz{suffix}")),
+            EntityRowGroup::new("co-3", format!("Cami Lopez{suffix}")),
+        ]
+    });
+
+    let filters = vec![EntityColumnFilter::select(
+        "kind",
+        "entity-grouping-kind-filter",
+        Signal::stored("Activity".to_owned()),
+        Signal::derive(move || kind_filter.get()),
+        Signal::stored("All activities".to_owned()),
+        Signal::stored(vec![
+            EntityColumnFilterOption::new("Task", "Task"),
+            EntityColumnFilterOption::new("Goal", "Goal"),
+            EntityColumnFilterOption::new("Actual", "Actual"),
+        ]),
+        Callback::new(move |value: String| kind_filter.set(value)),
+    )];
+
+    view! {
+        <section
+            id="entity-table-grouping-fixture"
+            class="mx-auto max-w-4xl space-y-3 bg-base-100 p-4"
+        >
+            <h1 class="ld-text-display font-semibold">"Coordinator activity groups"</h1>
+            <p class="ld-text-body text-base-content/75">
+                "Three coordinator groups over one global column header and one filter row. The coordinator name is never a data cell."
+            </p>
+            <div class="flex flex-wrap items-center gap-3 text-sm">
+                <span>
+                    "Collapsed: "
+                    <code data-testid="entity-grouping-collapsed">
+                        {move || {
+                            let keys = collapsed
+                                .with(|keys| keys.iter().cloned().collect::<Vec<_>>())
+                                .join(",");
+                            if keys.is_empty() { "(none)".to_owned() } else { keys }
+                        }}
+                    </code>
+                </span>
+                <span>
+                    "Collapse proposals: "
+                    <code data-testid="entity-grouping-collapse-proposals">
+                        {move || collapse_proposals.get().to_string()}
+                    </code>
+                </span>
+                <span>
+                    "Selected: "
+                    <code data-testid="entity-grouping-selected-count">
+                        {move || accepted.with(BTreeSet::len).to_string()}
+                    </code>
+                </span>
+                <span>
+                    "Exported group column: "
+                    <code data-testid="entity-grouping-export-cells">
+                        {move || exported_group_cells.get()}
+                    </code>
+                </span>
+                <span>
+                    "Exported group keys: "
+                    <code data-testid="entity-grouping-export-keys">
+                        {move || exported_group_keys.get()}
+                    </code>
+                </span>
+            </div>
+            <div class="flex flex-wrap gap-2">
+                <Button
+                    on:click=move |_| label_suffix.update(|suffix| *suffix = !*suffix)
+                    attr:data-testid="entity-grouping-relabel"
+                >
+                    "Relabel groups"
+                </Button>
+                <Button
+                    on:click=move |_| collapsed.set(BTreeSet::new())
+                    attr:data-testid="entity-grouping-expand-all"
+                >
+                    "Expand all groups"
+                </Button>
+            </div>
+            <EntityTable
+                data=filtered
+                columns=coordinator_activity_columns()
+                row_key=Rc::new(|row: &CoordinatorActivityRow| row.id.clone())
+                dataset_identity="entity-table-grouping-fixture"
+                page_reset_key=Signal::derive(move || kind_filter.get())
+                column_filters=filters
+                row_grouping=EntityRowGrouping::controlled(
+                    Rc::new(|row: &CoordinatorActivityRow| row.coordinator_id.clone()),
+                    groups,
+                )
+                    .collapsible(
+                        Signal::from(collapsed),
+                        Callback::new(move |proposal: EntityGroupCollapseProposal| {
+                            collapse_proposals.update(|count| *count += 1);
+                            collapsed.set(proposal.keys);
+                        }),
+                    )
+                multi_selection=EntityTableMultiSelection::controlled(
+                    accepted.into(),
+                    Callback::new(move |proposal: EntityTableSelectionProposal| {
+                        accepted.set(proposal.keys);
+                    }),
+                )
+                on_display_projection=Callback::new(move |projection: EntityTableDisplayProjection| {
+                    let rows = projection.rows(EntityTableProjectionScope::AllFiltered);
+                    exported_group_cells.set(
+                        rows.iter()
+                            .filter_map(|row| row.cells.first().cloned())
+                            .collect::<Vec<_>>()
+                            .join("|"),
+                    );
+                    exported_group_keys.set(
+                        rows.iter()
+                            .filter_map(|row| row.group_key.clone())
+                            .collect::<Vec<_>>()
+                            .join("|"),
+                    );
+                })
+                attr:id="entity-grouping-table"
             />
         </section>
     }

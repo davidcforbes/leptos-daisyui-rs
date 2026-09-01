@@ -1,5 +1,6 @@
 //! Pure ordering, pagination, visibility, and resize behavior.
 
+use super::grouping::ENTITY_GROUP_COLUMN_ID;
 use super::types::{
     EntityColumn, EntityComparator, EntityPageSize, EntityPageSizeIntent,
     EntityPreparedSortComparator, EntitySort, EntitySortDirection, EntityTableActionColumnPolicy,
@@ -244,7 +245,23 @@ pub fn entity_table_display_projection<T>(
         effective_page_size,
         row_key,
         action_columns,
+        None,
     )
+}
+
+/// Group identity carried into a display/export projection (`ldui-iyfa`).
+///
+/// The visual table stops repeating the group label in every row, so the
+/// projection has to put it back: a leading synthetic column carries the
+/// label, and [`EntityTableDisplayRow::group_key`] carries the stable
+/// identity. Both are absent on an ungrouped table.
+pub(crate) struct EntityProjectionGrouping<'a> {
+    /// Group key of each entry in `indices`, parallel to it.
+    pub group_keys: &'a [String],
+    /// Resolves a group key to its display label.
+    pub label_of: &'a dyn Fn(&str) -> String,
+    /// Localized header of the synthetic group column.
+    pub column_header: &'a str,
 }
 
 // Keeping the already-derived index window explicit makes this pure helper
@@ -259,6 +276,7 @@ pub(crate) fn entity_table_display_projection_from_indices<T>(
     effective_page_size: usize,
     row_key: &dyn Fn(&T) -> String,
     action_columns: EntityTableActionColumnPolicy,
+    grouping: Option<EntityProjectionGrouping<'_>>,
 ) -> EntityTableDisplayProjection {
     let projected_columns = ordered_columns(preferences, columns)
         .into_iter()
@@ -267,18 +285,42 @@ pub(crate) fn entity_table_display_projection_from_indices<T>(
             !column.is_action || action_columns == EntityTableActionColumnPolicy::Include
         })
         .collect::<Vec<_>>();
-    let descriptors = projected_columns
-        .iter()
-        .map(|column| EntityTableDisplayColumn::new(column.id, &column.header, column.is_action))
+    // Prepended rather than appended so the group identity reads as the
+    // outermost fact of the record, the same way the heading reads above the
+    // rows it heads.
+    let descriptors = grouping
+        .as_ref()
+        .map(|grouping| {
+            EntityTableDisplayColumn::new(ENTITY_GROUP_COLUMN_ID, grouping.column_header, false)
+        })
+        .into_iter()
+        .chain(projected_columns.iter().map(|column| {
+            EntityTableDisplayColumn::new(column.id, &column.header, column.is_action)
+        }))
         .collect::<Vec<_>>();
     let projected_rows = indices
         .iter()
-        .map(|index| {
+        .enumerate()
+        .map(|(position, index)| {
             let row = &rows[*index];
-            EntityTableDisplayRow::new(
+            let group_key = grouping
+                .as_ref()
+                .and_then(|grouping| grouping.group_keys.get(position))
+                .cloned();
+            let group_cell = grouping
+                .as_ref()
+                .zip(group_key.as_ref())
+                .map(|(grouping, key)| (grouping.label_of)(key));
+            let projected = EntityTableDisplayRow::new(
                 row_key(row),
-                projected_columns.iter().map(|column| (column.text)(row)),
-            )
+                group_cell
+                    .into_iter()
+                    .chain(projected_columns.iter().map(|column| (column.text)(row))),
+            );
+            match group_key {
+                Some(key) => projected.with_group_key(key),
+                None => projected,
+            }
         })
         .collect::<Vec<_>>();
     let bounds = page_bounds(current_page, effective_page_size, projected_rows.len());

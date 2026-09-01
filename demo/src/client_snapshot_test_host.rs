@@ -17,7 +17,7 @@ use leptos::prelude::*;
 use leptos_daisyui_rs::test_mode;
 use leptos_daisyui_rs::tokens::{UiAnimationsPreamble, UiTokensPreamble};
 use snapshot_table_page::{
-    EntityTableEmphasisFixture, EntityTableMultiSelectionFixture,
+    EntityTableEmphasisFixture, EntityTableGroupingFixture, EntityTableMultiSelectionFixture,
     EntityTablePageSizeIdentityFixture, EntityTablePresentationFixture,
     EntityTableSelectionFixture, EntityTableViewportFitFixture, SnapshotTablePageControlsFixture,
     SnapshotTablePageFixture,
@@ -66,11 +66,16 @@ fn main() {
         let emphasis_fixture = web_sys::window()
             .and_then(|window| window.location().pathname().ok())
             .is_some_and(|path| path.ends_with("/entity-table-emphasis"));
+        let grouping_fixture = web_sys::window()
+            .and_then(|window| window.location().pathname().ok())
+            .is_some_and(|path| path.ends_with("/entity-table-grouping"));
         view! {
             <UiTokensPreamble />
             <UiAnimationsPreamble />
             <main class="min-h-screen bg-base-200 p-4 sm:p-6">
-                {if multi_selection_fixture {
+                {if grouping_fixture {
+                    view! { <EntityTableGroupingFixture /> }.into_any()
+                } else if multi_selection_fixture {
                     view! { <EntityTableMultiSelectionFixture /> }.into_any()
                 } else if emphasis_fixture {
                     view! { <EntityTableEmphasisFixture /> }.into_any()

@@ -227,6 +227,15 @@ pub struct EntityTableDisplayRow {
     pub key: String,
     /// Canonical full text aligned with the projection's ordered columns.
     pub cells: Vec<String>,
+    /// Stable group identity when the table is grouped (`ldui-iyfa`).
+    ///
+    /// This is the group KEY, never the display label -- the label already
+    /// travels as the leading synthetic group cell in `cells`, so an export
+    /// carries both the human column and the identity a re-import can join
+    /// on. Absent on an ungrouped table, which keeps every pre-grouping
+    /// serialized projection byte-identical.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_key: Option<String>,
 }
 
 impl EntityTableDisplayRow {
@@ -239,7 +248,14 @@ impl EntityTableDisplayRow {
         Self {
             key: key.into(),
             cells: cells.into_iter().map(Into::into).collect(),
+            group_key: None,
         }
+    }
+
+    /// Stamps the row's stable group identity.
+    pub fn with_group_key(mut self, group_key: impl Into<String>) -> Self {
+        self.group_key = Some(group_key.into());
+        self
     }
 }
 

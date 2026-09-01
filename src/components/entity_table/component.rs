@@ -4,13 +4,20 @@ use super::emphasis::{
     EntityRowEmphasis, EntityRowEmphasisClassifier, entity_row_emphasis_cell_class,
     entity_row_emphasis_for, entity_row_emphasis_row_class,
 };
+use super::grouping::{
+    EntityGroupActions, EntityGroupCollapseCause, EntityGroupCollapseProposal, EntityGroupKey,
+    EntityGroupOrder, EntityGroupRun, EntityGroupTexts, EntityGroupedSection, EntityRowGroup,
+    EntityRowGrouping, entity_group_header_colspan, entity_group_label, entity_group_meta,
+    entity_grouped_order, entity_grouped_page_sections, entity_previous_group_key,
+    propose_entity_group_collapse,
+};
 use super::model::{
     ENTITY_PAGE_SIZE_CHOICES, EntityColumnMove, EntityFocusRecord, EntityFocusTarget,
-    SortedIndexCache, emit_normalized_preference_change,
+    EntityProjectionGrouping, SortedIndexCache, emit_normalized_preference_change,
     entity_table_display_projection_from_indices, focus_target, move_column, next_sort,
     next_sort_additive, normalize_preferences, ordered_columns, page_after_dataset_change,
     page_after_row_delta, reset_columns, reset_sort, resolve_entity_page_size, set_preferred_width,
-    sorted_indices, toggle_hidden_column,
+    toggle_hidden_column,
 };
 use super::multi_selection::{
     EntityTableMultiSelection, EntityTableSelectionCause, EntityTableSelectionProposal,
@@ -151,6 +158,24 @@ pub fn EntityRowAction(
             {children()}
         </span>
     }
+}
+
+/// The rows one render displays, in the order it displays them.
+///
+/// Built once per dependency change and shared by `Rc`. On an ungrouped table
+/// `indices` is the sort cache's own permutation (no copy) and both grouping
+/// vectors are empty, so nothing about grouping costs an ungrouped table
+/// anything.
+struct EntityDisplayedOrder {
+    /// Displayed source-row indices, sorted, then grouped, then
+    /// collapse-filtered.
+    indices: Rc<Vec<usize>>,
+    /// Group key of each displayed index, parallel to `indices`. Empty when
+    /// the table is not grouped.
+    group_keys: Vec<String>,
+    /// Every non-empty group in rank order, collapsed or not. Empty when the
+    /// table is not grouped.
+    runs: Vec<EntityGroupRun>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -629,6 +654,30 @@ pub fn EntityTable<T>(
     /// `data-entity-row-emphasis` attribute on any row.
     #[prop(optional)]
     row_emphasis: Option<EntityRowEmphasisClassifier<T>>,
+    /// Optional controlled row grouping by stable group key (`ldui-iyfa`).
+    ///
+    /// Supplying it partitions the rendered rows into accessible sections, one
+    /// `<tbody>` per group, each opened by a full-width
+    /// `<th scope="colgroup">` heading carrying the caller's label plus
+    /// optional compact metadata and actions. There is still exactly ONE
+    /// global column header and one filter row: grouping never splits the
+    /// table into one instance per group.
+    ///
+    /// Sorting and filtering are unchanged and explicit. Filters apply to
+    /// child rows; a group whose rows are all filtered away has no heading
+    /// left to render. Row sorting happens *within* groups -- grouping applies
+    /// a stable partition by group rank over the table's own sort permutation
+    /// -- and the section order is the caller's declared order unless an
+    /// explicit [`EntityGroupOrder`] is selected.
+    ///
+    /// Pagination never lies about counts. Group headings are presentation
+    /// rows: they are not records, they never enter the row-range summary, and
+    /// they are not part of the displayed-page population the
+    /// `multi_selection` header checkbox governs. A heading is only ever
+    /// derived from a row that is on the page, so an expanded group's heading
+    /// can never strand itself as the last visible row.
+    #[prop(optional)]
+    row_grouping: Option<EntityRowGrouping<T>>,
     /// Preference namespace appended to the framework storage prefix.
     ///
     /// This compatibility prop selects `LegacyLocalStorage` when
@@ -714,6 +763,46 @@ where
         .with_value(|columns| rendered_column_widths(&preferences.get_untracked(), columns));
     let row_key = StoredValue::new_local(row_key);
     let row_emphasis = StoredValue::new_local(row_emphasis);
+    // ── Controlled row grouping (ldui-iyfa) ──
+    //
+    // Split into individually `Copy` pieces so every closure below captures
+    // exactly the part it reads. `has_grouping` is the single gate: false
+    // renders the ungrouped body byte-for-byte as it did before this prop
+    // existed -- one `<tbody>`, no headings, no `data-entity-group-*`
+    // attributes anywhere.
+    let has_grouping = row_grouping.is_some();
+    let group_of: StoredValue<Option<EntityGroupKey<T>>, LocalStorage> = StoredValue::new_local(
+        row_grouping
+            .as_ref()
+            .map(|model| Rc::clone(&model.group_of)),
+    );
+    let group_actions: StoredValue<Option<EntityGroupActions>, LocalStorage> =
+        StoredValue::new_local(
+            row_grouping
+                .as_ref()
+                .and_then(|model| model.actions.clone()),
+        );
+    let group_declarations: Signal<Vec<EntityRowGroup>, LocalStorage> = row_grouping
+        .as_ref()
+        .map_or_else(|| Signal::stored_local(Vec::new()), |model| model.groups);
+    let group_order: Signal<EntityGroupOrder> = row_grouping.as_ref().map_or_else(
+        || Signal::stored(EntityGroupOrder::Declared),
+        |model| model.order,
+    );
+    let collapsible_groups = row_grouping
+        .as_ref()
+        .is_some_and(|model| model.collapsed.is_some());
+    let collapsed_groups: Signal<BTreeSet<String>> = row_grouping
+        .as_ref()
+        .and_then(|model| model.collapsed)
+        .unwrap_or_else(|| Signal::stored(BTreeSet::new()));
+    let on_collapse_change = row_grouping
+        .as_ref()
+        .and_then(|model| model.on_collapse_change);
+    let group_texts: Signal<EntityGroupTexts> = row_grouping.as_ref().map_or_else(
+        || Signal::stored(EntityGroupTexts::default()),
+        |model| model.texts,
+    );
     let compact_row = CompactRowStore::new(compact_row);
     let column_filters = column_filter_signal(column_filters);
     let compact_filter_layout = compact_filter_layout_signal();
@@ -825,16 +914,6 @@ where
         });
     }
 
-    Effect::new(move |_| {
-        let total_rows = data.get().len();
-        let rows_per_page = page_size.get().rows();
-        let next_page =
-            page_after_row_delta(current_page.get_untracked(), rows_per_page, total_rows);
-        if next_page != current_page.get_untracked() {
-            current_page.set(next_page);
-        }
-    });
-
     if let PreferenceSource::Uncontrolled {
         current,
         persistence,
@@ -867,6 +946,25 @@ where
         header_descriptors.with(|columns| entity_flexible_column_id(columns))
     });
     let has_selection_column = multi_selection.is_some();
+    // ── The one full-width span (ldui-ibjk, ldui-iyfa) ──
+    //
+    // The empty-state row and every group heading span the SAME derived
+    // count -- the columns visible right now plus the leading selection cell
+    // when one is rendered. Two independent colspan computations is how a
+    // full-width row comes to be short by one and desync the declared
+    // `<colgroup>` tracks, so there is deliberately only one.
+    let visible_column_count = Signal::derive_local(move || {
+        let preferences_value = preferences.get();
+        column_store.with_value(|columns| {
+            ordered_columns(&preferences_value, columns)
+                .into_iter()
+                .filter(|column| !preferences_value.hidden_columns.contains(column.id))
+                .count()
+        })
+    });
+    let body_colspan = Signal::derive_local(move || {
+        entity_group_header_colspan(visible_column_count.get(), has_selection_column)
+    });
     let stable_tracks = Signal::derive(move || {
         let widths = column_widths.get();
         let data_tracks = header_descriptors
@@ -889,28 +987,122 @@ where
         entity_stable_tracks(has_selection_column, data_tracks)
     });
 
-    let total_rows = Signal::derive_local(move || data.get().len());
+    // ── The one displayed row order (ldui-iyfa, extending ldui-5p06) ──
+    //
+    // Sorting, grouping and collapse resolve here exactly once. The rendered
+    // body, the row-range summary, the pager, the displayed-page selection
+    // population, the focus-recovery window and the display projection all
+    // read this and nothing else. Recomputing "which rows are displayed" a
+    // second time is precisely the bug class 5p06 fixed, and grouping (which
+    // reorders rows AND can remove them) would have multiplied it.
+    let displayed_order: Signal<Rc<EntityDisplayedOrder>, LocalStorage> =
+        Signal::derive_local(move || {
+            let rows = data.get();
+            let columns = column_store.get_value();
+            let preferences_value = preferences.get();
+            let sorted = sorted_index_cache
+                .try_update_value(|cache| {
+                    cache.indices(
+                        Rc::clone(&rows),
+                        &columns,
+                        &preferences_value.sort,
+                        semantic_generation.get(),
+                    )
+                })
+                .expect("entity-table sort cache is still mounted");
+            let Some(group_of) = group_of.get_value() else {
+                // Ungrouped: the cached permutation IS the displayed order,
+                // shared by `Rc` rather than copied.
+                return Rc::new(EntityDisplayedOrder {
+                    indices: sorted,
+                    group_keys: Vec::new(),
+                    runs: Vec::new(),
+                });
+            };
+            let group_key_of = |index: usize| group_of(&rows[index]);
+            // Stable partition by group rank over the sort permutation, so row
+            // sorting stays *within* groups.
+            let grouped = entity_grouped_order(
+                sorted.as_slice(),
+                &group_key_of,
+                &group_declarations.get(),
+                group_order.get(),
+                &collapsed_groups.get(),
+            );
+            Rc::new(EntityDisplayedOrder {
+                indices: Rc::new(grouped.indices),
+                group_keys: grouped.group_keys,
+                runs: grouped.runs,
+            })
+        });
+    // Data rows only. A group heading is a presentation row and never a
+    // record, so it can never inflate this count, the row-range summary, or
+    // the page count.
+    let total_rows =
+        Signal::derive_local(move || displayed_order.with(|order| order.indices.len()));
     let total_pages = Signal::derive(move || page_count(total_rows.get(), page_size.get().rows()));
+    let page_bounds_signal = Signal::derive_local(move || {
+        page_bounds(current_page.get(), page_size.get().rows(), total_rows.get())
+    });
     let page_row_keys = Signal::derive_local(move || {
         let rows = data.get();
-        let columns = column_store.get_value();
-        let preferences_value = preferences.get();
-        let indices = sorted_index_cache
-            .try_update_value(|cache| {
-                cache.indices(
-                    Rc::clone(&rows),
-                    &columns,
-                    &preferences_value.sort,
-                    semantic_generation.get(),
-                )
-            })
-            .expect("entity-table sort cache is still mounted");
-        let bounds = page_bounds(current_page.get(), page_size.get().rows(), indices.len());
+        let bounds = page_bounds_signal.get();
         let row_key = row_key.get_value();
-        indices[bounds]
-            .iter()
-            .map(|index| row_key(&rows[*index]))
-            .collect::<Vec<_>>()
+        displayed_order.with(|order| {
+            order.indices[bounds]
+                .iter()
+                .map(|index| row_key(&rows[*index]))
+                .collect::<Vec<_>>()
+        })
+    });
+    // Parallel to `page_row_keys`; empty on an ungrouped table.
+    let page_group_keys = Signal::derive_local(move || {
+        let bounds = page_bounds_signal.get();
+        displayed_order.with(|order| {
+            if order.group_keys.is_empty() {
+                return Vec::new();
+            }
+            order.group_keys[bounds].to_vec()
+        })
+    });
+    // Sections are derived FROM the page's rows, which is why an expanded
+    // group's heading can never be stranded as the last visible row with its
+    // children on the next page: the heading has no independent existence.
+    let page_sections: Signal<Vec<EntityGroupedSection>, LocalStorage> =
+        Signal::derive_local(move || {
+            if !has_grouping {
+                return Vec::new();
+            }
+            let bounds = page_bounds_signal.get();
+            let previous =
+                displayed_order.with(|order| entity_previous_group_key(&order.group_keys, &bounds));
+            let is_last_page = current_page.get() + 1 >= total_pages.get().max(1);
+            displayed_order.with(|order| {
+                page_group_keys.with(|group_keys| {
+                    page_row_keys.with(|row_keys| {
+                        entity_grouped_page_sections(
+                            &order.runs,
+                            group_keys,
+                            row_keys,
+                            previous.as_deref(),
+                            is_last_page,
+                        )
+                    })
+                })
+            })
+        });
+
+    // Clamps the page against the DISPLAYED row count, so collapsing the
+    // groups that held the current page's rows lands on a real page instead of
+    // an empty one past the end.
+    Effect::new(move |_| {
+        let displayed = total_rows.get();
+        let rows_per_page = page_size.get().rows();
+        let next_page =
+            page_after_row_delta(current_page.get_untracked(), rows_per_page, displayed);
+        if next_page != current_page.get_untracked() {
+            current_page.set(next_page);
+        }
     });
 
     // ── Controlled checkbox multi-selection (ldui-nz6d) ──
@@ -1032,25 +1224,36 @@ where
             let rows = data.get();
             let columns = column_store.get_value();
             let preferences_value = preferences.get();
-            let indices = sorted_index_cache
-                .try_update_value(|cache| {
-                    cache.indices(
-                        Rc::clone(&rows),
-                        &columns,
-                        &preferences_value.sort,
-                        semantic_generation.get(),
-                    )
-                })
-                .expect("entity-table sort cache is still mounted");
+            // The SAME displayed order the body paints, so an export can never
+            // describe a different row set or a different order than the
+            // screen -- including under grouping and collapse.
+            let order = displayed_order.get();
+            let declarations = has_grouping.then(|| group_declarations.get());
+            let column_header = group_texts.with(|texts| texts.column_header.clone());
+            let label_of = |key: &str| {
+                declarations
+                    .as_ref()
+                    .map_or_else(|| key.to_owned(), |groups| entity_group_label(groups, key))
+            };
+            // Group identity travels with the export even though the visual
+            // table has stopped repeating it in every row -- that suppression
+            // is the whole point of grouping, and losing the fact on the way
+            // out would trade one defect for another.
+            let grouping = has_grouping.then(|| EntityProjectionGrouping {
+                group_keys: order.group_keys.as_slice(),
+                label_of: &label_of,
+                column_header: column_header.as_str(),
+            });
             on_display_projection.run(entity_table_display_projection_from_indices(
                 rows.as_slice(),
                 &columns,
                 &preferences_value,
-                indices.as_slice(),
+                order.indices.as_slice(),
                 current_page.get(),
                 page_size.get().rows(),
                 row_key.get_value().as_ref(),
                 projection_action_columns,
+                grouping,
             ));
         });
     }
@@ -1061,22 +1264,18 @@ where
         };
         let current_scope = focus_scope.get();
         let source_rows = source_data.get();
-        let rendered_rows = data.get();
-        let mut preferences_value = preferences.get();
-        preferences_value.page_size = page_size.get().rows();
-        let columns = column_store.get_value();
         let row_key = row_key.get_value();
         let source_keys = source_rows
             .iter()
             .map(|row| row_key(row))
             .collect::<Vec<_>>();
-        let visible_keys = visible_row_keys(
-            rendered_rows.as_slice(),
-            &columns,
-            &preferences_value,
-            current_page.get(),
-            row_key.as_ref(),
-        );
+        // The keys the body is actually painting, not a second independently
+        // recomputed page window. Grouping reorders rows and collapse removes
+        // them, so a recomputed window would recover focus onto a row that is
+        // not on screen (ldui-iyfa); reading the painted set is also what
+        // makes focus survive a collapse, an expansion, and a filtered row's
+        // removal by exactly the same code path.
+        let visible_keys = page_row_keys.get();
         let target = focus_target(
             &record,
             &source_keys,
@@ -2044,52 +2243,106 @@ where
                             })
                         }}
                     </thead>
-                    <tbody>
-                        {move || page_row_keys.with(|keys| keys.is_empty()).then(|| {
-                            let visible_columns = column_store.with_value(|columns| {
-                                let preferences_value = preferences.get();
-                                ordered_columns(&preferences_value, columns)
-                                    .into_iter()
-                                    .filter(|column| {
-                                        !preferences_value.hidden_columns.contains(column.id)
-                                    })
-                                    .count()
-                            });
-                            let colspan =
-                                entity_empty_state_colspan(visible_columns, has_selection_column);
-                            view! {
+                    // Ungrouped: exactly the single `<tbody>` this table has
+                    // always rendered. Grouping costs an ungrouped table no
+                    // markup at all.
+                    {(!has_grouping).then(|| view! {
+                        <tbody>
+                            {move || page_row_keys.with(|keys| keys.is_empty()).then(|| view! {
+                                <tr>
+                                    <td
+                                        colspan=move || body_colspan.get()
+                                        class="border border-table-grid py-10 text-center text-base-content/65 forced-colors:border-[CanvasText]"
+                                    >
+                                        {texts.with(|texts| texts.no_rows.clone())}
+                                    </td>
+                                </tr>
+                            })}
+                            {local_for_enumerate(
+                                move || page_row_keys.get(),
+                                |key| key.clone(),
+                                move |visible_position, key| render_keyed_row(
+                                    key,
+                                    visible_position.into(),
+                                    KeyedRowContext {
+                                        data,
+                                        column_store,
+                                        preferences,
+                                        row_key,
+                                        compact_row,
+                                        on_row_activate,
+                                        selection,
+                                        multi_selection,
+                                        accepted_keys,
+                                        selection_scope,
+                                        row_emphasis,
+                                    },
+                                ),
+                            )}
+                        </tbody>
+                    })}
+                    // Grouped: one `<tbody>` per rendered section (ldui-iyfa).
+                    // `<tbody>` is already `role="rowgroup"`, so the section
+                    // boundary IS the structural grouping; the heading names
+                    // it, and `scope="colgroup"` is what attributes every
+                    // child cell below to that heading without the label being
+                    // repeated in a single data cell.
+                    {has_grouping.then(|| {
+                        let section_context = GroupSectionContext {
+                            page_sections,
+                            group_declarations,
+                            group_actions,
+                            collapsed_groups,
+                            on_collapse_change,
+                            collapsible_groups,
+                            selection_scope,
+                            body_colspan,
+                            group_texts,
+                            row: KeyedRowContext {
+                                data,
+                                column_store,
+                                preferences,
+                                row_key,
+                                compact_row,
+                                on_row_activate,
+                                selection,
+                                multi_selection,
+                                accepted_keys,
+                                selection_scope,
+                                row_emphasis,
+                            },
+                        };
+                        view! {
+                            {move || page_sections.with(Vec::is_empty).then(|| view! {
+                                <tbody>
                                     <tr>
                                         <td
-                                            colspan=colspan
+                                            colspan=move || body_colspan.get()
                                             class="border border-table-grid py-10 text-center text-base-content/65 forced-colors:border-[CanvasText]"
                                         >
                                             {texts.with(|texts| texts.no_rows.clone())}
                                         </td>
                                     </tr>
-                            }
-                        })}
-                        {local_for_enumerate(
-                            move || page_row_keys.get(),
-                            |key| key.clone(),
-                            move |visible_position, key| render_keyed_row(
-                                key,
-                                visible_position,
-                                KeyedRowContext {
-                                    data,
-                                    column_store,
-                                    preferences,
-                                    row_key,
-                                    compact_row,
-                                    on_row_activate,
-                                    selection,
-                                    multi_selection,
-                                    accepted_keys,
-                                    selection_scope,
-                                    row_emphasis,
-                                },
-                            ),
-                        )}
-                    </tbody>
+                                </tbody>
+                            })}
+                            // Keyed by section IDENTITY, not by its rows: a data
+                            // change that leaves the sections themselves alone
+                            // must not remount every `<tbody>` and tear the
+                            // keyed rows inside it out of the DOM with it.
+                            {local_for_enumerate(
+                                move || page_sections.get(),
+                                |section| (
+                                    section.group_key.clone(),
+                                    section.continued,
+                                    section.collapsed,
+                                ),
+                                move |_position, section| render_group_section(
+                                    section,
+                                    section_context,
+                                ),
+                            )}
+                        }
+                    })}
                 </table>
                 </div>
             </div>
@@ -2246,6 +2499,228 @@ where
     move || leptos::tachys::view::keyed::keyed(each(), key.clone(), children.clone())
 }
 
+static ENTITY_GROUP_ID: AtomicU64 = AtomicU64::new(0);
+
+fn next_entity_group_id() -> String {
+    format!(
+        "ldui-entity-group-{}",
+        ENTITY_GROUP_ID.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
+struct GroupSectionContext<T: 'static> {
+    page_sections: Signal<Vec<EntityGroupedSection>, LocalStorage>,
+    group_declarations: Signal<Vec<EntityRowGroup>, LocalStorage>,
+    group_actions: StoredValue<Option<EntityGroupActions>, LocalStorage>,
+    collapsed_groups: Signal<BTreeSet<String>>,
+    on_collapse_change: Option<Callback<EntityGroupCollapseProposal>>,
+    collapsible_groups: bool,
+    selection_scope: Signal<String>,
+    body_colspan: Signal<usize, LocalStorage>,
+    group_texts: Signal<EntityGroupTexts>,
+    row: KeyedRowContext<T>,
+}
+
+impl<T: 'static> Clone for GroupSectionContext<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T: 'static> Copy for GroupSectionContext<T> {}
+
+/// Renders one accessible group section: a `<tbody>` opened by a full-width
+/// heading, followed by that group's rows.
+///
+/// # Why `<tbody>` plus `<th scope="colgroup">`
+///
+/// Two independent mechanisms, neither of which repeats the group label in a
+/// data cell -- which is the defect being fixed:
+///
+/// - A `<tbody>` is already `role="rowgroup"`, so the section boundary is the
+///   structural fact that these rows belong together. It carries
+///   `aria-labelledby` pointing at the heading, so assistive technology that
+///   names row groups reads the group's name on entry.
+/// - The heading is a `<th scope="colgroup">` spanning every column. HTML's
+///   own header-association algorithm applies a `colgroup`-scoped header to
+///   the remaining cells in those columns, so a screen reader in table
+///   navigation attributes each child cell to the heading automatically. No
+///   per-row attribute, no repeated cell.
+///
+/// The alternative -- one table per group -- was refused outright: it
+/// duplicates the column header and the filter row per group, which is exactly
+/// what `ldui-iyfa` exists to stop consumers doing.
+///
+/// The heading row itself is never focusable and never `aria-selected`: it is
+/// presentation, not a record. When the group is collapsible the heading holds
+/// one ordinary `<button aria-expanded aria-controls>`, which is a single
+/// normal tab stop inside the table region -- no trap, no roving state of its
+/// own. Collapsed children are not rendered at all, so they leave the
+/// accessibility tree rather than being painted and hidden.
+fn render_group_section<T: Clone + 'static>(
+    section: EntityGroupedSection,
+    context: GroupSectionContext<T>,
+) -> impl IntoView {
+    let GroupSectionContext {
+        page_sections,
+        group_declarations,
+        group_actions,
+        collapsed_groups,
+        on_collapse_change,
+        collapsible_groups,
+        selection_scope,
+        body_colspan,
+        group_texts,
+        row,
+    } = context;
+    let group_key = section.group_key.clone();
+    let continued = section.continued;
+    let collapsed = section.collapsed;
+    let group_row_count = section.group_row_count;
+    let body_id = next_entity_group_id();
+    let heading_id = format!("{body_id}-heading");
+    let labelled_by = heading_id.clone();
+
+    let label_key = group_key.clone();
+    let label = move || {
+        let declared = group_declarations.with(|groups| entity_group_label(groups, &label_key));
+        group_texts.with(|texts| texts.heading(&declared, continued))
+    };
+    let meta_key = group_key.clone();
+    let meta = move || {
+        group_declarations
+            .with(|groups| entity_group_meta(groups, &meta_key))
+            .unwrap_or_else(|| group_texts.with(|texts| texts.row_count_label(group_row_count)))
+    };
+    let actions_key = group_key.clone();
+    let actions = group_actions.with_value(|render| {
+        let render = render.clone()?;
+        group_declarations.with_untracked(|groups| {
+            groups
+                .iter()
+                .find(|group| group.key() == actions_key)
+                .map(|group| render(group))
+        })
+    });
+
+    let toggle_label_key = group_key.clone();
+    let toggle_label = move || {
+        let declared =
+            group_declarations.with(|groups| entity_group_label(groups, &toggle_label_key));
+        group_texts.with(|texts| texts.toggle_label(&declared, collapsed))
+    };
+    let toggle_key = group_key.clone();
+    let toggle_controls = body_id.clone();
+    let heading_content = if collapsible_groups {
+        view! {
+            <button
+                type="button"
+                class="ld-focus-ring flex min-w-0 items-center gap-2 rounded-field px-1 text-left"
+                data-entity-group-toggle=group_key.clone()
+                aria-expanded=(!collapsed).to_string()
+                aria-controls=toggle_controls
+                aria-label=toggle_label
+                on:click=move |_| {
+                    let Some(on_collapse_change) = on_collapse_change else {
+                        return;
+                    };
+                    let current = collapsed_groups.get_untracked();
+                    on_collapse_change.run(EntityGroupCollapseProposal {
+                        keys: propose_entity_group_collapse(&current, &toggle_key, !collapsed),
+                        cause: EntityGroupCollapseCause::Group {
+                            key: toggle_key.clone(),
+                            collapsed: !collapsed,
+                        },
+                        scope: selection_scope.get_untracked(),
+                    });
+                }
+            >
+                <span
+                    class="inline-flex shrink-0 transition-transform"
+                    class:rotate-90=!collapsed
+                    aria-hidden="true"
+                >
+                    <Icon name="chevron-right" size=IconSize::XSmall />
+                </span>
+                <span class="ld-text-body min-w-0 font-semibold">{label}</span>
+            </button>
+        }
+        .into_any()
+    } else {
+        view! { <span class="ld-text-body min-w-0 font-semibold">{label}</span> }.into_any()
+    };
+
+    let rows_key = group_key.clone();
+    let rows_continued = continued;
+    let section_row_keys = move || {
+        page_sections.with(|sections| {
+            sections
+                .iter()
+                .find(|candidate| {
+                    candidate.group_key == rows_key && candidate.continued == rows_continued
+                })
+                .map_or_else(Vec::new, |candidate| candidate.row_keys.clone())
+        })
+    };
+    let base_key = group_key.clone();
+    let base_position = Signal::derive_local(move || {
+        page_sections.with(|sections| {
+            sections
+                .iter()
+                .find(|candidate| {
+                    candidate.group_key == base_key && candidate.continued == rows_continued
+                })
+                .map_or(0, |candidate| candidate.first_row_position)
+        })
+    });
+
+    view! {
+        <tbody
+            id=body_id
+            aria-labelledby=labelled_by
+            data-entity-group=group_key.clone()
+            data-entity-group-collapsed=collapsed.then_some("true")
+        >
+            <tr
+                class="bg-table-filter text-table-filter-content forced-colors:bg-[Canvas] forced-colors:text-[CanvasText]"
+                data-entity-group-header=group_key.clone()
+                data-entity-group-continued=continued.then_some("true")
+            >
+                <th
+                    id=heading_id
+                    scope="colgroup"
+                    colspan=move || body_colspan.get()
+                    class="border border-table-grid px-3 py-2 text-left forced-colors:border-[CanvasText]"
+                >
+                    <div class="flex min-w-0 flex-wrap items-center gap-2">
+                        {heading_content}
+                        <span
+                            class="ld-text-caption min-w-0 font-normal text-table-filter-content/75"
+                            data-entity-group-meta="true"
+                        >
+                            {meta}
+                        </span>
+                        {actions.map(|actions| view! {
+                            <span class="ml-auto flex shrink-0 items-center gap-2" data-entity-group-actions="true">
+                                {actions}
+                            </span>
+                        })}
+                    </div>
+                </th>
+            </tr>
+            {(!collapsed).then(move || local_for_enumerate(
+                section_row_keys,
+                |key| key.clone(),
+                move |position, key| render_keyed_row(
+                    key,
+                    Signal::derive_local(move || base_position.get() + position.get()),
+                    row,
+                ),
+            ))}
+        </tbody>
+    }
+}
+
 struct KeyedRowContext<T: 'static> {
     data: Signal<Rc<Vec<T>>, LocalStorage>,
     column_store: ColumnStore<T>,
@@ -2260,9 +2735,17 @@ struct KeyedRowContext<T: 'static> {
     row_emphasis: StoredValue<Option<EntityRowEmphasisClassifier<T>>, LocalStorage>,
 }
 
+impl<T: 'static> Clone for KeyedRowContext<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T: 'static> Copy for KeyedRowContext<T> {}
+
 fn render_keyed_row<T: Clone + 'static>(
     key: String,
-    visible_position: ReadSignal<usize, LocalStorage>,
+    visible_position: Signal<usize, LocalStorage>,
     context: KeyedRowContext<T>,
 ) -> impl IntoView {
     let KeyedRowContext {
@@ -2595,21 +3078,6 @@ fn render_row_cells<T: Clone + 'static>(
         {wide_cells}
     }
     .into_any()
-}
-
-fn visible_row_keys<T>(
-    rows: &[T],
-    columns: &[EntityColumn<T>],
-    preferences: &EntityTablePreferences,
-    current_page: usize,
-    row_key: &dyn Fn(&T) -> String,
-) -> Vec<String> {
-    let indices = sorted_indices(rows, columns, &preferences.sort);
-    let bounds = page_bounds(current_page, preferences.page_size, indices.len());
-    indices[bounds]
-        .iter()
-        .map(|index| row_key(&rows[*index]))
-        .collect()
 }
 
 fn focus_record_from_event(event: &web_sys::FocusEvent, scope: &str) -> Option<EntityFocusRecord> {

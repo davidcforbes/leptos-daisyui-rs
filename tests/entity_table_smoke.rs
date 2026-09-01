@@ -4504,3 +4504,277 @@ async fn entity_table_multi_selection_governs_only_the_displayed_page() {
 
     assert_no_browser_errors(&harness, "entity table multi-selection").await;
 }
+
+/// `ldui-iyfa`: controlled, accessible row groups over a client snapshot.
+///
+/// Proves the facts a pure state-machine test cannot reach: that there is ONE
+/// global column header and one filter row for every group, that the group
+/// label is announced through table semantics rather than repeated in a data
+/// cell, that a heading's `colspan` really matches the cells a data row
+/// renders (a heading short by one desyncs the declared `<colgroup>` tracks --
+/// `ldui-ibjk`), that collapsed children leave the DOM (and therefore the
+/// accessibility tree) instead of being painted and hidden, that the row-range
+/// summary counts records and never headings, and that keyboard focus survives
+/// a collapse.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
+async fn entity_table_row_groups_are_accessible_and_never_inflate_counts() {
+    let harness = harness_at("/components/entity-table-grouping").await;
+    begin_browser_error_capture(&harness).await;
+    wait_for_selector(
+        &harness,
+        "#entity-grouping-table tbody[data-entity-group] tr[data-entity-row-key]",
+    )
+    .await;
+
+    // ONE global column header and ONE filter row, for three group sections.
+    let structure = eval_json(
+        &harness,
+        r#"(() => {
+            const table = document.querySelector('#entity-grouping-table [data-entity-table-grid]');
+            const sections = Array.from(table.querySelectorAll('tbody[data-entity-group]'));
+            const headings = Array.from(table.querySelectorAll('tr[data-entity-group-header] th'));
+            return {
+                theads: table.querySelectorAll('thead').length,
+                filter_rows: table.querySelectorAll('[data-entity-column-filter-row]').length,
+                sections: sections.length,
+                group_keys: sections.map(section => section.dataset.entityGroup),
+                heading_scopes: headings.map(th => th.getAttribute('scope')),
+                labelled: sections.every(section => {
+                    const id = section.getAttribute('aria-labelledby');
+                    return !!id && !!section.querySelector(`#${id}`);
+                }),
+                heading_ids_unique:
+                    new Set(headings.map(th => th.id)).size === headings.length,
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(structure["theads"], json!(1), "{structure}");
+    assert_eq!(structure["filter_rows"], json!(1), "{structure}");
+    assert_eq!(structure["sections"], json!(3), "{structure}");
+    assert_eq!(
+        structure["group_keys"],
+        json!(["co-1", "co-2", "co-3"]),
+        "{structure}"
+    );
+    assert_eq!(
+        structure["heading_scopes"],
+        json!(["colgroup", "colgroup", "colgroup"]),
+        "the heading must be a colgroup-scoped header cell: {structure}"
+    );
+    assert_eq!(structure["labelled"], json!(true), "{structure}");
+    assert_eq!(structure["heading_ids_unique"], json!(true), "{structure}");
+
+    // The group identity is carried ONCE by the heading, never repeated as a
+    // data cell -- which is the defect this bead removes.
+    let no_repetition = eval_json(
+        &harness,
+        r#"(() => {
+            const table = document.querySelector('#entity-grouping-table [data-entity-table-grid]');
+            const labels = ['Ana Ruiz', 'Beto Cruz', 'Cami Lopez'];
+            const cells = Array.from(table.querySelectorAll('tbody tr[data-entity-row-key] td'))
+                .map(cell => cell.textContent.trim());
+            return {
+                repeated: cells.filter(text => labels.some(label => text.includes(label))).length,
+                headings: Array.from(table.querySelectorAll('tr[data-entity-group-header] th'))
+                    .map(th => th.textContent.trim()),
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(
+        no_repetition["repeated"],
+        json!(0),
+        "no data cell may repeat the group label: {no_repetition}"
+    );
+
+    // The heading spans exactly the cells a data row renders, INCLUDING the
+    // leading multi-selection control cell (ldui-ibjk).
+    let spans = eval_json(
+        &harness,
+        r#"(() => {
+            const table = document.querySelector('#entity-grouping-table [data-entity-table-grid]');
+            const heading = table.querySelector('tr[data-entity-group-header] th');
+            const row = table.querySelector('tbody tr[data-entity-row-key]');
+            const rendered = Array.from(row.children)
+                .filter(cell => getComputedStyle(cell).display !== 'none').length;
+            const cols = table.querySelectorAll('colgroup col').length;
+            return {
+                colspan: Number(heading.getAttribute('colspan')),
+                rendered,
+                cols,
+                heading_width: Math.round(heading.getBoundingClientRect().width),
+                row_width: Math.round(row.getBoundingClientRect().width),
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(spans["colspan"], spans["cols"], "{spans}");
+    assert_eq!(spans["colspan"], spans["rendered"], "{spans}");
+    assert_eq!(spans["heading_width"], spans["row_width"], "{spans}");
+
+    // Headings are presentation: they are not focusable, carry no row key, and
+    // never enter the displayed-page selection population.
+    let presentation = eval_json(
+        &harness,
+        r#"(() => {
+            const table = document.querySelector('#entity-grouping-table [data-entity-table-grid]');
+            const headings = Array.from(table.querySelectorAll('tr[data-entity-group-header]'));
+            return {
+                tabindex: headings.filter(row => row.hasAttribute('tabindex')).length,
+                selected: headings.filter(row => row.hasAttribute('aria-selected')).length,
+                row_keys: headings.filter(row => row.hasAttribute('data-entity-row-key')).length,
+                checkboxes: headings.filter(row => row.querySelector('[data-entity-selection-row]')).length,
+                group_toggles: table.querySelectorAll('[data-entity-selection-toggle="group"]').length,
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(presentation["tabindex"], json!(0), "{presentation}");
+    assert_eq!(presentation["selected"], json!(0), "{presentation}");
+    assert_eq!(presentation["row_keys"], json!(0), "{presentation}");
+    assert_eq!(presentation["checkboxes"], json!(0), "{presentation}");
+    assert_eq!(presentation["group_toggles"], json!(0), "{presentation}");
+
+    // Selecting the displayed page selects the DATA rows and nothing else --
+    // the six headings and their cells contribute no keys (ldui-nz6d).
+    click(
+        &harness,
+        "#entity-grouping-table [data-entity-selection-toggle='page']",
+    )
+    .await;
+    let selected = eval_json(
+        &harness,
+        r#"(() => ({
+            count: Number(document.querySelector('[data-testid="entity-grouping-selected-count"]').textContent.trim()),
+            rows: document.querySelectorAll('#entity-grouping-table tbody tr[data-entity-row-key]').length,
+        }))()"#,
+    )
+    .await;
+    assert_eq!(selected["count"], selected["rows"], "{selected}");
+
+    // The row-range summary counts records, never headings.
+    let summary_before = eval_json(
+        &harness,
+        r#"(() => document.querySelector('#entity-grouping-table [data-entity-table-footer] span.text-sm').textContent.trim())()"#,
+    )
+    .await;
+    assert_eq!(
+        summary_before,
+        json!("Showing 1-18 of 18"),
+        "{summary_before}"
+    );
+
+    // Collapse the first group from the keyboard-operable disclosure control.
+    click(
+        &harness,
+        "#entity-grouping-table [data-entity-group-toggle='co-1']",
+    )
+    .await;
+    let collapsed = eval_json(
+        &harness,
+        r#"(() => {
+            const table = document.querySelector('#entity-grouping-table [data-entity-table-grid]');
+            const section = table.querySelector('tbody[data-entity-group="co-1"]');
+            const toggle = section.querySelector('[data-entity-group-toggle]');
+            return {
+                expanded: toggle.getAttribute('aria-expanded'),
+                controls: toggle.getAttribute('aria-controls') === section.id,
+                child_rows: section.querySelectorAll('tr[data-entity-row-key]').length,
+                total_rows: table.querySelectorAll('tbody tr[data-entity-row-key]').length,
+                sections: table.querySelectorAll('tbody[data-entity-group]').length,
+                summary: document
+                    .querySelector('#entity-grouping-table [data-entity-table-footer] span.text-sm')
+                    .textContent.trim(),
+                focus_inside: !!document.activeElement.closest('#entity-grouping-table'),
+                focus_toggle: document.activeElement.dataset.entityGroupToggle || null,
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(collapsed["expanded"], json!("false"), "{collapsed}");
+    assert_eq!(collapsed["controls"], json!(true), "{collapsed}");
+    assert_eq!(
+        collapsed["child_rows"],
+        json!(0),
+        "collapsed children must leave the DOM, not merely be hidden: {collapsed}"
+    );
+    assert_eq!(collapsed["total_rows"], json!(12), "{collapsed}");
+    assert_eq!(
+        collapsed["sections"],
+        json!(3),
+        "a collapsed group keeps its heading: {collapsed}"
+    );
+    assert_eq!(
+        collapsed["summary"],
+        json!("Showing 1-12 of 12"),
+        "{collapsed}"
+    );
+    assert_eq!(
+        collapsed["focus_inside"],
+        json!(true),
+        "focus must survive a collapse: {collapsed}"
+    );
+    assert_eq!(collapsed["focus_toggle"], json!("co-1"), "{collapsed}");
+
+    // Expanding restores every filtered row.
+    click(&harness, "[data-testid='entity-grouping-expand-all']").await;
+    let expanded = eval_json(
+        &harness,
+        r#"(() => document.querySelectorAll('#entity-grouping-table tbody tr[data-entity-row-key]').length)()"#,
+    )
+    .await;
+    assert_eq!(expanded, json!(18), "{expanded}");
+
+    // Relabelling groups must not repartition or reorder them: labels are
+    // display copy, keys are identity.
+    click(&harness, "[data-testid='entity-grouping-relabel']").await;
+    let relabelled = eval_json(
+        &harness,
+        r#"(() => {
+            const table = document.querySelector('#entity-grouping-table [data-entity-table-grid]');
+            return {
+                keys: Array.from(table.querySelectorAll('tbody[data-entity-group]'))
+                    .map(section => section.dataset.entityGroup),
+                labels: Array.from(table.querySelectorAll('tr[data-entity-group-header] th'))
+                    .map(th => th.textContent.trim()),
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(
+        relabelled["keys"],
+        json!(["co-1", "co-2", "co-3"]),
+        "{relabelled}"
+    );
+    assert!(
+        relabelled["labels"][0]
+            .as_str()
+            .is_some_and(|label| label.contains("(Field)")),
+        "{relabelled}"
+    );
+    click(&harness, "[data-testid='entity-grouping-relabel']").await;
+
+    // The export carries the group identity the visual table stopped
+    // repeating: the label as a leading column cell, the stable key beside it.
+    let exported = eval_json(
+        &harness,
+        r#"(() => ({
+            cells: document.querySelector('[data-testid="entity-grouping-export-cells"]').textContent.trim(),
+            keys: document.querySelector('[data-testid="entity-grouping-export-keys"]').textContent.trim(),
+        }))()"#,
+    )
+    .await;
+    let exported_keys = exported["keys"].as_str().unwrap_or_default();
+    assert_eq!(exported_keys.split('|').count(), 18, "{exported}");
+    assert!(exported_keys.starts_with("co-1|"), "{exported}");
+    assert!(
+        exported["cells"]
+            .as_str()
+            .is_some_and(|cells| cells.starts_with("Ana Ruiz|")),
+        "{exported}"
+    );
+
+    assert_no_browser_errors(&harness, "EntityTable row grouping").await;
+}

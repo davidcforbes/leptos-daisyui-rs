@@ -4,6 +4,7 @@ use crate::components::data_table::{clamp_page, page_bounds, page_count, row_ran
 use leptos::prelude::{Callback, Get, IntoAny, RwSignal, Set, Signal, StoredValue, Update};
 use leptos::reactive::owner::Owner;
 use std::cell::{Cell, RefCell};
+use std::collections::BTreeSet;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
@@ -2280,4 +2281,734 @@ fn combining_both_selection_models_fails_closed_at_construction() {
     // precedence rule that silently picks one.
     let _ = super::multi_selection::resolve_entity_selection_mode(true, true)
         .unwrap_or_else(|message| panic!("{message}"));
+}
+
+// ── Controlled accessible row grouping (ldui-iyfa) ──
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ActivityRow {
+    id: &'static str,
+    coordinator: &'static str,
+    kind: &'static str,
+}
+
+fn activity_rows() -> Vec<ActivityRow> {
+    vec![
+        ActivityRow {
+            id: "a1",
+            coordinator: "co-2",
+            kind: "Task",
+        },
+        ActivityRow {
+            id: "a2",
+            coordinator: "co-1",
+            kind: "Task",
+        },
+        ActivityRow {
+            id: "a3",
+            coordinator: "co-2",
+            kind: "Goal",
+        },
+        ActivityRow {
+            id: "a4",
+            coordinator: "co-1",
+            kind: "Goal",
+        },
+        ActivityRow {
+            id: "a5",
+            coordinator: "co-3",
+            kind: "Actual",
+        },
+    ]
+}
+
+fn activity_groups() -> Vec<EntityRowGroup> {
+    vec![
+        EntityRowGroup::new("co-1", "Ana Ruiz"),
+        EntityRowGroup::new("co-2", "Beto Cruz"),
+        EntityRowGroup::new("co-3", "Ana Ruiz"),
+    ]
+}
+
+fn grouped_order_of(
+    rows: &[ActivityRow],
+    groups: &[EntityRowGroup],
+    order: EntityGroupOrder,
+    collapsed: &BTreeSet<String>,
+) -> EntityGroupedOrder {
+    let sorted: Vec<usize> = (0..rows.len()).collect();
+    let group_key_of = |index: usize| rows[index].coordinator.to_owned();
+    entity_grouped_order(&sorted, &group_key_of, groups, order, collapsed)
+}
+
+fn grouped_keys_of(rows: &[ActivityRow], order: &EntityGroupedOrder) -> Vec<&'static str> {
+    order.indices.iter().map(|index| rows[*index].id).collect()
+}
+
+fn grouped_page_of(
+    order: &EntityGroupedOrder,
+    rows: &[ActivityRow],
+    bounds: std::ops::Range<usize>,
+) -> (Vec<String>, Vec<String>) {
+    let group_keys = order.group_keys[bounds.clone()].to_vec();
+    let row_keys = order.indices[bounds]
+        .iter()
+        .map(|index| rows[*index].id.to_owned())
+        .collect::<Vec<_>>();
+    (group_keys, row_keys)
+}
+
+#[test]
+fn grouping_partitions_by_stable_key_never_by_display_label() {
+    // `co-1` and `co-3` deliberately carry the SAME label. Two groups that
+    // read identically on screen must stay two groups, because identity is the
+    // key -- were the label the partition, this dataset would collapse three
+    // sections into two and silently merge two coordinators' records.
+    let rows = activity_rows();
+    let order = grouped_order_of(
+        &rows,
+        &activity_groups(),
+        EntityGroupOrder::Declared,
+        &BTreeSet::new(),
+    );
+    assert_eq!(
+        order
+            .runs
+            .iter()
+            .map(|run| run.key.as_str())
+            .collect::<Vec<_>>(),
+        vec!["co-1", "co-2", "co-3"]
+    );
+    assert_eq!(
+        grouped_keys_of(&rows, &order),
+        vec!["a2", "a4", "a1", "a3", "a5"]
+    );
+}
+
+#[test]
+fn relabelling_a_group_changes_nothing_but_the_rendered_heading() {
+    // A localization change must not repartition the table, reorder a section,
+    // or move a collapse flag onto a different group.
+    let rows = activity_rows();
+    let declared = activity_groups();
+    let relabelled = vec![
+        EntityRowGroup::new("co-1", "Ana Ruiz (Field)"),
+        EntityRowGroup::new("co-2", "Beto Cruz (Field)"),
+        EntityRowGroup::new("co-3", "Ana Ruiz (Office)"),
+    ];
+    let before = grouped_order_of(
+        &rows,
+        &declared,
+        EntityGroupOrder::Declared,
+        &BTreeSet::new(),
+    );
+    let after = grouped_order_of(
+        &rows,
+        &relabelled,
+        EntityGroupOrder::Declared,
+        &BTreeSet::new(),
+    );
+    assert_eq!(before, after);
+    assert_eq!(entity_group_label(&relabelled, "co-3"), "Ana Ruiz (Office)");
+    // An undeclared key still renders, under its own key, rather than
+    // disappearing with its rows.
+    assert_eq!(entity_group_label(&declared, "co-9"), "co-9");
+}
+
+#[test]
+fn row_sorting_happens_within_groups_not_across_them() {
+    // The incoming permutation is the table's own sort. Grouping is a STABLE
+    // partition on top of it, so the within-group order must survive exactly.
+    let rows = activity_rows();
+    let sorted_by_kind: Vec<usize> = vec![4, 2, 3, 0, 1];
+    let group_key_of = |index: usize| rows[index].coordinator.to_owned();
+    let order = entity_grouped_order(
+        &sorted_by_kind,
+        &group_key_of,
+        &activity_groups(),
+        EntityGroupOrder::Declared,
+        &BTreeSet::new(),
+    );
+    // co-1 keeps (a4, a2) and co-2 keeps (a3, a1) -- the order the sort put
+    // them in, not the source order.
+    assert_eq!(
+        grouped_keys_of(&rows, &order),
+        vec!["a4", "a2", "a3", "a1", "a5"]
+    );
+}
+
+#[test]
+fn an_explicit_group_sort_reorders_sections_and_leaves_rows_alone() {
+    let rows = activity_rows();
+    let groups = activity_groups();
+    let ascending = grouped_order_of(
+        &rows,
+        &groups,
+        EntityGroupOrder::LabelAscending,
+        &BTreeSet::new(),
+    );
+    // Two groups share the label "Ana Ruiz"; declared order breaks the tie, so
+    // the result is total rather than dependent on sort implementation.
+    assert_eq!(
+        ascending
+            .runs
+            .iter()
+            .map(|run| run.key.as_str())
+            .collect::<Vec<_>>(),
+        vec!["co-1", "co-3", "co-2"]
+    );
+    let descending = grouped_order_of(
+        &rows,
+        &groups,
+        EntityGroupOrder::LabelDescending,
+        &BTreeSet::new(),
+    );
+    assert_eq!(
+        descending
+            .runs
+            .iter()
+            .map(|run| run.key.as_str())
+            .collect::<Vec<_>>(),
+        vec!["co-2", "co-1", "co-3"]
+    );
+    // Within co-2, source order (a1 before a3) survives every group sort.
+    assert_eq!(
+        grouped_keys_of(&rows, &descending),
+        vec!["a1", "a3", "a2", "a4", "a5"]
+    );
+}
+
+#[test]
+fn undeclared_group_keys_rank_after_declared_ones_in_first_appearance_order() {
+    let rows = activity_rows();
+    let declared = vec![EntityRowGroup::new("co-2", "Beto Cruz")];
+    let order = grouped_order_of(
+        &rows,
+        &declared,
+        EntityGroupOrder::Declared,
+        &BTreeSet::new(),
+    );
+    assert_eq!(
+        order
+            .runs
+            .iter()
+            .map(|run| run.key.as_str())
+            .collect::<Vec<_>>(),
+        vec!["co-2", "co-1", "co-3"]
+    );
+    // Nothing is dropped for being undeclared: every row still reaches a page.
+    assert_eq!(order.indices.len(), rows.len());
+}
+
+#[test]
+fn filtering_out_a_group_removes_its_heading_with_its_rows() {
+    // Filters apply to child rows; this component filters nothing itself. A
+    // group whose rows are all gone has no run left, so its heading cannot
+    // outlive its children.
+    let rows: Vec<ActivityRow> = activity_rows()
+        .into_iter()
+        .filter(|row| row.coordinator != "co-2")
+        .collect();
+    let order = grouped_order_of(
+        &rows,
+        &activity_groups(),
+        EntityGroupOrder::Declared,
+        &BTreeSet::new(),
+    );
+    assert!(order.runs.iter().all(|run| run.key != "co-2"));
+    assert_eq!(order.runs.len(), 2);
+}
+
+#[test]
+fn collapsing_removes_rows_from_the_displayed_model_but_keeps_an_honest_count() {
+    let rows = activity_rows();
+    let collapsed = BTreeSet::from(["co-1".to_owned()]);
+    let order = grouped_order_of(
+        &rows,
+        &activity_groups(),
+        EntityGroupOrder::Declared,
+        &collapsed,
+    );
+    // The run survives with its true row count -- the heading can still say
+    // how many records it hides -- while contributing no displayed rows, so
+    // paging, the row-range summary and the selection population shrink
+    // together and every count stays truthful.
+    let run = order
+        .runs
+        .iter()
+        .find(|run| run.key == "co-1")
+        .expect("a collapsed group keeps its run");
+    assert!(run.collapsed);
+    assert_eq!(run.row_count, 2);
+    assert_eq!(order.indices.len(), 3);
+    assert!(!order.group_keys.iter().any(|key| key == "co-1"));
+    assert_eq!(order.group_keys.len(), order.indices.len());
+}
+
+#[test]
+fn collapsing_never_resurrects_a_group_the_filter_emptied() {
+    let rows: Vec<ActivityRow> = activity_rows()
+        .into_iter()
+        .filter(|row| row.coordinator != "co-2")
+        .collect();
+    let collapsed = BTreeSet::from(["co-2".to_owned()]);
+    let order = grouped_order_of(
+        &rows,
+        &activity_groups(),
+        EntityGroupOrder::Declared,
+        &collapsed,
+    );
+    assert!(order.runs.iter().all(|run| run.key != "co-2"));
+}
+
+#[test]
+fn group_collapse_proposals_carry_the_complete_resulting_set() {
+    // Same contract as ldui-nz6d's selection proposals: a complete set, never
+    // a delta the caller has to reassemble.
+    let current = BTreeSet::from(["co-1".to_owned(), "co-2".to_owned()]);
+    let expanded = propose_entity_group_collapse(&current, "co-1", false);
+    assert_eq!(expanded, BTreeSet::from(["co-2".to_owned()]));
+    let collapsed = propose_entity_group_collapse(&current, "co-3", true);
+    assert_eq!(
+        collapsed,
+        BTreeSet::from(["co-1".to_owned(), "co-2".to_owned(), "co-3".to_owned()])
+    );
+    // The caller's own accepted set is never mutated in place.
+    assert_eq!(current.len(), 2);
+}
+
+#[test]
+fn an_expanded_group_heading_is_never_stranded_as_the_last_visible_row() {
+    // Headings are derived FROM the page's rows, so an orphan heading is
+    // unrepresentable rather than merely avoided. Every page boundary of this
+    // dataset is checked, at every page size.
+    let rows = activity_rows();
+    let order = grouped_order_of(
+        &rows,
+        &activity_groups(),
+        EntityGroupOrder::Declared,
+        &BTreeSet::new(),
+    );
+    for page_size in 1..=rows.len() {
+        let pages = page_count(order.indices.len(), page_size);
+        for page in 0..pages {
+            let bounds = page_bounds(page, page_size, order.indices.len());
+            let (group_keys, row_keys) = grouped_page_of(&order, &rows, bounds.clone());
+            let previous = entity_previous_group_key(&order.group_keys, &bounds);
+            let sections = entity_grouped_page_sections(
+                &order.runs,
+                &group_keys,
+                &row_keys,
+                previous.as_deref(),
+                page + 1 >= pages,
+            );
+            assert!(
+                sections
+                    .iter()
+                    .all(|section| section.collapsed || !section.row_keys.is_empty()),
+                "expanded section without rows at page {page} size {page_size}"
+            );
+            // Every painted row belongs to exactly one section, in order.
+            let painted = sections
+                .iter()
+                .flat_map(|section| section.row_keys.clone())
+                .collect::<Vec<_>>();
+            assert_eq!(painted, row_keys);
+        }
+    }
+}
+
+#[test]
+fn a_group_spanning_a_page_boundary_resumes_with_a_continuation_heading() {
+    let rows = activity_rows();
+    let order = grouped_order_of(
+        &rows,
+        &activity_groups(),
+        EntityGroupOrder::Declared,
+        &BTreeSet::new(),
+    );
+    // Page size 1 splits co-1 (a2, a4) across pages 0 and 1.
+    let bounds = page_bounds(1, 1, order.indices.len());
+    let (group_keys, row_keys) = grouped_page_of(&order, &rows, bounds.clone());
+    let previous = entity_previous_group_key(&order.group_keys, &bounds);
+    assert_eq!(previous.as_deref(), Some("co-1"));
+    let sections = entity_grouped_page_sections(
+        &order.runs,
+        &group_keys,
+        &row_keys,
+        previous.as_deref(),
+        false,
+    );
+    assert_eq!(sections.len(), 1);
+    assert!(sections[0].continued);
+    assert_eq!(sections[0].group_key, "co-1");
+    // The count is the group's TRUE size, not the page's slice of it.
+    assert_eq!(sections[0].group_row_count, 2);
+    assert_eq!(sections[0].first_row_position, 0);
+}
+
+#[test]
+fn a_collapsed_group_heading_is_anchored_before_the_next_fresh_section() {
+    let rows = activity_rows();
+    let collapsed = BTreeSet::from(["co-2".to_owned()]);
+    let order = grouped_order_of(
+        &rows,
+        &activity_groups(),
+        EntityGroupOrder::Declared,
+        &collapsed,
+    );
+    let bounds = page_bounds(0, 25, order.indices.len());
+    let (group_keys, row_keys) = grouped_page_of(&order, &rows, bounds.clone());
+    let previous = entity_previous_group_key(&order.group_keys, &bounds);
+    let sections = entity_grouped_page_sections(
+        &order.runs,
+        &group_keys,
+        &row_keys,
+        previous.as_deref(),
+        true,
+    );
+    assert_eq!(
+        sections
+            .iter()
+            .map(|section| section.group_key.as_str())
+            .collect::<Vec<_>>(),
+        vec!["co-1", "co-2", "co-3"]
+    );
+    let hidden = &sections[1];
+    assert!(hidden.collapsed);
+    assert!(hidden.row_keys.is_empty());
+    assert_eq!(hidden.group_row_count, 2);
+}
+
+#[test]
+fn a_trailing_collapsed_group_renders_on_the_last_page_and_only_there() {
+    let rows = activity_rows();
+    let collapsed = BTreeSet::from(["co-3".to_owned()]);
+    let order = grouped_order_of(
+        &rows,
+        &activity_groups(),
+        EntityGroupOrder::Declared,
+        &collapsed,
+    );
+    let pages = page_count(order.indices.len(), 2);
+    let mut rendered = 0;
+    for page in 0..pages {
+        let bounds = page_bounds(page, 2, order.indices.len());
+        let (group_keys, row_keys) = grouped_page_of(&order, &rows, bounds.clone());
+        let previous = entity_previous_group_key(&order.group_keys, &bounds);
+        let sections = entity_grouped_page_sections(
+            &order.runs,
+            &group_keys,
+            &row_keys,
+            previous.as_deref(),
+            page + 1 >= pages,
+        );
+        rendered += sections
+            .iter()
+            .filter(|section| section.group_key == "co-3")
+            .count();
+    }
+    assert_eq!(
+        rendered, 1,
+        "every non-empty collapsed group renders exactly once"
+    );
+}
+
+#[test]
+fn collapsing_every_group_still_renders_every_heading() {
+    let rows = activity_rows();
+    let collapsed = BTreeSet::from(["co-1".to_owned(), "co-2".to_owned(), "co-3".to_owned()]);
+    let order = grouped_order_of(
+        &rows,
+        &activity_groups(),
+        EntityGroupOrder::Declared,
+        &collapsed,
+    );
+    assert!(order.indices.is_empty());
+    let sections = entity_grouped_page_sections(&order.runs, &[], &[], None, true);
+    assert_eq!(sections.len(), 3);
+    assert!(sections.iter().all(|section| section.collapsed));
+}
+
+#[test]
+fn a_group_heading_spans_the_current_column_count_including_the_selection_cell() {
+    // ldui-ibjk: the `<colgroup>` pins one `<col>` per column and the leading
+    // selection cell claims its own track, so a heading short by one desyncs
+    // the grid. Both full-width rows -- the empty state and every heading --
+    // read the same arithmetic, which is why they cannot drift apart.
+    assert_eq!(entity_group_header_colspan(4, false), 4);
+    assert_eq!(entity_group_header_colspan(4, true), 5);
+    // Hiding a column narrows the span with it.
+    assert_eq!(entity_group_header_colspan(3, true), 4);
+    // A table with every column hidden still spans one cell, never zero.
+    assert_eq!(entity_group_header_colspan(0, false), 1);
+    assert_eq!(entity_group_header_colspan(0, true), 2);
+    assert_eq!(
+        entity_group_header_colspan(4, true),
+        super::component::entity_empty_state_colspan(4, true)
+    );
+}
+
+#[test]
+fn group_headings_are_presentation_and_never_join_the_displayed_page_selection() {
+    // ldui-nz6d's invariant: the header checkbox governs the keys the table is
+    // painting. A heading is not a record and has no row key, so it cannot
+    // enter that population -- and there is deliberately no per-group
+    // select-all, which would have to name rows on other pages (or, for a
+    // collapsed group, rows nobody can see) and would reintroduce exactly the
+    // "checked means something you cannot verify" defect nz6d refused.
+    let rows = activity_rows();
+    let order = grouped_order_of(
+        &rows,
+        &activity_groups(),
+        EntityGroupOrder::Declared,
+        &BTreeSet::new(),
+    );
+    let bounds = page_bounds(0, 25, order.indices.len());
+    let (group_keys, row_keys) = grouped_page_of(&order, &rows, bounds);
+    let sections = entity_grouped_page_sections(&order.runs, &group_keys, &row_keys, None, true);
+    let displayed = EntityTableDisplayedPage::new(row_keys.clone());
+    assert_eq!(displayed.len(), rows.len());
+    assert_eq!(sections.len(), 3);
+    let accepted = row_keys.iter().cloned().collect::<BTreeSet<_>>();
+    assert_eq!(
+        displayed.selection_state(&accepted),
+        EntityTableDisplayedPageSelection::All,
+        "selecting every painted row checks the header; headings never count"
+    );
+    let source = include_str!("component.rs");
+    assert!(
+        !source.contains("data-entity-selection-toggle=\"group\""),
+        "no per-group select-all may exist"
+    );
+}
+
+#[test]
+fn collapsing_a_group_shrinks_the_selection_population_rather_than_clearing_keys() {
+    let rows = activity_rows();
+    let collapsed = BTreeSet::from(["co-1".to_owned()]);
+    let order = grouped_order_of(
+        &rows,
+        &activity_groups(),
+        EntityGroupOrder::Declared,
+        &collapsed,
+    );
+    let bounds = page_bounds(0, 25, order.indices.len());
+    let (_, row_keys) = grouped_page_of(&order, &rows, bounds);
+    let displayed = EntityTableDisplayedPage::new(row_keys);
+    // a2/a4 belong to the collapsed group. They stay ACCEPTED and are counted
+    // off-page, exactly like keys on another page -- never silently cleared.
+    let accepted = BTreeSet::from([
+        "a2".to_owned(),
+        "a4".to_owned(),
+        "a1".to_owned(),
+        "a3".to_owned(),
+        "a5".to_owned(),
+    ]);
+    assert_eq!(
+        displayed.selection_state(&accepted),
+        EntityTableDisplayedPageSelection::All
+    );
+    assert_eq!(off_page_selected_count(&accepted, displayed.keys()), 2);
+}
+
+#[test]
+fn the_display_projection_carries_the_group_identity_the_table_stopped_repeating() {
+    let rows = activity_rows();
+    let columns = vec![
+        EntityColumn::text("kind", "Kind", |row: &ActivityRow| row.kind.to_owned()).required(),
+    ];
+    let preferences = EntityTablePreferences::new(1);
+    let order = grouped_order_of(
+        &rows,
+        &activity_groups(),
+        EntityGroupOrder::Declared,
+        &BTreeSet::new(),
+    );
+    let groups = activity_groups();
+    let label_of = |key: &str| entity_group_label(&groups, key);
+    let projection = super::model::entity_table_display_projection_from_indices(
+        &rows,
+        &columns,
+        &preferences,
+        &order.indices,
+        0,
+        25,
+        &|row: &ActivityRow| row.id.to_owned(),
+        EntityTableActionColumnPolicy::default(),
+        Some(super::model::EntityProjectionGrouping {
+            group_keys: &order.group_keys,
+            label_of: &label_of,
+            column_header: "Coordinator",
+        }),
+    );
+    assert_eq!(projection.columns[0].id, ENTITY_GROUP_COLUMN_ID);
+    assert_eq!(projection.columns[0].label, "Coordinator");
+    assert_eq!(projection.columns[1].id, "kind");
+    let exported = projection.rows(EntityTableProjectionScope::AllFiltered);
+    assert_eq!(exported.len(), rows.len());
+    // The LABEL is the exported cell (a person reads a CSV) and the KEY is the
+    // stable identity beside it (a re-import joins on it). Two groups sharing
+    // a label stay distinguishable because of the key.
+    assert_eq!(exported[0].cells[0], "Ana Ruiz");
+    assert_eq!(exported[0].group_key.as_deref(), Some("co-1"));
+    assert_eq!(exported[4].cells[0], "Ana Ruiz");
+    assert_eq!(exported[4].group_key.as_deref(), Some("co-3"));
+    // The export is in the same grouped order the body paints.
+    assert_eq!(
+        exported
+            .iter()
+            .map(|row| row.key.as_str())
+            .collect::<Vec<_>>(),
+        vec!["a2", "a4", "a1", "a3", "a5"]
+    );
+}
+
+#[test]
+fn an_ungrouped_projection_gains_no_group_column_and_no_group_key() {
+    let rows = activity_rows();
+    let columns = vec![
+        EntityColumn::text("kind", "Kind", |row: &ActivityRow| row.kind.to_owned()).required(),
+    ];
+    let preferences = EntityTablePreferences::new(1);
+    let projection = entity_table_display_projection(
+        &rows,
+        &columns,
+        &preferences,
+        0,
+        25,
+        &|row: &ActivityRow| row.id.to_owned(),
+        EntityTableActionColumnPolicy::default(),
+    );
+    assert_eq!(projection.columns.len(), 1);
+    assert_eq!(projection.columns[0].id, "kind");
+    assert!(
+        projection
+            .rows(EntityTableProjectionScope::AllFiltered)
+            .iter()
+            .all(|row| row.group_key.is_none())
+    );
+}
+
+#[test]
+fn group_ranks_are_total_over_declared_and_encountered_keys() {
+    let groups = activity_groups();
+    let encountered = vec!["co-9".to_owned(), "co-2".to_owned(), "co-8".to_owned()];
+    let ranks = entity_group_ranks(&groups, EntityGroupOrder::Declared, &encountered);
+    assert_eq!(ranks["co-1"], 0);
+    assert_eq!(ranks["co-2"], 1);
+    assert_eq!(ranks["co-3"], 2);
+    assert_eq!(ranks["co-9"], 3);
+    assert_eq!(ranks["co-8"], 4);
+}
+
+#[test]
+fn a_grouped_table_keeps_one_global_column_header_and_one_filter_row() {
+    // The whole point of ldui-iyfa: one table instance, not one per group. The
+    // `<thead>` and the controlled filter row sit outside the grouped body
+    // branch entirely, so grouping structurally cannot duplicate either.
+    let source = include_str!("component.rs");
+    assert_eq!(source.matches("<thead").count(), 1);
+    assert_eq!(source.matches("data-entity-column-filter-row=").count(), 1);
+}
+
+#[test]
+fn the_group_heading_carries_row_group_and_colgroup_semantics() {
+    // One `<tbody>` per section (already `role="rowgroup"`) named by its
+    // heading, plus a spanning `<th scope="colgroup">` so HTML's own
+    // header-association algorithm attributes every child cell to the heading
+    // without the label being repeated in a data cell.
+    let source = include_str!("component.rs");
+    assert!(source.contains("aria-labelledby=labelled_by"));
+    assert!(source.contains("scope=\"colgroup\""));
+    assert!(source.contains("data-entity-group-header=group_key.clone()"));
+    // Collapsed children are not rendered at all -- they leave the
+    // accessibility tree instead of being painted and visually hidden.
+    assert!(source.contains("{(!collapsed).then(move || local_for_enumerate("));
+    // The disclosure control, not the heading row, carries `aria-expanded`.
+    assert!(source.contains("aria-expanded=(!collapsed).to_string()"));
+}
+
+#[test]
+fn a_group_heading_row_is_never_focusable_and_never_selectable() {
+    // Presentation rows must not create a tab stop, must not report
+    // `aria-selected`, and must not carry a row key that selection or focus
+    // recovery could latch onto.
+    let source = include_str!("component.rs");
+    let heading = source
+        .split("data-entity-group-header=group_key.clone()")
+        .nth(1)
+        .expect("group heading markup");
+    let heading = &heading[..heading.find("</tr>").expect("group heading end")];
+    assert!(!heading.contains("tabindex"));
+    assert!(!heading.contains("aria-selected"));
+    assert!(!heading.contains("data-entity-row-key"));
+}
+
+#[test]
+fn focus_recovery_reads_the_painted_page_rather_than_recomputing_one() {
+    // Grouping reorders rows and collapse removes them, so a second
+    // independently recomputed page window would recover focus onto a row that
+    // is not on screen. There is one displayed order and everything reads it.
+    let source = include_str!("component.rs");
+    assert!(source.contains("let visible_keys = page_row_keys.get();"));
+    assert!(
+        !source.contains("fn visible_row_keys"),
+        "the duplicate page-window computation must be gone"
+    );
+}
+
+#[test]
+fn an_ungrouped_table_renders_the_body_it_always_did() {
+    // Grouping costs a table that does not use it nothing: no extra `<tbody>`,
+    // no heading markup, no `data-entity-group-*` attribute anywhere.
+    let source = include_str!("component.rs");
+    assert!(source.contains("{(!has_grouping).then(|| view! {"));
+    assert!(source.contains("{has_grouping.then(|| {"));
+    // Every piece of grouping markup lives behind that gate.
+    let grouped = source
+        .split("{has_grouping.then(|| {")
+        .nth(1)
+        .expect("grouped body branch");
+    let ungrouped = source
+        .split("{(!has_grouping).then(|| view! {")
+        .nth(1)
+        .expect("ungrouped body branch");
+    let ungrouped = &ungrouped[..ungrouped
+        .find("{has_grouping.then(|| {")
+        .expect("ungrouped branch ends before the grouped one")];
+    assert!(!ungrouped.contains("data-entity-group"));
+    assert!(grouped.contains("render_group_section"));
+}
+
+#[test]
+fn every_group_string_the_table_renders_comes_from_texts() {
+    // A dedicated texts struct, like ldui-nz6d's selection copy: copy that
+    // only exists when the feature is configured must not widen the always
+    // required `EntityTableTexts` and break every consumer's literal.
+    let texts = EntityGroupTexts::default();
+    assert_eq!(texts.row_count_label(459), "459 rows");
+    assert_eq!(texts.heading("Ana Ruiz", false), "Ana Ruiz");
+    assert_eq!(texts.heading("Ana Ruiz", true), "Ana Ruiz (continued)");
+    // The accessible name of the disclosure control contains the visible group
+    // label, so it satisfies label-in-name rather than replacing it.
+    assert_eq!(texts.toggle_label("Ana Ruiz", false), "Collapse Ana Ruiz");
+    assert_eq!(texts.toggle_label("Ana Ruiz", true), "Expand Ana Ruiz");
+    assert_eq!(texts.column_header, "Group");
+    // Adding grouping left the base texts struct untouched.
+    let base = EntityTableTexts::default();
+    assert_eq!(base.no_rows, "No rows");
+}
+
+#[test]
+fn a_declared_group_carries_optional_compact_metadata() {
+    let groups = vec![EntityRowGroup::new("co-1", "Ana Ruiz").with_meta("3 of 5 complete")];
+    assert_eq!(
+        entity_group_meta(&groups, "co-1").as_deref(),
+        Some("3 of 5 complete")
+    );
+    assert_eq!(entity_group_meta(&groups, "co-2"), None);
+    assert_eq!(groups[0].key(), "co-1");
+    assert_eq!(groups[0].label(), "Ana Ruiz");
+    assert_eq!(groups[0].meta(), Some("3 of 5 complete"));
 }

@@ -2,6 +2,7 @@
 
 mod component;
 mod emphasis;
+mod grouping;
 mod model;
 mod multi_selection;
 mod selection;
@@ -9,6 +10,11 @@ mod storage;
 mod types;
 
 pub use emphasis::{EntityRowEmphasis, EntityRowEmphasisClassifier};
+pub use grouping::{
+    ENTITY_GROUP_COLUMN_ID, EntityGroupActions, EntityGroupCollapseCause,
+    EntityGroupCollapseProposal, EntityGroupKey, EntityGroupOrder, EntityGroupTexts,
+    EntityRowGroup, EntityRowGrouping, propose_entity_group_collapse,
+};
 pub use model::{
     ENTITY_PAGE_SIZE_CHOICES, EntityColumnMove, EntityFocusRecord, EntityFocusTarget,
     entity_table_display_projection, focus_target, move_column, next_sort, next_sort_additive,
@@ -53,6 +59,13 @@ use model::SortedIndexCache;
 
 #[cfg(test)]
 pub(crate) use component::next_entity_page_size_id;
+
+#[cfg(test)]
+pub(crate) use grouping::{
+    EntityGroupedOrder, entity_group_header_colspan, entity_group_label, entity_group_meta,
+    entity_group_ranks, entity_grouped_order, entity_grouped_page_sections,
+    entity_previous_group_key,
+};
 
 #[cfg(test)]
 mod tests;

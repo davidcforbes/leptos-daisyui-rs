@@ -614,6 +614,184 @@ row, or a single-row workflow act on a set. Omitting `multi_selection`
 entirely renders exactly the markup a table that predates it rendered: no
 leading track, no leading cells, no live region.
 
+## Controlled accessible row groups (ldui-iyfa)
+
+`row_grouping` partitions the rendered rows into accessible sections without
+splitting the table. It exists because a dataset with repeated child facts --
+Office Coordinator Activity's 459 activity rows, where every row repeats its
+coordinator's name and the workflow reads Task / Goal / Actual beneath one
+coordinator heading -- previously had only two bad options: repeat the group
+identity in every row, or fork one `EntityTable` per group and duplicate the
+column header and filter row with it.
+
+```rust,ignore
+use leptos_daisyui_rs::components::{
+    EntityRowGroup, EntityRowGrouping, EntityTable,
+};
+use std::rc::Rc;
+
+let groups = Signal::derive_local(move || {
+    coordinators
+        .get()
+        .into_iter()
+        .map(|coordinator| {
+            EntityRowGroup::new(coordinator.id, coordinator.display_name)
+                .with_meta(coordinator.cadence)
+        })
+        .collect::<Vec<_>>()
+});
+
+view! {
+    <EntityTable
+        data=rows
+        columns=activity_columns()
+        row_key=Rc::new(|row: &ActivityRow| row.id.clone())
+        dataset_identity=dataset
+        row_grouping=EntityRowGrouping::controlled(
+            Rc::new(|row: &ActivityRow| row.coordinator_id.clone()),
+            groups,
+        )
+    />
+}
+```
+
+### The key is the identity; the label is copy
+
+`EntityRowGroup::new(key, label)` separates the two on purpose. The key drives
+the partition, the section rank, collapse state, and the exported group
+identity. The label drives the rendered heading and the exported group column,
+nothing else. Two groups may carry the *same* label and stay entirely
+distinct, and relabelling a group (a locale change, a renamed coordinator)
+repartitions nothing, reorders nothing, and cannot move a collapse flag onto a
+different group.
+
+Groups the caller never declared are not dropped. They rank after every
+declared group, in first-appearance order, so a dataset that grows a new group
+key still shows every record rather than silently hiding rows.
+
+### One global header, one filter row
+
+Grouping renders exactly one `<thead>` and one controlled filter row for the
+whole table, regardless of how many sections it paints. Consumers need no DOM
+post-processing and no local table fork.
+
+### Sorting and filtering, stated explicitly
+
+- **Filters apply to child rows.** `EntityTable` filters nothing itself; the
+  caller filters `data` as before. A group whose rows are all filtered away
+  has no rows left, so its heading disappears with them. There is no separate
+  "hide empty groups" switch to forget.
+- **Row sorting happens within groups.** Grouping applies a *stable* partition
+  by group rank on top of the table's own sort permutation, so the sort order
+  inside every section is exactly the order the sort produced.
+- **Group order is caller-controlled.** The default is the declared order of
+  `groups`. `EntityRowGrouping::with_order` selects an explicit group sort --
+  `EntityGroupOrder::LabelAscending` / `LabelDescending` -- which replaces the
+  rank only. Ties fall back to declared order, so the result is total rather
+  than dependent on sort implementation.
+
+### Pagination never inflates counts
+
+Group headings are presentation rows. They are not records, so they never
+enter the `Showing x-y of z` summary, the page count, or the display
+projection's row list. Paging remains strictly over data rows.
+
+A heading is only ever derived from a row that is on the current page, which
+makes an *orphan heading* -- an expanded group's heading stranded as the last
+visible row with its children on the next page -- unrepresentable rather than
+merely avoided. When a group's rows straddle a page boundary, the next page
+opens with a continuation heading (`"{group} (continued)"`).
+
+### Collapse is optional, controlled, and a filter
+
+The default exposes every filtered row. `EntityRowGrouping::collapsible`
+binds a caller-owned `Signal<BTreeSet<String>>` of collapsed keys plus a
+`Callback<EntityGroupCollapseProposal>`. Like `multi_selection`, every gesture
+emits ONE proposal carrying the COMPLETE resulting key set -- never a delta --
+stamped with the scope it was computed against, and nothing changes until the
+caller's own signal does.
+
+Collapsing removes the group's rows from the displayed model outright: they
+leave paging, the row-range summary, the displayed-page selection population,
+and `on_display_projection` together. That is what keeps every count truthful,
+and it is why collapsed children leave the accessibility tree instead of being
+painted and hidden. A collapsed group keeps its heading and its honest row
+count, so nothing disappears without a trace.
+
+### Accessibility
+
+- **One `<tbody>` per rendered section**, which is already `role="rowgroup"`,
+  so the section boundary is the structural fact that these rows belong
+  together. It carries `aria-labelledby` pointing at its heading.
+- **The heading is a `<th scope="colgroup">`** spanning every column. HTML's
+  own header-association algorithm applies a `colgroup`-scoped header to the
+  remaining cells in those columns, so a screen reader in table navigation
+  attributes each child cell to the heading **automatically** -- no per-row
+  attribute, and no group label repeated in a data cell. That repetition is
+  the defect being fixed, so re-introducing it as an ARIA crutch would defeat
+  the point.
+- **The heading row is never focusable and never `aria-selected`.** It is
+  presentation, not a record, and carries no row key for selection or focus
+  recovery to latch onto.
+- **Collapse lives on a control, not the row.** When `collapsible` is bound,
+  the heading holds one ordinary `<button>` with `aria-expanded` and
+  `aria-controls` naming its `<tbody>` -- a single normal tab stop, no trap,
+  no roving state of its own. Its accessible name contains the visible group
+  label, so it satisfies label-in-name.
+- **The heading spans the current column count**, including the leading
+  multi-selection control cell when one is rendered. The empty-state row and
+  every heading read one shared derivation, because two independent colspan
+  computations is how a full-width row comes to be short by one and desync the
+  declared `<colgroup>` tracks (`ldui-ibjk`).
+
+### Grouping and multi-selection
+
+A group heading does **not** participate in the displayed-page selection
+population that `multi_selection`'s header checkbox governs (`ldui-nz6d`): it
+has no row key, so it cannot. The header checkbox continues to mean exactly
+"the rows currently displayed", now grouped.
+
+**There is deliberately no per-group select-all.** A group spans pages, and a
+collapsed group displays nothing at all, so a per-group checkbox would have to
+name keys the table is not painting -- reintroducing precisely the "checked
+means something you cannot verify" defect `ldui-nz6d` refused for the header
+checkbox. Selecting a whole group is done the same way selecting everything
+is: widen the page size until the group is displayed, which makes the
+widening an explicit, visible act.
+
+Collapsing a group does not clear its selected keys. They stay accepted and
+are reported by the live region as off-page, exactly like keys on another
+page.
+
+### Export carries the group identity
+
+The visual table stops repeating the group in every row, so the display
+projection puts it back. On a grouped table `on_display_projection` prepends a
+synthetic `ENTITY_GROUP_COLUMN_ID` column carrying the group **label** (what a
+person reads in a CSV), and every `EntityTableDisplayRow` carries
+`group_key: Some(..)` with the stable **identity** (what a re-import joins
+on). Rows are in the same grouped order the body paints. An ungrouped table's
+projection is unchanged: no group column, and `group_key` is `None`.
+
+### Localization
+
+Group copy lives on its own `EntityGroupTexts`, supplied via
+`EntityRowGrouping::with_texts`, for the same reason `EntityTableSelectionTexts`
+is separate: copy that only exists when the feature is configured must not
+widen the always-required `EntityTableTexts` and break every consumer's
+literal. It carries `column_header`, `row_count` (`{count}`), `continued`
+(`{group}`), `collapse` (`{group}`), and `expand` (`{group}`).
+
+### Stable IDs
+
+Each section mints a stable `<tbody id>` and a `<th id>` derived from it, so
+`aria-labelledby` and `aria-controls` resolve without the caller supplying
+ids or post-processing the DOM. Group identity is additionally exposed for
+tests and styling as `data-entity-group`, `data-entity-group-header`,
+`data-entity-group-continued`, `data-entity-group-collapsed`,
+`data-entity-group-toggle`, `data-entity-group-meta`, and
+`data-entity-group-actions`.
+
 ## Typed summary-row emphasis
 
 `row_emphasis` classifies each row into `EntityRowEmphasis` -- `Standard`,
