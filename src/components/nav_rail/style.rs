@@ -27,11 +27,18 @@ pub fn group_class(pinned: bool) -> &'static str {
 /// `theme::CONTROL_PRESSED` selection fill; the resting state is a muted
 /// icon that gains a lighter hover pill and full-opacity text on `:hover`
 /// (replacing the renderer's manual `update_hover` hit-testing with CSS).
+/// Inactive items use `text-base-content/75`, the crate's muted-copy idiom.
+///
+/// It was `/60`, which measures 4.64:1 over `base-100` and passes AA — but the
+/// rail's own background is `bg-base-300`, where the same colour measures
+/// 4.42:1 and FAILS the 4.5:1 threshold. The ratio that matters is the one
+/// against the surface the text actually sits on, not the page default
+/// (ldui-2e7a).
 pub fn item_class(active: bool) -> &'static str {
     if active {
         "relative flex h-12 w-12 cursor-pointer items-center justify-center rounded-box bg-base-200 text-primary transition-colors hover:bg-base-300"
     } else {
-        "relative flex h-12 w-12 cursor-pointer items-center justify-center rounded-box text-base-content/60 transition-colors hover:bg-base-200 hover:text-base-content"
+        "relative flex h-12 w-12 cursor-pointer items-center justify-center rounded-box text-base-content/75 transition-colors hover:bg-base-200 hover:text-base-content"
     }
 }
 

@@ -29,7 +29,9 @@ fn test_group_class_pinned_appends_mt_auto() {
 #[test]
 fn test_item_class_resting() {
     let class = item_class(false);
-    assert!(class.contains("text-base-content/60"));
+    // /75, not /60: at /60 the inactive item measures 4.42:1 against
+    // the rail's own bg-base-300 and fails AA (ldui-2e7a).
+    assert!(class.contains("text-base-content/75"));
     assert!(class.contains("hover:bg-base-200"));
     assert!(!class.contains("bg-base-200 text-primary"));
 }
@@ -104,7 +106,7 @@ fn test_indicator_width_is_the_shared_accent_stroke() {
 // component style modules (see metric_row::tests).
 #[test]
 fn test_all_item_states_return_valid_classes() {
-    let variants = vec![(false, "text-base-content/60"), (true, "text-primary")];
+    let variants = vec![(false, "text-base-content/75"), (true, "text-primary")];
     for (active, expected_fragment) in variants {
         assert!(item_class(active).contains(expected_fragment));
     }
