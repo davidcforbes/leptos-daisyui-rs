@@ -15,16 +15,36 @@
 //! Card depth is the framework's own static policy, not a stock Tailwind
 //! utility: see [`kpi_card_shell_class`] and `ld-card-depth` (ldui-k4fn).
 
-use crate::components::{StatDeltaTrend, Tooltip};
+use crate::components::{
+    CapacityBar, CapacityBarColor, Pressable, StatDeltaTrend, Tooltip, capacity_bar_percent,
+};
 use crate::merge_classes;
 use leptos::{html::Div, prelude::*};
 
 /// Reactive framework-owned copy for `KpiStrip`/`KpiCard`'s own generated
-/// text -- the unavailable-value fallback and the trend-direction words
-/// folded into each card's accessible name. Caller-supplied [`KpiItem`]
-/// text (label/value/description/help) is not covered here: localize it by
-/// rebuilding the `items` list for the active locale, the same as any
-/// other reactive prop in this crate.
+/// text -- the unavailable-value fallback, the trend-direction words folded
+/// into each card's accessible name, and every sentence the baseline
+/// comparison row generates. Caller-supplied [`KpiItem`] text
+/// (label/value/description/help, the baseline's own name, an action's
+/// label) is not covered here: localize it by rebuilding the `items` list
+/// for the active locale, the same as any other reactive prop in this
+/// crate.
+///
+/// ### Comparison templates
+///
+/// The five `baseline_*` fields are templates, not finished sentences.
+/// Three placeholders are substituted before rendering:
+///
+/// - `{ratio}` -- current as a percentage OF the baseline, e.g. `112`.
+/// - `{delta}` -- the unsigned deviation FROM the baseline in percentage
+///   points, e.g. `12`. Which side it falls on is carried by *which*
+///   template is chosen, so the number itself is never signed.
+/// - `{baseline}` -- the caller's own [`KpiBaseline::label`], e.g.
+///   `"12-week avg / 250"`.
+///
+/// In the no-baseline and settling templates there is no ratio and no
+/// deviation, so `{ratio}` and `{delta}` substitute to `unavailable` rather
+/// than to a fabricated `0` (ldui-ztgo).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct KpiStripTexts {
     /// Shown -- and spoken via the accessible name -- in place of a `None`
@@ -36,6 +56,26 @@ pub struct KpiStripTexts {
     pub trend_down: String,
     /// Trend word for [`StatDeltaTrend::Neutral`].
     pub trend_steady: String,
+    /// The truthful ratio readout rendered beside the comparison bar --
+    /// UNBOUNDED, so it still reads `312%` when the bar itself has
+    /// saturated. Default `"{ratio}%"`.
+    pub baseline_ratio: String,
+    /// Sentence for a value above its baseline. Default
+    /// `"{delta}% above baseline"`.
+    pub baseline_above: String,
+    /// Sentence for a value below its baseline. Default
+    /// `"{delta}% below baseline"`.
+    pub baseline_below: String,
+    /// Sentence for a value that rounds to its baseline. Default
+    /// `"In line with baseline"`.
+    pub baseline_level: String,
+    /// Sentence for [`KpiBaselineAvailability::Absent`] -- and for a
+    /// baseline the arithmetic cannot use. Default `"No baseline yet"`.
+    pub baseline_absent: String,
+    /// Sentence for [`KpiBaselineAvailability::Settling`] -- a baseline
+    /// window that exists but is not yet full. Default
+    /// `"Baseline still settling"`.
+    pub baseline_settling: String,
 }
 
 impl Default for KpiStripTexts {
@@ -45,6 +85,12 @@ impl Default for KpiStripTexts {
             trend_up: "trending up".to_owned(),
             trend_down: "trending down".to_owned(),
             trend_steady: "steady".to_owned(),
+            baseline_ratio: "{ratio}%".to_owned(),
+            baseline_above: "{delta}% above baseline".to_owned(),
+            baseline_below: "{delta}% below baseline".to_owned(),
+            baseline_level: "In line with baseline".to_owned(),
+            baseline_absent: "No baseline yet".to_owned(),
+            baseline_settling: "Baseline still settling".to_owned(),
         }
     }
 }
@@ -57,6 +103,62 @@ impl KpiStripTexts {
             StatDeltaTrend::Negative => &self.trend_down,
             StatDeltaTrend::Neutral => &self.trend_steady,
         }
+    }
+
+    /// The raw template for a resolved comparison state.
+    fn baseline_template(&self, state: KpiBaselineState) -> &str {
+        match state {
+            KpiBaselineState::Above => &self.baseline_above,
+            KpiBaselineState::Below => &self.baseline_below,
+            KpiBaselineState::Level => &self.baseline_level,
+            KpiBaselineState::NoBaseline => &self.baseline_absent,
+            KpiBaselineState::Settling => &self.baseline_settling,
+        }
+    }
+
+    /// The localized comparison sentence for a resolved comparison.
+    ///
+    /// Always returns a sentence: every one of the five states has its own
+    /// template, so an unavailable baseline is DESCRIBED rather than
+    /// silently omitted.
+    pub fn baseline_sentence(&self, comparison: &KpiComparison, baseline_label: &str) -> String {
+        self.fill_template(
+            self.baseline_template(comparison.state),
+            comparison,
+            baseline_label,
+        )
+    }
+
+    /// The localized truthful ratio readout, or `None` when the comparison
+    /// carries no ratio to be truthful about.
+    pub fn baseline_ratio_readout(
+        &self,
+        comparison: &KpiComparison,
+        baseline_label: &str,
+    ) -> Option<String> {
+        comparison
+            .ratio_percent
+            .map(|_| self.fill_template(&self.baseline_ratio, comparison, baseline_label))
+    }
+
+    /// Substitutes `{ratio}`, `{delta}` and `{baseline}`. An absent number
+    /// becomes `unavailable`, never a fabricated zero.
+    fn fill_template(
+        &self,
+        template: &str,
+        comparison: &KpiComparison,
+        baseline_label: &str,
+    ) -> String {
+        let ratio = comparison
+            .ratio_percent
+            .map_or_else(|| self.unavailable.clone(), |value| value.to_string());
+        let delta = comparison
+            .deviation_percent
+            .map_or_else(|| self.unavailable.clone(), |value| value.abs().to_string());
+        template
+            .replace("{ratio}", &ratio)
+            .replace("{delta}", &delta)
+            .replace("{baseline}", baseline_label)
     }
 }
 
@@ -117,6 +219,43 @@ impl KpiStatus {
             KpiStatus::Error => "bg-error",
         }
     }
+
+    /// Stable runtime marker, emitted as `data-kpi-card-status` so a test or
+    /// a consumer can read a card's status WITHOUT reading its colour --
+    /// [`RecordStatusTone::as_str`](super::RecordStatusTone::as_str)'s
+    /// posture, adopted here for the same reason.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            KpiStatus::Neutral => "neutral",
+            KpiStatus::Info => "info",
+            KpiStatus::Success => "success",
+            KpiStatus::Warning => "warning",
+            KpiStatus::Error => "error",
+        }
+    }
+
+    /// Fill colour for this card's baseline comparison bar.
+    ///
+    /// The bar wears the card's TYPED status and nothing else. It must not
+    /// derive its colour from the numbers -- `CapacityBarColor::for_direction`
+    /// exists and would paint at-or-above green and below red, which asserts
+    /// that higher is better. For "days to close" or "cost per matter",
+    /// higher is worse, and the framework has no way to know which it is
+    /// looking at (ldui-ztgo). Favourable/unfavourable is the caller's
+    /// [`KpiStatus`] to declare.
+    ///
+    /// `Neutral` takes `CapacityBarColor::Primary`, `CapacityBar`'s own
+    /// documented default fill, rather than inventing an emphasis the card
+    /// does not have.
+    fn comparison_bar_color(self) -> CapacityBarColor {
+        match self {
+            KpiStatus::Neutral => CapacityBarColor::Primary,
+            KpiStatus::Info => CapacityBarColor::Info,
+            KpiStatus::Success => CapacityBarColor::Success,
+            KpiStatus::Warning => CapacityBarColor::Warning,
+            KpiStatus::Error => CapacityBarColor::Error,
+        }
+    }
 }
 
 /// Optional trend indicator for a [`KpiItem`] -- the same up/down/steady
@@ -149,6 +288,321 @@ impl KpiTrend {
     /// Sets the trailing label.
     pub fn label(mut self, label: impl Into<String>) -> Self {
         self.label = label.into();
+        self
+    }
+}
+
+/// Headroom the comparison track carries beyond the baseline, so the
+/// baseline marker sits at a FIXED position rather than wherever the current
+/// value happens to push it.
+///
+/// The track's right edge is `baseline * 1.25`, so the marker lands at
+/// exactly `1 / 1.25` = 80% of the track on **every** card in a strip. That
+/// fixed position is what makes "over baseline" legible across twelve cards
+/// at a glance: the eye compares fill ends against one shared tick, not
+/// against a tick that moved because one card's value was large.
+///
+/// Letting `CapacityBar` compute its own default max would defeat this --
+/// its default is `cap * 1.25` *clamped up to at least `value`*, so a card at
+/// 300% of baseline would rescale its own track and drop the marker to 33%
+/// while its neighbour kept it at 80%.
+pub const KPI_BASELINE_TRACK_HEADROOM: f64 = 1.25;
+
+/// Whether a [`KpiBaseline`] actually has a baseline to compare against.
+///
+/// Three DECLARED states, never inferred from a sentinel number. "There is
+/// no baseline", "the baseline window is still filling", and "the baseline
+/// is 250" are three different facts about the data, and a caller that
+/// cannot distinguish them in the type system ends up encoding the first two
+/// as `0.0` -- which is exactly how a dashboard comes to divide by zero and
+/// print `inf%`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum KpiBaselineAvailability {
+    /// A baseline value to compare against. Only usable when it is finite
+    /// and strictly positive; see [`KpiBaseline::resolve`] for what happens
+    /// otherwise.
+    Available(f64),
+    /// There is no baseline for this KPI -- no history, a brand-new metric,
+    /// a scope with no prior period.
+    Absent,
+    /// A baseline window exists but is not yet full, so the average it would
+    /// produce is not yet meaningful. Distinct from [`Self::Absent`]: the
+    /// answer is "not yet", not "never".
+    Settling,
+}
+
+/// Which sentence a resolved comparison speaks.
+///
+/// `Above`/`Level`/`Below` are decided from the ROUNDED ratio, so the
+/// direction word can never disagree with the percentage printed beside it:
+/// a value 0.16% over its baseline rounds to `100%` and therefore reads
+/// "in line with", not "0% above".
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum KpiBaselineState {
+    /// Current rounds above the baseline.
+    Above,
+    /// Current rounds to the baseline.
+    Level,
+    /// Current rounds below the baseline.
+    Below,
+    /// No comparison is possible and none is drawn.
+    #[default]
+    NoBaseline,
+    /// The baseline window is still filling; no comparison is drawn.
+    Settling,
+}
+
+impl KpiBaselineState {
+    /// Stable runtime marker, emitted as `data-kpi-baseline-state`.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Above => "above",
+            Self::Level => "level",
+            Self::Below => "below",
+            Self::NoBaseline => "no-baseline",
+            Self::Settling => "settling",
+        }
+    }
+
+    /// Whether this state carries a bar and a percentage at all.
+    pub const fn is_comparable(self) -> bool {
+        matches!(self, Self::Above | Self::Level | Self::Below)
+    }
+}
+
+/// The fully resolved outcome of one [`KpiBaseline`] -- pure data, computed
+/// by [`KpiBaseline::resolve`] and rendered by [`KpiCard`].
+///
+/// Split out from rendering on purpose: every number below is a plain
+/// function of two `f64`s and an availability, so over-baseline
+/// truthfulness, zero/absent/settling handling and bar clamping are all
+/// testable natively without a browser.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct KpiComparison {
+    /// Which sentence to speak.
+    pub state: KpiBaselineState,
+    /// Current as a percentage OF the baseline, rounded to a whole
+    /// percent and **deliberately unbounded** -- `312` stays `312`.
+    ///
+    /// This is the half of the pair that stays truthful when
+    /// [`Self::saturated`] pins the bar to the end of its track. `None`
+    /// whenever [`Self::state`] is not comparable.
+    pub ratio_percent: Option<i64>,
+    /// Signed deviation from the baseline in whole percentage points --
+    /// exactly `ratio_percent - 100`, so the two can never disagree by a
+    /// rounding step. `None` whenever the state is not comparable.
+    pub deviation_percent: Option<i64>,
+    /// The usable baseline the comparison was computed against -- finite
+    /// and strictly positive, or `None` when the state is not comparable.
+    /// This is the bar's cap-line position in data units.
+    pub baseline_value: Option<f64>,
+    /// The right edge of the comparison track in data units, i.e.
+    /// `baseline_value * KPI_BASELINE_TRACK_HEADROOM`. Passed to
+    /// `CapacityBar` as an explicit `max` so the marker cannot move.
+    pub track_max: Option<f64>,
+    /// Where the fill ends, as a percentage of the track, clamped to
+    /// `[0, 100]`. This is the BOUNDED half of the pair.
+    pub fill_percent: f64,
+    /// Where the baseline marker sits, as a percentage of the track.
+    /// `80.0` for every comparable card (see
+    /// [`KPI_BASELINE_TRACK_HEADROOM`]), `0.0` when nothing is drawn.
+    pub marker_percent: f64,
+    /// The value ran past the end of the track, so the bar is pinned at
+    /// 100% while [`Self::ratio_percent`] keeps reporting the real figure.
+    ///
+    /// Emitted as `data-kpi-baseline-saturated` precisely so "the bar is
+    /// full" and "the value is at the cap" stay distinguishable to a test,
+    /// a consumer, and anyone reading the DOM.
+    pub saturated: bool,
+    /// The caller declared [`KpiBaselineAvailability::Available`] but handed
+    /// over a number the arithmetic cannot use -- zero, negative, `NaN`, an
+    /// infinity, or a non-finite current value.
+    ///
+    /// The card degrades to the no-baseline presentation, but LOUDLY: this
+    /// flag is emitted as `data-kpi-baseline-degraded`, so a silent
+    /// fabricated `0%` is not what the consumer discovers six months later.
+    pub degraded: bool,
+}
+
+impl KpiComparison {
+    /// The unavailable-comparison outcome: no bar, no percentage.
+    const fn unavailable(state: KpiBaselineState, degraded: bool) -> Self {
+        Self {
+            state,
+            ratio_percent: None,
+            deviation_percent: None,
+            baseline_value: None,
+            track_max: None,
+            fill_percent: 0.0,
+            marker_percent: 0.0,
+            saturated: false,
+            degraded,
+        }
+    }
+}
+
+/// A current-versus-baseline comparison owned by one [`KpiItem`] -- the
+/// typed model behind the card's comparison row.
+///
+/// ```rust
+/// use leptos_daisyui_rs::patterns::{KpiBaseline, KpiBaselineState};
+///
+/// // 280 against a trailing 12-week average of 250.
+/// let baseline = KpiBaseline::against(280.0, 250.0).label("12-week avg / 250");
+/// let resolved = baseline.resolve();
+/// assert_eq!(resolved.state, KpiBaselineState::Above);
+/// assert_eq!(resolved.ratio_percent, Some(112));
+/// assert_eq!(resolved.deviation_percent, Some(12));
+/// ```
+#[derive(Clone, Debug, PartialEq)]
+pub struct KpiBaseline {
+    /// The current measured value, in the baseline's own units. Raw and
+    /// unformatted: [`KpiItem::value`] carries the formatted string a human
+    /// reads, this carries the number the comparison is computed from.
+    pub current: f64,
+    /// Whether there is a baseline, and what it is.
+    pub availability: KpiBaselineAvailability,
+    /// The caller's own localized name for the baseline, e.g.
+    /// `"12-week avg / 250"`. Rendered beside the bar and substituted for
+    /// `{baseline}` in [`KpiStripTexts`]' templates. Renders nothing when
+    /// empty.
+    pub label: String,
+}
+
+impl KpiBaseline {
+    /// A comparison of `current` against `baseline`.
+    pub fn against(current: f64, baseline: f64) -> Self {
+        Self {
+            current,
+            availability: KpiBaselineAvailability::Available(baseline),
+            label: String::new(),
+        }
+    }
+
+    /// A KPI that has no baseline at all.
+    pub fn absent(current: f64) -> Self {
+        Self {
+            current,
+            availability: KpiBaselineAvailability::Absent,
+            label: String::new(),
+        }
+    }
+
+    /// A KPI whose baseline window is still filling.
+    pub fn settling(current: f64) -> Self {
+        Self {
+            current,
+            availability: KpiBaselineAvailability::Settling,
+            label: String::new(),
+        }
+    }
+
+    /// Sets the caller's localized baseline name.
+    pub fn label(mut self, label: impl Into<String>) -> Self {
+        self.label = label.into();
+        self
+    }
+
+    /// Resolves this baseline into the numbers the card renders.
+    ///
+    /// The two halves of the honesty contract are produced here, together,
+    /// so they cannot drift apart:
+    ///
+    /// - [`KpiComparison::fill_percent`] is BOUNDED. It goes through
+    ///   [`capacity_bar_percent`], the very function `CapacityBar` uses, and
+    ///   is therefore clamped to `[0, 100]` exactly as the rendered bar is.
+    /// - [`KpiComparison::ratio_percent`] is UNBOUNDED and is never derived
+    ///   from the fill. A value at 312% of baseline reports `312` while the
+    ///   bar sits at 100% and [`KpiComparison::saturated`] says so.
+    ///
+    /// The marker never moves and never disappears: it is pinned at 80% of
+    /// the track for every comparable card, so a full bar reads as "well
+    /// past the tick", never as "exactly at the cap".
+    pub fn resolve(&self) -> KpiComparison {
+        let baseline = match self.availability {
+            KpiBaselineAvailability::Absent => {
+                return KpiComparison::unavailable(KpiBaselineState::NoBaseline, false);
+            }
+            KpiBaselineAvailability::Settling => {
+                return KpiComparison::unavailable(KpiBaselineState::Settling, false);
+            }
+            KpiBaselineAvailability::Available(baseline) => baseline,
+        };
+
+        // A declared baseline the arithmetic cannot use. Zero and negative
+        // baselines are as unusable as NaN: `current / 0.0` is an infinity,
+        // and "312% of -40" is not a sentence anyone can act on. Degrade to
+        // the no-baseline presentation, and FLAG the degradation.
+        if !baseline.is_finite() || baseline <= 0.0 || !self.current.is_finite() {
+            return KpiComparison::unavailable(KpiBaselineState::NoBaseline, true);
+        }
+
+        let max = baseline * KPI_BASELINE_TRACK_HEADROOM;
+        let ratio_percent = (self.current / baseline * 100.0).round() as i64;
+        let deviation_percent = ratio_percent - 100;
+        let state = match deviation_percent.signum() {
+            1 => KpiBaselineState::Above,
+            -1 => KpiBaselineState::Below,
+            _ => KpiBaselineState::Level,
+        };
+
+        KpiComparison {
+            state,
+            ratio_percent: Some(ratio_percent),
+            deviation_percent: Some(deviation_percent),
+            baseline_value: Some(baseline),
+            track_max: Some(max),
+            fill_percent: capacity_bar_percent(self.current, max),
+            marker_percent: capacity_bar_percent(baseline, max),
+            saturated: self.current > max,
+            degraded: false,
+        }
+    }
+}
+
+/// A caller-owned, localized activation affordance for one [`KpiItem`].
+///
+/// Presence of this struct is only HALF of what makes a card activatable:
+/// the other half is an `on_activate` callback on [`KpiCard`]/[`KpiStrip`].
+/// A card missing either one renders exactly as it did before this type
+/// existed -- no button, no tab stop, no `data-kpi-card-activatable`. See
+/// [`kpi_card_is_activatable`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KpiAction {
+    /// The control's visible label, e.g. `"View details"`. Caller-owned and
+    /// caller-localized, like every other [`KpiItem`] string.
+    pub label: String,
+    /// Optional fuller accessible name. When empty, the framework builds
+    /// one as `"<label>, <the card's accessible name>"`, which keeps the
+    /// visible label as the accessible name's prefix (WCAG 2.5.3 Label in
+    /// Name) while still telling a screen-reader user WHICH of twelve
+    /// identically-labelled buttons this is.
+    pub accessible_label: String,
+    /// Whether the action is currently unavailable. Renders the native
+    /// `disabled` attribute, so the control stays in the accessibility tree
+    /// and out of the tab order.
+    pub disabled: bool,
+}
+
+impl KpiAction {
+    /// An enabled action with a visible label.
+    pub fn new(label: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            accessible_label: String::new(),
+            disabled: false,
+        }
+    }
+
+    /// Overrides the generated accessible name.
+    pub fn accessible_label(mut self, accessible_label: impl Into<String>) -> Self {
+        self.accessible_label = accessible_label.into();
+        self
+    }
+
+    /// Marks the action unavailable.
+    pub fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
         self
     }
 }
@@ -191,6 +645,18 @@ pub struct KpiItem {
     /// is the regime `ldui-tnyq` covers. Reach for a shorter label rather
     /// than a narrower card if you hit it (`ldui-yhvf`).
     pub help: String,
+    /// Optional current-versus-baseline comparison, rendered as a bounded
+    /// bar with a fixed baseline marker plus a truthful, unbounded
+    /// percentage and a localized sentence (ldui-ztgo).
+    ///
+    /// Sits BELOW the value, never above it, so a card carrying a baseline
+    /// and a card without one keep identical label and value offsets --
+    /// the alignment contract `ldui-tbaw` established for the label's
+    /// reserved two-line box is untouched by this row.
+    pub baseline: Option<KpiBaseline>,
+    /// Optional activation affordance. Renders only when the card ALSO
+    /// receives an `on_activate` callback; see [`KpiAction`].
+    pub action: Option<KpiAction>,
 }
 
 impl KpiItem {
@@ -204,6 +670,8 @@ impl KpiItem {
             status: KpiStatus::default(),
             trend: None,
             help: String::new(),
+            baseline: None,
+            action: None,
         }
     }
 
@@ -236,6 +704,47 @@ impl KpiItem {
         self.help = help.into();
         self
     }
+
+    /// Sets the current-versus-baseline comparison.
+    pub fn baseline(mut self, baseline: KpiBaseline) -> Self {
+        self.baseline = Some(baseline);
+        self
+    }
+
+    /// Marks the item activatable with the given caller-owned action copy.
+    ///
+    /// Takes effect only once the card also has an `on_activate` callback.
+    pub fn action(mut self, action: KpiAction) -> Self {
+        self.action = Some(action);
+        self
+    }
+}
+
+/// Whether a card renders its activation control.
+///
+/// BOTH halves are required: the item's own [`KpiAction`] copy AND a
+/// callback to run. A card with neither -- which is every card written
+/// before ldui-ztgo -- takes the `false` branch, keeps `role="group"` with
+/// no `tabindex`, renders no `<button>`, and is therefore not focusable and
+/// does not announce as a control. A caller who supplies a callback but no
+/// action copy gets no button either, because a framework-invented English
+/// label would be exactly the unlocalized string this pattern refuses to
+/// mint.
+pub fn kpi_card_is_activatable(action: Option<&KpiAction>, has_callback: bool) -> bool {
+    action.is_some() && has_callback
+}
+
+/// The activation control's accessible name.
+///
+/// Falls back to `"<visible label>, <card accessible name>"` so that the
+/// visible label is always a PREFIX of the accessible name (WCAG 2.5.3), and
+/// twelve cards' worth of identically-labelled "View details" buttons are
+/// still individually identifiable in a screen reader's control list.
+fn kpi_action_accessible_name(action: &KpiAction, card_accessible_name: &str) -> String {
+    if has_text(&action.accessible_label) {
+        return action.accessible_label.clone();
+    }
+    format!("{}, {}", action.label, card_accessible_name)
 }
 
 /// Whether optional copy should render at all -- mirrors
@@ -243,6 +752,23 @@ impl KpiItem {
 /// renders nothing, not an empty line.
 fn has_text(value: &str) -> bool {
     !value.is_empty()
+}
+
+/// The reconciliation key for one card in a [`KpiStrip`].
+///
+/// Covers the WHOLE item, not just [`KpiItem::id`]. Keying on the id alone
+/// would be wrong here in a way that is easy to ship and hard to notice:
+/// [`KpiCard`] receives its item by value and holds no reactive signal over
+/// it, so an id-keyed `For` would leave a card showing yesterday's number
+/// after a refresh that changed the value but not the id -- and the
+/// localized-strip case (same ids, translated labels) would never
+/// re-render at all.
+///
+/// A `Debug` rendering is used because it is total by construction: any
+/// field added to [`KpiItem`] later is included automatically, so this
+/// cannot silently fall behind the struct it keys.
+fn kpi_item_fingerprint(item: &KpiItem) -> String {
+    format!("{item:?}")
 }
 
 /// Responsive grid classes for the strip.
@@ -362,6 +888,43 @@ fn kpi_card_accessible_name(
 /// }
 /// ```
 ///
+/// ### The typed baseline + activation pattern (ldui-ztgo)
+///
+/// A dashboard card that compares a current value against a trailing
+/// average AND launches into the rows behind the number needs no card
+/// markup, no `Card`/`Badge` composition, and no consumer CSS:
+///
+/// ```rust
+/// use leptos::prelude::*;
+/// use leptos_daisyui_rs::patterns::{
+///     KpiAction, KpiBaseline, KpiCard, KpiItem, KpiStatus,
+/// };
+///
+/// #[component]
+/// fn Example() -> impl IntoView {
+///     let open_detail = Callback::new(|id: String| {
+///         // The framework emits the stable `KpiItem::id` and nothing else.
+///         // Mapping it to a route, a request, or a selected scope is the
+///         // caller's job -- this pattern never navigates or fetches.
+///         let _ = id;
+///     });
+///
+///     let item = KpiItem::new("intakes", "Intakes", "280")
+///         .status(KpiStatus::Success)
+///         .baseline(KpiBaseline::against(280.0, 250.0).label("12-week avg / 250"))
+///         .action(KpiAction::new("View details"));
+///
+///     view! { <KpiCard item=item on_activate=open_detail /> }
+/// }
+/// ```
+///
+/// That renders `280`, a bounded bar whose baseline tick sits at a fixed
+/// 80% of its track, the truthful readout `112%`, the localized sentence
+/// `12% above baseline`, and one `View details` button. Swap
+/// [`KpiBaseline::against`] for [`KpiBaseline::absent`] or
+/// [`KpiBaseline::settling`] and the bar disappears while the card keeps
+/// its own localized sentence -- see [`KpiBaseline::resolve`].
+///
 /// ### Add to `input.css`
 /// ```css
 /// @source inline("rounded-box border border-base-300 bg-base-100 h-full min-w-0 overflow-hidden");
@@ -371,9 +934,17 @@ fn kpi_card_accessible_name(
 /// @source inline("flex flex-col items-center gap-1 gap-2 p-3 p-4 min-w-0 shrink-0");
 /// @source inline("line-clamp-2 min-h-8");
 /// @source inline("font-semibold uppercase tracking-wide tabular-nums break-words italic");
-/// @source inline("text-base-content/75 text-base-content/40 text-base-content/60 text-info text-success text-warning text-error");
+/// @source inline("text-base-content text-base-content/75 text-base-content/40 text-base-content/60 text-info text-success text-warning text-error");
 /// @source inline("tooltip tooltip-top inline-flex h-4 w-4 items-center justify-center rounded-full border sr-only");
+/// @source inline("self-start text-left underline underline-offset-2 rounded-field");
+/// @source inline("relative h-3 w-full overflow-hidden rounded-full bg-base-200");
+/// @source inline("absolute inset-y-0 left-0 top-0 h-full rounded-full w-0.5");
+/// @source inline("bg-base-content/80 bg-neutral bg-primary");
 /// ```
+///
+/// The last three lines are `CapacityBar`'s own classes: a card carrying a
+/// [`KpiBaseline`] renders one, so a consumer that safelists only the card's
+/// classes gets an invisible comparison bar rather than an error.
 ///
 /// The `ld-text-*` steps and `ld-card-depth` are NOT listed above on
 /// purpose: they are not Tailwind utilities, so `@source inline(...)`
@@ -419,6 +990,14 @@ pub fn KpiCard(
     #[prop(optional, into)]
     class: &'static str,
 
+    /// Activation callback, receiving the stable [`KpiItem::id`].
+    ///
+    /// One callback, one control: supplying this AND an item [`KpiAction`]
+    /// renders a single framework-owned `Pressable` inside the card. Omit
+    /// either and the card renders exactly as it did before ldui-ztgo.
+    #[prop(optional)]
+    on_activate: Option<Callback<String>>,
+
     /// Node reference for the outer `<div>` element.
     #[prop(optional)]
     node_ref: NodeRef<Div>,
@@ -431,9 +1010,12 @@ pub fn KpiCard(
         status,
         trend,
         help,
+        baseline,
+        action,
     } = item;
 
     let available = value.is_some();
+    let activatable = kpi_card_is_activatable(action.as_ref(), on_activate.is_some());
     let help_id = has_text(&help).then(|| format!("kpi-card-help-{id}"));
 
     let name_label = label.clone();
@@ -495,6 +1077,105 @@ pub fn KpiCard(
         }
     });
 
+    // ldui-ztgo. Two numbers are produced here and they answer different
+    // questions on purpose:
+    //
+    //   * the BAR is bounded -- `fill_percent` is clamped to the track, and
+    //     the baseline marker is pinned at 80% of it on every card, so the
+    //     twelve cards of a dashboard all compare against the same tick;
+    //   * the READOUT is not -- `ratio_percent` says 312% when the value is
+    //     312% of baseline, while the bar sits full and
+    //     `data-kpi-baseline-saturated` records that the geometry ran out
+    //     before the number did.
+    //
+    // A bar that ends at the track's edge therefore never means "at the
+    // cap": the cap is the tick at 80%, which is still visible behind the
+    // fill, and the true figure is printed immediately beneath it.
+    let comparison_node = baseline.map(|baseline| {
+        let resolved = baseline.resolve();
+        let baseline_label = baseline.label.clone();
+        let has_baseline_label = has_text(&baseline_label);
+        let bar_color = status.comparison_bar_color();
+        let current = baseline.current;
+
+        let bar = resolved
+            .baseline_value
+            .zip(resolved.track_max)
+            .map(|(cap, max)| {
+                // Explicit `max`, never `CapacityBar`'s own default: the default
+                // grows the track to fit an over-baseline value, which would slide
+                // the marker left on exactly the cards where its position matters
+                // most. See `KPI_BASELINE_TRACK_HEADROOM`.
+                //
+                // `aria-hidden` because the bar is redundant reinforcement of text
+                // that already states the ratio, the direction and the baseline's
+                // name -- and because a saturated bar's honest `aria-valuenow`
+                // would exceed its own `aria-valuemax`. Twelve unnamed progressbars
+                // would be noise; twelve out-of-range ones would be wrong.
+                view! {
+                    <CapacityBar
+                        value=current
+                        cap=cap
+                        max=Some(max)
+                        color=bar_color
+                        over_color=bar_color
+                        attr:aria-hidden="true"
+                        attr:data-kpi-baseline-bar="true"
+                    />
+                }
+            });
+
+        let readout_label = baseline_label.clone();
+        let readout =
+            move || texts.with(|texts| texts.baseline_ratio_readout(&resolved, &readout_label));
+        let sentence_label = baseline_label.clone();
+        let sentence =
+            move || texts.with(|texts| texts.baseline_sentence(&resolved, &sentence_label));
+
+        view! {
+            <div
+                class="flex flex-col gap-1 min-w-0"
+                data-kpi-card-comparison="true"
+                data-kpi-baseline-state=resolved.state.as_str()
+                data-kpi-baseline-percent=resolved
+                    .ratio_percent
+                    .map(|percent| percent.to_string())
+                data-kpi-baseline-saturated=resolved.saturated.then_some("true")
+                data-kpi-baseline-degraded=resolved.degraded.then_some("true")
+            >
+                {bar}
+                // Conditional, not merely empty: with no ratio to print and
+                // no baseline name to print, an unconditional `<p>` would
+                // still consume the column's `gap-1` and push the sentence
+                // 4px down on exactly the no-baseline cards, which is the
+                // kind of one-card-only offset `ldui-tbaw` exists to stop.
+                {(resolved.state.is_comparable() || has_baseline_label)
+                    .then(|| {
+                        view! {
+                            <p class="ld-text-small text-base-content/75 break-words">
+                                <span
+                                    class="font-semibold tabular-nums text-base-content"
+                                    data-kpi-baseline-readout="true"
+                                >
+                                    {readout}
+                                </span>
+                                {has_baseline_label
+                                    .then(|| {
+                                        view! { <span>{format!(" {baseline_label}")}</span> }
+                                    })}
+                            </p>
+                        }
+                    })}
+                <p
+                    class="ld-text-small text-base-content/75 break-words"
+                    data-kpi-baseline-sentence="true"
+                >
+                    {sentence}
+                </p>
+            </div>
+        }
+    });
+
     let help_button = help_id.clone().map(|_| {
         view! {
             <Tooltip tip=help.clone() class="shrink-0">
@@ -543,6 +1224,54 @@ pub fn KpiCard(
         ></div>
     };
 
+    // ldui-ztgo. ONE interactive descendant, or none at all.
+    //
+    // Deliberately NOT whole-card activation. Three reasons, in order of
+    // how expensive each would be to discover later:
+    //
+    // 1. `<button>` takes phrasing content, and the card body is built from
+    //    `<p>` elements plus an `sr-only` help `<span id>`. Wrapping the body
+    //    in a button is invalid HTML, and browsers reparent their way out of
+    //    it in ways that break the layout.
+    // 2. The card's accessible-name grammar is `role="group"` +
+    //    `aria-label`, and every existing caller depends on it. A card that
+    //    became a button would announce as a control even where nothing has
+    //    changed but the framework version.
+    // 3. A whole-card click handler that is not a real control needs a
+    //    duplicated keyboard path and a synthetic tab stop, and then the
+    //    help affordance sits INSIDE a control -- the nested-interactive
+    //    defect this bead explicitly prohibits.
+    //
+    // The help control is already non-interactive (an `aria-hidden` span in
+    // a CSS-hover `Tooltip`, with the real text exposed through
+    // `aria-describedby`), so an activatable card has exactly one focusable
+    // element and one tab stop: this `Pressable`.
+    let action_node = activatable
+        .then(|| action.zip(on_activate))
+        .flatten()
+        .map(|(action, on_activate)| {
+            let activation_id = id.clone();
+            let action_label = action.label.clone();
+            let accessible_action_name = {
+                let name = accessible_name();
+                kpi_action_accessible_name(&action, &name)
+            };
+            view! {
+                <Pressable
+                    disabled=action.disabled
+                    // `text-info` + a permanent underline: the affordance is
+                    // carried by the underline and the label, with colour
+                    // third, so it survives greyscale and forced-colors.
+                    class="ld-text-small self-start text-left font-semibold text-info underline underline-offset-2 rounded-field"
+                    on_click=Callback::new(move |_| on_activate.run(activation_id.clone()))
+                    attr:aria-label=accessible_action_name
+                    attr:data-kpi-card-action="true"
+                >
+                    {action_label}
+                </Pressable>
+            }
+        });
+
     view! {
         <div
             node_ref=node_ref
@@ -551,6 +1280,12 @@ pub fn KpiCard(
             aria-describedby=help_id
             data-kpi-card=id
             data-kpi-card-unavailable=(!available).then_some("true")
+            // Status without colour: a machine-readable marker so a test or
+            // a consumer can read a card's semantic emphasis without
+            // sampling a pixel (RecordHeader's `data-record-status-tone`
+            // precedent).
+            data-kpi-card-status=status.as_str()
+            data-kpi-card-activatable=activatable.then_some("true")
             class=merge_classes!(kpi_card_shell_class(), class)
         >
             {accent}
@@ -560,8 +1295,10 @@ pub fn KpiCard(
                     {help_button}
                 </div>
                 <p class=value_class data-kpi-card-value="true">{value_node}</p>
+                {comparison_node}
                 {description_node}
                 {trend_node}
+                {action_node}
                 {help_description}
             </div>
         </div>
@@ -601,6 +1338,52 @@ pub fn KpiCard(
 /// }
 /// ```
 ///
+/// ### Mixing baseline and activatable cards (ldui-ztgo)
+///
+/// One `on_activate` callback serves the whole strip and receives the
+/// activated [`KpiItem::id`]; only the items that carry their own
+/// [`KpiAction`] copy become activatable, so there is no parallel array
+/// whose positions have to line up with `items`:
+///
+/// ```rust
+/// use leptos::prelude::*;
+/// use leptos_daisyui_rs::patterns::{
+///     KpiAction, KpiBaseline, KpiItem, KpiStatus, KpiStrip,
+/// };
+///
+/// #[component]
+/// fn Example() -> impl IntoView {
+///     let open_detail = Callback::new(|id: String| {
+///         let _ = id;
+///     });
+///
+///     let items = Signal::derive(|| {
+///         vec![
+///             // Above baseline, activatable.
+///             KpiItem::new("intakes", "Intakes", "280")
+///                 .status(KpiStatus::Success)
+///                 .baseline(KpiBaseline::against(280.0, 250.0).label("12-week avg / 250"))
+///                 .action(KpiAction::new("View details")),
+///             // Below baseline, activatable.
+///             KpiItem::new("closes", "Closes", "5,739")
+///                 .status(KpiStatus::Warning)
+///                 .baseline(KpiBaseline::against(5739.0, 6705.0).label("12-week avg / 6,705"))
+///                 .action(KpiAction::new("View details")),
+///             // A brand-new metric: no baseline exists to compare against.
+///             KpiItem::new("referrals", "Referrals", "12")
+///                 .baseline(KpiBaseline::absent(12.0)),
+///             // A window that exists but is not yet full.
+///             KpiItem::new("retention", "Retention", "88%")
+///                 .baseline(KpiBaseline::settling(88.0)),
+///             // No baseline row and no action: unchanged from before.
+///             KpiItem::new("last-sync", "Last sync", "").unavailable(),
+///         ]
+///     });
+///
+///     view! { <KpiStrip items=items on_activate=open_detail /> }
+/// }
+/// ```
+///
 /// ### Add to `input.css`
 /// ```css
 /// @source inline("@container grid grid-cols-2 @sm:grid-cols-3 @lg:grid-cols-4 @5xl:grid-cols-8 gap-3 gap-4 w-full");
@@ -626,6 +1409,15 @@ pub fn KpiStrip(
     #[prop(optional, into, default = Signal::stored(KpiStripTexts::default()))]
     texts: Signal<KpiStripTexts>,
 
+    /// Activation callback, receiving the activated [`KpiItem::id`].
+    ///
+    /// Forwarded to every card, but only the items carrying their own
+    /// [`KpiAction`] copy become activatable -- so one strip can mix
+    /// activatable and read-only cards without a parallel array whose
+    /// positions must accidentally line up with `items`.
+    #[prop(optional)]
+    on_activate: Option<Callback<String>>,
+
     /// Additional CSS classes for the grid wrapper.
     #[prop(optional, into)]
     class: &'static str,
@@ -645,15 +1437,38 @@ pub fn KpiStrip(
             class=move || merge_classes!(kpi_strip_grid_class(compact.get()), class)
             data-kpi-strip="true"
         >
-            {move || {
-                items
-                    .get()
-                    .into_iter()
-                    .map(|item| {
-                        view! { <KpiCard item=item compact=compact texts=texts /> }
-                    })
-                    .collect_view()
-            }}
+            // Keyed, not `collect_view()` (ldui-ztgo). `collect_view()`
+            // rebuilds EVERY card on any change to the list, which destroys
+            // the focused activation button whenever a poll refreshes one
+            // unrelated KPI. `KpiCard` takes its item by value and is not
+            // internally reactive, so the key has to cover the whole item,
+            // not just its id: an unchanged card then keeps its DOM (and its
+            // focus), while a card whose data moved is rebuilt, which is
+            // exactly what a non-reactive child needs.
+            <For each=move || items.get() key=kpi_item_fingerprint let:item>
+                {
+                    // `on_activate` is an `Option`, and an optional component
+                    // prop takes the INNER type, so the option is unwrapped
+                    // here rather than forwarded. Both arms render the same
+                    // element; only the callback differs.
+                    match on_activate {
+                        Some(on_activate) => {
+                            view! {
+                                <KpiCard
+                                    item=item
+                                    compact=compact
+                                    texts=texts
+                                    on_activate=on_activate
+                                />
+                            }
+                                .into_any()
+                        }
+                        None => {
+                            view! { <KpiCard item=item compact=compact texts=texts /> }.into_any()
+                        }
+                    }
+                }
+            </For>
         </div>
         </div>
     }
@@ -662,6 +1477,24 @@ pub fn KpiStrip(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The module body above the test module -- used by the source-level
+    /// guards so a test's own explanatory prose is never scanned as if it
+    /// were rendered markup.
+    fn module_source() -> &'static str {
+        let source = include_str!("kpi_strip.rs");
+        source
+            .split_once("\n#[cfg(test)]")
+            .map_or(source, |(before, _)| before)
+    }
+
+    /// Just `KpiCard`'s body.
+    fn kpi_card_source() -> &'static str {
+        module_source()
+            .split_once("pub fn KpiCard(")
+            .expect("KpiCard component source")
+            .1
+    }
 
     /// ldui-k4fn: the card's depth is the framework's semantic elevation
     /// class, and no stock Tailwind shadow utility survives anywhere on the
@@ -957,6 +1790,566 @@ mod tests {
             .map_or(source, |(before, _)| before);
         assert!(!component.contains("\"stats\""));
         assert!(!component.contains("\"stat\""));
+    }
+
+    // ------------------------------------------------------------------
+    // ldui-ztgo: typed baseline comparison.
+    // ------------------------------------------------------------------
+
+    /// The bead's own worked example: 280 against a trailing 12-week
+    /// average of 250 is 112% of baseline and 12% above it. The two numbers
+    /// are derived from one rounding, so they can never disagree.
+    #[test]
+    fn baseline_reports_the_worked_office_example() {
+        let resolved = KpiBaseline::against(280.0, 250.0).resolve();
+        assert_eq!(resolved.state, KpiBaselineState::Above);
+        assert_eq!(resolved.ratio_percent, Some(112));
+        assert_eq!(resolved.deviation_percent, Some(12));
+        assert!(!resolved.saturated);
+        assert!(!resolved.degraded);
+    }
+
+    /// THE truthfulness property. The bar is bounded and the number is not:
+    /// a value at 312% of baseline pins the fill to the end of the track
+    /// while the readout still says 312, and `saturated` records that the
+    /// geometry -- not the value -- ran out.
+    #[test]
+    fn over_baseline_saturates_the_bar_while_the_percentage_stays_truthful() {
+        let resolved = KpiBaseline::against(780.0, 250.0).resolve();
+        assert_eq!(resolved.state, KpiBaselineState::Above);
+        assert_eq!(
+            resolved.ratio_percent,
+            Some(312),
+            "the readout must report the real ratio, not the clamped bar"
+        );
+        assert_eq!(resolved.deviation_percent, Some(212));
+        assert_eq!(
+            resolved.fill_percent, 100.0,
+            "the bar is bounded by its track"
+        );
+        assert!(
+            resolved.saturated,
+            "a bar that ran out of track must SAY so, so 'full' is never \
+             mistaken for 'at the baseline'"
+        );
+    }
+
+    /// The marker is the reason a saturated bar is still readable. It sits
+    /// at a fixed 80% of the track (1 / 1.25) on EVERY comparable card --
+    /// below, level, at 112%, and at 312% -- so a full bar is visibly far
+    /// past the tick rather than sitting on it.
+    #[test]
+    fn the_baseline_marker_never_moves_across_cards() {
+        let cards = [
+            KpiBaseline::against(0.0, 250.0),
+            KpiBaseline::against(125.0, 250.0),
+            KpiBaseline::against(250.0, 250.0),
+            KpiBaseline::against(280.0, 250.0),
+            KpiBaseline::against(780.0, 250.0),
+            // A completely different scale: the marker position is a ratio,
+            // so it is identical here too.
+            KpiBaseline::against(9.0, 4.0),
+        ];
+        for card in cards {
+            let resolved = card.resolve();
+            assert!(
+                (resolved.marker_percent - 80.0).abs() < 1e-9,
+                "marker moved to {} for {card:?}",
+                resolved.marker_percent
+            );
+        }
+    }
+
+    /// At exactly the baseline the fill reaches the marker and stops: no
+    /// overflow, not saturated, and the sentence is the `Level` one rather
+    /// than a nonsensical "0% above".
+    #[test]
+    fn a_value_exactly_at_the_baseline_is_level_and_stops_at_the_marker() {
+        let resolved = KpiBaseline::against(250.0, 250.0).resolve();
+        assert_eq!(resolved.state, KpiBaselineState::Level);
+        assert_eq!(resolved.ratio_percent, Some(100));
+        assert_eq!(resolved.deviation_percent, Some(0));
+        assert!((resolved.fill_percent - 80.0).abs() < 1e-9);
+        assert!(!resolved.saturated);
+    }
+
+    /// A value a hair over the baseline rounds to 100% and must therefore
+    /// speak the `Level` sentence -- "in line with", never "0% above",
+    /// which is the sentence a raw greater-than comparison would produce.
+    #[test]
+    fn a_hair_over_the_baseline_rounds_to_level_not_zero_percent_above() {
+        let resolved = KpiBaseline::against(250.4, 250.0).resolve();
+        assert_eq!(resolved.state, KpiBaselineState::Level);
+        assert_eq!(resolved.deviation_percent, Some(0));
+    }
+
+    #[test]
+    fn below_baseline_reports_the_deviation_unsigned_via_the_template() {
+        let resolved = KpiBaseline::against(5739.0, 6705.0).resolve();
+        assert_eq!(resolved.state, KpiBaselineState::Below);
+        assert_eq!(resolved.ratio_percent, Some(86));
+        assert_eq!(resolved.deviation_percent, Some(-14));
+        let texts = KpiStripTexts::default();
+        assert_eq!(
+            texts.baseline_sentence(&resolved, ""),
+            "14% below baseline",
+            "the sentence carries direction; the number is never signed twice"
+        );
+    }
+
+    /// The bar's own geometry never leaves the track, in either direction.
+    #[test]
+    fn the_fill_is_clamped_to_the_track_in_both_directions() {
+        for (current, baseline) in [
+            (-500.0_f64, 250.0_f64),
+            (0.0, 250.0),
+            (250.0, 250.0),
+            (312.5, 250.0),
+            (1_000_000.0, 250.0),
+        ] {
+            let resolved = KpiBaseline::against(current, baseline).resolve();
+            assert!(
+                (0.0..=100.0).contains(&resolved.fill_percent),
+                "fill escaped the track: {current} vs {baseline} -> {}",
+                resolved.fill_percent
+            );
+        }
+    }
+
+    /// A zero baseline is a declared `Available(0.0)`, which the arithmetic
+    /// cannot use. It must NOT divide, must NOT fabricate a percentage, and
+    /// must not degrade silently -- `degraded` is what makes it findable.
+    #[test]
+    fn a_zero_baseline_never_divides_and_never_fabricates_a_percentage() {
+        let resolved = KpiBaseline::against(42.0, 0.0).resolve();
+        assert_eq!(resolved.state, KpiBaselineState::NoBaseline);
+        assert_eq!(resolved.ratio_percent, None);
+        assert_eq!(resolved.deviation_percent, None);
+        assert_eq!(resolved.fill_percent, 0.0);
+        assert!(!resolved.saturated);
+        assert!(
+            resolved.degraded,
+            "an unusable baseline must be flagged, not quietly swallowed"
+        );
+    }
+
+    /// Negative and non-finite baselines, and a non-finite current, take the
+    /// same guarded path. None of them may produce NaN or an infinity.
+    #[test]
+    fn negative_and_non_finite_inputs_are_all_guarded() {
+        for (current, baseline) in [
+            (42.0_f64, -40.0_f64),
+            (42.0, f64::NAN),
+            (42.0, f64::INFINITY),
+            (f64::NAN, 250.0),
+            (f64::INFINITY, 250.0),
+        ] {
+            let resolved = KpiBaseline::against(current, baseline).resolve();
+            assert_eq!(
+                resolved.state,
+                KpiBaselineState::NoBaseline,
+                "{current} vs {baseline}"
+            );
+            assert_eq!(resolved.ratio_percent, None, "{current} vs {baseline}");
+            assert!(resolved.degraded, "{current} vs {baseline}");
+            assert!(
+                resolved.fill_percent.is_finite() && resolved.track_max.is_none(),
+                "{current} vs {baseline} produced non-finite geometry"
+            );
+        }
+    }
+
+    /// The three unavailable-comparison states are DISTINCT, each with its
+    /// own sentence. "There is no baseline", "the window is still filling",
+    /// and "the caller handed over an unusable number" are different facts,
+    /// and only the last is a defect.
+    #[test]
+    fn absent_settling_and_degraded_are_three_distinguishable_states() {
+        let absent = KpiBaseline::absent(12.0).resolve();
+        let settling = KpiBaseline::settling(88.0).resolve();
+        let degraded = KpiBaseline::against(42.0, 0.0).resolve();
+
+        assert_eq!(absent.state, KpiBaselineState::NoBaseline);
+        assert!(!absent.degraded);
+        assert_eq!(settling.state, KpiBaselineState::Settling);
+        assert!(!settling.degraded);
+        assert_eq!(degraded.state, KpiBaselineState::NoBaseline);
+        assert!(degraded.degraded);
+
+        // Absent and settling never collapse into one another's copy.
+        let texts = KpiStripTexts::default();
+        assert_eq!(texts.baseline_sentence(&absent, ""), "No baseline yet");
+        assert_eq!(
+            texts.baseline_sentence(&settling, ""),
+            "Baseline still settling"
+        );
+        assert_ne!(
+            texts.baseline_sentence(&absent, ""),
+            texts.baseline_sentence(&settling, "")
+        );
+    }
+
+    /// Every one of the five states speaks. None of them renders an empty
+    /// comparison row, which is the silent-degradation shape this repo has
+    /// repeatedly paid for.
+    #[test]
+    fn every_baseline_state_has_its_own_non_empty_sentence() {
+        let texts = KpiStripTexts::default();
+        let sentences: Vec<String> = [
+            KpiBaseline::against(280.0, 250.0),
+            KpiBaseline::against(250.0, 250.0),
+            KpiBaseline::against(200.0, 250.0),
+            KpiBaseline::absent(1.0),
+            KpiBaseline::settling(1.0),
+        ]
+        .iter()
+        .map(|baseline| texts.baseline_sentence(&baseline.resolve(), "12-week avg"))
+        .collect();
+        for sentence in &sentences {
+            assert!(!sentence.is_empty(), "empty comparison sentence");
+            assert!(
+                !sentence.contains('{'),
+                "an unsubstituted placeholder leaked into the copy: {sentence}"
+            );
+        }
+        let unique: std::collections::BTreeSet<&String> = sentences.iter().collect();
+        assert_eq!(
+            unique.len(),
+            5,
+            "five states, five sentences: {sentences:?}"
+        );
+    }
+
+    /// `{ratio}`/`{delta}` in a no-baseline template substitute to the
+    /// localized `unavailable` word, never to a fabricated `0`.
+    #[test]
+    fn absent_templates_substitute_unavailable_rather_than_zero() {
+        let texts = KpiStripTexts {
+            baseline_absent: "{ratio} / {delta} for {baseline}".to_owned(),
+            ..KpiStripTexts::default()
+        };
+        let resolved = KpiBaseline::absent(5.0).resolve();
+        assert_eq!(
+            texts.baseline_sentence(&resolved, "12-week avg"),
+            "Unavailable / Unavailable for 12-week avg"
+        );
+    }
+
+    /// The ratio readout exists only where there is a ratio to report.
+    #[test]
+    fn the_ratio_readout_is_absent_when_there_is_nothing_to_be_truthful_about() {
+        let texts = KpiStripTexts::default();
+        let comparable = KpiBaseline::against(780.0, 250.0).resolve();
+        assert_eq!(
+            texts.baseline_ratio_readout(&comparable, ""),
+            Some("312%".to_owned())
+        );
+        for unavailable in [
+            KpiBaseline::absent(1.0).resolve(),
+            KpiBaseline::settling(1.0).resolve(),
+            KpiBaseline::against(1.0, 0.0).resolve(),
+        ] {
+            assert_eq!(texts.baseline_ratio_readout(&unavailable, ""), None);
+        }
+    }
+
+    /// All three placeholders are substituted in every template, so a
+    /// locale is free to order them however its grammar needs.
+    #[test]
+    fn every_placeholder_is_substituted_in_a_localized_template() {
+        let texts = KpiStripTexts {
+            baseline_above: "{baseline}: {ratio}% ({delta} pts arriba)".to_owned(),
+            ..KpiStripTexts::default()
+        };
+        let resolved = KpiBaseline::against(280.0, 250.0).resolve();
+        assert_eq!(
+            texts.baseline_sentence(&resolved, "promedio de 12 semanas"),
+            "promedio de 12 semanas: 112% (12 pts arriba)"
+        );
+    }
+
+    /// The bar's colour is the card's TYPED status, never a function of the
+    /// numbers. `CapacityBarColor::for_direction` exists and would paint
+    /// above-baseline green, which asserts higher-is-better -- false for
+    /// "days to close" or "cost per matter".
+    #[test]
+    fn the_comparison_bar_takes_its_colour_from_status_not_from_the_numbers() {
+        assert_eq!(
+            KpiStatus::Warning.comparison_bar_color(),
+            CapacityBarColor::Warning
+        );
+        assert_eq!(
+            KpiStatus::Success.comparison_bar_color(),
+            CapacityBarColor::Success
+        );
+        assert_eq!(
+            KpiStatus::Neutral.comparison_bar_color(),
+            CapacityBarColor::Primary
+        );
+
+        let module = module_source();
+        assert!(
+            !module.contains("for_direction("),
+            "the KPI comparison must not infer good/bad from the values: \
+             CapacityBarColor's direction helper encodes higher-is-better"
+        );
+        assert!(
+            module.contains("over_color=bar_color"),
+            "the overflow band must share the fill's colour, so exceeding the \
+             baseline carries no inferred valence -- 'over' is signalled by \
+             the fill crossing the marker and by the sentence, not by an \
+             alarm colour the framework has no basis to choose"
+        );
+    }
+
+    /// The comparison row sits BELOW the value, so a card with a baseline
+    /// and one without keep identical label and value offsets (the
+    /// `ldui-tbaw` alignment contract).
+    #[test]
+    fn the_comparison_row_never_renders_above_the_value() {
+        let component = kpi_card_source();
+        let value = component
+            .find("data-kpi-card-value")
+            .expect("the value paragraph");
+        let comparison = component
+            .find("{comparison_node}")
+            .expect("the comparison node in the card body");
+        assert!(
+            value < comparison,
+            "the comparison row must follow the value; anything inserted \
+             ABOVE it would shift every baseline-bearing card's value out of \
+             line with its neighbours (ldui-tbaw)"
+        );
+        // And the two mechanisms that keep mixed cards aligned are untouched.
+        assert!(kpi_card_label_class().contains("min-h-8"));
+        assert!(kpi_card_shell_class().contains("h-full"));
+    }
+
+    // ------------------------------------------------------------------
+    // ldui-ztgo: activation.
+    // ------------------------------------------------------------------
+
+    /// Activation is OPT-IN and needs BOTH halves. Every card written
+    /// before this bead has neither, so none of them becomes focusable or
+    /// announces as a control.
+    #[test]
+    fn activation_requires_both_the_action_copy_and_a_callback() {
+        let action = KpiAction::new("View details");
+        assert!(!kpi_card_is_activatable(None, false));
+        assert!(
+            !kpi_card_is_activatable(None, true),
+            "a callback alone must not mint an unlocalized English button"
+        );
+        assert!(
+            !kpi_card_is_activatable(Some(&action), false),
+            "action copy alone has nothing to run"
+        );
+        assert!(kpi_card_is_activatable(Some(&action), true));
+    }
+
+    /// An item built the old way carries neither half, so the gate is
+    /// false for it by construction -- the proof that existing callers are
+    /// untouched rather than an assertion that they are.
+    #[test]
+    fn items_built_without_the_new_builders_are_never_activatable() {
+        let legacy = KpiItem::new("open", "Open matters", "128")
+            .description("Across every queue")
+            .status(KpiStatus::Warning)
+            .trend(KpiTrend::new(4.0, StatDeltaTrend::Positive))
+            .help("Everything still on the desk.");
+        assert!(legacy.action.is_none());
+        assert!(legacy.baseline.is_none());
+        assert!(!kpi_card_is_activatable(legacy.action.as_ref(), true));
+        assert!(!kpi_card_is_activatable(legacy.action.as_ref(), false));
+    }
+
+    /// A non-activatable card renders no button, no `tabindex`, and keeps
+    /// `role="group"`. Pinned at the source level because the markers that
+    /// would make a card focusable are all conditional on the same gate.
+    #[test]
+    fn a_non_activatable_card_stays_a_non_focusable_group() {
+        let component = kpi_card_source();
+        assert!(
+            component.contains(r#"role="group""#),
+            "the card's accessible-name grammar must not change"
+        );
+        assert!(
+            !component.contains("tabindex"),
+            "the card must never mint a synthetic tab stop: {component}"
+        );
+        assert!(
+            component.contains("let action_node = activatable"),
+            "the action control must be gated on `activatable`"
+        );
+        assert!(
+            component.contains(r#"data-kpi-card-activatable=activatable.then_some("true")"#),
+            "the activatable marker must be conditional, so a read-only card \
+             does not advertise a control it does not have"
+        );
+    }
+
+    /// Exactly one interactive descendant, and only when activatable. The
+    /// help affordance stays a non-interactive `aria-hidden` span whose real
+    /// text reaches assistive tech through `aria-describedby`, so there is
+    /// never a control inside a control.
+    #[test]
+    fn an_activatable_card_has_exactly_one_interactive_descendant() {
+        let component = kpi_card_source();
+        assert_eq!(
+            component.matches("<Pressable").count(),
+            1,
+            "one activation control per card, not one per affordance"
+        );
+        assert_eq!(
+            component.matches("<Button").count(),
+            0,
+            "a second control would nest interactive elements inside the card"
+        );
+        assert!(
+            component.contains(r#"aria-hidden="true""#),
+            "the help glyph must stay non-interactive and hidden"
+        );
+        assert!(
+            component.contains("aria-describedby=help_id"),
+            "help text reaches assistive tech without a second tab stop"
+        );
+    }
+
+    /// The activation control's accessible name always begins with its
+    /// visible label (WCAG 2.5.3 Label in Name) and still distinguishes one
+    /// of twelve identically-labelled buttons.
+    #[test]
+    fn the_action_accessible_name_extends_the_visible_label() {
+        let action = KpiAction::new("View details");
+        let name = kpi_action_accessible_name(&action, "Intakes: 280");
+        assert!(
+            name.starts_with("View details"),
+            "the visible label must be a prefix of the accessible name: {name}"
+        );
+        assert_eq!(name, "View details, Intakes: 280");
+    }
+
+    #[test]
+    fn an_explicit_accessible_label_wins() {
+        let action = KpiAction::new("View details").accessible_label("Open the intake detail view");
+        assert_eq!(
+            kpi_action_accessible_name(&action, "Intakes: 280"),
+            "Open the intake detail view"
+        );
+    }
+
+    #[test]
+    fn kpi_action_defaults_to_enabled_with_a_generated_name() {
+        let action = KpiAction::new("View details");
+        assert!(!action.disabled);
+        assert_eq!(action.accessible_label, "");
+        assert!(KpiAction::new("x").disabled(true).disabled);
+    }
+
+    /// ldui-k4fn, revisited for ldui-ztgo. An ACTIVATABLE card keeps the
+    /// STATIC card elevation; it does not adopt `ld-elevated`'s hover lift.
+    ///
+    /// The card is not the control -- one `Pressable` inside it is. Lifting
+    /// the whole card on hover would promise that pressing anywhere on it
+    /// does something, which is a bigger lie than the read-only tile
+    /// `ld-card-depth` was chosen to avoid. The interactive affordance lives
+    /// exactly where the interaction does: `Pressable` already carries
+    /// `ld-pressable` (press scale) and `ld-focus-ring` (focus-visible
+    /// ring), eased by `ld-eased`.
+    #[test]
+    fn an_activatable_card_keeps_the_static_elevation_not_the_interactive_lift() {
+        let shell = kpi_card_shell_class();
+        assert!(shell.split_whitespace().any(|c| c == "ld-card-depth"));
+        assert!(!shell.split_whitespace().any(|c| c == "ld-elevated"));
+        let component = kpi_card_source();
+        assert!(
+            !component.contains("ld-elevated"),
+            "no branch of the card may swap in the interactive elevation: {component}"
+        );
+        assert!(
+            component.contains("<Pressable"),
+            "the focus/press affordance must live on the control"
+        );
+    }
+
+    /// Status is readable without colour: a stable `data-` marker, the
+    /// `RecordHeader` precedent.
+    #[test]
+    fn status_is_exposed_as_a_colour_independent_marker() {
+        assert_eq!(KpiStatus::Neutral.as_str(), "neutral");
+        assert_eq!(KpiStatus::Error.as_str(), "error");
+        assert!(kpi_card_source().contains("data-kpi-card-status=status.as_str()"));
+    }
+
+    #[test]
+    fn baseline_state_markers_are_stable() {
+        assert_eq!(KpiBaselineState::Above.as_str(), "above");
+        assert_eq!(KpiBaselineState::Level.as_str(), "level");
+        assert_eq!(KpiBaselineState::Below.as_str(), "below");
+        assert_eq!(KpiBaselineState::NoBaseline.as_str(), "no-baseline");
+        assert_eq!(KpiBaselineState::Settling.as_str(), "settling");
+        assert!(KpiBaselineState::Above.is_comparable());
+        assert!(!KpiBaselineState::NoBaseline.is_comparable());
+        assert!(!KpiBaselineState::Settling.is_comparable());
+    }
+
+    #[test]
+    fn kpi_item_builders_set_the_new_typed_capabilities() {
+        let item = KpiItem::new("intakes", "Intakes", "280")
+            .baseline(KpiBaseline::against(280.0, 250.0).label("12-week avg / 250"))
+            .action(KpiAction::new("View details"));
+        let baseline = item.baseline.expect("baseline set");
+        assert_eq!(baseline.current, 280.0);
+        assert_eq!(
+            baseline.availability,
+            KpiBaselineAvailability::Available(250.0)
+        );
+        assert_eq!(baseline.label, "12-week avg / 250");
+        assert_eq!(item.action.expect("action set").label, "View details");
+    }
+
+    /// The strip reconciles on the WHOLE item, not on the id. An id-only key
+    /// would leave a card showing a stale number after a refresh, and would
+    /// never re-render a locale change at all (same ids, new labels).
+    #[test]
+    fn the_reconciliation_key_covers_every_field_not_just_the_id() {
+        let base = KpiItem::new("intakes", "Intakes", "280");
+        assert_eq!(kpi_item_fingerprint(&base), kpi_item_fingerprint(&base));
+
+        let same_id_new_value = KpiItem::new("intakes", "Intakes", "281");
+        let same_id_new_locale = KpiItem::new("intakes", "Admisiones", "280");
+        let same_id_new_status = KpiItem::new("intakes", "Intakes", "280").status(KpiStatus::Error);
+        let same_id_new_baseline =
+            KpiItem::new("intakes", "Intakes", "280").baseline(KpiBaseline::against(280.0, 250.0));
+        for changed in [
+            same_id_new_value,
+            same_id_new_locale,
+            same_id_new_status,
+            same_id_new_baseline,
+        ] {
+            assert_ne!(
+                kpi_item_fingerprint(&base),
+                kpi_item_fingerprint(&changed),
+                "a changed card must get a new key or it will never re-render"
+            );
+        }
+    }
+
+    /// The track's right edge is a fixed multiple of the baseline, and the
+    /// card passes it explicitly. `CapacityBar`'s own default max is
+    /// `cap * 1.25` CLAMPED UP TO `value`, which would rescale the track --
+    /// and slide the marker -- on exactly the over-baseline cards where the
+    /// marker's position matters most.
+    #[test]
+    fn the_comparison_track_max_is_pinned_and_passed_explicitly() {
+        assert_eq!(KPI_BASELINE_TRACK_HEADROOM, 1.25);
+        let resolved = KpiBaseline::against(780.0, 250.0).resolve();
+        assert_eq!(resolved.track_max, Some(312.5));
+        assert_eq!(resolved.baseline_value, Some(250.0));
+        assert!(
+            kpi_card_source().contains("max=Some(max)"),
+            "the card must override CapacityBar's value-dependent default max"
+        );
     }
 
     /// Guards against `opacity-*` utilities creeping back in for muted

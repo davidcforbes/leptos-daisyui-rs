@@ -21,8 +21,9 @@ mod common;
 use common::{
     assert_no_browser_errors, begin_browser_error_capture, body_font_family, click, harness_at,
 };
-use pixelproof_web::ViewportSize;
+use pixelproof_web::{Key, ViewportSize};
 use serde_json::{Value, json};
+use std::time::Duration;
 
 const PAGE: &str = "/components/admin_workbench";
 
@@ -865,4 +866,314 @@ fn shadow_spec(parsed: &Value) -> ldui_audit::ShadowSpec {
     spec.color = [n("r"), n("g"), n("b")];
     spec.inset = parsed["inset"].as_bool().unwrap_or(false);
     spec
+}
+
+// ----------------------------------------------------------------------
+// ldui-ztgo: typed baseline comparison and card activation.
+//
+// The fixture deliberately mixes four cards carrying a comparison row with
+// four that carry none, so `wide_viewport_kpi_labels_wrap_without_ellipsis_and_stay_aligned`
+// above -- which already asserts equal card heights and identical value
+// offsets across the whole strip -- doubles as the proof that a
+// baseline-bearing card and a plain one still line up.
+// ----------------------------------------------------------------------
+
+/// Per-card comparison and activation markers, read straight off the DOM
+/// rather than off any colour.
+async fn kpi_comparison_report(h: &pixelproof_web::Harness) -> Value {
+    eval_json(
+        h,
+        r#"(() => {
+            const cards = Array.from(
+                document.querySelectorAll('[data-testid="admin-workbench-kpis"] [data-kpi-card]')
+            );
+            return cards.map(card => {
+                const comparison = card.querySelector('[data-kpi-card-comparison]');
+                const bar = card.querySelector('[data-kpi-baseline-bar]');
+                const readout = card.querySelector('[data-kpi-baseline-readout]');
+                const sentence = card.querySelector('[data-kpi-baseline-sentence]');
+                const action = card.querySelector('[data-kpi-card-action]');
+                const barRect = bar ? bar.getBoundingClientRect() : null;
+                const fill = bar
+                    ? Array.from(bar.querySelectorAll('span')).map(span => ({
+                          left: span.getBoundingClientRect().left - barRect.left,
+                          width: span.getBoundingClientRect().width,
+                      }))
+                    : null;
+                return {
+                    id: card.getAttribute('data-kpi-card'),
+                    status: card.getAttribute('data-kpi-card-status'),
+                    activatable: card.getAttribute('data-kpi-card-activatable'),
+                    state: comparison
+                        ? comparison.getAttribute('data-kpi-baseline-state')
+                        : null,
+                    percent: comparison
+                        ? comparison.getAttribute('data-kpi-baseline-percent')
+                        : null,
+                    saturated: comparison
+                        ? comparison.getAttribute('data-kpi-baseline-saturated')
+                        : null,
+                    degraded: comparison
+                        ? comparison.getAttribute('data-kpi-baseline-degraded')
+                        : null,
+                    hasBar: bar !== null,
+                    barWidth: barRect ? barRect.width : null,
+                    barChildren: fill,
+                    readout: readout ? readout.textContent.trim() : null,
+                    sentence: sentence ? sentence.textContent.trim() : null,
+                    hasAction: action !== null,
+                    actionName: action ? action.getAttribute('aria-label') : null,
+                    actionDisabled: action ? action.disabled : null,
+                    // Every focusable descendant of the card. The activation
+                    // contract is at most ONE.
+                    focusables: card.querySelectorAll(
+                        'a[href], button, input, select, textarea, [tabindex]'
+                    ).length,
+                };
+            });
+        })()"#,
+    )
+    .await
+}
+
+fn card<'a>(report: &'a Value, id: &str) -> &'a Value {
+    report
+        .as_array()
+        .expect("comparison report array")
+        .iter()
+        .find(|card| card["id"] == json!(id))
+        .unwrap_or_else(|| panic!("card {id} in {report}"))
+}
+
+/// The bounded bar / truthful number pair, on real geometry.
+///
+/// `conversations-open` is 17 against a baseline of 4 -- 425% -- so its bar
+/// runs out of track. The bar must be pinned to its track while the readout
+/// keeps saying 425%, and `data-kpi-baseline-saturated` must record that the
+/// geometry, not the value, is what ran out.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-admin-workbench)"]
+async fn an_over_baseline_card_bounds_its_bar_while_the_percentage_stays_truthful() {
+    let h = harness_at(PAGE).await;
+    begin_browser_error_capture(&h).await;
+
+    h.set_viewport(ViewportSize::new(1680, 900))
+        .await
+        .expect("set 1680px viewport");
+
+    let report = kpi_comparison_report(&h).await;
+
+    let over = card(&report, "conversations-open");
+    assert_eq!(over["state"], json!("above"), "{over}");
+    assert_eq!(
+        over["percent"],
+        json!("425"),
+        "the readout must report the real ratio, not the clamped bar: {over}"
+    );
+    assert_eq!(
+        over["saturated"],
+        json!("true"),
+        "a bar that ran out of track must say so: {over}"
+    );
+    let readout = over["readout"].as_str().unwrap_or_default();
+    assert!(
+        readout.contains("425"),
+        "the visible readout must stay truthful past the cap: {over}"
+    );
+
+    // The painted fill spans the whole track, and the baseline tick is still
+    // there at 80% of it -- so a full bar reads as "well past the marker",
+    // never as "exactly at the cap".
+    let bar_width = over["barWidth"].as_f64().expect("bar width");
+    let children = over["barChildren"]
+        .as_array()
+        .expect("bar children")
+        .to_vec();
+    let painted = children
+        .iter()
+        .map(|c| c["left"].as_f64().unwrap_or(0.0) + c["width"].as_f64().unwrap_or(0.0))
+        .fold(0.0_f64, f64::max);
+    assert!(
+        (painted - bar_width).abs() <= 1.5,
+        "the fill must be bounded by the track: painted {painted} of {bar_width} in {over}"
+    );
+    let marker = children
+        .iter()
+        .map(|c| c["left"].as_f64().unwrap_or(0.0))
+        .fold(0.0_f64, f64::max);
+    assert!(
+        (marker - bar_width * 0.8).abs() <= 2.0,
+        "the baseline marker must stay at 80% of the track even when the bar \
+         is saturated: marker {marker} of {bar_width} in {over}"
+    );
+
+    // A card under its baseline puts the marker in exactly the same place.
+    let under = card(&report, "payments-collected");
+    assert_eq!(under["state"], json!("below"), "{under}");
+    let under_width = under["barWidth"].as_f64().expect("bar width");
+    assert!(
+        (under_width - bar_width).abs() <= 1.5,
+        "every comparison track in a strip is the same width: {under} / {over}"
+    );
+
+    assert_no_browser_errors(&h, "admin-workbench kpi comparison").await;
+}
+
+/// A settling baseline draws no bar and fabricates no percentage, but it
+/// still SPEAKS -- its own sentence, distinct from the no-baseline one.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-admin-workbench)"]
+async fn a_settling_baseline_draws_no_bar_and_still_says_why() {
+    let h = harness_at(PAGE).await;
+    begin_browser_error_capture(&h).await;
+
+    h.set_viewport(ViewportSize::new(1680, 900))
+        .await
+        .expect("set 1680px viewport");
+
+    let report = kpi_comparison_report(&h).await;
+    let settling = card(&report, "customer-success-pts");
+    assert_eq!(settling["state"], json!("settling"), "{settling}");
+    assert_eq!(settling["hasBar"], json!(false), "{settling}");
+    assert_eq!(
+        settling["percent"],
+        Value::Null,
+        "a settling baseline must not fabricate a ratio: {settling}"
+    );
+    assert_eq!(
+        settling["degraded"],
+        Value::Null,
+        "a DECLARED settling window is not a defect: {settling}"
+    );
+    let sentence = settling["sentence"].as_str().unwrap_or_default();
+    assert!(
+        !sentence.is_empty() && !sentence.contains('{'),
+        "the settling card must carry its own substituted copy: {settling}"
+    );
+
+    // Cards with no baseline at all render no comparison row whatsoever --
+    // proof that the row is opt-in and existing cards are untouched.
+    let plain = card(&report, "open-matters");
+    assert_eq!(plain["state"], Value::Null, "{plain}");
+    assert_eq!(plain["hasBar"], json!(false), "{plain}");
+
+    assert_no_browser_errors(&h, "admin-workbench settling baseline").await;
+}
+
+/// Activation is opt-in, is exactly one tab stop, and never nests one
+/// interactive element inside another.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-admin-workbench)"]
+async fn only_activatable_cards_are_focusable_and_only_once() {
+    let h = harness_at(PAGE).await;
+    begin_browser_error_capture(&h).await;
+
+    h.set_viewport(ViewportSize::new(1680, 900))
+        .await
+        .expect("set 1680px viewport");
+
+    let report = kpi_comparison_report(&h).await;
+    for card in report.as_array().expect("comparison report array") {
+        let activatable = card["activatable"] == json!("true");
+        assert_eq!(
+            card["hasAction"],
+            json!(activatable),
+            "the action control and the activatable marker must agree: {card}"
+        );
+        let focusables = card["focusables"].as_i64().expect("focusable count");
+        if activatable {
+            assert_eq!(
+                focusables, 1,
+                "an activatable card is ONE tab stop -- the help affordance \
+                 stays a non-interactive span: {card}"
+            );
+            let name = card["actionName"].as_str().unwrap_or_default();
+            assert!(
+                name.starts_with("View details"),
+                "the visible label must prefix the accessible name (WCAG 2.5.3): {card}"
+            );
+        } else {
+            assert_eq!(
+                focusables, 0,
+                "a read-only card must not become focusable or announce as a \
+                 control: {card}"
+            );
+        }
+        // Status is readable without sampling a colour.
+        assert!(
+            card["status"].is_string(),
+            "every card exposes its status as a marker: {card}"
+        );
+    }
+
+    assert_no_browser_errors(&h, "admin-workbench kpi activation shape").await;
+}
+
+/// Pointer and keyboard both activate, and both hand back the stable
+/// `KpiItem::id` -- never an index, never a label.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-admin-workbench)"]
+async fn pointer_and_keyboard_both_emit_the_stable_item_id() {
+    let h = harness_at(PAGE).await;
+    begin_browser_error_capture(&h).await;
+
+    h.set_viewport(ViewportSize::new(1680, 900))
+        .await
+        .expect("set 1680px viewport");
+
+    async fn activated(h: &pixelproof_web::Harness) -> Value {
+        eval_json(
+            h,
+            r#"document.querySelector('[data-testid="admin-workbench-kpi-activated"]').textContent.trim()"#,
+        )
+        .await
+    }
+
+    let no_hire = "[data-kpi-card=\"no-hire-conversions\"] [data-kpi-card-action]";
+    click(&h, no_hire).await;
+    assert_eq!(
+        activated(&h).await,
+        json!("no-hire-conversions"),
+        "a pointer press emits the activated card's stable id"
+    );
+
+    // Enter on a different card's control, so a stale value cannot pass.
+    let payments = "[data-kpi-card=\"payments-collected\"] [data-kpi-card-action]";
+    h.page()
+        .find_element(payments)
+        .await
+        .expect("find the payments action")
+        .focus()
+        .await
+        .expect("focus the payments action");
+    h.press_key_sequence(&[Key::Enter])
+        .await
+        .expect("Enter on the payments action");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(
+        activated(&h).await,
+        json!("payments-collected"),
+        "Enter activates the focused card's control"
+    );
+
+    // And Space, which is the other native button activation key.
+    click(&h, no_hire).await;
+    h.page()
+        .find_element(payments)
+        .await
+        .expect("find the payments action")
+        .focus()
+        .await
+        .expect("focus the payments action");
+    h.press_key_sequence(&[Key::Space])
+        .await
+        .expect("Space on the payments action");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(
+        activated(&h).await,
+        json!("payments-collected"),
+        "Space activates the focused card's control"
+    );
+
+    assert_no_browser_errors(&h, "admin-workbench kpi activation").await;
 }

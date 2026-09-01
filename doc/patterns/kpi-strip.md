@@ -57,9 +57,12 @@ Builder methods on `KpiItem`:
 - `.description(text)` -- optional supporting copy; renders nothing when
   empty.
 - `.status(KpiStatus)` -- optional semantic emphasis (`Info`/`Success`/
-  `Warning`/`Error`). Drives the value text color *and* a top accent
-  stripe together, so status is never color-only; `Neutral` (the default)
-  renders no stripe.
+  `Warning`/`Error`). Drives the value text color, a LEFT accent edge, and
+  the comparison bar's fill together. The edge is always laid out and
+  `Neutral` (the default) paints it the house blue, so a status is what
+  OVERRIDES the default rather than what adds an edge -- see `ldui-kmpa`.
+  Status is also emitted as `data-kpi-card-status`, so it is readable
+  without sampling a colour.
 - `.trend(KpiTrend)` -- optional up/down/steady indicator, reusing
   `StatDeltaTrend` so `KpiStrip` and `StatDelta` agree on what "positive"
   means for a given metric. `KpiTrend::new(value, direction)` plus an
@@ -67,6 +70,172 @@ Builder methods on `KpiItem`:
 - `.help(text)` -- optional help text. Renders a small "?" affordance with a
   hover tooltip, and is also wired to the card's `aria-describedby` so it
   reaches assistive tech without requiring a hover.
+- `.baseline(KpiBaseline)` -- optional current-versus-baseline comparison
+  row. See below.
+- `.action(KpiAction)` -- optional activation affordance. See below.
+
+## Baseline comparison (ldui-ztgo)
+
+A dashboard KPI is usually two facts, not one: the current number, and how
+it stands against a trailing baseline. `KpiBaseline` carries both raw
+numbers plus the caller's own name for the baseline:
+
+```rust,no_run
+use leptos_daisyui_rs::patterns::{KpiBaseline, KpiItem, KpiStatus};
+
+let item = KpiItem::new("intakes", "Intakes", "280")
+    .status(KpiStatus::Success)
+    .baseline(KpiBaseline::against(280.0, 250.0).label("12-week avg / 250"));
+```
+
+That renders `280`, a bar, the readout `112%`, the baseline's name, and the
+sentence `12% above baseline`.
+
+### The bar is bounded; the number is not
+
+This is the property to hold onto, because getting it wrong turns a
+dashboard into a liar. The comparison track's right edge is pinned at
+`baseline * KPI_BASELINE_TRACK_HEADROOM` (1.25), so:
+
+- the **baseline marker sits at exactly 80% of the track on every card in
+  the strip**, and never moves. Twelve cards therefore compare their fills
+  against one shared tick.
+- a value between 0 and 125% of baseline draws a fill that ends where it
+  really is;
+- a value past 125% **saturates**: the fill is clamped to the track, the
+  card sets `data-kpi-baseline-saturated="true"`, and the readout beside it
+  keeps printing the true figure -- `425%`, not `100%`.
+
+Because the marker stays at 80% rather than at the track's end, a saturated
+bar reads as "well past the baseline". A bar clamped at 100% of its track
+never means "at the cap"; the cap is the tick, still visible behind the
+fill.
+
+`CapacityBar`'s own default `max` is deliberately overridden. That default
+is `cap * 1.25` *clamped up to at least `value`*, which would rescale the
+track to fit an over-baseline value and slide the marker left -- on exactly
+the cards where the marker's position matters most.
+
+### Four unavailable states, four sentences
+
+A baseline that cannot be divided by is not an edge case to swallow; it is
+a fact to report. `KpiBaselineAvailability` makes the caller declare which:
+
+| Declared | State | Renders |
+|---|---|---|
+| `KpiBaseline::against(c, b)` with finite `b > 0` | `Above` / `Level` / `Below` | bar + readout + directional sentence |
+| `KpiBaseline::absent(c)` | `NoBaseline` | no bar, no percentage, the `baseline_absent` sentence |
+| `KpiBaseline::settling(c)` | `Settling` | no bar, no percentage, the `baseline_settling` sentence |
+| `against(c, 0.0)`, a negative, `NaN`, an infinity, or a non-finite current | `NoBaseline` **plus** `data-kpi-baseline-degraded="true"` | the `baseline_absent` sentence |
+
+Nothing in that table produces `NaN`, `inf`, or a fabricated `0%`. The last
+row is the only one that is a defect, and it is flagged rather than
+silently folded into the third -- "there is no baseline", "the window is
+still filling", and "the caller handed over an unusable number" are three
+different facts.
+
+A value a hair over its baseline (250.4 against 250) rounds to `100%` and
+therefore speaks the `Level` sentence, never `0% above`: the direction word
+and the printed percentage come from ONE rounding, so they cannot disagree.
+
+### Colour never carries the judgement
+
+The bar takes its fill colour from the card's typed `KpiStatus`, and the
+over-baseline band takes the **same** colour. The framework has no basis
+for deciding whether higher is better: for "intakes" it is, for "days to
+close" and "cost per matter" it is not. `CapacityBarColor::for_direction`
+exists and would paint at-or-above green -- it is deliberately not used
+here. "Over" is signalled by the fill crossing the marker and by the
+sentence; favourable/unfavourable is the caller's `status` to declare.
+
+### Alignment is unaffected
+
+The comparison row renders BELOW the value, so a card with a baseline and a
+card without keep identical label and value offsets. `ldui-tbaw`'s two
+mechanisms are untouched: the label still reserves two line boxes
+(`min-h-8`) and the accent edge is still always laid out. In a grid row the
+shells are `h-full`, so a taller baseline-bearing card simply sets the row
+height and its neighbours stretch to match.
+
+## Activation (ldui-ztgo)
+
+A card becomes activatable only when BOTH halves are present: the item's
+own `KpiAction` copy and an `on_activate` callback on the card or strip.
+
+```rust,no_run
+use leptos::prelude::*;
+use leptos_daisyui_rs::patterns::{KpiAction, KpiBaseline, KpiItem, KpiStrip};
+
+let open_detail = Callback::new(|id: String| {
+    // The framework emits the stable `KpiItem::id` and nothing else.
+    let _ = id;
+});
+
+let items = Signal::derive(|| {
+    vec![
+        KpiItem::new("intakes", "Intakes", "280")
+            .baseline(KpiBaseline::against(280.0, 250.0).label("12-week avg / 250"))
+            .action(KpiAction::new("View details")),
+        // No action: stays a read-only, non-focusable group.
+        KpiItem::new("last-sync", "Last sync", "").unavailable(),
+    ]
+});
+
+view! { <KpiStrip items=items on_activate=open_detail /> }
+```
+
+**One framework-rendered control, not whole-card activation.** The card
+stays a `role="group"` `<div>` and gains one `Pressable` inside it. Three
+reasons, in order of how expensive each would be to discover later:
+
+1. `<button>` takes phrasing content, and the card body is built from `<p>`
+   elements plus an `sr-only` help `<span id>`. Wrapping the body in a
+   button is invalid HTML.
+2. The card's accessible-name grammar is `role="group"` + `aria-label`, and
+   every existing caller depends on it. A card that became a button would
+   announce as a control on pages where nothing changed but the framework
+   version.
+3. A whole-card click handler that is not a real control needs a duplicated
+   keyboard path and a synthetic tab stop -- and then the help affordance
+   sits inside a control, which is the nested-interactive defect.
+
+Consequences worth stating plainly:
+
+- An activatable card is exactly **one** tab stop. The help affordance is a
+  non-interactive `aria-hidden` span whose real text reaches assistive tech
+  through `aria-describedby`, so there is never a control inside a control.
+- A non-activatable card gains no `tabindex`, no `<button>`, and no
+  `data-kpi-card-activatable`. Every card written before this bead has
+  neither half of the gate, so none of them changed.
+- Pointer, Enter and Space all work, because the control is a real
+  `<button>` -- nothing is re-implemented.
+- The accessible name defaults to `"<visible label>, <the card's accessible
+  name>"`, keeping the visible label as a prefix (WCAG 2.5.3 Label in Name)
+  while distinguishing one of twelve identically-labelled "View details"
+  buttons. `KpiAction::accessible_label` overrides it.
+- `KpiAction::disabled(true)` renders the native `disabled` attribute, so
+  the control leaves the tab order and stays in the accessibility tree.
+
+### Elevation: the card keeps the STATIC depth
+
+An activatable card does **not** adopt `ld-elevated`'s interactive hover
+lift; it keeps `ld-card-depth` (ldui-k4fn). The card is not the control --
+the `Pressable` inside it is. Lifting the whole card on hover would promise
+that pressing anywhere on it does something, which is a bigger lie than the
+read-only tile `ld-card-depth` was chosen to avoid. The interactive
+affordance lives exactly where the interaction does: `Pressable` already
+carries `ld-pressable` (press scale) and `ld-focus-ring` (focus-visible
+ring), eased by `ld-eased`.
+
+### Reconciliation and focus
+
+`KpiStrip` reconciles its cards with a keyed `<For>` whose key covers the
+WHOLE item, not just its id. `KpiCard` takes its item by value and holds no
+reactive signal over it, so an id-only key would leave a card showing a
+stale number after a refresh -- and a locale change (same ids, translated
+labels) would never re-render at all. Keying on the whole item means an
+unchanged card keeps its DOM, and its focused action button keeps focus,
+while a card whose data moved is rebuilt.
 
 ## Grid and `compact`
 
@@ -124,8 +293,29 @@ let texts = KpiStripTexts {
     trend_up: "en hausse".to_string(),
     trend_down: "en baisse".to_string(),
     trend_steady: "stable".to_string(),
+    // Every comparison sentence is framework-owned copy too, so a locale
+    // switch reaches it without rebuilding the items.
+    baseline_ratio: "{ratio} %".to_string(),
+    baseline_above: "{delta} % au-dessus de la {baseline}".to_string(),
+    baseline_below: "{delta} % en dessous de la {baseline}".to_string(),
+    baseline_level: "Conforme a la {baseline}".to_string(),
+    baseline_absent: "Pas encore de reference".to_string(),
+    baseline_settling: "Reference en cours de constitution".to_string(),
 };
 ```
+
+The five `baseline_*` fields are templates, not finished sentences. Three
+placeholders are substituted:
+
+- `{ratio}` -- current as a percentage OF the baseline (`112`).
+- `{delta}` -- the UNSIGNED deviation in percentage points (`12`). Which
+  side it falls on is carried by which template is chosen, so the number is
+  never signed twice.
+- `{baseline}` -- the caller's own `KpiBaseline::label`.
+
+In the no-baseline and settling templates there is no ratio and no
+deviation, so `{ratio}` and `{delta}` substitute to `unavailable` rather
+than to a fabricated `0`.
 
 ## Section heading and period selection stay caller-owned
 
@@ -217,4 +407,13 @@ shadow at all -- worse than the drift it fixes, and silent
 
 ## Reference
 
-Demo: `/components/kpi_strip`. Source: `src/patterns/kpi_strip.rs`.
+Demo: `/components/kpi_strip` -- including a twelve-card Office-like
+dashboard covering above/level/below, saturated, no-baseline, settling, a
+zero baseline, a disabled action, and an unavailable value. The
+`/components/admin_workbench` fixture deliberately mixes four
+comparison-bearing cards with four plain ones, so that page's existing
+equal-height and aligned-value browser assertions double as the alignment
+proof.
+
+Source: `src/patterns/kpi_strip.rs`. Browser proof:
+`tests/admin_workbench_smoke.rs` (`cargo xtask test-admin-workbench`).

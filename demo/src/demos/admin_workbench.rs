@@ -31,8 +31,8 @@ use crate::core::{ContentLayout, Section};
 use leptos::prelude::*;
 use leptos_daisyui_rs::components::*;
 use leptos_daisyui_rs::patterns::{
-    KpiItem, KpiStatus, KpiStrip, KpiTrend, PageHeader, PageHeaderDivider, PageQuickActionContent,
-    PageQuickActions,
+    KpiAction, KpiBaseline, KpiItem, KpiStatus, KpiStrip, KpiTrend, PageHeader, PageHeaderDivider,
+    PageQuickActionContent, PageQuickActions,
 };
 use std::rc::Rc;
 
@@ -130,22 +130,40 @@ fn workbench_column_filters(
 /// two-line labels below are the exact wording the consumer reported as
 /// ellipsized at 1680px: "No-Hire Conversions", "Payments Collected",
 /// "Customer Success Pts", "Conversations Open", "Responses Pending".
+///
+/// ldui-ztgo: four of the eight now carry a typed baseline comparison and
+/// two are activatable, deliberately leaving the other four exactly as they
+/// were. That mix is the fixture's whole point here -- the suite's existing
+/// equal-height and aligned-value assertions then prove that a card WITH a
+/// comparison row and a card WITHOUT one still line up, rather than that
+/// being merely asserted in prose.
 fn workbench_kpis() -> Vec<KpiItem> {
     vec![
         KpiItem::new("open-matters", "Open matters", "128")
             .trend(KpiTrend::new(4.0, StatDeltaTrend::Positive).label("this week"))
             .help("Every matter currently open, across all assignees."),
+        // Above baseline, activatable.
         KpiItem::new("no-hire-conversions", "No-Hire Conversions", "38")
             .status(KpiStatus::Info)
-            .description("This quarter"),
+            .description("This quarter")
+            .baseline(KpiBaseline::against(38.0, 32.0).label("12-week avg / 32"))
+            .action(KpiAction::new("View details")),
+        // Below baseline, activatable.
         KpiItem::new("payments-collected", "Payments Collected", "$92,400")
             .status(KpiStatus::Success)
-            .trend(KpiTrend::new(12.5, StatDeltaTrend::Positive).label("vs last month")),
+            .trend(KpiTrend::new(12.5, StatDeltaTrend::Positive).label("vs last month"))
+            .baseline(KpiBaseline::against(92400.0, 101000.0).label("12-week avg / $101,000"))
+            .action(KpiAction::new("View details")),
+        // A baseline window that is still filling: no bar, its own sentence.
         KpiItem::new("customer-success-pts", "Customer Success Pts", "812")
-            .status(KpiStatus::Warning),
+            .status(KpiStatus::Warning)
+            .baseline(KpiBaseline::settling(812.0).label("12-week avg")),
+        // Far past the top of its track: the bar saturates, the readout does
+        // not, and `data-kpi-baseline-saturated` records the difference.
         KpiItem::new("conversations-open", "Conversations Open", "17")
             .status(KpiStatus::Error)
-            .trend(KpiTrend::new(1.0, StatDeltaTrend::Negative)),
+            .trend(KpiTrend::new(1.0, StatDeltaTrend::Negative))
+            .baseline(KpiBaseline::against(17.0, 4.0).label("12-week avg / 4")),
         KpiItem::new("responses-pending", "Responses Pending", "").unavailable(),
         KpiItem::new("client-satisfaction", "Client satisfaction", "94%")
             .status(KpiStatus::Success),
@@ -297,6 +315,11 @@ pub fn AdminWorkbenchDemo() -> impl IntoView {
     let table_search = RwSignal::new(String::new());
     let table_status = RwSignal::new(String::new());
     let assistant_collapsed = RwSignal::new(false);
+    // ldui-ztgo: the KPI activation callback receives only the stable
+    // `KpiItem::id`. Synthetic, like `action_count` -- the showcase has no
+    // detail route to launch into.
+    let kpi_activated = RwSignal::new(String::new());
+    let on_kpi_activate = Callback::new(move |id: String| kpi_activated.set(id));
     let assistant_unread = RwSignal::new(2_usize);
     let assistant_draft = RwSignal::new(String::new());
     let assistant_messages = RwSignal::new(vec![
@@ -395,8 +418,17 @@ pub fn AdminWorkbenchDemo() -> impl IntoView {
 
                                     <KpiStrip
                                         items=Signal::derive(workbench_kpis)
+                                        on_activate=on_kpi_activate
                                         attr:data-testid="admin-workbench-kpis"
                                     />
+                                    // The framework emits the stable
+                                    // `KpiItem::id` and nothing else; mapping
+                                    // it to a route or a request is the
+                                    // caller's job. The showcase records it so
+                                    // the browser proof can read it back.
+                                    <p class="sr-only" data-testid="admin-workbench-kpi-activated">
+                                        {move || kpi_activated.get()}
+                                    </p>
 
                                     <div id="admin-workbench-table" data-testid="admin-workbench-table">
                                         <EntityTable
