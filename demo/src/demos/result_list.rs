@@ -102,6 +102,16 @@ fn relabel_case_a(items: &[ResultListItem<CaseRef>]) -> Vec<ResultListItem<CaseR
         .collect()
 }
 
+/// Drops one keyed row, simulating a filter that temporarily hides a row the
+/// caller's accepted key still names.
+fn remove_by_key(items: &[ResultListItem<CaseRef>], key: &str) -> Vec<ResultListItem<CaseRef>> {
+    items
+        .iter()
+        .filter(|item| item.key != key)
+        .cloned()
+        .collect()
+}
+
 #[component]
 pub fn ResultListDemo() -> impl IntoView {
     let (activated, set_activated) = signal(String::from("None"));
@@ -148,6 +158,36 @@ pub fn ResultListDemo() -> impl IntoView {
     let keyed_items = RwSignal::new(keyed_case_fixture());
     let (keyed_activated, set_keyed_activated) = signal(String::from("None"));
     let (keyed_highlighted, set_keyed_highlighted) = signal(String::from("None"));
+
+    // Caller-controlled selection fixture (ldui-bf8c): a separate items
+    // signal and accepted-key signal so this section never interacts with
+    // the uncontrolled fixture above.
+    let controlled_items = RwSignal::new(keyed_case_fixture());
+    let controlled_selected_key = RwSignal::new(Some("case-b".to_string()));
+    let (controlled_proposal, set_controlled_proposal) = signal(String::from("None"));
+    let (controlled_activated, set_controlled_activated) = signal(String::from("None"));
+
+    let controlled_selection = KeyedResultListSelection::controlled(
+        controlled_selected_key.into(),
+        Callback::new(move |proposal: KeyedResultListSelectionProposal| {
+            let cause = match proposal.cause {
+                KeyedResultListSelectionCause::Click => "click",
+                KeyedResultListSelectionCause::Keyboard => "keyboard",
+            };
+            set_controlled_proposal.set(format!(
+                "{} ({cause})",
+                proposal.key.clone().unwrap_or_else(|| "None".to_string())
+            ));
+            // Accepted truth stays caller-owned: this demo simply applies
+            // every proposal, but a real consumer could decline one (e.g.
+            // pending an async guard) and the list would keep rendering the
+            // previous accepted key untouched.
+            controlled_selected_key.set(proposal.key);
+        }),
+    );
+    let on_controlled_select = Callback::new(move |item: ResultListItem<CaseRef>| {
+        set_controlled_activated.set(format!("{} ({})", item.key, item.payload.case_number));
+    });
 
     let on_keyed_selection_change = Callback::new(move |key: Option<String>| {
         let label = key.clone().unwrap_or_else(|| "None".to_string());
@@ -284,6 +324,97 @@ pub fn ResultListDemo() -> impl IntoView {
                 </div>
             </Section>
 
+            <Section title="Controlled Selection (KeyedResultListSelection)">
+                <p class="text-sm opacity-70 mb-2">
+                    "The accepted key below is owned entirely by this demo, via "
+                    <code class="kbd kbd-sm">"KeyedResultListSelection::controlled"</code>
+                    ". Clicking a row or navigating with the keyboard never changes the "
+                    "highlight directly — it emits a proposal this page chooses to apply. "
+                    "The external-select/clear buttons and the filter/restore buttons change "
+                    "the accepted key or the item set independently, without ever going "
+                    "through the list."
+                </p>
+                <div
+                    class="alert alert-info mb-4"
+                    data-testid="keyed-result-list-controlled-status"
+                >
+                    <span>
+                        "Accepted key: "
+                        <strong>
+                            {move || {
+                                controlled_selected_key.get().unwrap_or_else(|| "None".to_string())
+                            }}
+                        </strong>
+                        " | Last proposal: " <strong>{move || controlled_proposal.get()}</strong>
+                        " | Activated: " <strong>{move || controlled_activated.get()}</strong>
+                    </span>
+                </div>
+                <div
+                    class="max-w-md mb-4"
+                    id="keyed-result-list-controlled"
+                    data-testid="keyed-result-list-controlled"
+                >
+                    <KeyedResultList
+                        items=controlled_items
+                        selection=controlled_selection
+                        on_select=on_controlled_select
+                    />
+                </div>
+                <div class="flex flex-wrap gap-2">
+                    <button
+                        class="btn btn-sm"
+                        data-testid="keyed-result-list-controlled-select-case-b"
+                        on:click=move |_| controlled_selected_key.set(Some("case-b".to_string()))
+                    >
+                        "Externally select case-b"
+                    </button>
+                    <button
+                        class="btn btn-sm"
+                        data-testid="keyed-result-list-controlled-select-case-c"
+                        on:click=move |_| controlled_selected_key.set(Some("case-c".to_string()))
+                    >
+                        "Externally select case-c"
+                    </button>
+                    <button
+                        class="btn btn-sm"
+                        data-testid="keyed-result-list-controlled-select-missing"
+                        on:click=move |_| controlled_selected_key.set(Some("case-x".to_string()))
+                    >
+                        "Externally select missing key (case-x)"
+                    </button>
+                    <button
+                        class="btn btn-sm"
+                        data-testid="keyed-result-list-controlled-clear"
+                        on:click=move |_| controlled_selected_key.set(None)
+                    >
+                        "Clear accepted key"
+                    </button>
+                    <button
+                        class="btn btn-sm"
+                        data-testid="keyed-result-list-controlled-filter-out-b"
+                        on:click=move |_| {
+                            controlled_items.update(|items| *items = remove_by_key(items, "case-b"))
+                        }
+                    >
+                        "Filter out case-b"
+                    </button>
+                    <button
+                        class="btn btn-sm"
+                        data-testid="keyed-result-list-controlled-restore"
+                        on:click=move |_| {
+                            // Restores only the item set. Deliberately leaves
+                            // `controlled_selected_key` untouched, so a key
+                            // filtered out above (still the accepted value,
+                            // never overwritten) is shown highlighted again
+                            // purely because a matching row reappeared.
+                            controlled_items.set(keyed_case_fixture());
+                        }
+                    >
+                        "Restore items"
+                    </button>
+                </div>
+            </Section>
+
             <Section title="Features">
                 <ul class="list-disc list-inside space-y-1 text-base-content/70">
                     <li>"Variable-height rows — the secondary line wraps naturally"</li>
@@ -294,6 +425,7 @@ pub fn ResultListDemo() -> impl IntoView {
                     <li>"Selected row auto-scrolls into view"</li>
                     <li>"WAI-ARIA listbox pattern: role=listbox/option, aria-selected, aria-activedescendant"</li>
                     <li>"KeyedResultList: selection and activation are tracked by stable key, never by index or display text"</li>
+                    <li>"KeyedResultList: an optional controlled selected key lets the caller stay authoritative over the accepted highlight"</li>
                 </ul>
             </Section>
         </ContentLayout>

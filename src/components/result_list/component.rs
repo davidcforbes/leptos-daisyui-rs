@@ -1,5 +1,6 @@
 use super::{
     core::{ResultListCore, ResultReplacementPolicy},
+    selection::{KeyedResultListSelection, resolve_result_list_selection_mode},
     types::{ResultListItem, ResultRow, current_result_item, result_row_key},
 };
 use leptos::{html::Div, prelude::*};
@@ -152,6 +153,60 @@ pub fn ResultList(
 /// text does not fully determine (e.g. a database id or case number behind a
 /// person's name).
 ///
+/// ## Caller-controlled selected key
+///
+/// By default `KeyedResultList` owns its own selected key internally
+/// (uncontrolled) and only reports changes via `on_selection_change`, exactly
+/// as it always has. Supply [`KeyedResultListSelection::controlled`] via the
+/// `selection` prop instead when a caller's own accepted state must be
+/// authoritative — seeding the initial highlight, restoring it after an
+/// external route/state change, or keeping the highlight aligned with an
+/// asynchronously loaded detail pane. When `selection` is present, the list
+/// still owns keyboard, hover, scroll-into-view, ARIA, and activation
+/// behavior; only the accepted key itself is caller-owned, and every
+/// pointer/keyboard gesture proposes a change through
+/// [`KeyedResultListSelectionProposal`] rather than writing local state — see
+/// [`KeyedResultListSelection`]'s own documentation for the full
+/// accepted-key contract, including what happens when the controlled key is
+/// absent from `items`.
+///
+/// `selection` and `on_selection_change` are mutually exclusive: supplying
+/// both is a configuration error rendered as a visible `role="alert"` panel
+/// rather than silently resolved to one of them, because
+/// `on_selection_change` reports a change the list itself decided, which has
+/// no meaning once the caller owns the accepted key.
+///
+/// ```rust,no_run
+/// use leptos::prelude::*;
+/// use leptos_daisyui_rs::components::*;
+///
+/// #[derive(Clone)]
+/// struct CaseRef { case_number: &'static str }
+///
+/// #[component]
+/// fn App() -> impl IntoView {
+///     let items = vec![
+///         ResultListItem::new("case-a", ResultRow::new("Alex Morgan"), CaseRef { case_number: "A-100" }),
+///         ResultListItem::new("case-b", ResultRow::new("Alex Morgan"), CaseRef { case_number: "B-200" }),
+///     ];
+///     // Accepted truth lives with the caller — seeded here, but it could
+///     // just as easily come from a route param or a server response.
+///     let accepted_key = RwSignal::new(Some("case-a".to_string()));
+///     let selection = KeyedResultListSelection::controlled(
+///         accepted_key.into(),
+///         Callback::new(move |proposal: KeyedResultListSelectionProposal| {
+///             accepted_key.set(proposal.key);
+///         }),
+///     );
+///     view! {
+///         <KeyedResultList
+///             items=Signal::derive(move || items.clone())
+///             selection=selection
+///         />
+///     }
+/// }
+/// ```
+///
 /// # Example
 /// ```rust,ignore
 /// use leptos::prelude::*;
@@ -215,9 +270,19 @@ pub fn KeyedResultList<T>(
     /// Fired whenever the highlighted key changes: keyboard nav, click, or
     /// the reconciliation that runs when `items` is replaced (preserving the
     /// current key when it still exists, else falling back to the first
-    /// result, else `None` for an empty list).
+    /// result, else `None` for an empty list). Uncontrolled only — mutually
+    /// exclusive with `selection`; see below.
     #[prop(optional)]
     on_selection_change: Option<Callback<Option<String>>>,
+
+    /// Opt-in caller-controlled selected key
+    /// ([`KeyedResultListSelection::controlled`]). When supplied, the
+    /// caller's accepted key is authoritative and every gesture proposes a
+    /// change instead of the list deciding locally. Mutually exclusive with
+    /// `on_selection_change`. See the "Caller-controlled selected key"
+    /// section above.
+    #[prop(optional)]
+    selection: Option<KeyedResultListSelection>,
 
     /// Additional CSS classes for the listbox container.
     #[prop(optional, into)]
@@ -230,6 +295,21 @@ pub fn KeyedResultList<T>(
 where
     T: Clone + Send + Sync + 'static,
 {
+    if let Err(message) =
+        resolve_result_list_selection_mode(selection.is_some(), on_selection_change.is_some())
+    {
+        return view! {
+            <div
+                role="alert"
+                data-result-list-selection-config-error=message
+                class="border border-error bg-error/10 p-4 text-sm text-error"
+            >
+                {message}
+            </div>
+        }
+        .into_any();
+    }
+
     view! {
         <ResultListCore
             items=items
@@ -237,8 +317,10 @@ where
             replacement_policy=ResultReplacementPolicy::PreserveKey
             on_select=on_select
             on_selection_change=on_selection_change
+            selection=selection
             class=class
             node_ref=node_ref
         />
     }
+    .into_any()
 }

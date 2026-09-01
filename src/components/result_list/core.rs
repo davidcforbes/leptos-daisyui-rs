@@ -1,3 +1,7 @@
+use super::selection::{
+    KeyedResultListSelection, KeyedResultListSelectionCause, KeyedResultListSelectionProposal,
+    displayed_controlled_key,
+};
 use super::types::{
     ResultListItem, current_result_item, keyed_option_dom_id, move_result_key,
     reconcile_result_key, validate_result_list_items,
@@ -26,10 +30,10 @@ fn result_option<T>(
     instance_id: u64,
     key: String,
     items: Signal<Vec<ResultListItem<T>>>,
-    selected: RwSignal<Option<String>>,
+    displayed_selected: Signal<Option<String>>,
     hover: RwSignal<Option<String>>,
+    propose_click: Callback<String>,
     on_select: Option<Callback<ResultListItem<T>>>,
-    on_selection_change: Option<Callback<Option<String>>>,
 ) -> impl IntoView
 where
     T: Clone + Send + Sync + 'static,
@@ -50,9 +54,12 @@ where
             id=dom_id
             data-result-key=key
             role="option"
-            aria-selected=move || (selected.get().as_deref() == Some(selected_attr_key.as_str())).to_string()
+            aria-selected=move || {
+                (displayed_selected.get().as_deref() == Some(selected_attr_key.as_str())).to_string()
+            }
             class=move || {
-                let is_selected = selected.get().as_deref() == Some(selected_class_key.as_str());
+                let is_selected = displayed_selected.get().as_deref()
+                    == Some(selected_class_key.as_str());
                 let is_hovered = hover.get().as_deref() == Some(hover_key.as_str());
                 merge_classes!(
                     "flex flex-col gap-1 px-3 py-2 cursor-pointer rounded-box",
@@ -80,10 +87,7 @@ where
                     return;
                 };
 
-                selected.set(Some(click_key.clone()));
-                if let Some(callback) = on_selection_change {
-                    callback.run(Some(click_key.clone()));
-                }
+                propose_click.run(click_key.clone());
                 if let Some(callback) = on_select {
                     callback.run(item);
                 }
@@ -125,6 +129,13 @@ pub(super) fn ResultListCore<T>(
     replacement_policy: ResultReplacementPolicy,
     #[prop(optional_no_strip)] on_select: Option<Callback<ResultListItem<T>>>,
     #[prop(optional_no_strip)] on_selection_change: Option<Callback<Option<String>>>,
+    /// Opt-in caller-controlled selected key. When present, the list never
+    /// owns selection state: rendering derives from
+    /// `selection.selected_key()` filtered to the current `items`, and every
+    /// gesture proposes through `selection`'s callback instead of writing
+    /// local state. See [`super::KeyedResultListSelection`].
+    #[prop(optional_no_strip)]
+    selection: Option<KeyedResultListSelection>,
     class: &'static str,
     node_ref: NodeRef<Div>,
 ) -> impl IntoView
@@ -132,11 +143,24 @@ where
     T: Clone + Send + Sync + 'static,
 {
     let instance_id = RESULT_LIST_SEQ.fetch_add(1, Ordering::Relaxed);
+    // Internal selection state, used only in the uncontrolled configuration
+    // (`selection.is_none()`). Left untouched when controlled: rendering
+    // reads `displayed_selected` below instead.
     let selected = RwSignal::new(None::<String>);
     let hover = RwSignal::new(None::<String>);
 
     Effect::new(move |_| {
         let latest = items.get();
+        hover.set(None);
+
+        // Controlled: the caller owns the accepted key. The list never
+        // reconciles it locally or reports a change here — an absent key is
+        // handled purely at render time by `displayed_selected`, so it can
+        // never be silently overwritten. See `selection::displayed_controlled_key`.
+        if selection.is_some() {
+            return;
+        }
+
         let next = if validate_result_list_items(&latest).is_err() {
             None
         } else {
@@ -151,7 +175,6 @@ where
         let changed = selected.get_untracked() != next;
 
         selected.set(next.clone());
-        hover.set(None);
         if (changed || replacement_policy == ResultReplacementPolicy::ResetFirst)
             && let Some(callback) = on_selection_change
         {
@@ -159,12 +182,25 @@ where
         }
     });
 
+    // The key actually rendered as selected/active. Uncontrolled: the
+    // list-owned `selected` signal. Controlled: the caller's accepted key,
+    // filtered to rows present in the current `items` on every read, so a
+    // key that reappears after a filter/replacement is highlighted again
+    // without any extra bookkeeping.
+    let displayed_selected: Signal<Option<String>> = match selection {
+        Some(model) => Signal::derive(move || {
+            let latest = items.get();
+            displayed_controlled_key(model.selected_key.get().as_deref(), &latest)
+        }),
+        None => Signal::derive(move || selected.get()),
+    };
+
     // Keep the selected option visible after either selection or current-list
     // order changes. Native scrolling replaces the original Direct2D offset
     // calculations.
     Effect::new(move |_| {
         let _ = items.get();
-        let Some(key) = selected.get() else {
+        let Some(key) = displayed_selected.get() else {
             return;
         };
         if let Some(element) = node_ref.get_untracked() {
@@ -178,13 +214,33 @@ where
         }
     });
 
+    // Proposes a new selected key for one row click. Uncontrolled: writes
+    // local state and fires the plain change notification. Controlled:
+    // emits a typed proposal and writes nothing — the caller remains
+    // authoritative, so the rendered highlight only moves once
+    // `selection.selected_key()` itself changes.
+    let propose_click: Callback<String> = Callback::new(move |key: String| match selection {
+        Some(model) => {
+            model.on_change.run(KeyedResultListSelectionProposal {
+                key: Some(key),
+                cause: KeyedResultListSelectionCause::Click,
+            });
+        }
+        None => {
+            selected.set(Some(key.clone()));
+            if let Some(callback) = on_selection_change {
+                callback.run(Some(key));
+            }
+        }
+    });
+
     let on_keydown = move |event: KeyboardEvent| {
         let latest = items.get_untracked();
         if latest.is_empty() || validate_result_list_items(&latest).is_err() {
             return;
         }
 
-        let current = selected.get_untracked();
+        let current = displayed_selected.get_untracked();
         let next = match event.key().as_str() {
             "ArrowDown" => {
                 event.prevent_default();
@@ -216,9 +272,19 @@ where
         };
 
         if let Some(next) = next {
-            selected.set(next.clone());
-            if let Some(callback) = on_selection_change {
-                callback.run(next);
+            match selection {
+                Some(model) => {
+                    model.on_change.run(KeyedResultListSelectionProposal {
+                        key: next,
+                        cause: KeyedResultListSelectionCause::Keyboard,
+                    });
+                }
+                None => {
+                    selected.set(next.clone());
+                    if let Some(callback) = on_selection_change {
+                        callback.run(next);
+                    }
+                }
             }
         }
     };
@@ -241,7 +307,7 @@ where
                 if validate_result_list_items(&latest).is_err() {
                     None
                 } else {
-                    selected
+                    displayed_selected
                         .get()
                         .map(|key| keyed_option_dom_id(instance_id, &key))
                 }
@@ -291,10 +357,10 @@ where
                                 instance_id,
                                 key,
                                 items,
-                                selected,
+                                displayed_selected,
                                 hover,
+                                propose_click,
                                 on_select,
-                                on_selection_change,
                             )
                         }
                     />

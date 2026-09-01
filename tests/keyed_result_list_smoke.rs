@@ -72,6 +72,61 @@ async fn restore_fixture(h: &pixelproof_web::Harness) {
     click(h, "[data-testid=\"keyed-result-list-restore\"]").await;
 }
 
+// ── Controlled selection (ldui-bf8c) ──
+//
+// A separate root/fixture (`#keyed-result-list-controlled`) so this section
+// never shares state with the uncontrolled fixture above. Every gesture here
+// is either an external button (never touches the list) or a click/keyboard
+// action on the list itself, which this fixture's `on_change` callback
+// applies to its own `RwSignal` — proving the proposal shape works without
+// asserting anything about the demo's specific choice to always apply it.
+
+const CONTROLLED_ROOT: &str = "#keyed-result-list-controlled [role=\"listbox\"]";
+
+/// Same shape as [`state`], scoped to the controlled fixture, plus the
+/// controlled status banner's own text (accepted key / last proposal /
+/// activation).
+async fn controlled_state(h: &pixelproof_web::Harness) -> Value {
+    eval_json(
+        h,
+        r#"(() => {
+            const root = document.querySelector('#keyed-result-list-controlled [role="listbox"]');
+            const status = document.querySelector('[data-testid="keyed-result-list-controlled-status"]');
+            const activeId = root?.getAttribute('aria-activedescendant') ?? null;
+            const activeEl = activeId ? document.getElementById(activeId) : null;
+            const options = Array.from(root?.querySelectorAll('[role="option"]') ?? []);
+            return {
+                statusText: status?.textContent.trim() ?? null,
+                activeDescendantId: activeId,
+                activeDescendantKey: activeEl?.dataset.resultKey ?? null,
+                optionKeys: options.map(o => o.dataset.resultKey),
+                selectedKeys: options
+                    .filter(o => o.getAttribute('aria-selected') === 'true')
+                    .map(o => o.dataset.resultKey),
+            };
+        })()"#,
+    )
+    .await
+}
+
+fn controlled_row_selector(key: &str) -> String {
+    format!("#keyed-result-list-controlled [data-result-key=\"{key}\"]")
+}
+
+/// Restores only the controlled fixture's item set — deliberately leaves the
+/// accepted key untouched, matching the button's own documented behavior.
+async fn restore_controlled_items(h: &pixelproof_web::Harness) {
+    click(h, "[data-testid=\"keyed-result-list-controlled-restore\"]").await;
+}
+
+async fn select_controlled_case_b(h: &pixelproof_web::Harness) {
+    click(
+        h,
+        "[data-testid=\"keyed-result-list-controlled-select-case-b\"]",
+    )
+    .await;
+}
+
 /// Two rows (`case-a`, `case-b`) intentionally render the identical display
 /// title "Alex Morgan". Clicking each must activate its own distinct
 /// payload, never the other's, and never fall back to matching by title.
@@ -319,4 +374,172 @@ async fn empty_result_set_renders_the_empty_state() {
 
     restore_fixture(&h).await;
     assert_no_browser_errors(&h, "empty-state journey").await;
+}
+
+/// External changes to the caller's accepted-key signal are authoritative:
+/// clicking a page button that never touches the list still moves the
+/// rendered highlight, `aria-selected`, and `aria-activedescendant`.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-keyed-result-list)"]
+async fn controlled_external_selection_is_authoritative() {
+    let h = harness_at(PAGE).await;
+    begin_browser_error_capture(&h).await;
+    restore_controlled_items(&h).await;
+    select_controlled_case_b(&h).await;
+
+    let before = controlled_state(&h).await;
+    assert_eq!(
+        before["selectedKeys"],
+        json!(["case-b"]),
+        "the fixture's initial accepted key is case-b: {before}"
+    );
+
+    click(
+        &h,
+        "[data-testid=\"keyed-result-list-controlled-select-case-c\"]",
+    )
+    .await;
+    let after = controlled_state(&h).await;
+    assert_eq!(
+        after["selectedKeys"],
+        json!(["case-c"]),
+        "an external button (never a row click) moved the highlight: {after}"
+    );
+    assert_eq!(
+        after["activeDescendantKey"],
+        json!("case-c"),
+        "aria-activedescendant follows the externally accepted key: {after}"
+    );
+    assert!(
+        after["statusText"]
+            .as_str()
+            .expect("status text")
+            .contains("Accepted key: case-c"),
+        "the caller's own signal is what changed: {after}"
+    );
+
+    assert_no_browser_errors(&h, "controlled external selection journey").await;
+}
+
+/// A controlled key that names no current row renders no false highlight and
+/// never mutates the caller's accepted key; when a matching row reappears
+/// the highlight (and its scroll target) is restored automatically.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-keyed-result-list)"]
+async fn controlled_key_absent_from_items_renders_no_highlight_and_restores() {
+    let h = harness_at(PAGE).await;
+    begin_browser_error_capture(&h).await;
+    restore_controlled_items(&h).await;
+    select_controlled_case_b(&h).await;
+
+    click(
+        &h,
+        "[data-testid=\"keyed-result-list-controlled-filter-out-b\"]",
+    )
+    .await;
+    let filtered = controlled_state(&h).await;
+    assert_eq!(
+        filtered["selectedKeys"],
+        json!([]),
+        "no row falsely renders as selected once case-b is filtered out: {filtered}"
+    );
+    assert_eq!(
+        filtered["activeDescendantId"],
+        Value::Null,
+        "aria-activedescendant is absent, not pointing at a removed row: {filtered}"
+    );
+    assert!(
+        filtered["statusText"]
+            .as_str()
+            .expect("status text")
+            .contains("Accepted key: case-b"),
+        "the accepted key itself is never silently overwritten just because \
+         its row disappeared: {filtered}"
+    );
+
+    restore_controlled_items(&h).await;
+    let restored = controlled_state(&h).await;
+    assert_eq!(
+        restored["selectedKeys"],
+        json!(["case-b"]),
+        "the highlight resumes automatically once a matching row reappears, \
+         with no button re-asserting the key: {restored}"
+    );
+    assert_eq!(
+        restored["activeDescendantKey"],
+        json!("case-b"),
+        "{restored}"
+    );
+
+    assert_no_browser_errors(&h, "controlled absent-then-restored key journey").await;
+}
+
+/// Clicking a row in the controlled list proposes a change (this fixture
+/// applies every proposal) rather than the list deciding locally; activation
+/// (`on_select`) still fires exactly as in the uncontrolled list.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-keyed-result-list)"]
+async fn controlled_click_proposes_a_change_and_still_activates() {
+    let h = harness_at(PAGE).await;
+    begin_browser_error_capture(&h).await;
+    restore_controlled_items(&h).await;
+    select_controlled_case_b(&h).await;
+
+    click(&h, &controlled_row_selector("case-a")).await;
+    let s = controlled_state(&h).await;
+    assert_eq!(
+        s["selectedKeys"],
+        json!(["case-a"]),
+        "the applied proposal is what moved the highlight: {s}"
+    );
+    let text = s["statusText"].as_str().expect("status text").to_owned();
+    assert!(
+        text.contains("Accepted key: case-a") && text.contains("case-a (click)"),
+        "the proposal names its cause: {text}"
+    );
+    assert!(
+        text.contains("Activated: case-a (A-100)"),
+        "activation still fires on click in the controlled configuration: {text}"
+    );
+
+    assert_no_browser_errors(&h, "controlled click proposal journey").await;
+}
+
+/// Keyboard navigation in the controlled list also proposes rather than
+/// diverging locally, and `aria-activedescendant` follows the applied
+/// proposal exactly as it does in the uncontrolled list.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-keyed-result-list)"]
+async fn controlled_keyboard_navigation_proposes_and_stays_coherent() {
+    let h = harness_at(PAGE).await;
+    begin_browser_error_capture(&h).await;
+    restore_controlled_items(&h).await;
+    select_controlled_case_b(&h).await;
+
+    h.page()
+        .find_element(CONTROLLED_ROOT)
+        .await
+        .expect("find controlled listbox")
+        .focus()
+        .await
+        .expect("focus controlled listbox");
+
+    h.press_key_sequence(&[Key::ArrowDown])
+        .await
+        .expect("ArrowDown");
+    let s = controlled_state(&h).await;
+    assert_eq!(
+        s["activeDescendantKey"],
+        json!("case-c"),
+        "ArrowDown from the accepted case-b proposes and applies case-c: {s}"
+    );
+    assert!(
+        s["statusText"]
+            .as_str()
+            .expect("status text")
+            .contains("case-c (keyboard)"),
+        "the proposal names Keyboard as its cause: {s}"
+    );
+
+    assert_no_browser_errors(&h, "controlled keyboard navigation journey").await;
 }

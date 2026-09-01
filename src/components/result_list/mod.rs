@@ -6,9 +6,13 @@
 
 mod component;
 mod core;
+mod selection;
 mod types;
 
 pub use component::*;
+pub use selection::{
+    KeyedResultListSelection, KeyedResultListSelectionCause, KeyedResultListSelectionProposal,
+};
 pub use types::*;
 
 #[cfg(test)]
