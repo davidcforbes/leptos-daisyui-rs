@@ -20,10 +20,10 @@ pub use area_chart::AreaChart;
 pub use bar_chart::BarChart;
 pub use heatmap::{HeatScale, Heatmap, HeatmapCell};
 pub use line_chart::{
-    LineCategory, LineChart, LineChartActivation, LineChartActivationSource,
+    LineAxisOptions, LineCategory, LineChart, LineChartActivation, LineChartActivationSource,
     LineChartActivationValue, LineChartData, LineChartDataSource, LineChartModifiers,
-    LineInteractionMode, LineLegendMode, LinePattern, LinePoint, LineSeries, MarkerShape,
-    MarkerStyle,
+    LineChartTexts, LineInteractionMode, LineLegendMode, LinePattern, LinePoint, LineSeries,
+    LineValueAxis, MarkerShape, MarkerStyle,
 };
 pub use pie_chart::{PieChart, PieSlice};
 pub use sparkline::Sparkline;

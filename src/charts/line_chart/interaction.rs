@@ -1,4 +1,5 @@
 use super::{
+    format::value_text,
     normalize::NormalizedChart,
     types::{
         LineChartActivation, LineChartActivationSource, LineChartActivationValue,
@@ -134,10 +135,13 @@ pub(super) fn activation_for(
                 series_id: series.id.clone(),
                 series_name: series.name.clone(),
                 value,
+                // Same formatter the card, the ticks and the hidden table
+                // use, so an activation payload can never state a number in a
+                // unit the chart never showed.
                 display_value: point
                     .display_value
                     .clone()
-                    .unwrap_or_else(|| value.to_string()),
+                    .unwrap_or_else(|| value_text(value, &series.format)),
             })
         })
         .collect::<Vec<_>>();
@@ -510,8 +514,10 @@ pub(super) fn focus_svg_element(_id: &str) {}
 mod tests {
     use super::*;
     use crate::charts::line_chart::normalize::{NormalizedChart, normalize_categorical};
+    use crate::charts::line_chart::types::LineAxes;
     use crate::charts::{
-        LineCategory, LineChartActivationSource, LineChartModifiers, LinePoint, LineSeries,
+        LineAxisOptions, LineCategory, LineChartActivationSource, LineChartModifiers, LinePoint,
+        LineSeries,
     };
 
     fn chart(values: &[(Option<f64>, Option<f64>)]) -> NormalizedChart {
@@ -874,6 +880,44 @@ mod tests {
         assert_eq!(activation.modifiers, modifiers);
         assert_eq!(activation.values[0].display_value, "1");
         assert_eq!(activation.values[1].display_value, "2");
+    }
+
+    /// The activation payload is a fourth place the chart states a number, and
+    /// it has to agree with the other three: a secondary-axis value arrives in
+    /// that axis' unit, not the primary's.
+    #[test]
+    fn activation_values_are_formatted_by_each_series_own_axis() {
+        let categories = vec![LineCategory {
+            key: "week-01".to_string(),
+            label: "W01".to_string(),
+        }];
+        let chart = normalize_categorical(
+            &categories,
+            &[
+                LineSeries::new("opened", "Opened", "blue", vec![LinePoint::new(120.0)]),
+                LineSeries::new("sla", "SLA", "orange", vec![LinePoint::new(0.9)])
+                    .on_secondary_axis(),
+            ],
+        )
+        .with_axes(LineAxes {
+            primary: LineAxisOptions::default().with_unit(" conversations"),
+            secondary: LineAxisOptions::default().with_unit(" s").with_decimals(2),
+        });
+
+        let activation = activation_for(
+            &chart,
+            active(0, None),
+            LineChartActivationSource::Pointer,
+            LineChartModifiers::default(),
+        )
+        .expect("category has values");
+
+        assert_eq!(activation.values[0].display_value, "120 conversations");
+        assert_eq!(activation.values[1].display_value, "0.90 s");
+        assert_eq!(
+            activation.values[1].value, 0.9,
+            "the raw value is untouched"
+        );
     }
 
     #[test]

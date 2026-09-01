@@ -2,15 +2,18 @@ use super::paint::{merge_style, paint_attrs, stroke_attrs};
 use leptos::prelude::*;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+mod format;
 mod geometry;
 mod interaction;
 mod normalize;
 mod tooltip;
 mod types;
+use types::LineAxes;
 pub use types::{
-    LineCategory, LineChartActivation, LineChartActivationSource, LineChartActivationValue,
-    LineChartData, LineChartDataSource, LineChartModifiers, LineInteractionMode, LineLegendMode,
-    LinePattern, LinePoint, LineSeries, MarkerShape, MarkerStyle,
+    LineAxisOptions, LineCategory, LineChartActivation, LineChartActivationSource,
+    LineChartActivationValue, LineChartData, LineChartDataSource, LineChartModifiers,
+    LineChartTexts, LineInteractionMode, LineLegendMode, LinePattern, LinePoint, LineSeries,
+    LineValueAxis, MarkerShape, MarkerStyle,
 };
 
 /// Per-instance sequence for categorical SVG title, description, tooltip, and
@@ -130,6 +133,55 @@ pub(super) fn tick_anchor(i: usize, tick_count: usize) -> &'static str {
 ///     }
 /// }
 /// ```
+///
+/// Two value axes — counts on the left, a duration on the right. A series opts
+/// in with [`LineSeries::on_secondary_axis`]; every series defaults to
+/// [`LineValueAxis::Primary`], so a chart that never mentions an axis renders
+/// exactly as it did before this existed. Each axis computes its own domain,
+/// and its unit is declared once in [`LineAxisOptions`] rather than formatted
+/// separately for the ticks, the card and the accessible table:
+///
+/// ```rust
+/// use leptos::prelude::*;
+/// use leptos_daisyui_rs::charts::{
+///     LineAxisOptions, LineCategory, LineChart, LineChartData, LinePoint, LineSeries,
+/// };
+///
+/// #[component]
+/// fn ConversationsReport() -> impl IntoView {
+///     let categories = vec![
+///         LineCategory { key: "week-01".to_string(), label: "W01".to_string() },
+///         LineCategory { key: "week-02".to_string(), label: "W02".to_string() },
+///     ];
+///     let series = vec![
+///         LineSeries::new(
+///             "opened",
+///             "Opened",
+///             "var(--color-primary)",
+///             vec![LinePoint::new(120.0), LinePoint::new(150.0)],
+///         ),
+///         LineSeries::new(
+///             "first-response",
+///             "Average first response",
+///             "var(--color-accent)",
+///             vec![LinePoint::new(41.0), LinePoint::new(28.5)],
+///         )
+///         .on_secondary_axis(),
+///     ];
+///
+///     view! {
+///         <LineChart
+///             data=LineChartData::categorical(categories, series)
+///             accessible_label="Conversations by week".to_string()
+///             primary_axis=LineAxisOptions::default().with_label("Conversations")
+///             secondary_axis=LineAxisOptions::default()
+///                 .with_label("First response")
+///                 .with_unit(" s")
+///                 .with_decimals(1)
+///         />
+///     }
+/// }
+/// ```
 #[component]
 pub fn LineChart(
     /// Static or reactive chart data; legacy `(x, y)` vectors convert automatically.
@@ -182,12 +234,34 @@ pub fn LineChart(
     /// Whether categorical data includes its accessible table; defaults to true.
     #[prop(default = true)]
     show_data_table: bool,
+    /// Naming and value formatting for the left-hand value axis, which every
+    /// series uses unless it opts out. Defaults to naming and formatting
+    /// nothing, which is the pre-secondary-axis rendering.
+    #[prop(optional, into)]
+    primary_axis: LineAxisOptions,
+    /// Naming and value formatting for the right-hand value axis. The axis
+    /// itself is drawn only when a series is assigned to it, so setting this
+    /// alone never adds a scale.
+    #[prop(optional, into)]
+    secondary_axis: LineAxisOptions,
+    /// Chart copy that is neither per series nor per point. Defaults reproduce
+    /// the strings the chart already emitted.
+    #[prop(optional, into)]
+    texts: LineChartTexts,
     /// Optional callback invoked by a categorical point activation.
     #[prop(optional)]
     on_point_activate: Option<Callback<LineChartActivation>>,
 ) -> impl IntoView {
     let data = Memo::new(move |_| data.get());
     let instance = LINE_CHART_SEQ.fetch_add(1, Ordering::Relaxed);
+    let axes = LineAxes {
+        primary: primary_axis,
+        secondary: secondary_axis,
+    };
+    // The reconcile effect below normalizes independently of the render, so it
+    // needs the same axis options; a chart normalized with different options
+    // would compare unequal to itself and re-run reconciliation every frame.
+    let axes_stored = StoredValue::new(axes.clone());
 
     // Interaction state lives here — outside the data-driven render closure —
     // so hover/focus/dismissal and the roving tab stop survive a data
@@ -208,7 +282,8 @@ pub fn LineChart(
             previous_chart.set_value(None);
             return;
         };
-        let next = normalize::normalize_categorical(&categories, &series);
+        let next = normalize::normalize_categorical(&categories, &series)
+            .with_axes(axes_stored.get_value());
         let previous = previous_chart.get_value();
         previous_chart.set_value(Some(next.clone()));
         let Some(previous) = previous else {
@@ -270,6 +345,8 @@ pub fn LineChart(
             instance,
             interaction,
             measured_width,
+            axes.clone(),
+            texts.clone(),
         ),
     }
 }
@@ -289,10 +366,13 @@ fn render_categorical(
     instance: u64,
     interaction: RwSignal<interaction::InteractionState>,
     measured_width: RwSignal<Option<f64>>,
+    axes: LineAxes,
+    texts: LineChartTexts,
 ) -> AnyView {
     use geometry::{
-        Projection, dasharray, marker_size, marker_stroke_width, nearest_series_at, path_segments,
-        place_tooltip, plot_bounds, point, size, svg_number, visible_tick_indices,
+        AxisProjections, PlotInsets, dasharray, marker_size, marker_stroke_width,
+        nearest_series_at, path_segments, place_tooltip, plot_bounds, point, size, svg_number,
+        visible_tick_indices,
     };
     use interaction::{
         ActivePoint, InteractionAction, NavigationKey, activation_for, displayed_active,
@@ -302,28 +382,25 @@ fn render_categorical(
     use web_sys::wasm_bindgen::JsCast;
 
     let (width, height) = resolve_dimensions(width, height);
-    let chart = normalize_categorical(&categories, &series);
-    let Some(domain) = chart.domain else {
-        return render_empty_categorical(
-            &chart,
+    let chart = normalize_categorical(&categories, &series).with_axes(axes);
+    // The right-hand axis exists only when a series actually put finite values
+    // on it. A caller that configures `secondary_axis` but assigns no series
+    // therefore gets no phantom scale, ticks or gutter.
+    let has_secondary_axis = chart.has_secondary_axis();
+    let empty = |chart: &normalize::NormalizedChart| {
+        render_empty_categorical(
+            chart,
             width,
             height,
-            accessible_label,
-            description,
+            accessible_label.clone(),
+            description.clone(),
             show_data_table,
             instance,
-        );
+            texts.clone(),
+        )
     };
     if chart.categories.is_empty() || chart.series.is_empty() {
-        return render_empty_categorical(
-            &chart,
-            width,
-            height,
-            accessible_label,
-            description,
-            show_data_table,
-            instance,
-        );
+        return empty(&chart);
     }
 
     let max_marker_radius = chart
@@ -332,31 +409,46 @@ fn render_categorical(
         .map(|series| marker_size(&series.marker) + marker_stroke_width(&series.marker) / 2.0)
         .fold(0.0_f64, f64::max);
     let has_data_labels = chart.series.iter().any(|series| series.show_data_labels);
+    let primary_title = chart.axes.primary.label.clone();
+    let secondary_title = has_secondary_axis
+        .then(|| chart.axes.secondary.label.clone())
+        .flatten();
     let bounds = plot_bounds(
         width as f64,
         height as f64,
-        max_marker_radius,
-        has_data_labels,
+        PlotInsets {
+            max_marker_radius,
+            has_data_labels,
+            secondary_ticks: has_secondary_axis,
+            primary_label: primary_title.is_some(),
+            secondary_label: secondary_title.is_some(),
+        },
     );
-    let projection = Projection {
+    let Some(projections) = AxisProjections::new(
         bounds,
-        category_count: chart.categories.len(),
-        domain,
+        chart.categories.len(),
+        chart.domain,
+        chart.secondary_domain,
+    ) else {
+        return empty(&chart);
     };
     let plot_width = (bounds.right - bounds.left).max(1.0);
+    // `None` while one axis is enough: every caption, accessible value and
+    // table header then keeps the bare series name it has always had. The
+    // moment two scales are on screen, one attribution is built here and used
+    // by the legend, the focus targets' accessible names and the hidden table
+    // alike, so a reader meets the same wording everywhere.
+    let axis_names = has_secondary_axis.then(|| {
+        (
+            format::axis_name(LineValueAxis::Primary, &chart.axes, &texts),
+            format::axis_name(LineValueAxis::Secondary, &chart.axes, &texts),
+        )
+    });
     let title_id = format!("line-chart-{instance}-title");
     let desc_id = format!("line-chart-{instance}-desc");
     let tooltip_id = format!("line-chart-{instance}-tooltip");
     let Some(initial_state) = initial_categorical_state(&chart) else {
-        return render_empty_categorical(
-            &chart,
-            width,
-            height,
-            accessible_label,
-            description,
-            show_data_table,
-            instance,
-        );
+        return empty(&chart);
     };
     let show_legend = match legend_mode {
         LineLegendMode::Auto => chart.series.len() >= 2,
@@ -460,9 +552,9 @@ fn render_categorical(
             bounds.left + (client_x - rect.left()) / rect.width() * (bounds.right - bounds.left);
         let svg_y =
             bounds.top + (client_y - rect.top()) / rect.height() * (bounds.bottom - bounds.top);
-        let category_index = projection.category_at_x(svg_x)?;
+        let category_index = projections.category_at_x(svg_x)?;
         let preferred_series_index = chart_stored
-            .with_value(|current| nearest_series_at(current, projection, category_index, svg_y));
+            .with_value(|current| nearest_series_at(current, &projections, category_index, svg_y));
         Some(ActivePoint {
             category_index,
             preferred_series_index,
@@ -477,7 +569,7 @@ fn render_categorical(
         Memo::new(move |_| {
             displayed().and_then(|active| {
                 chart_stored.with_value(|current| {
-                    tooltip::tooltip_model(current, projection, &active, &tooltip_id)
+                    tooltip::tooltip_model(current, &projections, &active, &tooltip_id)
                 })
             })
         })
@@ -572,19 +664,52 @@ fn render_categorical(
             }
         })
         .collect_view();
-    let y_ticks = (0..=4)
-        .map(|index| {
-            let fraction = index as f64 / 4.0;
-            let value = domain.max - (domain.max - domain.min) * fraction;
-            let y = bounds.top + (bounds.bottom - bounds.top) * fraction;
-            view! {
-                <text x=svg_number(bounds.left - 6.0) y=svg_number(y) text-anchor="end" dominant-baseline="middle"
-                    fill="currentColor" font-size="12" opacity="0.65">
-                    {format!("{value:.1}")}
-                </text>
-            }
-        })
-        .collect_view();
+    // Both axes read against the same five gridline fractions, so a reader
+    // compares a left tick and a right tick at the same height.
+    let y_ticks = chart.domain.map(|domain| {
+        value_axis_ticks(
+            domain,
+            bounds,
+            &chart.axes.primary,
+            AxisTickSide::Left,
+            None,
+        )
+    });
+    let secondary_y_ticks = chart.secondary_domain.map(|domain| {
+        let ticks = value_axis_ticks(
+            domain,
+            bounds,
+            &chart.axes.secondary,
+            AxisTickSide::Right,
+            Some("secondary"),
+        );
+        let (axis_stroke, axis_style) = stroke_attrs("currentColor".to_string());
+        view! {
+            <g data-line-chart-y-axis="secondary">
+                <line x1=svg_number(bounds.right) y1=svg_number(bounds.top) x2=svg_number(bounds.right) y2=svg_number(bounds.bottom)
+                    stroke=axis_stroke style=axis_style stroke-opacity="0.35" stroke-width="1" />
+                {ticks}
+            </g>
+        }
+    });
+    let primary_axis_title = primary_title.map(|label| {
+        axis_title_view(
+            label,
+            12.0,
+            (bounds.top + bounds.bottom) / 2.0,
+            -90.0,
+            "primary",
+        )
+    });
+    let secondary_axis_title = secondary_title.map(|label| {
+        axis_title_view(
+            label,
+            width as f64 - 12.0,
+            (bounds.top + bounds.bottom) / 2.0,
+            90.0,
+            "secondary",
+        )
+    });
     // Tick thinning keys off the measured CSS width once the ResizeObserver
     // has reported one; the viewBox width is the deterministic initial value.
     // 56px minimum (not 48): the first/last ticks anchor start/end to avoid
@@ -599,9 +724,10 @@ fn render_categorical(
                 .map(|index| {
                     let category = &current.categories[index];
                     let anchor = tick_anchor(index, current.categories.len());
+                    let (fill, fill_style) = paint_attrs("currentColor".to_string());
                     view! {
-                        <text x=svg_number(projection.category_x(index)) y=svg_number(bounds.bottom + 18.0)
-                            text-anchor=anchor fill="currentColor" font-size="12" opacity="0.7">
+                        <text x=svg_number(projections.category_x(index)) y=svg_number(bounds.bottom + 18.0)
+                            text-anchor=anchor fill=fill style=fill_style font-size="12" opacity="0.7">
                             {category.label.clone()}
                         </text>
                     }
@@ -617,7 +743,7 @@ fn render_categorical(
             let color = series.color.clone();
             let id = series.id.clone();
             let dash = dasharray(&series.pattern);
-            path_segments(series, projection).into_iter().map(move |d| {
+            path_segments(series, &projections).into_iter().map(move |d| {
                 // Router-headed binding per segment so the paint-routing scan
                 // sees a bare `stroke=stroke` (svg_paint_routing).
                 let (stroke, stroke_style) = stroke_attrs(color.clone());
@@ -635,12 +761,15 @@ fn render_categorical(
             let Some(value) = point.value else {
                 continue;
             };
+            // Every mark is placed by the projection of the series' own axis;
+            // there is no shared value scale left in the render path.
+            let value_y = projections.value_y(series.axis, value);
             marker_views.push(marker_view(
                 &series.id,
                 index,
                 &chart.categories[index].key,
-                projection.category_x(index),
-                projection.value_y(value),
+                projections.category_x(index),
+                value_y,
                 series,
                 point.marker_color.as_deref(),
             ));
@@ -650,7 +779,7 @@ fn render_categorical(
                 let anchor = tick_anchor(index, chart.categories.len());
                 let (fill, style) = paint_attrs(series.color.clone());
                 data_label_views.push(view! {
-                    <text x=svg_number(projection.category_x(index)) y=svg_number(projection.value_y(value) - marker_size(&series.marker) - 5.0)
+                    <text x=svg_number(projections.category_x(index)) y=svg_number(value_y - marker_size(&series.marker) - 5.0)
                         text-anchor=anchor fill=fill style=style font-size="12" font-weight="600">
                         {label}
                     </text>
@@ -667,10 +796,10 @@ fn render_categorical(
             .enumerate()
             .filter(|(index, _)| chart.series.iter().any(|series| series.points[*index].value.is_some()))
             .map(|(index, category)| {
-                let values = category_accessible_values(&chart, index);
+                let values = category_accessible_values(&chart, index, axis_names.as_ref());
                 let describedby_id = tooltip_id.clone();
                 view! {
-                    <rect id=format!("line-chart-{instance}-category-{index}") x=svg_number(projection.category_x(index) - plot_width / (chart.categories.len().max(2) - 1) as f64 / 2.0)
+                    <rect id=format!("line-chart-{instance}-category-{index}") x=svg_number(projections.category_x(index) - plot_width / (chart.categories.len().max(2) - 1) as f64 / 2.0)
                         y=svg_number(bounds.top) width=svg_number(plot_width / (chart.categories.len().max(2) - 1) as f64)
                         height=svg_number(bounds.bottom - bounds.top) fill="transparent" role=focus_role
                         data-line-chart-focus=""
@@ -807,7 +936,13 @@ fn render_categorical(
                 } />
         }
     });
-    let legend = show_legend.then(|| chart.series.iter().map(legend_entry).collect_view());
+    let legend = show_legend.then(|| {
+        chart
+            .series
+            .iter()
+            .map(|series| legend_entry(series, axis_names.as_ref()))
+            .collect_view()
+    });
     let description =
         description.unwrap_or_else(|| "Categorical multi-series line chart".to_string());
     let viewbox = format!("0 0 {width} {height}");
@@ -818,14 +953,15 @@ fn render_categorical(
             <div data-testid="line-chart-tooltip" id=tooltip_id role="tooltip" node_ref=tooltip_ref
                 class="pointer-events-none absolute z-10 rounded-sm border border-base-300 bg-base-100 p-2 text-xs shadow-sm"
                 style=move || tooltip_style.get()>
-                {move || tooltip_model_memo.get().map(tooltip_card_content)}
+                {move || tooltip_model_memo.get().map(|model| tooltip_card_content(model, has_secondary_axis))}
             </div>
         }
     };
 
     view! {
         <div data-testid="interactive-line-chart" role="group" aria-label=accessible_label.clone()
-            data-active-category=active_category_attr data-preferred-series=preferred_series_attr class="w-full">
+            data-active-category=active_category_attr data-preferred-series=preferred_series_attr
+            data-line-chart-axes=has_secondary_axis.then_some("dual") class="w-full">
             {show_legend.then(|| view! {
                 <div data-line-chart-legend class="flex flex-wrap gap-x-4 gap-y-2 text-sm" aria-label="Chart legend">
                     {legend}
@@ -842,6 +978,9 @@ fn render_categorical(
                     <line x1=svg_number(bounds.left) y1=svg_number(bounds.top) x2=svg_number(bounds.left) y2=svg_number(bounds.bottom)
                         stroke="currentColor" stroke-opacity="0.35" stroke-width="1" />
                     {y_ticks}
+                    {secondary_y_ticks}
+                    {primary_axis_title}
+                    {secondary_axis_title}
                     {x_ticks}
                     {line_paths}
                     {markers}
@@ -851,7 +990,7 @@ fn render_categorical(
                 </svg>
                 {tooltip_card}
             </div>
-            {show_data_table.then(|| categorical_table(&chart, accessible_label.clone()))}
+            {show_data_table.then(|| categorical_table(&chart, accessible_label.clone(), &texts, axis_names.as_ref()))}
         </div>
     }
     .into_any()
@@ -860,7 +999,7 @@ fn render_categorical(
 /// Renders one tooltip card body: category header plus one row per finite
 /// series with the same pattern/marker swatch identity the legend draws. No
 /// focusable content — the card is a described-by surface, not a stop.
-fn tooltip_card_content(model: tooltip::TooltipModel) -> AnyView {
+fn tooltip_card_content(model: tooltip::TooltipModel, dual_axis: bool) -> AnyView {
     use geometry::{dasharray, svg_number};
 
     let rows = model
@@ -888,7 +1027,8 @@ fn tooltip_card_content(model: tooltip::TooltipModel) -> AnyView {
             };
             view! {
                 <div class="flex items-center gap-2" data-series-id=row.series_id.clone()
-                    data-preferred=preferred.to_string()>
+                    data-preferred=preferred.to_string()
+                    data-axis=dual_axis.then(|| format::axis_token(row.axis))>
                     <svg aria-hidden="true" viewBox="0 0 20 8" class="h-2 w-5">
                         <line x1="1" y1="4" x2="19" y2="4" fill="none" stroke=stroke style=stroke_style
                             stroke-width="2" stroke-dasharray=dash />
@@ -907,6 +1047,87 @@ fn tooltip_card_content(model: tooltip::TooltipModel) -> AnyView {
         <div class="mt-1 flex min-w-32 flex-col gap-1">{rows}</div>
     }
     .into_any()
+}
+
+/// Which side of the plot an axis' tick labels sit on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AxisTickSide {
+    Left,
+    Right,
+}
+
+/// Renders one value axis' five tick labels against the shared gridlines.
+///
+/// Both axes come through here so the right-hand scale cannot drift from the
+/// left-hand one in position, size or formatting. `data_axis` is `None` for
+/// the primary axis, which keeps a single-axis chart's tick markup exactly
+/// what it was; the secondary axis carries `data-axis="secondary"` so a
+/// browser test locates it by identity rather than by document position.
+fn value_axis_ticks(
+    domain: normalize::Domain,
+    bounds: geometry::PlotBounds,
+    options: &LineAxisOptions,
+    side: AxisTickSide,
+    data_axis: Option<&'static str>,
+) -> AnyView {
+    use geometry::svg_number;
+
+    let (x, anchor) = match side {
+        AxisTickSide::Left => (bounds.left - 6.0, "end"),
+        AxisTickSide::Right => (bounds.right + 6.0, "start"),
+    };
+    (0..=4)
+        .map(|index| {
+            let fraction = index as f64 / 4.0;
+            let value = domain.max - (domain.max - domain.min) * fraction;
+            let y = bounds.top + (bounds.bottom - bounds.top) * fraction;
+            let (fill, fill_style) = paint_attrs("currentColor".to_string());
+            view! {
+                <text x=svg_number(x) y=svg_number(y) text-anchor=anchor dominant-baseline="middle"
+                    fill=fill style=fill_style font-size="12" opacity="0.65" data-axis=data_axis>
+                    {format::tick_text(value, options)}
+                </text>
+            }
+        })
+        .collect_view()
+        .into_any()
+}
+
+/// Renders a rotated axis title outside its tick column.
+fn axis_title_view(label: String, x: f64, y: f64, rotation: f64, axis: &'static str) -> AnyView {
+    use geometry::svg_number;
+
+    let (fill, fill_style) = paint_attrs("currentColor".to_string());
+    view! {
+        <text x=svg_number(x) y=svg_number(y) text-anchor="middle" fill=fill style=fill_style
+            font-size="12" transform=format!("rotate({rotation}, {}, {})", svg_number(x), svg_number(y))
+            data-line-chart-axis-label=axis>
+            {label}
+        </text>
+    }
+    .into_any()
+}
+
+/// How a series is named wherever its numbers appear beside another axis'.
+///
+/// With one axis this is the bare series name, byte for byte what it always
+/// was. With two, the axis is named alongside it — once, here — so the legend,
+/// the accessible names and the hidden table cannot describe the same series
+/// three different ways.
+fn series_caption(
+    series: &normalize::NormalizedSeries,
+    axis_names: Option<&(String, String)>,
+) -> String {
+    match axis_names {
+        None => series.name.clone(),
+        Some((primary, secondary)) => format::series_caption(
+            &series.name,
+            match series.axis {
+                LineValueAxis::Primary => primary,
+                LineValueAxis::Secondary => secondary,
+            },
+        ),
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -962,7 +1183,11 @@ fn preferred_series_id(
     chart.series.get(index).map(|series| series.id.clone())
 }
 
-fn category_accessible_values(chart: &normalize::NormalizedChart, category_index: usize) -> String {
+fn category_accessible_values(
+    chart: &normalize::NormalizedChart,
+    category_index: usize,
+    axis_names: Option<&(String, String)>,
+) -> String {
     chart
         .series
         .iter()
@@ -972,8 +1197,8 @@ fn category_accessible_values(chart: &normalize::NormalizedChart, category_index
                 let display_value = point
                     .display_value
                     .clone()
-                    .unwrap_or_else(|| value.to_string());
-                format!("{} {display_value}", series.name)
+                    .unwrap_or_else(|| format::value_text(value, &series.format));
+                format!("{} {display_value}", series_caption(series, axis_names))
             })
         })
         .collect::<Vec<_>>()
@@ -1033,7 +1258,10 @@ fn marker_view(
     }
 }
 
-fn legend_entry(series: &normalize::NormalizedSeries) -> AnyView {
+fn legend_entry(
+    series: &normalize::NormalizedSeries,
+    axis_names: Option<&(String, String)>,
+) -> AnyView {
     use geometry::{dasharray, marker_size, svg_number};
     let (stroke, stroke_style) = stroke_attrs(series.color.clone());
     // The marker glyph gets its own router-headed stroke binding rather than
@@ -1066,22 +1294,39 @@ fn legend_entry(series: &normalize::NormalizedSeries) -> AnyView {
         .into_any(),
     };
     view! {
-        <span data-series-id=series.id.clone() class="inline-flex items-center gap-2 whitespace-nowrap">
+        <span data-series-id=series.id.clone() data-axis=axis_names.map(|_| format::axis_token(series.axis))
+            class="inline-flex items-center gap-2 whitespace-nowrap">
             <svg data-line-chart-pattern-swatch="" aria-hidden="true" viewBox="0 0 28 14" class="h-4 w-7">
                 <line x1="1" y1="7" x2="27" y2="7" fill="none" stroke=stroke style=stroke_style stroke-width="2" stroke-dasharray=dash />
                 {marker}
             </svg>
-            {series.name.clone()}
+            {series_caption(series, axis_names)}
         </span>
     }
     .into_any()
 }
 
-fn categorical_table(chart: &normalize::NormalizedChart, accessible_label: String) -> AnyView {
+/// The chart's non-visual truth.
+///
+/// With two axes a bare column of numbers is ambiguous, so each series column
+/// is headed by the same caption the legend shows — series name plus its axis
+/// — and each cell carries its axis' unit through the shared formatter. Both
+/// the header and the cell also carry `data-axis`, but only when there are two
+/// axes to distinguish: a single-axis table is byte for byte what it was.
+fn categorical_table(
+    chart: &normalize::NormalizedChart,
+    accessible_label: String,
+    texts: &LineChartTexts,
+    axis_names: Option<&(String, String)>,
+) -> AnyView {
+    let axis_attr =
+        |series: &normalize::NormalizedSeries| axis_names.map(|_| format::axis_token(series.axis));
     let header = chart
         .series
         .iter()
-        .map(|series| view! { <th scope="col">{series.name.clone()}</th> })
+        .map(|series| {
+            view! { <th scope="col" data-axis=axis_attr(series)>{series_caption(series, axis_names)}</th> }
+        })
         .collect_view();
     let rows = chart
         .categories
@@ -1098,25 +1343,27 @@ fn categorical_table(chart: &normalize::NormalizedChart, accessible_label: Strin
                             series.points[index]
                                 .display_value
                                 .clone()
-                                .unwrap_or_else(|| value.to_string())
+                                .unwrap_or_else(|| format::value_text(value, &series.format))
                         })
-                        .unwrap_or_else(|| "No value".to_string());
-                    view! { <td>{value}</td> }
+                        .unwrap_or_else(|| texts.no_value.clone());
+                    view! { <td data-axis=axis_attr(series)>{value}</td> }
                 })
                 .collect_view();
             view! { <tr><th scope="row">{category.label.clone()}</th>{cells}</tr> }
         })
         .collect_view();
+    let category_header = texts.category_header.clone();
     view! {
         <table data-line-chart-table class="sr-only">
             <caption>{accessible_label}</caption>
-            <thead><tr><th scope="col">"Category"</th>{header}</tr></thead>
+            <thead><tr><th scope="col">{category_header}</th>{header}</tr></thead>
             <tbody>{rows}</tbody>
         </table>
     }
     .into_any()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_empty_categorical(
     chart: &normalize::NormalizedChart,
     width: u32,
@@ -1125,10 +1372,11 @@ fn render_empty_categorical(
     description: Option<String>,
     show_data_table: bool,
     instance: u64,
+    texts: LineChartTexts,
 ) -> AnyView {
-    use geometry::{plot_bounds, svg_number};
+    use geometry::{PlotInsets, plot_bounds, svg_number};
 
-    let bounds = plot_bounds(width as f64, height as f64, 0.0, false);
+    let bounds = plot_bounds(width as f64, height as f64, PlotInsets::default());
     let title_id = format!("line-chart-{instance}-title");
     let desc_id = format!("line-chart-{instance}-desc");
     let description =
@@ -1149,7 +1397,7 @@ fn render_empty_categorical(
                 </svg>
                 <div data-line-chart-empty role="status" class="text-sm opacity-70">"No chart data"</div>
             </div>
-            {show_data_table.then(|| categorical_table(chart, accessible_label.clone()))}
+            {show_data_table.then(|| categorical_table(chart, accessible_label.clone(), &texts, None))}
         </div>
     }
     .into_any()
@@ -1498,7 +1746,7 @@ mod tests {
         assert_eq!(state.category_key, "ready");
         assert_eq!(state.preferred_series, "target");
         assert_eq!(
-            category_accessible_values(&chart, state.category_index),
+            category_accessible_values(&chart, state.category_index, None),
             "Target 42 resolved"
         );
     }
@@ -1525,6 +1773,7 @@ mod tests {
                 ..MarkerStyle::default()
             },
             show_data_labels: false,
+            axis: LineValueAxis::Primary,
         }];
 
         let chart = normalize::normalize_categorical(&categories, &series);
@@ -1535,6 +1784,131 @@ mod tests {
                 chart.series[0].points[0].marker_color.as_deref()
             ),
             "var(--color-success)"
+        );
+    }
+
+    /// The whole no-regression claim in one place: with no series naming an
+    /// axis, the captions, the accessible values and the axis-attribution
+    /// state are exactly what they were before a second axis existed.
+    #[test]
+    fn a_single_axis_chart_keeps_bare_series_names_everywhere() {
+        let chart = normalize::normalize_categorical(
+            &[LineCategory {
+                key: "week-01".to_string(),
+                label: "W01".to_string(),
+            }],
+            &[
+                LineSeries::new("actual", "Actual", "blue", vec![LinePoint::new(42.0)]),
+                LineSeries::new("target", "Target", "red", vec![LinePoint::new(48.0)]),
+            ],
+        )
+        .with_axes(LineAxes::default());
+
+        assert!(!chart.has_secondary_axis());
+        assert_eq!(series_caption(&chart.series[0], None), "Actual");
+        assert_eq!(series_caption(&chart.series[1], None), "Target");
+        assert_eq!(
+            category_accessible_values(&chart, 0, None),
+            "Actual 42, Target 48"
+        );
+    }
+
+    /// And the same surfaces once two axes are on screen: one attribution,
+    /// built once, with each value carrying its own axis' unit.
+    #[test]
+    fn a_dual_axis_chart_names_each_series_axis_once() {
+        let chart = normalize::normalize_categorical(
+            &[LineCategory {
+                key: "week-01".to_string(),
+                label: "W01".to_string(),
+            }],
+            &[
+                LineSeries::new("opened", "Opened", "blue", vec![LinePoint::new(120.0)]),
+                LineSeries::new(
+                    "first-response",
+                    "First response",
+                    "orange",
+                    vec![LinePoint::new(41.0)],
+                )
+                .on_secondary_axis(),
+            ],
+        )
+        .with_axes(LineAxes {
+            primary: LineAxisOptions::default().with_label("Conversations"),
+            secondary: LineAxisOptions::default()
+                .with_label("Duration")
+                .with_unit(" s")
+                .with_decimals(1),
+        });
+        let texts = LineChartTexts::default();
+        let axis_names = Some((
+            format::axis_name(LineValueAxis::Primary, &chart.axes, &texts),
+            format::axis_name(LineValueAxis::Secondary, &chart.axes, &texts),
+        ));
+
+        assert!(chart.has_secondary_axis());
+        assert_eq!(
+            series_caption(&chart.series[0], axis_names.as_ref()),
+            "Opened (Conversations)"
+        );
+        assert_eq!(
+            series_caption(&chart.series[1], axis_names.as_ref()),
+            "First response (Duration)"
+        );
+        assert_eq!(
+            category_accessible_values(&chart, 0, axis_names.as_ref()),
+            "Opened (Conversations) 120, First response (Duration) 41.0 s"
+        );
+    }
+
+    /// A caller may configure the secondary axis and assign nothing to it. The
+    /// axis must then not exist at all — no domain, no gutter, no attribution.
+    #[test]
+    fn configuring_a_secondary_axis_without_assigning_a_series_renders_no_second_axis() {
+        let chart = normalize::normalize_categorical(
+            &[LineCategory {
+                key: "week-01".to_string(),
+                label: "W01".to_string(),
+            }],
+            &[LineSeries::new(
+                "actual",
+                "Actual",
+                "blue",
+                vec![LinePoint::new(42.0)],
+            )],
+        )
+        .with_axes(LineAxes {
+            primary: LineAxisOptions::default(),
+            secondary: LineAxisOptions::default()
+                .with_label("Duration")
+                .with_unit(" s"),
+        });
+
+        assert!(!chart.has_secondary_axis());
+        assert_eq!(chart.secondary_domain, None);
+        assert_eq!(
+            chart.series[0].format.unit, None,
+            "the unassigned axis' unit must not leak onto a primary series"
+        );
+        assert_eq!(
+            geometry::plot_bounds(
+                400.0,
+                200.0,
+                geometry::PlotInsets {
+                    max_marker_radius: 4.0,
+                    secondary_ticks: chart.has_secondary_axis(),
+                    ..geometry::PlotInsets::default()
+                }
+            ),
+            geometry::plot_bounds(
+                400.0,
+                200.0,
+                geometry::PlotInsets {
+                    max_marker_radius: 4.0,
+                    ..geometry::PlotInsets::default()
+                }
+            ),
+            "no right gutter is reserved for an axis that is not drawn"
         );
     }
 

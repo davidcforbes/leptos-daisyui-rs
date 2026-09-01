@@ -4,10 +4,11 @@
 //! into an absolutely positioned HTML card and only then measures/places it
 //! via [`super::geometry::place_tooltip`].
 
-use super::geometry::{Point, Projection, point};
+use super::format::value_text;
+use super::geometry::{AxisProjections, Point, point};
 use super::interaction::ActivePoint;
 use super::normalize::NormalizedChart;
-use super::types::{LinePattern, MarkerShape};
+use super::types::{LinePattern, LineValueAxis, MarkerShape};
 
 /// One series row of the card: the series identity, its host display string,
 /// and enough of its visual identity (color, pattern, marker) to draw the
@@ -20,6 +21,10 @@ pub(super) struct TooltipRow {
     pub color: String,
     pub pattern: LinePattern,
     pub marker_shape: MarkerShape,
+    /// The axis this row's number is measured against. The card would
+    /// otherwise state a duration and a count side by side with nothing
+    /// distinguishing which scale each belongs to.
+    pub axis: LineValueAxis,
 }
 
 /// The card itself: category header, finite series rows in input order, the
@@ -40,7 +45,7 @@ pub(super) struct TooltipModel {
 /// finite series) so the card opens next to the mark the user is on.
 pub(super) fn tooltip_model(
     chart: &NormalizedChart,
-    projection: Projection,
+    projections: &AxisProjections,
     active: &ActivePoint,
     tooltip_id: &str,
 ) -> Option<TooltipModel> {
@@ -54,13 +59,17 @@ pub(super) fn tooltip_model(
             Some(TooltipRow {
                 series_id: series.id.clone(),
                 series_name: series.name.clone(),
+                // The host's own text still wins; otherwise the value is
+                // formatted by the axis this series belongs to, which is the
+                // same call the ticks and the hidden table make.
                 display_value: point
                     .display_value
                     .clone()
-                    .unwrap_or_else(|| value.to_string()),
+                    .unwrap_or_else(|| value_text(value, &series.format)),
                 color: series.color.clone(),
                 pattern: series.pattern.clone(),
                 marker_shape: series.marker.shape,
+                axis: series.axis,
             })
         })
         .collect();
@@ -83,26 +92,30 @@ pub(super) fn tooltip_model(
             .preferred_series_index
             .and_then(finite_index)
             .or_else(|| (0..chart.series.len()).find_map(finite_index))?;
+    let preferred = chart.series.get(preferred_index);
 
     Some(TooltipModel {
         id: tooltip_id.to_string(),
         category_label: category.label.clone(),
         rows,
-        preferred_series_id: chart
-            .series
-            .get(preferred_index)
-            .map(|series| series.id.clone()),
+        preferred_series_id: preferred.map(|series| series.id.clone()),
+        // The card opens next to the mark the user is on, which means the
+        // preferred series' own axis — anchoring against a shared scale would
+        // float the card away from a secondary-axis point.
         anchor: point(
-            projection.category_x(active.category_index),
-            projection.value_y(preferred_value),
+            projections.category_x(active.category_index),
+            projections.value_y(
+                preferred.map_or(LineValueAxis::Primary, |series| series.axis),
+                preferred_value,
+            ),
         ),
     })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::super::normalize::normalize_categorical;
-    use super::super::types::{LineCategory, LinePoint, LineSeries};
+    use super::super::normalize::{Domain, normalize_categorical};
+    use super::super::types::{LineAxes, LineAxisOptions, LineCategory, LinePoint, LineSeries};
     use super::*;
     use crate::charts::line_chart::geometry::{PlotBounds, Projection};
 
@@ -150,12 +163,16 @@ mod tests {
         }
     }
 
+    fn projections(chart: &NormalizedChart) -> AxisProjections {
+        AxisProjections::single(projection(chart))
+    }
+
     #[test]
     fn rows_keep_series_input_order_and_host_display_strings() {
         let chart = fixture();
         let model = tooltip_model(
             &chart,
-            projection(&chart),
+            &projections(&chart),
             &ActivePoint {
                 category_index: 0,
                 preferred_series_index: None,
@@ -183,7 +200,7 @@ mod tests {
         let chart = fixture();
         let model = tooltip_model(
             &chart,
-            projection(&chart),
+            &projections(&chart),
             &ActivePoint {
                 category_index: 1,
                 // Preferred points at the gapped series; the model must fall
@@ -205,7 +222,7 @@ mod tests {
         let projection = projection(&chart);
         let model = tooltip_model(
             &chart,
-            projection,
+            &AxisProjections::single(projection),
             &ActivePoint {
                 category_index: 0,
                 preferred_series_index: Some(1),
@@ -217,6 +234,74 @@ mod tests {
         assert_eq!(model.anchor.x, projection.category_x(0));
         assert_eq!(model.anchor.y, projection.value_y(48.0));
         assert!(model.anchor.x.is_finite() && model.anchor.y.is_finite());
+    }
+
+    /// The failure mode the second axis exists to prevent, at the card: a
+    /// count and a duration in one card, each stated against its own scale and
+    /// each carrying its own unit, with the anchor on the mark the user is on.
+    #[test]
+    fn each_row_reports_its_series_against_its_own_axis_and_unit() {
+        let categories = vec![LineCategory {
+            key: "week-01".to_string(),
+            label: "W01".to_string(),
+        }];
+        let chart = normalize_categorical(
+            &categories,
+            &[
+                LineSeries::new("opened", "Opened", "blue", vec![LinePoint::new(120.0)]),
+                LineSeries::new(
+                    "first-response",
+                    "First response",
+                    "orange",
+                    vec![LinePoint::new(0.9)],
+                )
+                .on_secondary_axis(),
+            ],
+        )
+        .with_axes(LineAxes {
+            primary: LineAxisOptions::default().with_unit(" conversations"),
+            secondary: LineAxisOptions::default().with_unit(" s").with_decimals(1),
+        });
+        let bounds = PlotBounds {
+            left: 0.0,
+            top: 0.0,
+            right: 100.0,
+            bottom: 100.0,
+        };
+        let projections = AxisProjections::new(
+            bounds,
+            1,
+            Some(Domain {
+                min: 0.0,
+                max: 120.0,
+            }),
+            Some(Domain { min: 0.0, max: 1.0 }),
+        )
+        .expect("both axes have domains");
+        let model = tooltip_model(
+            &chart,
+            &projections,
+            &ActivePoint {
+                category_index: 0,
+                preferred_series_index: Some(1),
+            },
+            "tip-0",
+        )
+        .expect("both series are finite here");
+
+        assert_eq!(model.rows[0].display_value, "120 conversations");
+        assert_eq!(model.rows[0].axis, LineValueAxis::Primary);
+        assert_eq!(model.rows[1].display_value, "0.9 s");
+        assert_eq!(model.rows[1].axis, LineValueAxis::Secondary);
+        assert_eq!(
+            model.anchor.y,
+            projections.value_y(LineValueAxis::Secondary, 0.9),
+            "the card anchors on the duration mark, not where a shared scale would put it"
+        );
+        assert_ne!(
+            model.anchor.y,
+            projections.value_y(LineValueAxis::Primary, 0.9)
+        );
     }
 
     #[test]
@@ -246,7 +331,7 @@ mod tests {
         assert!(
             tooltip_model(
                 &chart,
-                projection,
+                &AxisProjections::single(projection),
                 &ActivePoint {
                     category_index: 0,
                     preferred_series_index: None,

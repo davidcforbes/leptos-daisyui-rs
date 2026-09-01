@@ -1,4 +1,4 @@
-use super::types::{LineCategory, LinePoint, LineSeries};
+use super::types::{LineAxes, LineAxisOptions, LineCategory, LinePoint, LineSeries, LineValueAxis};
 
 /// The finite y-range used by categorical line-chart geometry.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -35,14 +35,42 @@ pub(super) struct NormalizedSeries {
     pub marker: super::types::MarkerStyle,
     pub show_data_labels: bool,
     pub dom_id: String,
+    pub axis: LineValueAxis,
+    /// The axis' formatting options, copied here so every surface that states
+    /// this series' numbers formats them the same way without re-resolving.
+    pub format: LineAxisOptions,
 }
 
-/// Fully aligned categorical data and its usable y-domain.
+/// Fully aligned categorical data and its usable per-axis y-domains.
+///
+/// `domain` is the primary (left) axis and keeps its original name and
+/// meaning. `secondary_domain` is `None` unless at least one series opted onto
+/// the secondary axis *and* has a finite value there, which is what keeps a
+/// single-axis chart from growing a phantom right-hand scale.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct NormalizedChart {
     pub categories: Vec<NormalizedCategory>,
     pub series: Vec<NormalizedSeries>,
     pub domain: Option<Domain>,
+    pub secondary_domain: Option<Domain>,
+    pub axes: LineAxes,
+}
+
+impl NormalizedChart {
+    /// Attaches the caller's axis options, giving every series the formatting
+    /// its own axis defines.
+    pub(super) fn with_axes(mut self, axes: LineAxes) -> Self {
+        for series in &mut self.series {
+            series.format = axes.options(series.axis).clone();
+        }
+        self.axes = axes;
+        self
+    }
+
+    /// Whether a right-hand axis should be drawn at all.
+    pub(super) fn has_secondary_axis(&self) -> bool {
+        self.secondary_domain.is_some()
+    }
 }
 
 /// Converts public categorical values into render-safe, category-aligned data.
@@ -80,14 +108,21 @@ pub(super) fn normalize_categorical(
             marker: series.marker.clone(),
             show_data_labels: series.show_data_labels,
             dom_id: format!("{}-{series_index}", series.id),
+            axis: series.axis,
+            format: LineAxisOptions::default(),
         })
         .collect::<Vec<_>>();
 
-    let domain = domain_for(&series);
+    // Each axis sees only its own series, so a duration series can never widen
+    // a count scale and a count series can never flatten a duration one.
+    let domain = domain_for(&series, LineValueAxis::Primary);
+    let secondary_domain = domain_for(&series, LineValueAxis::Secondary);
     NormalizedChart {
         categories,
         series,
         domain,
+        secondary_domain,
+        axes: LineAxes::default(),
     }
 }
 
@@ -109,9 +144,18 @@ fn normalize_point(point: Option<&LinePoint>) -> NormalizedPoint {
     }
 }
 
-fn domain_for(series: &[NormalizedSeries]) -> Option<Domain> {
+/// The finite range of the series assigned to `axis`, or `None` when no series
+/// is on that axis or none of them has a finite value there.
+///
+/// A single-value or all-equal axis (`min == max`) would otherwise give the
+/// projection a zero-height domain and a division by zero, so it is expanded
+/// symmetrically here — explicitly, rather than being absorbed downstream by
+/// the projection's `unwrap_or(0.5)` fallback, which would silently flatten
+/// every point of that axis onto the plot's mid-line.
+fn domain_for(series: &[NormalizedSeries], axis: LineValueAxis) -> Option<Domain> {
     let mut values = series
         .iter()
+        .filter(|series| series.axis == axis)
         .flat_map(|series| series.points.iter().filter_map(|point| point.value));
     let first = values.next()?;
     let (min, max) = values.fold((first, first), |(min, max), value| {
@@ -172,7 +216,7 @@ fn warn_duplicate_identifiers<'a>(_kind: &str, _values: impl Iterator<Item = &'a
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::charts::{LineCategory, LinePoint, LineSeries};
+    use crate::charts::{LineAxisOptions, LineCategory, LinePoint, LineSeries, LineValueAxis};
 
     fn categories() -> Vec<LineCategory> {
         vec![
@@ -344,6 +388,193 @@ mod tests {
             assert!(domain.max.is_finite(), "{value:?}: {domain:?}");
             assert!(domain.min < domain.max, "{value:?}: {domain:?}");
         }
+    }
+
+    /// The single-axis guarantee, proven rather than asserted: a chart whose
+    /// series never mention an axis produces the same primary domain it always
+    /// did AND no secondary domain at all, so no right-hand scale can render.
+    #[test]
+    fn a_chart_of_default_series_has_no_secondary_axis() {
+        let chart = normalize_categorical(
+            &categories(),
+            &[
+                LineSeries::new(
+                    "actual",
+                    "Actual",
+                    "blue",
+                    vec![LinePoint::new(4.0), LinePoint::new(9.0)],
+                ),
+                LineSeries::new(
+                    "target",
+                    "Target",
+                    "red",
+                    vec![LinePoint::new(6.0), LinePoint::new(6.0)],
+                ),
+            ],
+        );
+
+        assert!(
+            chart
+                .series
+                .iter()
+                .all(|series| series.axis == LineValueAxis::Primary)
+        );
+        assert_eq!(chart.domain, Some(Domain { min: 4.0, max: 9.0 }));
+        assert_eq!(chart.secondary_domain, None);
+        assert!(!chart.has_secondary_axis());
+    }
+
+    /// The bead's motivating case: three count series and one duration series
+    /// that is three orders of magnitude smaller. Each axis' domain must see
+    /// only its own series, or the duration line flatlines against the counts.
+    #[test]
+    fn each_axis_computes_its_domain_from_its_own_series_only() {
+        let chart = normalize_categorical(
+            &categories(),
+            &[
+                LineSeries::new(
+                    "opened",
+                    "Opened",
+                    "blue",
+                    vec![
+                        LinePoint::new(120.0),
+                        LinePoint::new(150.0),
+                        LinePoint::new(90.0),
+                    ],
+                ),
+                LineSeries::new(
+                    "first-response",
+                    "Average first response",
+                    "orange",
+                    vec![
+                        LinePoint::new(0.4),
+                        LinePoint::new(1.2),
+                        LinePoint::new(0.9),
+                    ],
+                )
+                .on_secondary_axis(),
+            ],
+        );
+
+        assert_eq!(
+            chart.domain,
+            Some(Domain {
+                min: 90.0,
+                max: 150.0
+            }),
+            "the count axis must not be widened down to the duration values"
+        );
+        assert_eq!(
+            chart.secondary_domain,
+            Some(Domain { min: 0.4, max: 1.2 }),
+            "the duration axis must not be widened up to the count values"
+        );
+        assert!(chart.has_secondary_axis());
+    }
+
+    /// A degenerate axis must not reach the projection with `min == max`: that
+    /// is the division by zero, and the projection's fallback would put every
+    /// point of that axis on the mid-line without saying so.
+    #[test]
+    fn an_all_equal_secondary_axis_expands_instead_of_dividing_by_zero() {
+        let chart = normalize_categorical(
+            &categories(),
+            &[
+                LineSeries::new(
+                    "opened",
+                    "Opened",
+                    "blue",
+                    vec![LinePoint::new(1.0), LinePoint::new(5.0)],
+                ),
+                LineSeries::new(
+                    "sla",
+                    "SLA",
+                    "orange",
+                    vec![
+                        LinePoint::new(12.0),
+                        LinePoint::new(12.0),
+                        LinePoint::new(12.0),
+                    ],
+                )
+                .on_secondary_axis(),
+            ],
+        );
+        let secondary = chart.secondary_domain.expect("finite values have a domain");
+
+        assert!(secondary.min < secondary.max, "{secondary:?}");
+        assert!(secondary.min.is_finite() && secondary.max.is_finite());
+        assert_eq!(
+            secondary,
+            Domain {
+                min: 11.0,
+                max: 13.0
+            },
+            "the documented symmetric expansion, at least one unit wide"
+        );
+        assert_eq!(
+            chart.domain,
+            Some(Domain { min: 1.0, max: 5.0 }),
+            "expanding one axis must not disturb the other"
+        );
+    }
+
+    #[test]
+    fn a_secondary_series_with_no_finite_values_renders_no_secondary_axis() {
+        let chart = normalize_categorical(
+            &categories(),
+            &[
+                LineSeries::new("opened", "Opened", "blue", vec![LinePoint::new(3.0)]),
+                LineSeries::new(
+                    "sla",
+                    "SLA",
+                    "orange",
+                    vec![LinePoint::missing(), LinePoint::new(f64::NAN)],
+                )
+                .on_secondary_axis(),
+            ],
+        );
+
+        assert!(!chart.has_secondary_axis());
+        assert_eq!(chart.secondary_domain, None);
+        assert!(chart.domain.is_some());
+    }
+
+    #[test]
+    fn a_chart_of_only_secondary_series_still_has_a_secondary_domain() {
+        let chart = normalize_categorical(
+            &categories(),
+            &[LineSeries::new(
+                "sla",
+                "SLA",
+                "orange",
+                vec![LinePoint::new(2.0), LinePoint::new(8.0)],
+            )
+            .on_secondary_axis()],
+        );
+
+        assert_eq!(chart.domain, None, "no series is on the primary axis");
+        assert_eq!(chart.secondary_domain, Some(Domain { min: 2.0, max: 8.0 }));
+    }
+
+    #[test]
+    fn axis_options_reach_every_series_through_its_own_axis() {
+        let chart = normalize_categorical(
+            &categories(),
+            &[
+                LineSeries::new("opened", "Opened", "blue", vec![LinePoint::new(3.0)]),
+                LineSeries::new("sla", "SLA", "orange", vec![LinePoint::new(2.0)])
+                    .on_secondary_axis(),
+            ],
+        )
+        .with_axes(LineAxes {
+            primary: LineAxisOptions::default().with_unit(" cases"),
+            secondary: LineAxisOptions::default().with_unit(" s").with_decimals(1),
+        });
+
+        assert_eq!(chart.series[0].format.unit.as_deref(), Some(" cases"));
+        assert_eq!(chart.series[0].format.decimals, None);
+        assert_eq!(chart.series[1].format.unit.as_deref(), Some(" s"));
+        assert_eq!(chart.series[1].format.decimals, Some(1));
     }
 
     #[test]

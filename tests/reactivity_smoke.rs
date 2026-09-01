@@ -916,8 +916,9 @@ async fn categorical_line_chart_exposes_static_render_contract() {
     );
     assert_eq!(
         snapshot["rootCount"],
-        json!(2),
-        "the showcase renders the interactive fixture plus the callback-less one: {snapshot}"
+        json!(3),
+        "the showcase renders the interactive fixture, the callback-less one, and the \
+         dual-axis one (ldui-j0mt): {snapshot}"
     );
     assert_eq!(
         snapshot["plotCount"],
@@ -1039,6 +1040,169 @@ async fn categorical_line_chart_exposes_static_render_contract() {
         snapshot["emptyCount"],
         json!(0),
         "populated fixture must not render empty state: {snapshot}"
+    );
+}
+
+/// The secondary value axis (ldui-j0mt), as a DOM contract over the demo's
+/// dual-axis fixture: three conversation counts against one first-response
+/// duration three orders of magnitude smaller.
+///
+/// Every element is located by a stable `data-` attribute, never by document
+/// position — a positional query ("the second text element") starts describing
+/// something else the moment tick thinning or a marker shape changes.
+///
+/// The first two charts on the page are single-axis and are asserted here too:
+/// the whole no-regression claim is that they carry *no* axis attribution at
+/// all, which cannot be shown by looking only at the dual-axis chart.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn dual_axis_line_chart_states_each_series_against_its_own_axis() {
+    let h = harness_at("/components/charts").await;
+    let snapshot = eval_json(
+        &h,
+        r#"(() => {
+            const roots = [...document.querySelectorAll('[data-testid="interactive-line-chart"]')];
+            const dual = document.querySelector('[data-testid="dual-axis-line-chart"] [data-testid="interactive-line-chart"]');
+            if (!dual) return null;
+            const svg = dual.querySelector('[data-line-chart-plot]');
+            const secondary = svg.querySelector('[data-line-chart-y-axis="secondary"]');
+            const table = dual.querySelector('[data-line-chart-table]');
+            const legend = dual.querySelector('[data-line-chart-legend]');
+            const headers = [...(table?.querySelectorAll('thead th') ?? [])];
+            const rowCells = index => [...(table?.querySelectorAll('tbody tr')[index]?.querySelectorAll('th, td') ?? [])]
+                .map(cell => cell.textContent.trim());
+            const yFor = seriesId => {
+                const marker = dual.querySelector(`[data-series-id="${seriesId}"][data-category-index="0"]`);
+                if (!marker) return null;
+                const box = marker.getBBox();
+                return box.y + box.height / 2;
+            };
+            return {
+                singleAxisRootsWithAxisAttribute: roots
+                    .filter(root => root !== dual)
+                    .filter(root => root.hasAttribute('data-line-chart-axes')).length,
+                singleAxisAxisMarkedCells: roots
+                    .filter(root => root !== dual)
+                    .reduce((n, root) => n + root.querySelectorAll('[data-axis]').length, 0),
+                singleAxisSecondaryGroups: roots
+                    .filter(root => root !== dual)
+                    .reduce((n, root) => n + root.querySelectorAll('[data-line-chart-y-axis]').length, 0),
+                dualMarker: dual.getAttribute('data-line-chart-axes'),
+                secondaryAxisGroups: svg.querySelectorAll('[data-line-chart-y-axis="secondary"]').length,
+                secondaryTicks: secondary ? [...secondary.querySelectorAll('text[data-axis="secondary"]')].map(t => t.textContent.trim()) : [],
+                secondaryTickAnchors: secondary ? [...new Set([...secondary.querySelectorAll('text')].map(t => t.getAttribute('text-anchor')))] : [],
+                primaryTicks: [...svg.querySelectorAll('text:not([data-axis])')].length > 0,
+                axisLabels: [...svg.querySelectorAll('[data-line-chart-axis-label]')]
+                    .map(t => [t.getAttribute('data-line-chart-axis-label'), t.textContent.trim()]),
+                legendCaptions: legend ? [...legend.querySelectorAll('[data-series-id]')]
+                    .map(entry => [entry.getAttribute('data-axis'), entry.textContent.trim()]) : [],
+                headers: headers.map(th => [th.getAttribute('data-axis'), th.textContent.trim()]),
+                weekOneCells: rowCells(0),
+                weekThreeCells: rowCells(2),
+                openedY: yFor('opened'),
+                durationY: yFor('first-response'),
+                plotTop: svg.querySelector('[data-line-chart-pointer-overlay]')?.getAttribute('y') ?? null,
+                finiteSvg: !/NaN|Infinity/.test(svg.outerHTML),
+            };
+        })()"#,
+    )
+    .await;
+
+    assert!(
+        !snapshot.is_null(),
+        "dual-axis chart must exist: {snapshot}"
+    );
+
+    // No behaviour change for existing single-axis callers, shown rather than
+    // asserted: the other two charts carry none of the second axis' markup.
+    assert_eq!(
+        snapshot["singleAxisRootsWithAxisAttribute"],
+        json!(0),
+        "a single-axis chart must not be marked dual: {snapshot}"
+    );
+    assert_eq!(
+        snapshot["singleAxisAxisMarkedCells"],
+        json!(0),
+        "a single-axis chart emits no data-axis attribution anywhere: {snapshot}"
+    );
+    assert_eq!(
+        snapshot["singleAxisSecondaryGroups"],
+        json!(0),
+        "a single-axis chart renders no right-hand axis group: {snapshot}"
+    );
+
+    assert_eq!(snapshot["dualMarker"], json!("dual"), "{snapshot}");
+    assert_eq!(
+        snapshot["secondaryAxisGroups"],
+        json!(1),
+        "exactly one right-hand axis: {snapshot}"
+    );
+    assert_eq!(
+        snapshot["secondaryTicks"],
+        json!(["41.2 s", "36.4 s", "31.7 s", "26.9 s", "22.1 s"]),
+        "right ticks descend across the duration domain, in the duration axis' unit — never \
+         the count domain: {snapshot}"
+    );
+    assert_eq!(
+        snapshot["secondaryTickAnchors"],
+        json!(["start"]),
+        "right ticks anchor outward so they cannot overlap the plot: {snapshot}"
+    );
+    assert_eq!(
+        snapshot["axisLabels"],
+        json!([
+            ["primary", "Conversations"],
+            ["secondary", "First response"]
+        ]),
+        "both localized axis titles render, each identified by axis: {snapshot}"
+    );
+    assert_eq!(
+        snapshot["legendCaptions"],
+        json!([
+            ["primary", "Opened (Conversations)"],
+            ["primary", "Resolved (Conversations)"],
+            ["primary", "Abandoned (Conversations)"],
+            ["secondary", "Average first response (First response)"],
+        ]),
+        "the legend attributes every series to its axis: {snapshot}"
+    );
+    assert_eq!(
+        snapshot["headers"],
+        json!([
+            [null, "Category"],
+            ["primary", "Opened (Conversations)"],
+            ["primary", "Resolved (Conversations)"],
+            ["primary", "Abandoned (Conversations)"],
+            ["secondary", "Average first response (First response)"],
+        ]),
+        "the hidden table names each column's axis, so a reader never has to guess which \
+         scale a number belongs to: {snapshot}"
+    );
+    assert_eq!(
+        snapshot["weekOneCells"],
+        json!(["W01", "120", "112", "8", "41.2 s"]),
+        "each cell is formatted by its own axis: {snapshot}"
+    );
+    assert_eq!(
+        snapshot["weekThreeCells"],
+        json!(["W03", "151", "140", "11", "No value"]),
+        "a gap on the secondary axis is still announced as No value: {snapshot}"
+    );
+    assert_eq!(
+        snapshot["finiteSvg"],
+        json!(true),
+        "serialized SVG must not contain NaN or Infinity: {snapshot}"
+    );
+
+    // The defect the axis exists to fix: read against the count scale, a 41.2s
+    // duration would sit within a few pixels of the plot floor, indistinguishable
+    // from zero. On its own axis it sits at the very top of the plot instead.
+    let opened_y = snapshot["openedY"].as_f64().expect("opened marker");
+    let duration_y = snapshot["durationY"].as_f64().expect("duration marker");
+    assert!(
+        duration_y < opened_y,
+        "the duration mark must be placed by its own domain, not flattened under the \
+         counts: {snapshot}"
     );
 }
 

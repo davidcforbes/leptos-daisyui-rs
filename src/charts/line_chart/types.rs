@@ -40,6 +40,111 @@ pub struct LineSeries {
     pub marker: MarkerStyle,
     /// Whether individual point labels are rendered.
     pub show_data_labels: bool,
+    /// Which value axis this series is measured against; primary by default.
+    pub axis: LineValueAxis,
+}
+
+/// Which value axis a categorical series is measured against.
+///
+/// [`LineValueAxis::Primary`] is the single left-hand axis every categorical
+/// chart has always had, and is the default, so a series that never names an
+/// axis keeps exactly the geometry, ticks, legend text, tooltip text and table
+/// columns it had before a second axis existed. The right-hand axis is drawn
+/// only when at least one series opts into it, which is why a single-axis
+/// chart cannot grow a phantom second scale.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum LineValueAxis {
+    /// The left-hand value axis. Every series' default.
+    #[default]
+    Primary,
+    /// The right-hand value axis, with its own independent domain.
+    Secondary,
+}
+
+/// Localized naming and value formatting for one value axis.
+///
+/// This is the single source for a unit: ticks, the hover card, the accessible
+/// hidden table, the focus target's accessible name and the typed activation
+/// payload all format an axis' values through it, so none of them can drift
+/// from the others. A point's own `display_value` still wins where it is set —
+/// that contract is unchanged.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LineAxisOptions {
+    /// Axis title drawn beside its ticks and used to attribute a series in the
+    /// legend and hidden table. Falls back to the matching [`LineChartTexts`]
+    /// name when unset.
+    pub label: Option<String>,
+    /// Unit appended verbatim to every value this axis formats, so a caller
+    /// controls whether a space precedes it. Examples: `"%"`, `" s"`.
+    pub unit: Option<String>,
+    /// Decimal places used for values this axis formats. Unset keeps the
+    /// pre-existing rendering: shortest round-trip text for a value, one
+    /// decimal for a tick.
+    pub decimals: Option<usize>,
+}
+
+impl LineAxisOptions {
+    /// Sets the axis title used by ticks, the legend and the hidden table.
+    pub fn with_label(mut self, label: impl Into<String>) -> Self {
+        self.label = Some(label.into());
+        self
+    }
+
+    /// Sets the unit appended to every value this axis formats.
+    pub fn with_unit(mut self, unit: impl Into<String>) -> Self {
+        self.unit = Some(unit.into());
+        self
+    }
+
+    /// Sets the decimal places used for values this axis formats.
+    pub fn with_decimals(mut self, decimals: usize) -> Self {
+        self.decimals = Some(decimals);
+        self
+    }
+}
+
+/// Both value axes' options, resolved once per render.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(super) struct LineAxes {
+    pub primary: LineAxisOptions,
+    pub secondary: LineAxisOptions,
+}
+
+impl LineAxes {
+    /// Returns the options belonging to `axis`.
+    pub(super) fn options(&self, axis: LineValueAxis) -> &LineAxisOptions {
+        match axis {
+            LineValueAxis::Primary => &self.primary,
+            LineValueAxis::Secondary => &self.secondary,
+        }
+    }
+}
+
+/// User-visible chart copy that is not supplied per series or per point.
+///
+/// The defaults reproduce the strings the chart emitted before this struct
+/// existed, so adopting it changes nothing until a field is overridden.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LineChartTexts {
+    /// Header of the hidden table's category column.
+    pub category_header: String,
+    /// Hidden-table cell text for a category a series has no value at.
+    pub no_value: String,
+    /// Name used for the primary axis when it carries no label of its own.
+    pub primary_axis: String,
+    /// Name used for the secondary axis when it carries no label of its own.
+    pub secondary_axis: String,
+}
+
+impl Default for LineChartTexts {
+    fn default() -> Self {
+        Self {
+            category_header: "Category".to_string(),
+            no_value: "No value".to_string(),
+            primary_axis: "Primary axis".to_string(),
+            secondary_axis: "Secondary axis".to_string(),
+        }
+    }
 }
 
 /// One optional series value and its display overrides.
@@ -265,7 +370,8 @@ impl LinePoint {
 }
 
 impl LineSeries {
-    /// Creates a series with solid circular markers and no data labels.
+    /// Creates a series with solid circular markers, no data labels, and the
+    /// primary value axis.
     pub fn new(
         id: impl Into<String>,
         name: impl Into<String>,
@@ -280,7 +386,19 @@ impl LineSeries {
             pattern: LinePattern::Solid,
             marker: MarkerStyle::default(),
             show_data_labels: false,
+            axis: LineValueAxis::Primary,
         }
+    }
+
+    /// Measures this series against `axis` instead of the primary one.
+    pub fn with_axis(mut self, axis: LineValueAxis) -> Self {
+        self.axis = axis;
+        self
+    }
+
+    /// Measures this series against the right-hand secondary value axis.
+    pub fn on_secondary_axis(self) -> Self {
+        self.with_axis(LineValueAxis::Secondary)
     }
 }
 
@@ -339,6 +457,70 @@ mod tests {
         assert!(!series.show_data_labels);
         assert_eq!(series.marker.size, 4.0);
         assert_eq!(series.marker.shape, MarkerShape::Circle);
+    }
+
+    #[test]
+    fn a_series_is_measured_against_the_primary_axis_unless_it_opts_out() {
+        let series = LineSeries::new("closed", "Closed", "blue", vec![LinePoint::new(1.0)]);
+
+        assert_eq!(
+            series.axis,
+            LineValueAxis::Primary,
+            "the constructor must not move an existing caller onto a new axis"
+        );
+        assert_eq!(LineValueAxis::default(), LineValueAxis::Primary);
+        assert_eq!(
+            series.clone().on_secondary_axis().axis,
+            LineValueAxis::Secondary
+        );
+        assert_eq!(
+            series.with_axis(LineValueAxis::Secondary).axis,
+            LineValueAxis::Secondary
+        );
+    }
+
+    #[test]
+    fn axis_options_default_to_naming_and_formatting_nothing() {
+        let options = LineAxisOptions::default();
+
+        assert_eq!(options.label, None);
+        assert_eq!(options.unit, None);
+        assert_eq!(options.decimals, None);
+
+        let configured = LineAxisOptions::default()
+            .with_label("Average first response")
+            .with_unit(" s")
+            .with_decimals(1);
+        assert_eq!(configured.label.as_deref(), Some("Average first response"));
+        assert_eq!(configured.unit.as_deref(), Some(" s"));
+        assert_eq!(configured.decimals, Some(1));
+    }
+
+    #[test]
+    fn axes_resolve_options_per_axis() {
+        let axes = LineAxes {
+            primary: LineAxisOptions::default().with_unit(" cases"),
+            secondary: LineAxisOptions::default().with_unit(" s"),
+        };
+
+        assert_eq!(
+            axes.options(LineValueAxis::Primary).unit.as_deref(),
+            Some(" cases")
+        );
+        assert_eq!(
+            axes.options(LineValueAxis::Secondary).unit.as_deref(),
+            Some(" s")
+        );
+    }
+
+    #[test]
+    fn chart_texts_default_to_the_strings_the_chart_already_emitted() {
+        let texts = LineChartTexts::default();
+
+        assert_eq!(texts.category_header, "Category");
+        assert_eq!(texts.no_value, "No value");
+        assert_eq!(texts.primary_axis, "Primary axis");
+        assert_eq!(texts.secondary_axis, "Secondary axis");
     }
 
     #[test]

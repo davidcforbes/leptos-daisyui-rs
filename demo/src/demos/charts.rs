@@ -5,10 +5,10 @@ use leptos::prelude::*;
 // rather than glob because `charts` also exports a `Sparkline`, which would
 // collide with the reactive daisyUI-framed `components::Sparkline`.
 use leptos_daisyui_rs::charts::{
-    AreaChart, BarChart, ChartSeries, HeatScale, Heatmap, HeatmapCell, LineCategory, LineChart,
-    LineChartActivation, LineChartActivationSource, LineChartData, LinePattern, LinePoint,
-    LineSeries, MarkerShape, MarkerStyle, PieChart, PieSlice, Sparkline, StackedAreaChart,
-    StackedBarChart,
+    AreaChart, BarChart, ChartSeries, HeatScale, Heatmap, HeatmapCell, LineAxisOptions,
+    LineCategory, LineChart, LineChartActivation, LineChartActivationSource, LineChartData,
+    LinePattern, LinePoint, LineSeries, LineValueAxis, MarkerShape, MarkerStyle, PieChart,
+    PieSlice, Sparkline, StackedAreaChart, StackedBarChart,
 };
 
 /// Every chart in `leptos_daisyui_rs::charts`, each shown with at least one
@@ -113,6 +113,24 @@ pub fn ChartsDemo() -> impl IntoView {
                         height=200
                     />
                 </div>
+                <p class="text-sm text-base-content/75">
+                    "A series can opt onto a second value axis, so counts and a duration read together instead of the duration flatlining against the counts. Each axis computes its own domain and declares its own unit once: the right-hand ticks, the hover card, the legend captions and the screen-reader table all state a series against the axis it belongs to. Series that say nothing stay on the primary axis, and the right axis is drawn only when something is assigned to it."
+                </p>
+                <div class="w-full max-w-2xl" data-testid="dual-axis-line-chart">
+                    <LineChart
+                        data=dual_axis_line_data()
+                        accessible_label="Conversations and first response by week".to_string()
+                        description="Opened, resolved and abandoned conversation counts against average first response time.".to_string()
+                        primary_axis=LineAxisOptions::default().with_label("Conversations")
+                        secondary_axis=LineAxisOptions::default()
+                            .with_label("First response")
+                            .with_unit(" s")
+                            .with_decimals(1)
+                        width=560
+                        height=260
+                    />
+                </div>
+
                 <p class="text-sm opacity-70">
                     "For the preserved numeric XY chart, x_labels replace raw fractional x values, and the tick count is capped at the number of data points so a sparse series cannot print a duplicated date. Axis titles are optional."
                 </p>
@@ -367,6 +385,7 @@ fn actual_series() -> LineSeries {
             stroke_width: 1.0,
         },
         show_data_labels: true,
+        axis: LineValueAxis::Primary,
     }
 }
 
@@ -390,6 +409,7 @@ fn rolling_average_series() -> LineSeries {
             stroke_width: 1.0,
         },
         show_data_labels: false,
+        axis: LineValueAxis::Primary,
     }
 }
 
@@ -419,6 +439,7 @@ fn target_series() -> LineSeries {
             stroke_width: 1.0,
         },
         show_data_labels: true,
+        axis: LineValueAxis::Primary,
     }
 }
 
@@ -496,6 +517,78 @@ fn gapped_line_data() -> LineChartData {
                 series
             })
             .collect(),
+    )
+}
+
+/// The Office Conversations Reporting shape (ldui-j0mt): three count series
+/// against one duration series three orders of magnitude smaller. Deliberately
+/// deterministic, and deliberately includes a gap in the duration series so
+/// the secondary axis is exercised with missing data too.
+fn dual_axis_line_data() -> LineChartData {
+    let counts = [
+        (
+            "opened",
+            "Opened",
+            "var(--color-primary)",
+            [120.0, 138.0, 151.0, 144.0, 162.0, 158.0],
+        ),
+        (
+            "resolved",
+            "Resolved",
+            "var(--color-secondary)",
+            [112.0, 129.0, 140.0, 139.0, 155.0, 151.0],
+        ),
+        (
+            "abandoned",
+            "Abandoned",
+            "var(--color-warning)",
+            [8.0, 9.0, 11.0, 5.0, 7.0, 7.0],
+        ),
+    ];
+    let mut series = counts
+        .into_iter()
+        .map(|(id, name, color, values)| {
+            LineSeries::new(
+                id,
+                name,
+                color,
+                values.into_iter().map(LinePoint::new).collect(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let durations = [
+        Some(41.2),
+        Some(38.7),
+        None,
+        Some(29.4),
+        Some(24.8),
+        Some(22.1),
+    ];
+    let mut first_response = LineSeries::new(
+        "first-response",
+        "Average first response",
+        "var(--color-accent)",
+        durations
+            .into_iter()
+            .map(|value| value.map(LinePoint::new).unwrap_or_else(LinePoint::missing))
+            .collect(),
+    )
+    .on_secondary_axis();
+    first_response.pattern = LinePattern::Dashed;
+    first_response.marker = MarkerStyle {
+        shape: MarkerShape::Diamond,
+        ..MarkerStyle::default()
+    };
+    series.push(first_response);
+
+    LineChartData::categorical(
+        (1..=6)
+            .map(|week| LineCategory {
+                key: format!("conv-week-{week:02}"),
+                label: format!("W{week:02}"),
+            })
+            .collect(),
+        series,
     )
 }
 

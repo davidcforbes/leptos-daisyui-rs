@@ -1,6 +1,6 @@
 use super::{
     normalize::{Domain, NormalizedChart, NormalizedSeries},
-    types::{LinePattern, MarkerStyle},
+    types::{LinePattern, LineValueAxis, MarkerStyle},
 };
 
 const DEFAULT_MARKER_SIZE: f64 = 4.0;
@@ -84,6 +84,82 @@ impl Projection {
     }
 }
 
+/// One projection per value axis, over one shared plot rectangle.
+///
+/// Category spacing is axis-independent, so the x geometry is answered once by
+/// the primary projection; only the value-to-y mapping differs, which is the
+/// entire point of a second scale. When no series is on the secondary axis
+/// there is no secondary projection at all, and a lookup for it falls back to
+/// the primary — a series can therefore never be projected against a domain
+/// that does not exist.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct AxisProjections {
+    primary: Projection,
+    secondary: Option<Projection>,
+}
+
+impl AxisProjections {
+    /// Builds the projections for a plot, or `None` when neither axis has a
+    /// finite domain and there is nothing to draw.
+    pub(super) fn new(
+        bounds: PlotBounds,
+        category_count: usize,
+        primary: Option<Domain>,
+        secondary: Option<Domain>,
+    ) -> Option<Self> {
+        // A chart may legitimately have every series on the secondary axis, in
+        // which case the primary projection borrows that domain purely so the
+        // shared category geometry stays well defined. Nothing is drawn
+        // against it: a primary series with a finite value would have given
+        // the primary axis a domain of its own.
+        let fallback = primary.or(secondary)?;
+        Some(Self {
+            primary: Projection {
+                bounds,
+                category_count,
+                domain: primary.unwrap_or(fallback),
+            },
+            secondary: secondary.map(|domain| Projection {
+                bounds,
+                category_count,
+                domain,
+            }),
+        })
+    }
+
+    /// The projection a series measured against `axis` is drawn with.
+    pub(super) fn for_axis(&self, axis: LineValueAxis) -> Projection {
+        match axis {
+            LineValueAxis::Primary => self.primary,
+            LineValueAxis::Secondary => self.secondary.unwrap_or(self.primary),
+        }
+    }
+
+    /// The evenly spaced x-coordinate for a category, shared by both axes.
+    pub(super) fn category_x(&self, index: usize) -> f64 {
+        self.primary.category_x(index)
+    }
+
+    /// The nearest category index for an SVG x-coordinate, shared by both axes.
+    pub(super) fn category_at_x(&self, x: f64) -> Option<usize> {
+        self.primary.category_at_x(x)
+    }
+
+    /// The SVG y-coordinate a value takes on `axis`.
+    pub(super) fn value_y(&self, axis: LineValueAxis, value: f64) -> f64 {
+        self.for_axis(axis).value_y(value)
+    }
+
+    /// Wraps one projection as a primary-only pair.
+    #[cfg(test)]
+    pub(super) fn single(projection: Projection) -> Self {
+        Self {
+            primary: projection,
+            secondary: None,
+        }
+    }
+}
+
 /// A two-dimensional SVG or CSS coordinate.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct Point {
@@ -124,23 +200,53 @@ pub(super) fn size(width: f64, height: f64) -> Size {
     Size { width, height }
 }
 
+/// Gutter space the plot must leave for annotations drawn outside it.
+///
+/// Every field defaults to "nothing extra", so a chart that renders no data
+/// labels and no second axis gets exactly the bounds it always did.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(super) struct PlotInsets {
+    /// Largest visual marker radius across the chart's series.
+    pub max_marker_radius: f64,
+    /// Point labels are drawn beside markers.
+    pub has_data_labels: bool,
+    /// A right-hand tick scale is drawn.
+    pub secondary_ticks: bool,
+    /// A rotated title is drawn outside the left axis.
+    pub primary_label: bool,
+    /// A rotated title is drawn outside the right axis.
+    pub secondary_label: bool,
+}
+
+/// Approximate width of a rotated axis title, in view-box units.
+const AXIS_TITLE_GUTTER: f64 = 16.0;
+/// Approximate width of a right-hand tick label column, in view-box units.
+const SECONDARY_TICK_GUTTER: f64 = 34.0;
+
 /// Calculates plot bounds while keeping a minimum one-unit drawable region.
-pub(super) fn plot_bounds(
-    width: f64,
-    height: f64,
-    max_marker_radius: f64,
-    has_data_labels: bool,
-) -> PlotBounds {
+pub(super) fn plot_bounds(width: f64, height: f64, insets: PlotInsets) -> PlotBounds {
     let width = dimension(width);
     let height = dimension(height);
-    let marker = marker_radius(max_marker_radius);
-    let left = inset(40.0 + marker, width);
-    let right_padding = 12.0 + marker + if has_data_labels { 40.0 } else { 0.0 };
+    let marker = marker_radius(insets.max_marker_radius);
+    let left = inset(
+        40.0 + marker + gutter(insets.primary_label, AXIS_TITLE_GUTTER),
+        width,
+    );
+    let right_padding = 12.0
+        + marker
+        + if insets.has_data_labels { 40.0 } else { 0.0 }
+        + gutter(insets.secondary_ticks, SECONDARY_TICK_GUTTER)
+        + gutter(insets.secondary_label, AXIS_TITLE_GUTTER);
     // Data-label baselines sit five units above the marker. Reserve their
     // approximate 10px ascent as well, so a top-domain value remains inside
     // the SVG viewBox rather than being clipped at its first glyph.
     let top = inset(
-        12.0 + marker + if has_data_labels { 5.0 + 10.0 } else { 0.0 },
+        12.0 + marker
+            + if insets.has_data_labels {
+                5.0 + 10.0
+            } else {
+                0.0
+            },
         height,
     );
     let bottom_padding = 32.0 + marker;
@@ -153,8 +259,13 @@ pub(super) fn plot_bounds(
     }
 }
 
-/// Converts finite points into independent SVG path segments.
-pub(super) fn path_segments(series: &NormalizedSeries, projection: Projection) -> Vec<String> {
+/// Converts finite points into independent SVG path segments, projected
+/// against the series' own value axis.
+pub(super) fn path_segments(
+    series: &NormalizedSeries,
+    projections: &AxisProjections,
+) -> Vec<String> {
+    let projection = projections.for_axis(series.axis);
     let mut segments = Vec::new();
     let mut commands = Vec::new();
     for (index, point) in series.points.iter().enumerate() {
@@ -219,9 +330,13 @@ pub(super) fn visible_tick_indices(
 }
 
 /// Selects the finite series point closest to an SVG y-coordinate.
+///
+/// Each series is compared where it is actually drawn — on its own axis — so
+/// the hover card picks the mark under the pointer rather than the one that
+/// would be there if every series shared one scale.
 pub(super) fn nearest_series_at(
     chart: &NormalizedChart,
-    projection: Projection,
+    projections: &AxisProjections,
     category_index: usize,
     svg_y: f64,
 ) -> Option<usize> {
@@ -237,7 +352,12 @@ pub(super) fn nearest_series_at(
                 .points
                 .get(category_index)
                 .and_then(|point| point.value)
-                .map(|value| (index, (projection.value_y(value) - svg_y).abs()))
+                .map(|value| {
+                    (
+                        index,
+                        (projections.value_y(series.axis, value) - svg_y).abs(),
+                    )
+                })
         })
         .min_by(|(_, left), (_, right)| left.total_cmp(right))
         .map(|(index, _)| index)
@@ -377,6 +497,10 @@ fn marker_radius(value: f64) -> f64 {
     capped_positive_or(value, DEFAULT_MARKER_SIZE, MAX_MARKER_VISUAL_RADIUS)
 }
 
+fn gutter(present: bool, width: f64) -> f64 {
+    if present { width } else { 0.0 }
+}
+
 fn inset(value: f64, dimension: f64) -> f64 {
     value.min((dimension - 1.0).max(0.0) / 2.0)
 }
@@ -441,11 +565,19 @@ mod tests {
         }
     }
 
+    fn insets(max_marker_radius: f64, has_data_labels: bool) -> PlotInsets {
+        PlotInsets {
+            max_marker_radius,
+            has_data_labels,
+            ..PlotInsets::default()
+        }
+    }
+
     #[test]
     fn plot_bounds_clamp_tiny_dimensions_and_reserve_marker_and_label_clearance() {
-        let tiny = plot_bounds(0.0, -5.0, 4.0, false);
-        let labelled = plot_bounds(400.0, 200.0, 8.0, true);
-        let unlabelled = plot_bounds(400.0, 200.0, 8.0, false);
+        let tiny = plot_bounds(0.0, -5.0, insets(4.0, false));
+        let labelled = plot_bounds(400.0, 200.0, insets(8.0, true));
+        let unlabelled = plot_bounds(400.0, 200.0, insets(8.0, false));
 
         assert!(tiny.right - tiny.left >= 1.0);
         assert!(tiny.bottom - tiny.top >= 1.0);
@@ -453,6 +585,163 @@ mod tests {
         assert!(
             labelled.top >= 35.0,
             "a 12px point label needs its 10px ascent plus the 5px marker gap above the top marker"
+        );
+    }
+
+    /// The single-axis guarantee at the geometry layer: the plot rectangle a
+    /// chart with no second axis and no axis titles gets is bit-identical to
+    /// the one the pre-secondary-axis code computed.
+    #[test]
+    fn a_chart_without_a_second_axis_keeps_its_original_plot_rectangle() {
+        let base = plot_bounds(400.0, 200.0, insets(4.0, false));
+
+        assert_eq!(
+            base,
+            PlotBounds {
+                left: 44.0,
+                top: 16.0,
+                right: 384.0,
+                bottom: 164.0
+            }
+        );
+        assert_eq!(
+            plot_bounds(
+                400.0,
+                200.0,
+                PlotInsets {
+                    max_marker_radius: 4.0,
+                    ..PlotInsets::default()
+                }
+            ),
+            base
+        );
+    }
+
+    #[test]
+    fn a_second_axis_reserves_right_gutters_without_moving_the_left_one() {
+        let base = plot_bounds(400.0, 200.0, insets(4.0, false));
+        let ticks = plot_bounds(
+            400.0,
+            200.0,
+            PlotInsets {
+                max_marker_radius: 4.0,
+                secondary_ticks: true,
+                ..PlotInsets::default()
+            },
+        );
+        let both = plot_bounds(
+            400.0,
+            200.0,
+            PlotInsets {
+                max_marker_radius: 4.0,
+                secondary_ticks: true,
+                secondary_label: true,
+                primary_label: true,
+                ..PlotInsets::default()
+            },
+        );
+
+        assert_eq!(ticks.left, base.left, "the left gutter is untouched");
+        assert_eq!(ticks.right, base.right - 34.0);
+        assert_eq!(both.left, base.left + 16.0);
+        assert_eq!(both.right, base.right - 34.0 - 16.0);
+        assert_eq!((both.top, both.bottom), (base.top, base.bottom));
+    }
+
+    #[test]
+    fn each_series_is_projected_against_its_own_axis() {
+        let projections = AxisProjections::new(
+            PlotBounds {
+                left: 0.0,
+                top: 0.0,
+                right: 100.0,
+                bottom: 100.0,
+            },
+            2,
+            Some(Domain {
+                min: 0.0,
+                max: 100.0,
+            }),
+            Some(Domain { min: 0.0, max: 1.0 }),
+        )
+        .expect("both axes have domains");
+
+        // The same number is near the floor of a count axis and at the ceiling
+        // of a duration axis: reading one against the other is the defect.
+        assert_eq!(projections.value_y(LineValueAxis::Primary, 1.0), 99.0);
+        assert_eq!(projections.value_y(LineValueAxis::Secondary, 1.0), 0.0);
+        assert_eq!(projections.category_x(0), 0.0);
+        assert_eq!(projections.category_x(1), 100.0);
+    }
+
+    #[test]
+    fn a_missing_secondary_axis_falls_back_to_the_primary_projection() {
+        let bounds = PlotBounds {
+            left: 0.0,
+            top: 0.0,
+            right: 100.0,
+            bottom: 100.0,
+        };
+        let domain = Domain {
+            min: 0.0,
+            max: 10.0,
+        };
+        let projections =
+            AxisProjections::new(bounds, 2, Some(domain), None).expect("a primary domain");
+
+        assert_eq!(
+            projections.for_axis(LineValueAxis::Secondary),
+            projections.for_axis(LineValueAxis::Primary)
+        );
+        assert!(
+            AxisProjections::new(bounds, 2, None, None).is_none(),
+            "no finite value anywhere means nothing to project"
+        );
+        // Every series on the secondary axis: the shared category geometry
+        // still has to work, so the primary borrows that domain.
+        let secondary_only = AxisProjections::new(bounds, 2, None, Some(domain))
+            .expect("a secondary domain is enough");
+        assert_eq!(
+            secondary_only.for_axis(LineValueAxis::Primary),
+            secondary_only.for_axis(LineValueAxis::Secondary)
+        );
+    }
+
+    #[test]
+    fn the_nearest_series_is_the_one_nearest_where_it_is_actually_drawn() {
+        let chart = normalize_categorical(
+            &categories(1),
+            &[
+                LineSeries::new("count", "Count", "blue", vec![LinePoint::new(10.0)]),
+                LineSeries::new("duration", "Duration", "red", vec![LinePoint::new(0.9)])
+                    .on_secondary_axis(),
+            ],
+        );
+        let projections = AxisProjections::new(
+            PlotBounds {
+                left: 0.0,
+                top: 0.0,
+                right: 100.0,
+                bottom: 100.0,
+            },
+            1,
+            Some(Domain {
+                min: 0.0,
+                max: 100.0,
+            }),
+            Some(Domain { min: 0.0, max: 1.0 }),
+        )
+        .expect("both axes have domains");
+
+        // Count 10 draws near the floor at y=90; duration 0.9 draws near the
+        // ceiling at y=10 on its own scale. Read against the count scale it
+        // would sit at y=99.1 and the pointer below would pick the count.
+        assert_eq!(projections.value_y(LineValueAxis::Primary, 10.0), 90.0);
+        assert_eq!(projections.value_y(LineValueAxis::Secondary, 0.9), 10.0);
+        assert_eq!(
+            nearest_series_at(&chart, &projections, 0, 15.0),
+            Some(1),
+            "the pointer is next to the duration mark, not the count mark"
         );
     }
 
@@ -509,7 +798,7 @@ mod tests {
         );
 
         assert_eq!(
-            path_segments(&chart.series[0], projection()),
+            path_segments(&chart.series[0], &AxisProjections::single(projection())),
             vec![
                 "M 10.00 120.00".to_string(),
                 "M 76.67 53.33 L 110.00 20.00".to_string()
@@ -551,8 +840,10 @@ mod tests {
         let bounds = plot_bounds(
             1_000.0,
             500.0,
-            marker_size(&marker) + marker_stroke_width(&marker) / 2.0,
-            false,
+            insets(
+                marker_size(&marker) + marker_stroke_width(&marker) / 2.0,
+                false,
+            ),
         );
         assert_eq!(bounds.left, 190.0);
         assert_eq!(bounds.top, 162.0);
@@ -602,7 +893,10 @@ mod tests {
             },
         };
 
-        assert_eq!(nearest_series_at(&chart, projection, 0, 5.0), Some(1));
+        assert_eq!(
+            nearest_series_at(&chart, &AxisProjections::single(projection), 0, 5.0),
+            Some(1)
+        );
     }
 
     #[test]
@@ -631,7 +925,7 @@ mod tests {
         };
 
         assert_eq!(
-            path_segments(&chart.series[0], projection),
+            path_segments(&chart.series[0], &AxisProjections::single(projection)),
             vec!["M 0.00 0.00".to_string()]
         );
     }
@@ -677,10 +971,12 @@ mod tests {
             },
         };
 
+        let projections = AxisProjections::single(projection);
+
         assert_eq!(projection.category_at_x(56.0), Some(1));
-        assert_eq!(nearest_series_at(&chart, projection, 0, 5.0), Some(1));
-        assert_eq!(nearest_series_at(&chart, projection, 1, 80.0), Some(1));
-        assert_eq!(nearest_series_at(&chart, projection, 9, 50.0), None);
+        assert_eq!(nearest_series_at(&chart, &projections, 0, 5.0), Some(1));
+        assert_eq!(nearest_series_at(&chart, &projections, 1, 80.0), Some(1));
+        assert_eq!(nearest_series_at(&chart, &projections, 9, 50.0), None);
     }
 
     #[test]
