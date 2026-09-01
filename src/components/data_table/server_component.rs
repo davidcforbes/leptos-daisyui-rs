@@ -3015,6 +3015,7 @@ pub fn ServerDataTable(
                                     .map_or_else(SortOrder::default, |(_, order)| order)
                             })
                             sort_texts=sort_texts
+                            texts=texts
                             on_sort=on_sort
                             header_cell_class=classes.header_cell
                             column_widths=column_widths

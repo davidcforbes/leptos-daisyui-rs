@@ -174,6 +174,10 @@ pub fn DataTableDemo() -> impl IntoView {
                 row_range: "Mostrando {start}\u{2013}{end} de {total}".to_string(),
                 filter_all: "Todos".to_string(),
                 filter_label: "Filtrar por {column}".to_string(),
+                // ldui-vooa: the resize separator's accessible name follows
+                // this same reactive signal, so toggling the locale updates
+                // it without remounting either table.
+                resize_column: "Cambiar el ancho de la columna {column}".to_string(),
             }
         } else {
             DataTableTexts::default()
@@ -1407,6 +1411,7 @@ pub fn DataTableDemo() -> impl IntoView {
                         row_range: "Mostrando {start}\u{2013}{end} de {total}".to_string(),
                         filter_all: "Todos".to_string(),
                         filter_label: "Filtrar por {column}".to_string(),
+                        resize_column: "Cambiar el ancho de la columna {column}".to_string(),
                     }
                 />
             </Section>

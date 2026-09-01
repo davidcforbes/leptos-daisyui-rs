@@ -1,7 +1,7 @@
 use crate::components::data_table::resize::{
     MAX_COLUMN_WIDTH, effective_min_width, keyboard_resized_width, resized_width,
 };
-use crate::components::data_table::types::{Column, DataTableSortTexts, SortOrder};
+use crate::components::data_table::types::{Column, DataTableSortTexts, DataTableTexts, SortOrder};
 use crate::components::{Button, ButtonSize, ButtonStyle};
 use crate::merge_classes;
 use leptos::prelude::*;
@@ -46,6 +46,14 @@ pub fn DataTableHeader(
     /// Localized current-state and next-action copy for focused sort controls.
     #[prop(into)]
     sort_texts: Signal<DataTableSortTexts>,
+
+    /// Localized table chrome copy, including the column-resize separator's
+    /// accessible-name template (`ldui-vooa`). Optional so a caller that
+    /// only wires up `sort_texts` still compiles; defaults to
+    /// [`DataTableTexts::default`], which is the pre-`ldui-vooa` hardcoded
+    /// English "Resize {column} column" wording byte for byte.
+    #[prop(optional, into, default = Signal::stored(DataTableTexts::default()))]
+    texts: Signal<DataTableTexts>,
 
     /// Callback when column header is clicked
     on_sort: Callback<&'static str>,
@@ -208,7 +216,7 @@ pub fn DataTableHeader(
                                         role="separator"
                                         tabindex="0"
                                         aria-orientation="vertical"
-                                        aria-label=format!("Resize {} column", header_label)
+                                        aria-label=move || texts.with(|texts| texts.resize_label(&header_label))
                                         aria-valuemin=min_w.round() as u32
                                         aria-valuemax=MAX_COLUMN_WIDTH.round() as u32
                                         aria-valuenow=move || column_widths.with(|widths| {
@@ -350,5 +358,34 @@ mod tests {
     fn active_sort_indicator_keeps_the_directional_arrow() {
         assert_eq!(sort_indicator_symbol(true, SortOrder::Asc), "↑");
         assert_eq!(sort_indicator_symbol(true, SortOrder::Desc), "↓");
+    }
+
+    /// ldui-vooa: the resize separator's accessible name must be built from
+    /// the reactive `texts` template, never a hardcoded English `format!`
+    /// call -- that hardcoding is exactly the defect the bead reports (a
+    /// fully reactive Spanish table with an English "Resize Date column"
+    /// separator).
+    #[test]
+    fn resize_aria_label_is_driven_by_the_reactive_texts_template() {
+        let source = include_str!("header.rs");
+        let component = source
+            .split_once("pub fn DataTableHeader(")
+            .expect("DataTableHeader component source")
+            .1
+            .split_once("\n#[cfg(test)]")
+            .map_or(source, |(before, _)| before);
+        assert!(
+            !component.contains(r#"format!("Resize {} column""#),
+            "the hardcoded English resize label must not reappear: {component}"
+        );
+        assert!(
+            component.contains("texts.resize_label(&header_label)"),
+            "the resize separator's aria-label must read the localized \
+             template: {component}"
+        );
+        assert!(
+            component.contains("texts: Signal<DataTableTexts>"),
+            "DataTableHeader must accept the shared table texts contract"
+        );
     }
 }

@@ -1238,6 +1238,7 @@ pub fn DataTable(
                             sort_column=Signal::derive(move || sort_column.get())
                             sort_order=Signal::derive(move || sort_order.get())
                             sort_texts=sort_texts
+                            texts=texts
                             on_sort=on_sort
                             header_cell_class=classes.header_cell
                             column_widths=column_widths

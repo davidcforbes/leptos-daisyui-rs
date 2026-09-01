@@ -612,6 +612,28 @@ pub struct DataTableTexts {
     pub filter_all: String,
     /// Associated label template for a column filter; `{column}` is replaced.
     pub filter_label: String,
+    /// Accessible-name template for a column-resize separator; `{column}` is
+    /// replaced with the column's own (already-localized) header text.
+    ///
+    /// Mirrors `EntityTableTexts::resize_column` (`ldui-vooa`): the same
+    /// template shape, the same placeholder name, so a consumer localizing
+    /// both table families writes the sentence once. Consumed through
+    /// [`DataTableTexts::resize_label`], never read as a raw field, so the
+    /// substitution stays in one place.
+    pub resize_column: String,
+}
+
+impl DataTableTexts {
+    /// The resize separator's complete accessible name for one column,
+    /// substituting `{column}` in [`Self::resize_column`].
+    ///
+    /// A method rather than a bare field read: the shared `DataTableHeader`
+    /// (used by both `DataTable` and `ServerDataTable`) calls this instead
+    /// of hand-rolling `format!("Resize {column} column")`, which is
+    /// exactly the hardcoded English `aria-label` `ldui-vooa` replaces.
+    pub fn resize_label(&self, column: &str) -> String {
+        self.resize_column.replace("{column}", column)
+    }
 }
 
 impl Default for DataTableTexts {
@@ -628,6 +650,7 @@ impl Default for DataTableTexts {
             row_range: "Showing {start}\u{2013}{end} of {total}".to_string(),
             filter_all: "All".to_string(),
             filter_label: "Filter by {column}".to_string(),
+            resize_column: "Resize {column} column".to_string(),
         }
     }
 }
@@ -1032,6 +1055,27 @@ mod tests {
         assert_eq!(texts.search_label, "Search table");
         assert_eq!(texts.row_range, "Showing {start}\u{2013}{end} of {total}");
         assert_eq!(texts.filter_label, "Filter by {column}");
+        // ldui-vooa: default English matches the pre-bead hardcoded
+        // "Resize {column} column" byte for byte.
+        assert_eq!(texts.resize_column, "Resize {column} column");
+    }
+
+    /// ldui-vooa: the resize separator's accessible name is built from a
+    /// template, exactly like the sort control's, so a locale is free to
+    /// place `{column}` anywhere its grammar needs.
+    #[test]
+    fn resize_label_substitutes_the_column_placeholder() {
+        let texts = DataTableTexts::default();
+        assert_eq!(texts.resize_label("Date"), "Resize Date column");
+
+        let localized = DataTableTexts {
+            resize_column: "Cambiar el ancho de la columna {column}".to_string(),
+            ..DataTableTexts::default()
+        };
+        assert_eq!(
+            localized.resize_label("Fecha"),
+            "Cambiar el ancho de la columna Fecha"
+        );
     }
 
     #[test]
