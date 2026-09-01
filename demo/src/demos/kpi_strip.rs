@@ -2,7 +2,7 @@ use crate::core::{ContentLayout, Section};
 use leptos::prelude::*;
 use leptos_daisyui_rs::components::{Button, ButtonSize, StatDeltaTrend};
 use leptos_daisyui_rs::patterns::{
-    KpiAction, KpiBaseline, KpiItem, KpiStatus, KpiStrip, KpiStripTexts, KpiTrend,
+    KpiAction, KpiBaseline, KpiItem, KpiStatus, KpiStrip, KpiStripLayout, KpiStripTexts, KpiTrend,
 };
 
 /// The twelve production KPIs the consumer's Dashboard renders (ldui-ztgo),
@@ -186,6 +186,67 @@ pub fn KpiStripDemo() -> impl IntoView {
                         items=Signal::derive(dashboard_kpis)
                         compact=true
                         on_activate=on_activate
+                    />
+                </div>
+            </Section>
+
+            // ldui-k3ip. The same twelve peer KPIs as the section above,
+            // through the typed balanced-six ladder instead of the default
+            // eight-column one. The section above IS the negative control:
+            // identical items, default layout, eight then a ragged four.
+            <Section title="Balanced six: twelve peer KPIs as two rows of six">
+                <div class="flex flex-col gap-4" data-testid="kpi-strip-balanced-six">
+                    <p class="ld-text-small text-base-content/75">
+                        "A fixed dashboard scorecard, not an operational strip. Six columns once the strip itself is 896px wide or more, stepping down through four, three and two -- container queries, so the strip responds to its own width and not the window's."
+                    </p>
+                    <KpiStrip
+                        items=Signal::derive(dashboard_kpis)
+                        layout=KpiStripLayout::BalancedSix
+                        on_activate=on_activate
+                    />
+                </div>
+            </Section>
+
+            <Section title="Balanced six: exactly one row">
+                <div data-testid="kpi-strip-balanced-six-six">
+                    <KpiStrip
+                        items=Signal::derive(|| dashboard_kpis().into_iter().take(6).collect::<Vec<_>>())
+                        layout=KpiStripLayout::BalancedSix
+                    />
+                </div>
+            </Section>
+
+            // Five in six tracks: a ragged last row by design. The five cards
+            // keep their sixth-width tracks; the sixth track is simply empty,
+            // because stretching them would make a five-card strip's cards a
+            // different size from a six-card strip's.
+            <Section title="Balanced six: a count that does not divide">
+                <div data-testid="kpi-strip-balanced-six-five">
+                    <KpiStrip
+                        items=Signal::derive(|| dashboard_kpis().into_iter().take(5).collect::<Vec<_>>())
+                        layout=KpiStripLayout::BalancedSix
+                    />
+                </div>
+            </Section>
+
+            <Section title="Balanced six: no items">
+                <div data-testid="kpi-strip-balanced-six-empty">
+                    <KpiStrip
+                        items=Signal::derive(Vec::<KpiItem>::new)
+                        layout=KpiStripLayout::BalancedSix
+                    />
+                </div>
+            </Section>
+
+            // A constrained column, the case ldui-tnyq exists for: the same
+            // twelve cards must step DOWN here rather than asking how wide
+            // the window is.
+            <Section title="Balanced six in a narrow column">
+                <div class="max-w-md" data-testid="kpi-strip-balanced-six-narrow">
+                    <KpiStrip
+                        items=Signal::derive(dashboard_kpis)
+                        layout=KpiStripLayout::BalancedSix
+                        compact=true
                     />
                 </div>
             </Section>

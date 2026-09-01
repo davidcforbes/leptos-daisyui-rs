@@ -51,9 +51,10 @@ pub use filter_bar::{
     SnapshotDefaultSaveState, filter_active_summary, filter_bar_class, filter_result_summary,
 };
 pub use kpi_strip::{
-    KPI_BASELINE_TRACK_HEADROOM, KpiAction, KpiBaseline, KpiBaselineAvailability, KpiBaselineState,
-    KpiCard, KpiComparison, KpiItem, KpiStatus, KpiStrip, KpiStripTexts, KpiTrend,
-    kpi_card_is_activatable,
+    KPI_BASELINE_TRACK_HEADROOM, KPI_CARD_HELP_FLOOR_PX, KPI_CARD_TWO_LINE_FLOOR_PX, KpiAction,
+    KpiBaseline, KpiBaselineAvailability, KpiBaselineState, KpiCard, KpiComparison, KpiItem,
+    KpiStatus, KpiStrip, KpiStripLayout, KpiStripRowFit, KpiStripRung, KpiStripTexts, KpiTrend,
+    kpi_card_is_activatable, kpi_strip_card_width_px, kpi_strip_gap_px, kpi_strip_row_fit,
 };
 pub use list_page::{LIST_PAGE_BASE_CLASS, ListPage, list_page_class};
 pub use page_header::{PageHeader, PageHeaderDivider, PageHeaderNavigationLayout};

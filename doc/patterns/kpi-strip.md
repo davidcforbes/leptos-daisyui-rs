@@ -237,13 +237,68 @@ labels) would never re-render at all. Keying on the whole item means an
 unchanged card keeps its DOM, and its focused action button keeps focus,
 while a card whose data moved is rebuilt.
 
-## Grid and `compact`
+## Grid, layout profile, and `compact`
 
-`KpiStrip` owns the responsive grid: two columns at the narrowest width,
-growing through three and four columns to a full eight-column row at `xl`.
-Fewer than eight items simply leave the remaining explicit-column tracks
+`KpiStrip` owns the responsive grid, and it asks how wide **the strip** is,
+never how wide the window is -- the steps are CSS container queries
+(`@sm`/`@lg`/`@4xl`/`@5xl`), because a strip in a 648px content column was
+rendering 67px cards the moment the *viewport* crossed 1280px (ldui-tnyq).
+Fewer items than columns simply leave the remaining explicit-column tracks
 empty -- CSS Grid does not stretch existing cards to fill them, so card size
 stays equal regardless of count. The strip never scrolls horizontally.
+
+### `KpiStripLayout`: a typed ladder, not a column count (ldui-k3ip)
+
+| profile | ladder | for |
+|---|---|---|
+| `KpiStripLayout::AutoEight` (default) | 2 / 3 / 4 / 8 | an operational strip of short cards |
+| `KpiStripLayout::BalancedSix` | 2 / 3 / 4 / 6 | a balanced fixed dashboard scorecard |
+
+```rust
+view! { <KpiStrip items=items layout=KpiStripLayout::BalancedSix /> }
+```
+
+The prop is a named intent rather than a `columns: usize`, because an
+integer would accept twelve columns of 40px, would put breakpoint policy
+back in the consumer, and would say nothing about what happens at narrower
+widths -- the framework owns the whole ladder down from the widest rung.
+The default is unchanged, so every existing caller keeps the exact
+2 / 3 / 4 / 8 grid it had.
+
+**The rungs are derived, not chosen.** Card width is
+`(container - gap * (columns - 1)) / columns`, with `gap-4` = 16px, and a
+card needs about 114px to hold a two-line label (`ldui-tbaw`'s fit sweep,
+as shipped by `ldui-tnyq`) -- about 125px if it also carries a help
+control, which costs the label 20px of its row (`ldui-yhvf`):
+
+| profile | rung | container | columns | card |
+|---|---|---|---|---|
+| both | base | 320px | 2 | 152.0px |
+| both | `@sm` | 384px | 3 | 117.3px |
+| both | `@lg` | 512px | 4 | 116.0px |
+| `AutoEight` | `@5xl` | 1024px | 8 | 114.0px |
+| `BalancedSix` | `@4xl` | 896px | 6 | 136.0px |
+
+Six columns start at `@4xl` rather than `@3xl` (768px) because at 768px six
+columns are 114.7px: enough for a bare two-line label, not enough for a
+help-bearing one -- and a scorecard is exactly where help-bearing cards
+live. At the 1046px container `ldui-tnyq` measured on a 1680px window,
+`BalancedSix` gives 6 columns of 161.0px against `AutoEight`'s 8 of
+116.8px, so the balanced profile's cards are **wider**: a two-line label, a
+help trigger and a baseline comparison bar all gain room by choosing it.
+
+### Item counts that do not divide
+
+A short final row is deliberate. The tracks are explicit (`grid-cols-6`,
+never an `auto-fit` minmax), so seven cards in a balanced-six strip render
+six then one, and that one keeps its own sixth-width track rather than
+stretching across the row. Stretching would make a five-card strip's cards
+a different size from a six-card strip's, and would make the lone last card
+read as a more important thing than its peers -- equal card geometry is the
+property this pattern exists to protect. Twelve and six both divide evenly,
+which is why the balanced-six ladder's every rung (2, 3, 4, 6) is a divisor
+of twelve: a twelve-card set stays a balanced peer group at *every* width,
+not only the widest one.
 
 `compact=true` tightens card padding and gap (`p-4`/`gap-4` down to
 `p-3`/`gap-3`, both still on the canonical spacing scale) and steps the
@@ -340,7 +395,8 @@ view! {
 ## Add to `input.css`
 
 ```css
-@source inline("grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-8 gap-3 gap-4");
+@source inline("@container grid grid-cols-2 @sm:grid-cols-3 @lg:grid-cols-4 gap-3 gap-4 w-full");
+@source inline("@5xl:grid-cols-8 @4xl:grid-cols-6");
 @source inline("rounded-box border border-base-300 bg-base-100 h-full min-w-0 overflow-hidden");
 @source inline("forced-colors:border-[CanvasText]");
 @source inline("h-(--border-width-accent) w-full");

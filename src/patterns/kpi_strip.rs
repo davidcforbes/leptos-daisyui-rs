@@ -771,20 +771,292 @@ fn kpi_item_fingerprint(item: &KpiItem) -> String {
     format!("{item:?}")
 }
 
+/// The measured floor for a card that must hold a two-line label, in CSS
+/// px.
+///
+/// Not a taste number: `ldui-tbaw`'s fit sweep found a roughly
+/// 20-character label needs about 70px of label width to hold two lines,
+/// and label width is roughly card width minus 34px of body padding plus
+/// accent edge -- so about 104px bare, and `ldui-tnyq` shipped its ladder
+/// at 114px and up after measuring the rendered DOM at each rung. 114 is
+/// therefore the floor the framework has actually validated, and every
+/// rung of every profile must clear it.
+pub const KPI_CARD_TWO_LINE_FLOOR_PX: f64 = 114.0;
+
+/// The measured floor for a card that ALSO carries a help control, in CSS
+/// px.
+///
+/// A help trigger is a flex sibling of the label and takes 20px of the
+/// label's row (`ldui-yhvf`: 83px of label width became 63px on a 117px
+/// card), so a help-bearing card wants about 125px before the two-line
+/// label starts clipping. Ordinary operational strips sit far above this;
+/// a twelve-card scorecard at six columns is exactly the cramped regime
+/// where it bites, which is why [`KpiStripLayout::BalancedSix`] puts its
+/// six-column rung where it does.
+pub const KPI_CARD_HELP_FLOOR_PX: f64 = 125.0;
+
+/// One rung of a [`KpiStripLayout`]'s responsive column ladder.
+///
+/// The ladder is DATA, not a class string that happens to encode it: the
+/// grid class is asserted against this table, so the documented arithmetic
+/// and the emitted utilities cannot drift apart.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct KpiStripRung {
+    /// The Tailwind container-query variant prefix, e.g. `"@lg:"`. Empty
+    /// for the base rung, which has no variant.
+    pub prefix: &'static str,
+    /// The container width in CSS px at or above which this rung applies.
+    /// These are Tailwind v4's default container sizes: `@sm` 24rem/384px,
+    /// `@lg` 32rem/512px, `@4xl` 56rem/896px, `@5xl` 64rem/1024px.
+    pub min_container_px: u32,
+    /// Explicit column tracks at this rung.
+    pub columns: u32,
+}
+
+/// `2 / 3 / 4 / 8` -- the ladder every caller written before `ldui-k3ip`
+/// gets, byte for byte unchanged.
+const KPI_STRIP_AUTO_EIGHT_LADDER: &[KpiStripRung] = &[
+    KpiStripRung {
+        prefix: "",
+        min_container_px: 0,
+        columns: 2,
+    },
+    KpiStripRung {
+        prefix: "@sm:",
+        min_container_px: 384,
+        columns: 3,
+    },
+    KpiStripRung {
+        prefix: "@lg:",
+        min_container_px: 512,
+        columns: 4,
+    },
+    KpiStripRung {
+        prefix: "@5xl:",
+        min_container_px: 1024,
+        columns: 8,
+    },
+];
+
+/// `2 / 3 / 4 / 6` -- the balanced scorecard ladder.
+///
+/// Every rung divides twelve exactly (12 = 6x2 = 4x3 = 3x4 = 2x6), which
+/// is the property that makes a twelve-card set stay a balanced peer group
+/// at every width rather than only at the widest one.
+const KPI_STRIP_BALANCED_SIX_LADDER: &[KpiStripRung] = &[
+    KpiStripRung {
+        prefix: "",
+        min_container_px: 0,
+        columns: 2,
+    },
+    KpiStripRung {
+        prefix: "@sm:",
+        min_container_px: 384,
+        columns: 3,
+    },
+    KpiStripRung {
+        prefix: "@lg:",
+        min_container_px: 512,
+        columns: 4,
+    },
+    KpiStripRung {
+        prefix: "@4xl:",
+        min_container_px: 896,
+        columns: 6,
+    },
+];
+
+/// Which column ladder a [`KpiStrip`] follows -- the typed layout choice
+/// (`ldui-k3ip`).
+///
+/// A NAMED INTENT, not a column count. An integer prop would let a caller
+/// ask for twelve columns of 40px, would put breakpoint policy in the
+/// consumer (the exact fork this opinionated layer exists to remove), and
+/// would carry no answer for what happens at narrower widths -- the
+/// framework owns the whole ladder down from the widest rung, so a profile
+/// has to name the shape at the top and derive the rest. It is also
+/// orthogonal to `compact`, which changes padding and gap and never the
+/// column count.
+///
+/// ### The arithmetic behind each rung
+///
+/// Card width is `(container - gap * (columns - 1)) / columns`, with
+/// `gap-4` = 16px (`gap-3` = 12px in compact mode, which is strictly more
+/// generous). Every rung must clear [`KPI_CARD_TWO_LINE_FLOOR_PX`]:
+///
+/// | profile | rung | container | columns | card |
+/// |---|---|---|---|---|
+/// | both | base | 320px | 2 | 152.0px |
+/// | both | `@sm` | 384px | 3 | 117.3px |
+/// | both | `@lg` | 512px | 4 | 116.0px |
+/// | `AutoEight` | `@5xl` | 1024px | 8 | 114.0px |
+/// | `BalancedSix` | `@4xl` | 896px | 6 | 136.0px |
+///
+/// `@4xl` rather than `@3xl` (768px), and that choice is the whole reason
+/// the profile is a type: at 768px six columns are 114.7px, which clears
+/// the bare two-line floor but NOT [`KPI_CARD_HELP_FLOOR_PX`]. A scorecard
+/// is precisely where help-bearing cards live, so the six-column rung
+/// starts where a help-bearing card still holds two label lines. `@4xl`
+/// gives 136.0px, 11px of slack over that floor.
+///
+/// ### What it does to the consumer's measured strip
+///
+/// At the 1046px container `ldui-tnyq` measured on a 1680px window,
+/// `AutoEight` gives 8 columns of 116.8px and lays twelve cards out as
+/// eight then a ragged four; `BalancedSix` gives 6 columns of 161.0px and
+/// lays them out as two rows of six. The balanced profile's cards are
+/// WIDER, so nothing inside them -- a two-line label, a help trigger, a
+/// baseline comparison bar -- gets tighter by choosing it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum KpiStripLayout {
+    /// `2 / 3 / 4 / 8`. The default and the pre-`ldui-k3ip` behaviour: an
+    /// operational strip that fills a full row of up to eight short cards
+    /// once it is wide enough.
+    #[default]
+    AutoEight,
+    /// `2 / 3 / 4 / 6`. A balanced fixed dashboard scorecard: twelve peer
+    /// cards read as two rows of six, six as one row of six.
+    BalancedSix,
+}
+
+impl KpiStripLayout {
+    /// Stable runtime marker, emitted as `data-kpi-strip-layout` so a test
+    /// or a consumer can read the active profile WITHOUT parsing the grid's
+    /// utility classes -- [`KpiStatus::as_str`]'s posture, for the same
+    /// reason.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::AutoEight => "auto-eight",
+            Self::BalancedSix => "balanced-six",
+        }
+    }
+
+    /// This profile's responsive column ladder, widest rung last.
+    pub const fn ladder(self) -> &'static [KpiStripRung] {
+        match self {
+            Self::AutoEight => KPI_STRIP_AUTO_EIGHT_LADDER,
+            Self::BalancedSix => KPI_STRIP_BALANCED_SIX_LADDER,
+        }
+    }
+
+    /// The widest column count this profile ever reaches.
+    pub const fn max_columns(self) -> u32 {
+        match self {
+            Self::AutoEight => 8,
+            Self::BalancedSix => 6,
+        }
+    }
+
+    /// How many columns this profile renders in a container of the given
+    /// width -- the Rust mirror of what the container queries do in the
+    /// browser, so a native test can assert geometry rather than class
+    /// names.
+    pub fn columns_at(self, container_px: f64) -> u32 {
+        self.ladder()
+            .iter()
+            .filter(|rung| container_px >= f64::from(rung.min_container_px))
+            .map(|rung| rung.columns)
+            .next_back()
+            .unwrap_or(1)
+    }
+}
+
+/// The grid gap in CSS px: `gap-4` normally, `gap-3` in compact mode.
+pub const fn kpi_strip_gap_px(compact: bool) -> f64 {
+    if compact { 12.0 } else { 16.0 }
+}
+
+/// One card's rendered width in a strip of the given container width,
+/// column count and gap.
+///
+/// Pure geometry, exported so a consumer sizing a dashboard column can ask
+/// the same question the framework's own rung derivation asks instead of
+/// guessing.
+pub fn kpi_strip_card_width_px(container_px: f64, columns: u32, gap_px: f64) -> f64 {
+    if columns == 0 {
+        return 0.0;
+    }
+    (container_px - gap_px * f64::from(columns - 1)) / f64::from(columns)
+}
+
+/// How a list of items lands in a fixed number of column tracks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct KpiStripRowFit {
+    /// Explicit column tracks at the width being asked about.
+    pub columns: u32,
+    /// Rows that are completely filled.
+    pub full_rows: u32,
+    /// Cards in the final, possibly short, row. Zero only when there are no
+    /// items at all.
+    pub last_row: u32,
+}
+
+impl KpiStripRowFit {
+    /// The last row is short, so the strip ends on a ragged edge.
+    pub const fn is_ragged(self) -> bool {
+        self.last_row > 0 && self.last_row < self.columns
+    }
+
+    /// Total rows rendered.
+    pub const fn rows(self) -> u32 {
+        self.full_rows + if self.last_row > 0 { 1 } else { 0 }
+    }
+}
+
+/// How `items` cards land in `columns` tracks.
+///
+/// A count that does not divide evenly leaves a RAGGED LAST ROW, and that
+/// is the deliberate behaviour, not an emergent one. The tracks are
+/// explicit (`grid-cols-6`, never `auto-fit`/`auto-fill` with a minmax),
+/// so seven cards in a balanced-six strip render six then one, and that
+/// one keeps its own one-sixth track: it does not stretch across the row,
+/// and its neighbours above it do not shrink. Equal card geometry is the
+/// property being protected, so a short final row is preferred over
+/// stretching -- a stretched last card would read as a different, more
+/// important thing than its peers.
+pub fn kpi_strip_row_fit(items: usize, columns: u32) -> KpiStripRowFit {
+    if columns == 0 {
+        return KpiStripRowFit {
+            columns,
+            full_rows: 0,
+            last_row: 0,
+        };
+    }
+    let items = u32::try_from(items).unwrap_or(u32::MAX);
+    KpiStripRowFit {
+        columns,
+        full_rows: items / columns,
+        last_row: items % columns,
+    }
+}
+
 /// Responsive grid classes for the strip.
 ///
 /// Two columns at the narrowest width (never a single full-bleed column,
-/// which reads as a list rather than a grid of cards), growing to eight --
-/// a full row -- once the STRIP is wide enough, not the window. When there
-/// are fewer than eight items, CSS Grid
-/// leaves the remaining explicit-column tracks empty rather than
-/// stretching the existing cards to fill them, so card size stays equal
-/// regardless of count.
-fn kpi_strip_grid_class(compact: bool) -> &'static str {
-    if compact {
-        "grid grid-cols-2 @sm:grid-cols-3 @lg:grid-cols-4 @5xl:grid-cols-8 gap-3"
-    } else {
-        "grid grid-cols-2 @sm:grid-cols-3 @lg:grid-cols-4 @5xl:grid-cols-8 gap-4"
+/// which reads as a list rather than a grid of cards), growing to the
+/// profile's widest rung once the STRIP is wide enough, not the window
+/// (`ldui-tnyq`). When there are fewer items than columns, CSS Grid leaves
+/// the remaining explicit-column tracks empty rather than stretching the
+/// existing cards to fill them, so card size stays equal regardless of
+/// count.
+///
+/// Composed from the profile's own [`KpiStripLayout::ladder`] -- pinned by
+/// `kpi_strip_grid_class_is_composed_from_the_declared_ladder`, so a rung
+/// cannot be edited in one place and left stale in the other.
+const fn kpi_strip_grid_class(layout: KpiStripLayout, compact: bool) -> &'static str {
+    match (layout, compact) {
+        (KpiStripLayout::AutoEight, false) => {
+            "grid grid-cols-2 @sm:grid-cols-3 @lg:grid-cols-4 @5xl:grid-cols-8 gap-4"
+        }
+        (KpiStripLayout::AutoEight, true) => {
+            "grid grid-cols-2 @sm:grid-cols-3 @lg:grid-cols-4 @5xl:grid-cols-8 gap-3"
+        }
+        (KpiStripLayout::BalancedSix, false) => {
+            "grid grid-cols-2 @sm:grid-cols-3 @lg:grid-cols-4 @4xl:grid-cols-6 gap-4"
+        }
+        (KpiStripLayout::BalancedSix, true) => {
+            "grid grid-cols-2 @sm:grid-cols-3 @lg:grid-cols-4 @4xl:grid-cols-6 gap-3"
+        }
     }
 }
 
@@ -1308,7 +1580,8 @@ pub fn KpiCard(
 /// Responsive row of independent [`KpiCard`]s -- the pattern this module
 /// exists for.
 ///
-/// Owns the grid, equal card geometry, spacing, and `compact` behavior;
+/// Owns the grid, its typed [`KpiStripLayout`] ladder, equal card
+/// geometry, spacing, and `compact` behavior;
 /// each card owns its own label, value, description, and optional
 /// status/trend/help. Section headings and period selection (a date-range
 /// picker, a "This week" toggle) stay caller-owned through ordinary
@@ -1384,10 +1657,46 @@ pub fn KpiCard(
 /// }
 /// ```
 ///
+/// ### A balanced twelve-card scorecard (ldui-k3ip)
+///
+/// A fixed dashboard set of peer KPIs is not an operational strip: twelve
+/// cards through the default ladder become eight and then a ragged four,
+/// which reads as a primary row and a secondary one even though all twelve
+/// are peers. [`KpiStripLayout::BalancedSix`] is the typed way to say so --
+/// no CSS classes, no consumer breakpoints:
+///
+/// ```rust
+/// use leptos::prelude::*;
+/// use leptos_daisyui_rs::patterns::{KpiItem, KpiStrip, KpiStripLayout};
+///
+/// #[component]
+/// fn Example() -> impl IntoView {
+///     let items = Signal::derive(|| {
+///         (0..12)
+///             .map(|n| KpiItem::new(format!("kpi-{n}"), format!("Measure {n}"), "0"))
+///             .collect::<Vec<_>>()
+///     });
+///
+///     view! { <KpiStrip items=items layout=KpiStripLayout::BalancedSix /> }
+/// }
+/// ```
+///
+/// Twelve cards render as two rows of six once the strip is 896px wide or
+/// more; six cards render as one row of six; and the ladder steps down
+/// through four, three and two below that, so a strip beside a 360px
+/// assistant rail still fits. `compact` remains a separate padding/gap
+/// choice and never changes the column count.
+///
 /// ### Add to `input.css`
 /// ```css
-/// @source inline("@container grid grid-cols-2 @sm:grid-cols-3 @lg:grid-cols-4 @5xl:grid-cols-8 gap-3 gap-4 w-full");
+/// @source inline("@container grid grid-cols-2 @sm:grid-cols-3 @lg:grid-cols-4 gap-3 gap-4 w-full");
+/// @source inline("@5xl:grid-cols-8 @4xl:grid-cols-6");
 /// ```
+/// The second line carries both profiles' widest rungs. A consumer that
+/// safelists only its own profile's rung gets a strip stuck at four
+/// columns the day it switches -- silently, since a missing utility is not
+/// an error.
+///
 /// See [`KpiCard`] for the per-card classes.
 ///
 /// ## Node References
@@ -1401,8 +1710,20 @@ pub fn KpiStrip(
 
     /// Tighter card padding/gap/type step for dense contexts. Forwarded to
     /// every card.
+    ///
+    /// Independent of `layout`: it changes padding, gap and the value's
+    /// type step, and never the column count.
     #[prop(optional, into)]
     compact: Signal<bool>,
+
+    /// Which typed column ladder the strip follows (`ldui-k3ip`).
+    ///
+    /// Defaults to [`KpiStripLayout::AutoEight`], which is exactly the
+    /// `2 / 3 / 4 / 8` grid every caller had before this prop existed.
+    /// [`KpiStripLayout::BalancedSix`] is the balanced fixed-scorecard
+    /// ladder.
+    #[prop(optional, into)]
+    layout: Signal<KpiStripLayout>,
 
     /// Reactive framework-owned copy, forwarded to every card. See
     /// [`KpiStripTexts`].
@@ -1428,14 +1749,19 @@ pub fn KpiStrip(
 ) -> impl IntoView {
     view! {
         // Structural container only. An element cannot answer its OWN
-        // container query, so the `@sm`/`@lg`/`@6xl` steps on the grid below
-        // need a container ancestor to measure (ldui-tnyq). It carries no
-        // spacing of its own, so it cannot affect the strip's geometry.
+        // container query, so the `@sm`/`@lg`/`@4xl`/`@5xl` steps on the grid
+        // below need a container ancestor to measure (ldui-tnyq). It carries
+        // no spacing of its own, so it cannot affect the strip's geometry.
         <div class="@container w-full" data-kpi-strip-container="true">
         <div
             node_ref=node_ref
-            class=move || merge_classes!(kpi_strip_grid_class(compact.get()), class)
+            class=move || merge_classes!(kpi_strip_grid_class(layout.get(), compact.get()), class)
             data-kpi-strip="true"
+            // The active profile, readable without parsing utility classes
+            // -- so a test asserts the LADDER it asked for and then measures
+            // the geometry that ladder produced, rather than asserting on a
+            // class string that may or may not have reached the stylesheet.
+            data-kpi-strip-layout=move || layout.get().as_str()
         >
             // Keyed, not `collect_view()` (ldui-ztgo). `collect_view()`
             // rebuilds EVERY card on any change to the list, which destroys
@@ -1620,7 +1946,7 @@ mod tests {
 
     #[test]
     fn kpi_strip_grid_class_wraps_from_two_to_eight_columns() {
-        let normal = kpi_strip_grid_class(false);
+        let normal = kpi_strip_grid_class(KpiStripLayout::AutoEight, false);
         assert!(normal.contains("grid-cols-2"));
         // Container steps, not viewport ones: the column count must follow
         // the strip's own width (ldui-tnyq). A plain `sm:`/`md:`/`xl:` here
@@ -1635,7 +1961,7 @@ mod tests {
 
     #[test]
     fn kpi_strip_grid_class_compact_uses_a_tighter_gap() {
-        let compact = kpi_strip_grid_class(true);
+        let compact = kpi_strip_grid_class(KpiStripLayout::AutoEight, true);
         assert!(compact.contains("gap-3"));
         assert!(!compact.contains("gap-4"));
     }
@@ -1645,10 +1971,13 @@ mod tests {
         // Internal <= external (this crate's spacing rule): a card's own
         // padding must not exceed the grid gap separating it from its
         // neighbours, or the cards read as one group.
-        assert!(kpi_card_body_class(false).contains("p-4"));
-        assert!(kpi_strip_grid_class(false).contains("gap-4"));
-        assert!(kpi_card_body_class(true).contains("p-3"));
-        assert!(kpi_strip_grid_class(true).contains("gap-3"));
+        // Both profiles, since a new ladder must not smuggle in a new gap.
+        for layout in [KpiStripLayout::AutoEight, KpiStripLayout::BalancedSix] {
+            assert!(kpi_card_body_class(false).contains("p-4"));
+            assert!(kpi_strip_grid_class(layout, false).contains("gap-4"));
+            assert!(kpi_card_body_class(true).contains("p-3"));
+            assert!(kpi_strip_grid_class(layout, true).contains("gap-3"));
+        }
     }
 
     #[test]
@@ -2365,5 +2694,404 @@ mod tests {
             .split_once("\n#[cfg(test)]")
             .map_or(source, |(before, _)| before);
         assert!(!module.contains("opacity-"));
+    }
+
+    // ------------------------------------------------------------------
+    // ldui-k3ip: the typed layout profile.
+    //
+    // These assert GEOMETRY -- column counts and computed card widths --
+    // rather than class names, because `/components/kpi_strip` is not in
+    // the layout/style audit page sets (ldui-ddhr), so nothing else in this
+    // repo measures this pattern. A test that only compared class strings
+    // would pass while the strip rendered 40px cards.
+    // ------------------------------------------------------------------
+
+    /// The card width at which a comparison bar is drawn: the card, less
+    /// the always-laid-out 3px accent edge (`--border-width-accent`) and
+    /// the body's own padding on both sides (`p-4` = 16px, `p-3` = 12px).
+    fn comparison_bar_width_px(card_px: f64, compact: bool) -> f64 {
+        let padding = if compact { 12.0 } else { 16.0 };
+        card_px - 3.0 - padding * 2.0
+    }
+
+    /// SOURCE COMPATIBILITY, proved rather than asserted: the default
+    /// profile's grid classes are the pre-`ldui-k3ip` literals, character
+    /// for character. Every existing caller passes no `layout` at all and
+    /// therefore takes `Signal::default()`, which is
+    /// [`KpiStripLayout::AutoEight`].
+    ///
+    /// The other half of the proof is that this module's own doctests and
+    /// the showcase compile untouched -- neither passes `layout`.
+    #[test]
+    fn the_default_profile_is_the_untouched_pre_bead_grid() {
+        assert_eq!(KpiStripLayout::default(), KpiStripLayout::AutoEight);
+        assert_eq!(
+            kpi_strip_grid_class(KpiStripLayout::default(), false),
+            "grid grid-cols-2 @sm:grid-cols-3 @lg:grid-cols-4 @5xl:grid-cols-8 gap-4"
+        );
+        assert_eq!(
+            kpi_strip_grid_class(KpiStripLayout::default(), true),
+            "grid grid-cols-2 @sm:grid-cols-3 @lg:grid-cols-4 @5xl:grid-cols-8 gap-3"
+        );
+        // And the prop stays optional, so no call site is forced to name it.
+        assert!(
+            module_source().contains("layout: Signal<KpiStripLayout>"),
+            "the layout prop must stay an optional signal, defaulting to AutoEight"
+        );
+    }
+
+    /// The emitted utilities are composed from the declared ladder, so a
+    /// rung cannot be changed in the table and left stale in the class
+    /// string (or the reverse).
+    #[test]
+    fn kpi_strip_grid_class_is_composed_from_the_declared_ladder() {
+        for layout in [KpiStripLayout::AutoEight, KpiStripLayout::BalancedSix] {
+            for (compact, gap) in [(false, "gap-4"), (true, "gap-3")] {
+                let rungs: Vec<String> = layout
+                    .ladder()
+                    .iter()
+                    .map(|rung| format!("{}grid-cols-{}", rung.prefix, rung.columns))
+                    .collect();
+                let expected = format!("grid {} {gap}", rungs.join(" "));
+                assert_eq!(
+                    kpi_strip_grid_class(layout, compact),
+                    expected,
+                    "{layout:?} compact={compact}"
+                );
+            }
+        }
+    }
+
+    /// Container queries, never viewport breakpoints (`ldui-tnyq`), on
+    /// BOTH profiles -- a new ladder is exactly where a bare `xl:` would
+    /// slip back in.
+    #[test]
+    fn every_profile_uses_container_queries_not_viewport_breakpoints() {
+        for layout in [KpiStripLayout::AutoEight, KpiStripLayout::BalancedSix] {
+            for rung in layout.ladder() {
+                assert!(
+                    rung.prefix.is_empty() || rung.prefix.starts_with('@'),
+                    "{layout:?} rung {rung:?} is a viewport breakpoint; the strip \
+                     must ask how wide IT is, not how wide the window is"
+                );
+            }
+            for compact in [false, true] {
+                for token in kpi_strip_grid_class(layout, compact).split_whitespace() {
+                    assert!(
+                        !token.contains(':') || token.starts_with('@'),
+                        "{layout:?}: {token} is a viewport variant"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Every rung of every profile clears the measured two-line label floor
+    /// at its own threshold width, computed rather than eyeballed.
+    ///
+    /// The base rung is checked at 320px, the narrowest supported viewport;
+    /// a container starved below that is `ldui-kwup`, not a ladder defect.
+    #[test]
+    fn every_rung_clears_the_measured_two_line_card_floor() {
+        for layout in [KpiStripLayout::AutoEight, KpiStripLayout::BalancedSix] {
+            for rung in layout.ladder() {
+                let container = f64::from(rung.min_container_px).max(320.0);
+                for compact in [false, true] {
+                    let card =
+                        kpi_strip_card_width_px(container, rung.columns, kpi_strip_gap_px(compact));
+                    assert!(
+                        card >= KPI_CARD_TWO_LINE_FLOOR_PX,
+                        "{layout:?} {}{} columns at {container}px gives {card}px cards, \
+                         below the measured {KPI_CARD_TWO_LINE_FLOOR_PX}px floor",
+                        rung.prefix,
+                        rung.columns
+                    );
+                }
+            }
+        }
+    }
+
+    /// THE RUNG CHOICE, with its arithmetic. Six columns start at `@4xl`
+    /// (896px) because that is where a help-bearing card still holds two
+    /// label lines; `@3xl` (768px) would clear the bare floor and fail the
+    /// help floor, which is the regime a twelve-card scorecard lives in.
+    #[test]
+    fn the_six_column_rung_sits_where_a_help_bearing_card_still_fits() {
+        let gap = kpi_strip_gap_px(false);
+        let shipped = kpi_strip_card_width_px(896.0, 6, gap);
+        assert!((shipped - 136.0).abs() < 1e-9, "{shipped}");
+        assert!(
+            shipped >= KPI_CARD_HELP_FLOOR_PX,
+            "the shipped six-column rung must hold a help-bearing label"
+        );
+
+        // The rung that was considered and rejected.
+        let rejected = kpi_strip_card_width_px(768.0, 6, gap);
+        assert!((rejected - (768.0 - 80.0) / 6.0).abs() < 1e-9, "{rejected}");
+        assert!(
+            rejected >= KPI_CARD_TWO_LINE_FLOOR_PX,
+            "@3xl clears the bare two-line floor ..."
+        );
+        assert!(
+            rejected < KPI_CARD_HELP_FLOOR_PX,
+            "... but not the help-bearing one, which is why the rung is @4xl"
+        );
+
+        assert_eq!(
+            KpiStripLayout::BalancedSix
+                .ladder()
+                .last()
+                .expect("a widest rung")
+                .min_container_px,
+            896
+        );
+    }
+
+    /// The consumer's reproduction, in numbers. At the 1046px container
+    /// `ldui-tnyq` measured on a 1680px window, `BalancedSix` lays twelve
+    /// peer cards out as two full rows of six.
+    ///
+    /// The second half is the NEGATIVE CONTROL the bead asks for: the same
+    /// assertion run against the old hard-coded eight-column ladder fails,
+    /// and fails in exactly the reported way -- eight then a ragged four.
+    #[test]
+    fn twelve_cards_are_two_rows_of_six_and_the_eight_column_ladder_cannot_be() {
+        const CONSUMER_CONTAINER_PX: f64 = 1046.0;
+
+        let balanced = KpiStripLayout::BalancedSix.columns_at(CONSUMER_CONTAINER_PX);
+        assert_eq!(balanced, 6);
+        let fit = kpi_strip_row_fit(12, balanced);
+        assert_eq!(fit.full_rows, 2);
+        assert_eq!(fit.last_row, 0);
+        assert_eq!(fit.rows(), 2);
+        assert!(!fit.is_ragged(), "twelve peers must not end ragged");
+        let card =
+            kpi_strip_card_width_px(CONSUMER_CONTAINER_PX, balanced, kpi_strip_gap_px(false));
+        assert!((card - 161.0).abs() < 1e-9, "{card}");
+
+        // The old contract, at the identical width.
+        let auto = KpiStripLayout::AutoEight.columns_at(CONSUMER_CONTAINER_PX);
+        assert_eq!(auto, 8);
+        let auto_fit = kpi_strip_row_fit(12, auto);
+        // Two rows either way -- which is exactly why "two rows" alone is not
+        // the assertion. The property is TWO ROWS OF SIX: two FULL rows of
+        // equal peers. The eight-column ladder cannot express it, and the
+        // shape it produces instead is the reported defect.
+        assert_eq!(auto_fit.rows(), 2);
+        assert_ne!(
+            auto_fit.full_rows, 2,
+            "the eight-column ladder cannot produce two full rows; if this ever \
+             passes, the balanced-six assertion above is measuring nothing"
+        );
+        assert_eq!(auto_fit.full_rows, 1);
+        assert_eq!(auto_fit.last_row, 4);
+        assert!(
+            auto_fit.is_ragged(),
+            "eight then four is the reported defect: a ragged second row that \
+             reads as a secondary group"
+        );
+        let auto_card =
+            kpi_strip_card_width_px(CONSUMER_CONTAINER_PX, auto, kpi_strip_gap_px(false));
+        assert!(
+            card > auto_card,
+            "the balanced profile must not make cards narrower: {card} vs {auto_card}"
+        );
+    }
+
+    /// Six items are one full row of six; the AC's other counts land
+    /// deliberately.
+    #[test]
+    fn six_five_and_empty_item_sets_land_deliberately() {
+        let columns = KpiStripLayout::BalancedSix.columns_at(1046.0);
+
+        let six = kpi_strip_row_fit(6, columns);
+        assert_eq!(six.rows(), 1);
+        assert_eq!(six.full_rows, 1);
+        assert_eq!(six.last_row, 0);
+        assert!(!six.is_ragged());
+
+        // A count that does not divide is a RAGGED LAST ROW, on purpose:
+        // the tracks are explicit, so the five cards keep their sixth-width
+        // tracks and the sixth track is simply empty. Stretching them would
+        // make a five-card strip's cards a different size from a six-card
+        // strip's, which is the equal-geometry property this pattern owns.
+        let five = kpi_strip_row_fit(5, columns);
+        assert_eq!(five.rows(), 1);
+        assert_eq!(five.full_rows, 0);
+        assert_eq!(five.last_row, 5);
+        assert!(five.is_ragged());
+
+        // Seven: the bead's own divisibility question.
+        let seven = kpi_strip_row_fit(7, columns);
+        assert_eq!(seven.rows(), 2);
+        assert_eq!(seven.last_row, 1);
+        assert!(seven.is_ragged());
+
+        let empty = kpi_strip_row_fit(0, columns);
+        assert_eq!(empty.rows(), 0);
+        assert_eq!(empty.last_row, 0);
+        assert!(
+            !empty.is_ragged(),
+            "an empty strip is not a ragged one; it has no rows at all"
+        );
+    }
+
+    /// The ladder steps down without ever overflowing its container, and
+    /// never exceeds the profile's declared widest rung.
+    #[test]
+    fn narrow_containers_step_down_without_horizontal_overflow() {
+        for layout in [KpiStripLayout::AutoEight, KpiStripLayout::BalancedSix] {
+            for container in [
+                320.0_f64, 383.0, 384.0, 511.0, 512.0, 767.0, 895.0, 896.0, 1023.0, 1024.0, 1046.0,
+                1680.0, 2560.0,
+            ] {
+                let columns = layout.columns_at(container);
+                assert!(
+                    columns >= 2,
+                    "{layout:?} at {container}px fell below two columns"
+                );
+                assert!(
+                    columns <= layout.max_columns(),
+                    "{layout:?} at {container}px exceeded its declared widest rung"
+                );
+                for compact in [false, true] {
+                    let card =
+                        kpi_strip_card_width_px(container, columns, kpi_strip_gap_px(compact));
+                    assert!(
+                        card >= KPI_CARD_TWO_LINE_FLOOR_PX,
+                        "{layout:?} at {container}px gives {card}px cards, below the \
+                         measured floor -- the step-down happened too late"
+                    );
+                }
+            }
+        }
+    }
+
+    /// A rung applies AT its threshold, not one pixel past it -- the `>=`
+    /// semantics of a `@container (width >= 56rem)` rule.
+    #[test]
+    fn a_rung_applies_at_its_own_threshold_width() {
+        assert_eq!(KpiStripLayout::BalancedSix.columns_at(895.0), 4);
+        assert_eq!(KpiStripLayout::BalancedSix.columns_at(896.0), 6);
+        assert_eq!(KpiStripLayout::AutoEight.columns_at(1023.0), 4);
+        assert_eq!(KpiStripLayout::AutoEight.columns_at(1024.0), 8);
+        // Between 896 and 1024 the two profiles genuinely disagree, which
+        // is the point of having two.
+        assert_eq!(KpiStripLayout::BalancedSix.columns_at(960.0), 6);
+        assert_eq!(KpiStripLayout::AutoEight.columns_at(960.0), 4);
+    }
+
+    /// `compact` is orthogonal: it moves padding and gap, never the column
+    /// count.
+    #[test]
+    fn compact_changes_spacing_and_never_the_column_count() {
+        for layout in [KpiStripLayout::AutoEight, KpiStripLayout::BalancedSix] {
+            let normal: Vec<&str> = kpi_strip_grid_class(layout, false)
+                .split_whitespace()
+                .filter(|token| token.contains("grid-cols"))
+                .collect();
+            let compact: Vec<&str> = kpi_strip_grid_class(layout, true)
+                .split_whitespace()
+                .filter(|token| token.contains("grid-cols"))
+                .collect();
+            assert_eq!(normal, compact, "{layout:?}: compact moved a column rung");
+            assert_ne!(
+                kpi_strip_grid_class(layout, false),
+                kpi_strip_grid_class(layout, true),
+                "{layout:?}: compact must still change the gap"
+            );
+        }
+    }
+
+    /// ldui-ztgo's baseline comparison row still reads at six-column width.
+    ///
+    /// Six columns are WIDER than the eight the default already ships at
+    /// the consumer's container, so the bar and its fixed 80% marker gain
+    /// room rather than losing it. The narrowest a balanced-six bar ever
+    /// gets is at the six-column rung itself.
+    #[test]
+    fn the_baseline_bar_reads_at_six_column_width() {
+        // At the six-column rung: 136px card -> 101px of bar.
+        let narrowest = comparison_bar_width_px(
+            kpi_strip_card_width_px(896.0, 6, kpi_strip_gap_px(false)),
+            false,
+        );
+        assert!((narrowest - 101.0).abs() < 1e-9, "{narrowest}");
+
+        // What the default already ships at the consumer's own 1046px
+        // container: 116.75px card -> 81.75px of bar. The balanced profile
+        // is strictly more room than the shipped baseline bar has today.
+        let shipped_today = comparison_bar_width_px(
+            kpi_strip_card_width_px(1046.0, 8, kpi_strip_gap_px(false)),
+            false,
+        );
+        assert!(
+            narrowest > shipped_today,
+            "a six-column baseline bar must not be tighter than the eight-column \
+             one already in production: {narrowest} vs {shipped_today}"
+        );
+
+        // The marker sits at a fixed 80% of the track on every card
+        // (KPI_BASELINE_TRACK_HEADROOM), so at the narrowest balanced-six
+        // width it is still ~81px from the bar's left edge and clear of the
+        // 2px marker's own width.
+        let marker_offset = narrowest * 0.8;
+        assert!(marker_offset > 80.0, "{marker_offset}");
+        assert!(
+            narrowest - marker_offset >= 2.0,
+            "the fixed marker must not be flush against the track's right edge"
+        );
+
+        // And in compact mode, where padding drops with the gap.
+        let compact = comparison_bar_width_px(
+            kpi_strip_card_width_px(896.0, 6, kpi_strip_gap_px(true)),
+            true,
+        );
+        assert!(compact > narrowest, "{compact} vs {narrowest}");
+    }
+
+    /// Layout markers are stable and distinct, so a browser test can read
+    /// the active profile without parsing utility classes.
+    #[test]
+    fn layout_markers_are_stable_and_distinct() {
+        assert_eq!(KpiStripLayout::AutoEight.as_str(), "auto-eight");
+        assert_eq!(KpiStripLayout::BalancedSix.as_str(), "balanced-six");
+        assert_ne!(
+            KpiStripLayout::AutoEight.as_str(),
+            KpiStripLayout::BalancedSix.as_str()
+        );
+        assert!(
+            module_source().contains("data-kpi-strip-layout=move || layout.get().as_str()"),
+            "the strip must emit its active profile as a data marker"
+        );
+    }
+
+    /// The profile is a NAMED INTENT, not a column integer. A `columns:
+    /// usize` prop would accept twelve columns of 40px; there is no such
+    /// door.
+    #[test]
+    fn the_layout_prop_is_typed_rather_than_a_raw_column_count() {
+        let module = module_source();
+        assert!(
+            !module.contains("columns: usize"),
+            "a raw column count would let a caller ask for an unrenderable grid"
+        );
+        assert!(
+            !module.contains("grid_class: &'static str") && !module.contains("grid_class: String"),
+            "an arbitrary class fragment is not a composition contract either"
+        );
+        // Two profiles today; the enum is what makes a third additive.
+        assert_eq!(KpiStripLayout::AutoEight.max_columns(), 8);
+        assert_eq!(KpiStripLayout::BalancedSix.max_columns(), 6);
+    }
+
+    /// Degenerate inputs never divide by zero or panic.
+    #[test]
+    fn the_geometry_helpers_are_total() {
+        assert_eq!(kpi_strip_card_width_px(1024.0, 0, 16.0), 0.0);
+        let fit = kpi_strip_row_fit(12, 0);
+        assert_eq!(fit.rows(), 0);
+        assert!(!fit.is_ragged());
+        assert_eq!(kpi_strip_row_fit(usize::MAX, 6).columns, 6);
     }
 }

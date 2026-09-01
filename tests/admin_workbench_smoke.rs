@@ -1177,3 +1177,288 @@ async fn pointer_and_keyboard_both_emit_the_stable_item_id() {
 
     assert_no_browser_errors(&h, "admin-workbench kpi activation").await;
 }
+
+// ======================================================================
+// ldui-k3ip: the typed balanced-six layout profile.
+//
+// These drive `/components/kpi_strip`, not `PAGE`. The suite already runs
+// against the general demo app (`html_target: None`), so any showcase route
+// is reachable from it, and the alternative -- adding twelve more cards to
+// the admin-workbench fixture -- would move this file's own pinned
+// `kpiCardCount` and eight-card label sweep. A separate suite would need an
+// xtask step, which is out of this bead's scope.
+// ======================================================================
+
+const KPI_STRIP_PAGE: &str = "/components/kpi_strip";
+
+/// Geometry for one KpiStrip fixture: the container width the container
+/// queries actually measure, the strip's declared profile, and every card's
+/// rounded position and width.
+///
+/// Rows are derived from the cards' own vertical offsets, not from a class
+/// name: two rows of six means twelve cards occupying exactly two distinct
+/// offsets, six at each. That is the assertion the bead asks for, and it is
+/// one a class string cannot fake.
+async fn strip_geometry(h: &pixelproof_web::Harness, testid: &str) -> Value {
+    let expr = format!(
+        r#"(() => {{
+            const root = document.querySelector('[data-testid="{testid}"]');
+            const container = root.querySelector('[data-kpi-strip-container]');
+            const grid = root.querySelector('[data-kpi-strip]');
+            const cards = Array.from(grid.querySelectorAll('[data-kpi-card]'));
+            const rows = new Map();
+            for (const card of cards) {{
+                const r = card.getBoundingClientRect();
+                const top = Math.round(r.top);
+                if (!rows.has(top)) rows.set(top, []);
+                rows.get(top).push(Math.round(r.width * 100) / 100);
+            }}
+            const ordered = Array.from(rows.keys()).sort((a, b) => a - b);
+            return {{
+                layout: grid.getAttribute('data-kpi-strip-layout'),
+                containerWidth: Math.round(container.getBoundingClientRect().width * 100) / 100,
+                cardCount: cards.length,
+                rowWidths: ordered.map((top) => rows.get(top)),
+                overflowing: grid.scrollWidth > grid.clientWidth + 1,
+            }};
+        }})()"#
+    );
+    eval_json(h, &expr).await
+}
+
+/// Every card in a row must share one track width, to within a rounding
+/// pixel.
+fn assert_equal_tracks(widths: &[f64], context: &str) {
+    let first = widths[0];
+    for width in widths {
+        assert!(
+            (width - first).abs() <= 1.0,
+            "{context}: unequal card tracks {widths:?}"
+        );
+    }
+}
+
+/// The widths of one row of a `strip_geometry` report.
+fn row_widths(report: &Value, index: usize) -> Vec<f64> {
+    report["rowWidths"]
+        .as_array()
+        .expect("rowWidths array")
+        .get(index)
+        .unwrap_or_else(|| panic!("row {index} exists: {report}"))
+        .as_array()
+        .expect("row array")
+        .iter()
+        .map(|width| width.as_f64().expect("card width is a number"))
+        .collect()
+}
+
+/// How many rows a `strip_geometry` report has.
+fn row_count(report: &Value) -> usize {
+    report["rowWidths"]
+        .as_array()
+        .expect("rowWidths array")
+        .len()
+}
+
+/// THE bead's reproduction, measured. At a desktop width, twelve peer KPIs
+/// under the balanced-six profile occupy exactly two rows of six with equal
+/// tracks -- and the SAME twelve items under the default profile do not,
+/// which is the negative control proving the assertion measures something.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-admin-workbench)"]
+async fn balanced_six_lays_twelve_peer_kpis_out_as_two_rows_of_six_ldui_k3ip() {
+    let h = harness_at(KPI_STRIP_PAGE).await;
+    begin_browser_error_capture(&h).await;
+
+    h.set_viewport(ViewportSize::new(1680, 1000))
+        .await
+        .expect("set 1680px viewport");
+
+    let balanced = strip_geometry(&h, "kpi-strip-balanced-six").await;
+    assert_eq!(
+        balanced["layout"],
+        json!("balanced-six"),
+        "the strip must report the profile it was asked for: {balanced}"
+    );
+    assert_eq!(balanced["cardCount"], json!(12), "{balanced}");
+    let container = balanced["containerWidth"]
+        .as_f64()
+        .expect("container width");
+    assert!(
+        container >= 896.0,
+        "the six-column rung starts at 896px; this fixture measured {container}px, \
+         so the two-rows-of-six assertion below would be vacuous"
+    );
+
+    assert_eq!(
+        row_count(&balanced),
+        2,
+        "twelve peers in two rows: {balanced}"
+    );
+    let mut every_card: Vec<f64> = Vec::new();
+    for index in 0..2 {
+        let row = row_widths(&balanced, index);
+        assert_eq!(row.len(), 6, "row {index} must hold six cards: {balanced}");
+        assert_equal_tracks(&row, &format!("balanced-six row {index}"));
+        every_card.extend(row);
+    }
+    // Both rows share one track width, so neither reads as a different group.
+    assert_equal_tracks(&every_card, "balanced-six whole strip");
+    assert_eq!(balanced["overflowing"], json!(false), "{balanced}");
+
+    // NEGATIVE CONTROL. The identical twelve items with no `layout` prop --
+    // the hard-coded eight-column ladder -- cannot produce two rows of six.
+    let default_strip = strip_geometry(&h, "kpi-strip-dashboard").await;
+    assert_eq!(
+        default_strip["layout"],
+        json!("auto-eight"),
+        "the default profile must be unchanged: {default_strip}"
+    );
+    assert_eq!(default_strip["cardCount"], json!(12), "{default_strip}");
+    assert_eq!(
+        row_widths(&default_strip, 0).len(),
+        8,
+        "the default ladder still fills eight columns: {default_strip}"
+    );
+    assert_eq!(
+        row_widths(&default_strip, 1).len(),
+        4,
+        "and still ends on the ragged four this bead was filed about: {default_strip}"
+    );
+
+    assert_no_browser_errors(&h, "kpi-strip balanced-six twelve").await;
+}
+
+/// The other item counts the acceptance criteria name: six is one full row,
+/// five is a deliberately ragged row whose cards keep the SAME track width
+/// as the six-card strip (they do not stretch), and an empty strip renders
+/// no cards and no overflow.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-admin-workbench)"]
+async fn balanced_six_handles_six_five_and_empty_item_sets_ldui_k3ip() {
+    let h = harness_at(KPI_STRIP_PAGE).await;
+    begin_browser_error_capture(&h).await;
+
+    h.set_viewport(ViewportSize::new(1680, 1000))
+        .await
+        .expect("set 1680px viewport");
+
+    let six = strip_geometry(&h, "kpi-strip-balanced-six-six").await;
+    assert_eq!(six["cardCount"], json!(6), "{six}");
+    assert_eq!(row_count(&six), 1, "six cards are one row: {six}");
+    let six_row = row_widths(&six, 0);
+    assert_eq!(six_row.len(), 6, "{six}");
+    assert_equal_tracks(&six_row, "balanced-six six items");
+
+    let five = strip_geometry(&h, "kpi-strip-balanced-six-five").await;
+    assert_eq!(five["cardCount"], json!(5), "{five}");
+    assert_eq!(row_count(&five), 1, "{five}");
+    let five_row = row_widths(&five, 0);
+    assert_eq!(
+        five_row.len(),
+        5,
+        "a short last row is the deliberate outcome: {five}"
+    );
+    assert_equal_tracks(&five_row, "balanced-six five items");
+
+    // The ragged row does NOT stretch: five cards in six explicit tracks are
+    // the same width as six cards in six tracks, so a five-card scorecard and
+    // a six-card one are visually the same kind of thing.
+    assert!(
+        (six_row[0] - five_row[0]).abs() <= 1.0,
+        "a ragged row must not stretch its cards: {} vs {}",
+        five_row[0],
+        six_row[0]
+    );
+
+    let empty = strip_geometry(&h, "kpi-strip-balanced-six-empty").await;
+    assert_eq!(empty["cardCount"], json!(0), "{empty}");
+    assert_eq!(row_count(&empty), 0, "an empty strip has no rows: {empty}");
+    assert_eq!(empty["overflowing"], json!(false), "{empty}");
+
+    assert_no_browser_errors(&h, "kpi-strip balanced-six counts").await;
+}
+
+/// A balanced-six strip in a constrained column steps DOWN rather than
+/// asking how wide the window is (ldui-tnyq), and never overflows.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-admin-workbench)"]
+async fn balanced_six_steps_down_in_a_narrow_column_ldui_k3ip() {
+    let h = harness_at(KPI_STRIP_PAGE).await;
+    begin_browser_error_capture(&h).await;
+
+    for width in [1680_u32, 1280, 1024, 768] {
+        h.set_viewport(ViewportSize::new(width, 1000))
+            .await
+            .expect("set viewport");
+
+        let narrow = strip_geometry(&h, "kpi-strip-balanced-six-narrow").await;
+        let container = narrow["containerWidth"].as_f64().expect("width");
+        let row = row_widths(&narrow, 0);
+        assert!(
+            container < 896.0,
+            "the narrow fixture must actually be narrow at {width}px: {narrow}"
+        );
+        assert!(
+            row.len() <= 4,
+            "a {container}px column must not render six columns at a {width}px \
+             window -- that is the viewport-breakpoint bug ldui-tnyq fixed: {narrow}"
+        );
+        assert!(row.len() >= 2, "{narrow}");
+        assert_eq!(
+            narrow["overflowing"],
+            json!(false),
+            "the strip must wrap, never scroll horizontally: {narrow}"
+        );
+        assert_equal_tracks(&row, "balanced-six narrow column");
+    }
+
+    assert_no_browser_errors(&h, "kpi-strip balanced-six narrow").await;
+}
+
+/// ldui-ztgo's baseline comparison row still reads at six-column width: the
+/// bar is measurably WIDER than the one the default eight-column ladder
+/// already ships at the same container width, and the fixed 80% marker is
+/// still clear of the track's right edge.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-admin-workbench)"]
+async fn the_baseline_comparison_bar_still_reads_at_six_columns_ldui_k3ip() {
+    let h = harness_at(KPI_STRIP_PAGE).await;
+    begin_browser_error_capture(&h).await;
+
+    h.set_viewport(ViewportSize::new(1680, 1000))
+        .await
+        .expect("set 1680px viewport");
+
+    async fn bar_width(h: &pixelproof_web::Harness, testid: &str) -> f64 {
+        let expr = format!(
+            r#"(() => {{
+                const bar = document.querySelector(
+                    '[data-testid="{testid}"] [data-kpi-card="intakes"] [data-kpi-baseline-bar]'
+                );
+                return Math.round(bar.getBoundingClientRect().width * 100) / 100;
+            }})()"#
+        );
+        eval_json(h, &expr)
+            .await
+            .as_f64()
+            .expect("baseline bar width")
+    }
+
+    let balanced = bar_width(&h, "kpi-strip-balanced-six").await;
+    let default_strip = bar_width(&h, "kpi-strip-dashboard").await;
+    assert!(
+        balanced > default_strip,
+        "six columns are wider than eight at one container width, so the \
+         comparison bar must gain room, not lose it: {balanced} vs {default_strip}"
+    );
+    assert!(
+        balanced >= 100.0,
+        "the comparison bar must stay legible at six-column width: {balanced}px"
+    );
+    // The marker sits at a fixed 80% of the track on every card, so it is
+    // still well clear of the right edge at this width.
+    assert!(balanced - balanced * 0.8 >= 2.0, "{balanced}");
+
+    assert_no_browser_errors(&h, "kpi-strip balanced-six baseline bar").await;
+}
