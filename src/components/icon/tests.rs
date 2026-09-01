@@ -212,3 +212,67 @@ fn whatsapp_maps_to_whatsapp() {
 fn unknown_name_still_falls_back_to_blank() {
     assert_eq!(lucide_to_sprite("not-a-real-icon-name"), "blank");
 }
+
+// ---------------------------------------------------------------------------
+// Run-control glyphs (ldui-kybz)
+// ---------------------------------------------------------------------------
+//
+// `pause`, `play` and `save` (plus their alternate/consumer-vocabulary
+// spellings) unblock `PageQuickActions` for control-plane toolbars like
+// 4iiz-etl's operator portal. Each assertion follows the precedent set by
+// `record_header.rs`'s `every_tone_glyph_resolves_in_the_sprite`: an alias
+// that silently degrades to `blank` is indistinguishable from success at
+// runtime (an empty `<svg>`, no error), so every name added to the table
+// must be pinned here as resolving to something other than `blank`.
+
+#[test]
+fn pause_and_its_alternate_resolve() {
+    assert_ne!(lucide_to_sprite("pause"), "blank");
+    assert_ne!(lucide_to_sprite("square-pause"), "blank");
+}
+
+#[test]
+fn play_resume_and_the_alternate_spelling_resolve_to_the_same_symbol() {
+    assert_ne!(lucide_to_sprite("play"), "blank");
+    assert_eq!(lucide_to_sprite("circle-play"), lucide_to_sprite("play"));
+    assert_eq!(
+        lucide_to_sprite("resume"),
+        lucide_to_sprite("play"),
+        "resume is the consumer-vocabulary alias onto play"
+    );
+}
+
+#[test]
+fn save_snapshot_and_the_alternate_spelling_resolve_to_the_same_symbol() {
+    assert_ne!(lucide_to_sprite("save"), "blank");
+    assert_eq!(lucide_to_sprite("floppy-disk"), lucide_to_sprite("save"));
+    assert_eq!(
+        lucide_to_sprite("snapshot"),
+        lucide_to_sprite("save"),
+        "snapshot is the consumer-vocabulary alias onto save"
+    );
+}
+
+/// The exact six-button row from the bead
+/// (Pause all / Resume all / Restart all / Snapshot / Reap orphans /
+/// Freshness check) must render six real icons and no `blank`. `refresh`,
+/// `trash` and `activity` already resolved before this bead; `pause`,
+/// `resume` and `snapshot` are the three this bead adds.
+#[test]
+fn page_quick_actions_run_control_row_has_no_blank_icon() {
+    let row = [
+        ("Pause all", "pause"),
+        ("Resume all", "resume"),
+        ("Restart all", "refresh"),
+        ("Snapshot", "snapshot"),
+        ("Reap orphans", "trash"),
+        ("Freshness check", "activity"),
+    ];
+    for (label, icon) in row {
+        assert_ne!(
+            lucide_to_sprite(icon),
+            "blank",
+            "{label} icon {icon:?} must not fall back to blank"
+        );
+    }
+}

@@ -187,6 +187,20 @@ pub fn lucide_to_sprite(name: &str) -> &'static str {
         "bar-chart-3" => "performance-stats",
         "phone-call" => "phone-ring",
         "whatsapp" => "whatsapp",
+        // Run-control glyphs (ldui-kybz), requested by 4iiz-etl's operator
+        // portal for a Pause/Resume/Restart/Snapshot/Reap/Freshness quick-
+        // action row. `resume` and `snapshot` are consumer-vocabulary
+        // aliases onto the same symbols as `play`/`save`, so a caller who
+        // reaches for either spelling resolves directly instead of filing a
+        // second bead for the synonym.
+        "pause" => "pause",
+        "square-pause" => "pause",
+        "play" => "play",
+        "circle-play" => "play",
+        "resume" => "play",
+        "save" => "floppy-disk",
+        "floppy-disk" => "floppy-disk",
+        "snapshot" => "floppy-disk",
         _ => "blank",
     }
 }
