@@ -381,6 +381,21 @@ fn style_step() -> Step {
 /// instead of closing the dialog behind its back. Registered here because an
 /// unregistered suite runs in no lane at all -- it compiles, reports nothing,
 /// and the evidence it was written to produce is structurally unobtainable.
+/// Focused browser proof for `SelectableSummaryGroup` (ldui-l5cw): the
+/// radiogroup contract (one roving tab stop, arrow/Home/End movement that
+/// also selects, disabled cards skipped) and the unmeasured-vs-zero
+/// distinction, which a card reading "0" when it means "we could not measure
+/// this" would silently get wrong.
+fn selectable_summary_step() -> Step {
+    Step {
+        name: "test-selectable-summary",
+        run: Run::BrowserSuite {
+            test: "selectable_summary_smoke",
+            html_target: None,
+        },
+    }
+}
+
 fn modal_close_proposal_step() -> Step {
     Step {
         name: "test-modal-close-proposal",
@@ -514,6 +529,7 @@ fn full_steps() -> Vec<Step> {
     steps.push(style_step());
     steps.push(result_list_step());
     steps.push(modal_close_proposal_step());
+    steps.push(selectable_summary_step());
     steps.push(section_heading_step());
     steps.push(search_picker_dialog_step());
     steps.push(page_quick_actions_step());
@@ -2021,6 +2037,7 @@ fn main() -> ExitCode {
         "test-style" => run_steps(&[style_step()]),
         "test-keyed-result-list" => run_steps(&[result_list_step()]),
         "test-modal-close-proposal" => run_steps(&[modal_close_proposal_step()]),
+        "test-selectable-summary" => run_steps(&[selectable_summary_step()]),
         "test-section-heading" => run_steps(&[section_heading_step()]),
         "test-search-picker-dialog" => run_steps(&[search_picker_dialog_step()]),
         "test-page-quick-actions" => run_steps(&[page_quick_actions_step()]),
@@ -2041,7 +2058,7 @@ fn main() -> ExitCode {
         other => {
             eprintln!("xtask: unknown subcommand {other:?}");
             eprintln!(
-                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-server-table-column-tools|gen-tokens|check-sibling-tokens|bump>"
+                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-selectable-summary|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-server-table-column-tools|gen-tokens|check-sibling-tokens|bump>"
             );
             ExitCode::from(2)
         }
@@ -2323,12 +2340,12 @@ pub fn r() -> f32 { radius::CARD }
     }
 
     #[test]
-    fn reactivity_lane_has_exactly_52_browser_checks() {
+    fn reactivity_lane_has_exactly_53_browser_checks() {
         let source = include_str!("../../tests/reactivity_smoke.rs");
         assert_eq!(
             source.matches("#[tokio::test").count(),
-            52,
-            "the explicitly requested reactivity lane must keep its 52 checks \
+            53,
+            "the explicitly requested reactivity lane must keep its 53 checks \
              (45 + 5 added for ldui-2bt3's ServerDataTable viewport-fit query \
              sizing: offset growth/floor-retain/scroll, rapid narrow-resize \
              settling, declined-proposal retention, cursor First-reset, and \
@@ -2337,7 +2354,7 @@ pub fn r() -> f32 { radius::CARD }
              control added after the reviewer's era-carry-forward CRITICAL \
              fix; + 1 added for ldui-8hba's collapsed FilterSidebar toggle \
              hit-target regression, Left/Right x with/without \
-             header_actions)"
+             header_actions; \n             + 1 added for ldui-j0mt's categorical LineChart secondary value \n             axis, which also raised that suite's own rootCount from 2 to 3 \n             because the charts demo gained a dual-axis chart)"
         );
     }
 
