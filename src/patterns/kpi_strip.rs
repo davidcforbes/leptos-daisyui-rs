@@ -345,7 +345,7 @@ fn kpi_card_accessible_name(
 /// ```css
 /// @source inline("rounded-box border border-base-300 bg-base-100 shadow-sm h-full min-w-0 overflow-hidden");
 /// @source inline("forced-colors:border-[CanvasText]");
-/// @source inline("w-(--border-width-accent) shrink-0 self-stretch");
+/// @source inline("w-(--border-width-accent) shrink-0 self-stretch forced-colors:bg-[CanvasText]");
 /// @source inline("bg-status-blue bg-info bg-success bg-warning bg-error");
 /// @source inline("flex flex-col items-center gap-1 gap-2 p-3 p-4 min-w-0 shrink-0");
 /// @source inline("line-clamp-2 min-h-8");
@@ -489,7 +489,16 @@ pub fn KpiCard(
     let accent = view! {
         <div
             class=format!(
-                "w-(--border-width-accent) shrink-0 self-stretch {}",
+                // `forced-colors:bg-[CanvasText]` keeps a STRUCTURAL edge in
+                // forced-colors mode. Forced colors overrides author
+                // background-color with system colors, so a bar whose only
+                // presence is a `bg-*` would vanish entirely and the card
+                // would lose the edge that carries its status. Painting
+                // CanvasText restores a visible edge; the colour distinction
+                // between statuses is intentionally NOT preserved, because
+                // forced-colors exists precisely to replace author colour
+                // with the user's own palette.
+                "w-(--border-width-accent) shrink-0 self-stretch forced-colors:bg-[CanvasText] {}",
                 status.accent_bg_class(),
             )
             aria-hidden="true"

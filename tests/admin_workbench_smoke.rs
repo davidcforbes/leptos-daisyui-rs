@@ -586,3 +586,82 @@ async fn compact_viewport_help_fab_present_placed_and_accessible() {
 
     assert_no_browser_errors(&h, "admin-workbench help FAB compact viewport").await;
 }
+
+/// ldui-kmpa: every KpiCard carries a coloured LEFT accent edge, blue by
+/// default, and a status only changes its colour -- never the geometry.
+///
+/// Asserts computed geometry and paint rather than class names: a class-level
+/// check would pass while the edge rendered at the top, at zero width, or in a
+/// colour the theme never resolved. The neutral card's blue is the point of
+/// the bead -- an accent that appeared only on exceptional cards would make
+/// the EDGE the signal, whereas a universal edge makes the COLOUR the signal.
+#[tokio::test]
+#[ignore = "requires demo dev server (cargo xtask test-admin-workbench)"]
+async fn kpi_cards_carry_a_left_accent_edge_blue_by_default_ldui_kmpa() {
+    let h = harness_at(PAGE).await;
+    begin_browser_error_capture(&h).await;
+    h.set_viewport(ViewportSize::new(1440, 900))
+        .await
+        .expect("set viewport");
+
+    let report = eval_json(
+        &h,
+        r#"(() => {
+            const pick = id => document.querySelector(`[data-kpi-card="${id}"]`);
+            const read = card => {
+                const bar = card.firstElementChild;
+                const c = card.getBoundingClientRect();
+                const b = bar.getBoundingClientRect();
+                return {
+                    barWidth: +b.width.toFixed(1),
+                    // Inset from the card's own edge: the 1px border, not 0.
+                    leftInset: +(b.x - c.x).toFixed(1),
+                    // Short by the two 1px borders, never by the card's padding.
+                    heightShortfall: +(c.height - b.height).toFixed(1),
+                    color: getComputedStyle(bar).backgroundColor,
+                };
+            };
+            return { neutral: read(pick('open-matters')), semantic: read(pick('customer-success-pts')) };
+        })()"#,
+    )
+    .await;
+
+    for key in ["neutral", "semantic"] {
+        let m = &report[key];
+        let width = m["barWidth"].as_f64().expect("bar width");
+        assert!(
+            width >= 2.0,
+            "{key} card must have a visible accent edge, got {width}px: {report}"
+        );
+        let inset = m["leftInset"].as_f64().expect("inset");
+        assert!(
+            inset <= 2.0,
+            "the accent must sit on the LEFT edge, not inboard or on top;              inset was {inset}px: {report}"
+        );
+        let shortfall = m["heightShortfall"].as_f64().expect("shortfall");
+        assert!(
+            shortfall <= 4.0,
+            "the accent must run the card's full height (a top stripe or a              padded bar fails here); shortfall {shortfall}px: {report}"
+        );
+    }
+
+    // The default card is BLUE, not uncoloured: rgb(0, 69, 120) is
+    // ui_tokens::color::STATUS_BLUE_FG (#004578).
+    assert_eq!(
+        report["neutral"]["color"],
+        json!("rgb(0, 69, 120)"),
+        "a Neutral card must paint the house blue accent: {report}"
+    );
+    assert_ne!(
+        report["semantic"]["color"], report["neutral"]["color"],
+        "a semantic status must override the default colour: {report}"
+    );
+
+    // Geometry is identical across statuses -- only the colour differs.
+    assert_eq!(
+        report["neutral"]["barWidth"], report["semantic"]["barWidth"],
+        "a status must not change the accent's geometry: {report}"
+    );
+
+    assert_no_browser_errors(&h, "admin-workbench kpi accent edge").await;
+}
