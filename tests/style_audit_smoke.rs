@@ -197,15 +197,19 @@ const PAGES: &[(&str, &[(&str, usize)])] = &[
             // element, so headroom is exactly where a real regression hides.
             (family::TYPOGRAPHY, 31),
             (family::SHAPE, 0),
-            // 32, was 18: the auto_page_size/viewport_fit demo additions
-            // (ldui-89rp, ldui-2bt3) add several new ServerDataTable/DataTable
-            // instances, each with its own search `<input>` and page-size
-            // `<select>` -- daisyUI's `.input`/`.select` shadows are authored
-            // in oklch()/oklab(), which the engine's shadow parser cannot
-            // understand yet (PixelProof-0il, see the module doc and
-            // `demo_profile` above), so these genuinely cannot be declared
-            // and must stay ratcheted until the engine can parse them.
-            (family::DEPTH, 32),
+            // 36, was 32. The +4 is the selection checkboxes added by
+            // ldui-px06/ldui-nz6d, and it is the SAME already-declared
+            // class, not new debt: every one of the 36 is a daisyUI control
+            // shadow authored in oklch()/oklab(), which the engine's shadow
+            // parser cannot read (it decodes geometry out of the colour's
+            // coordinates), so a spec written for them would encode a
+            // mis-parse. Verified rather than assumed - the audit report
+            // caps at 20 findings per family, so 16 were elided; enumerating
+            // every non-none box-shadow on the page gives 23 select + 10
+            // checkbox + 3 alert = 36, with the 159 .btn shadows being the
+            // demo's DECLARED press affordance rather than violations.
+            // Stays ratcheted until PixelProof-0il teaches the parser oklch.
+            (family::DEPTH, 36),
             (family::GRID, 2),
             (family::COMPONENT_DRIFT, 10),
         ],

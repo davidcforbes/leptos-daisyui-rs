@@ -2352,7 +2352,13 @@ where
                 data-entity-table-footer="true"
             >
                 <div class="flex min-w-0 flex-wrap items-center gap-3">
-                    <label class="flex min-w-0 max-w-full flex-wrap items-center gap-2 text-sm text-base-content/75">
+                    // Stable hook for tests and consumers. Positional queries such as
+                    // `[data-entity-table] label select` used to find this control
+                    // because it lived in the toolbar; ldui-z0n1 moved it to the
+                    // footer, so the first label-select in the table is now the
+                    // status filter and those queries silently read the wrong
+                    // element. Identity should not depend on document order.
+                    <label data-entity-page-size-control="true" class="flex min-w-0 max-w-full flex-wrap items-center gap-2 text-sm text-base-content/75">
                         <span class="min-w-0 break-words">{move || texts.with(|texts| texts.rows_per_page.clone())}</span>
                         <Select
                             class="select-sm w-20 shrink-0"
@@ -2395,7 +2401,12 @@ where
                             }).collect_view()}
                         </Select>
                     </label>
-                    <span class="text-sm text-base-content/75">
+                    // Stable hook, for the same reason as the page-size control above:
+                    // the row-range used to be reachable as the footer's
+                    // last-child span, and ldui-z0n1 regrouped the footer so
+                    // that query now returns null. Identity should not depend
+                    // on document position.
+                    <span data-entity-row-range="true" class="text-sm text-base-content/75">
                         {move || {
                             let total = total_rows.get();
                             if total == 0 {
@@ -2620,10 +2631,11 @@ fn render_group_section<T: Clone + 'static>(
                 aria-expanded=(!collapsed).to_string()
                 aria-controls=toggle_controls
                 aria-label=toggle_label
-                on:click=move |_| {
+                on:click=move |event| {
                     let Some(on_collapse_change) = on_collapse_change else {
                         return;
                     };
+                    restore_group_toggle_focus(event, toggle_key.clone());
                     let current = collapsed_groups.get_untracked();
                     on_collapse_change.run(EntityGroupCollapseProposal {
                         keys: propose_entity_group_collapse(&current, &toggle_key, !collapsed),
@@ -3505,6 +3517,34 @@ fn separator_parent_width(target: Option<web_sys::EventTarget>) -> Option<f64> {
         .and_then(|element| element.parent_element())
         .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
         .map(|element| f64::from(element.offset_width()))
+}
+
+/// Return focus to a group's collapse toggle after the section re-renders.
+///
+/// The heading takes `collapsed` by value, so toggling REPLACES the button
+/// rather than mutating it; the browser then drops focus to `<body>` and a
+/// keyboard user is thrown to the top of the document mid-task. Same shape as
+/// the column-move case above (`ldui-9j16`), and the same remedy: re-query by
+/// the stable `data-entity-group-toggle` key on the next frame, once the new
+/// button exists. Keyed by group, so focus lands on the SAME group's toggle
+/// rather than merely somewhere plausible.
+fn restore_group_toggle_focus(event: web_sys::MouseEvent, group_key: String) {
+    let Some(root) = event
+        .target()
+        .or_else(|| event.current_target())
+        .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
+        .and_then(|element| element.closest("[data-entity-table]").ok().flatten())
+    else {
+        return;
+    };
+    request_animation_frame(move || {
+        let selector = format!("[data-entity-group-toggle=\"{group_key}\"]");
+        if let Ok(Some(button)) = root.query_selector(&selector)
+            && let Ok(button) = button.dyn_into::<web_sys::HtmlElement>()
+        {
+            let _ = button.focus();
+        }
+    });
 }
 
 fn restore_column_move_focus(

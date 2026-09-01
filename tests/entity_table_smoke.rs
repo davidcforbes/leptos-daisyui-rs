@@ -620,7 +620,7 @@ async fn controlled_preferences_reorder_columns_and_compose_sort_clauses() {
     let controlled_mount = eval_json(
         &harness,
         r#"(() => ({
-            pageSize: document.querySelector('[data-entity-table] label select').value,
+            pageSize: document.querySelector('[data-entity-table] [data-entity-page-size-control] select').value,
             headers: Array.from(document.querySelectorAll('[data-entity-table-grid] thead tr:first-child th')).map(th => th.dataset.entityColumn),
             stored: localStorage.getItem('ldui-entity-table:client-snapshot-demo'),
         }))()"#,
@@ -1575,7 +1575,7 @@ async fn client_snapshot_list_contract_works_end_to_end() {
             const firstHeader = table.querySelector('thead th:first-child');
             const chooser = root.querySelector('[data-entity-table] [role="menu"]');
             const datasetSelect = root.querySelector('[data-dataset-selector] select');
-            const pageSizeSelect = root.querySelector('[data-entity-table] label select');
+            const pageSizeSelect = root.querySelector('[data-entity-table] [data-entity-page-size-control] select');
             return {
                 contract: root.dataset.pageContract,
                 dataMode: root.querySelector('[data-entity-table]').dataset.tableDataMode,
@@ -1771,7 +1771,7 @@ async fn client_snapshot_list_contract_works_end_to_end() {
         eval_json(
             &harness,
             r#"(() => {
-                const select = document.querySelector('[data-entity-table] label select');
+                const select = document.querySelector('[data-entity-table] [data-entity-page-size-control] select');
                 select.value = '50';
                 select.dispatchEvent(new Event('change', { bubbles: true }));
                 return true;
@@ -1786,7 +1786,7 @@ async fn client_snapshot_list_contract_works_end_to_end() {
             &harness,
             r#"(() => ({
                 rows: document.querySelectorAll('[data-entity-table-grid] tbody tr').length,
-                range: document.querySelector('[data-entity-table] > div:last-child > span').textContent.trim(),
+                range: document.querySelector('[data-entity-table] [data-entity-row-range]').textContent.trim(),
             }))()"#,
         )
         .await,
@@ -1972,7 +1972,7 @@ async fn client_snapshot_list_contract_works_end_to_end() {
     let restored_preferences = eval_json(
         &harness,
         r#"(() => ({
-            pageSize: document.querySelector('[data-entity-table] label select').value,
+            pageSize: document.querySelector('[data-entity-table] [data-entity-page-size-control] select').value,
             statusHeader: Array.from(document.querySelectorAll('[data-entity-table-grid] thead th')).some(th => th.textContent.includes('Status')),
         }))()"#,
     )
@@ -3919,7 +3919,7 @@ async fn page_size_select_gets_unique_identity_without_an_override_and_honors_on
         r#"(() => {
             const describe = (testid) => {
                 const root = document.querySelector(`[data-testid="${testid}"]`);
-                const select = root.querySelector('label select');
+                const select = root.querySelector('[data-entity-page-size-control] select');
                 const label = root.querySelector('label');
                 return {
                     id: select.id,
