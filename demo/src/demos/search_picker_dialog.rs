@@ -1,7 +1,10 @@
 use crate::core::{ContentLayout, Section};
 use leptos::prelude::*;
 use leptos_daisyui_rs::components::*;
-use leptos_daisyui_rs::patterns::{SearchPickerDialog, SearchPickerStatus};
+use leptos_daisyui_rs::patterns::{
+    ConfirmableSearchPickerDialog, ConfirmableSearchPickerDialogTexts, SearchPickerDialog,
+    SearchPickerStatus,
+};
 use std::time::Duration;
 
 /// Typed activation payload the display row (a person's name) does not
@@ -171,6 +174,186 @@ fn SearchPickerDialogFixture(instance: &'static str) -> impl IntoView {
     }
 }
 
+/// Neutral-domain typed payload for the confirmable fixture: the display row
+/// (a person's name) does not determine the identity behind it, and two rows
+/// deliberately share a name.
+#[derive(Clone, Debug, PartialEq)]
+struct DirectoryWorker {
+    worker_id: &'static str,
+}
+
+fn worker_directory() -> Vec<(&'static str, &'static str, &'static str, &'static str)> {
+    vec![
+        ("worker-a", "Alex Morgan", "Region North", "W-100"),
+        ("worker-b", "Alex Morgan", "Region South", "W-200"),
+        ("worker-c", "Priya Natarajan", "Region East", "W-300"),
+        ("worker-d", "Jordan Blake", "Region West", "W-400"),
+        ("worker-e", "Sam Okafor", "Region Central", "W-500"),
+    ]
+}
+
+fn filter_workers(query: &str) -> Vec<ResultListItem<DirectoryWorker>> {
+    let needle = query.trim().to_lowercase();
+    worker_directory()
+        .into_iter()
+        .filter(|(_, title, _, _)| needle.is_empty() || title.to_lowercase().contains(&needle))
+        .map(|(key, title, region, worker_id)| {
+            let mut row = ResultRow::new(title);
+            row.subtitle = region.to_string();
+            ResultListItem::new(key, row, DirectoryWorker { worker_id })
+        })
+        .collect()
+}
+
+fn english_texts() -> ConfirmableSearchPickerDialogTexts {
+    ConfirmableSearchPickerDialogTexts::default()
+}
+
+fn spanish_texts() -> ConfirmableSearchPickerDialogTexts {
+    ConfirmableSearchPickerDialogTexts {
+        search_label: "Buscar".to_string(),
+        search_placeholder: "Escriba para buscar…".to_string(),
+        selected_label: "Seleccionado".to_string(),
+        selected_none: "Todavía no hay ningún resultado seleccionado.".to_string(),
+        cancel: "Cancelar".to_string(),
+        confirm: "Asignar".to_string(),
+        confirm_pending: "Asignando…".to_string(),
+        confirm_blocked_no_selection: "Seleccione un resultado para continuar.".to_string(),
+        confirm_blocked_unresolved: "El resultado seleccionado ya no está disponible.".to_string(),
+    }
+}
+
+/// One independent `ConfirmableSearchPickerDialog` instance.
+///
+/// The side-effect counter is the point of the fixture: selecting a result --
+/// by pointer or by keyboard -- must leave it at zero, and only the explicit
+/// Confirm control may ever increment it.
+#[component]
+fn ConfirmableSearchPickerFixture(instance: &'static str) -> impl IntoView {
+    let open = RwSignal::new(false);
+    let query = RwSignal::new(String::new());
+    let selected_key = RwSignal::new(None::<String>);
+    let pending = RwSignal::new(false);
+    let confirm_error = RwSignal::new(None::<String>);
+    let confirm_count = RwSignal::new(0u32);
+    let confirmed = RwSignal::new(String::from("None"));
+    let fail_next = RwSignal::new(false);
+    let spanish = RwSignal::new(false);
+    let pending_handle = RwSignal::new(None::<TimeoutHandle>);
+
+    on_cleanup(move || {
+        if let Some(handle) = pending_handle.try_get_untracked().flatten() {
+            handle.clear();
+        }
+    });
+
+    // Search is synchronous here so the browser lane has no timing to race;
+    // the async/loading/error presentation is already proven by the
+    // immediate-activation fixtures above.
+    let items = Signal::derive(move || filter_workers(&query.get()));
+
+    let on_confirm = Callback::new(move |item: ResultListItem<DirectoryWorker>| {
+        confirm_error.set(None);
+        pending.set(true);
+        let handle = set_timeout_with_handle(
+            move || {
+                let _ = pending.try_set(false);
+                if fail_next.try_get_untracked().unwrap_or(false) {
+                    let _ = confirm_error
+                        .try_set(Some("The assignment could not be saved.".to_string()));
+                    return;
+                }
+                // The side-effect counter only ever moves here.
+                let _ = confirm_count.try_update(|count| *count += 1);
+                let _ = confirmed.try_set(format!("{} ({})", item.key, item.payload.worker_id));
+                let _ = open.try_set(false);
+            },
+            Duration::from_millis(250),
+        );
+        if let Ok(handle) = handle {
+            pending_handle.set(Some(handle));
+        }
+    });
+
+    view! {
+        <div class="flex flex-col gap-3" data-testid=format!("{instance}-fixture")>
+            <div class="alert alert-info" data-testid=format!("{instance}-status")>
+                <span>
+                    "Confirmations: " <strong>{move || confirm_count.get()}</strong>
+                    " | Confirmed: " <strong>{move || confirmed.get()}</strong>
+                    " | Selected: "
+                    <strong>
+                        {move || selected_key.get().unwrap_or_else(|| "None".to_string())}
+                    </strong>
+                </span>
+            </div>
+            <div class="flex flex-wrap gap-2">
+                <Button
+                    color=ButtonColor::Primary
+                    attr:data-testid=format!("{instance}-trigger")
+                    on:click=move |_| open.set(true)
+                >
+                    "Open " {instance}
+                </Button>
+                <Button
+                    style=ButtonStyle::Outline
+                    attr:data-testid=format!("{instance}-toggle-failure")
+                    on:click=move |_| fail_next.update(|value| *value = !*value)
+                >
+                    {move || {
+                        if fail_next.get() { "Next confirm: fails" } else { "Next confirm: succeeds" }
+                    }}
+                </Button>
+                <Button
+                    style=ButtonStyle::Outline
+                    attr:data-testid=format!("{instance}-toggle-locale")
+                    on:click=move |_| spanish.update(|value| *value = !*value)
+                >
+                    {move || if spanish.get() { "Idioma: Español" } else { "Language: English" }}
+                </Button>
+            </div>
+
+            <ConfirmableSearchPickerDialog
+                open=open
+                control_id=instance
+                title=Signal::derive(move || {
+                    if spanish.get() {
+                        format!("Asignar responsable ({instance})")
+                    } else {
+                        format!("Assign owner ({instance})")
+                    }
+                })
+                description=Signal::derive(move || {
+                    Some(
+                        if spanish.get() {
+                            "Elija un trabajador y confirme la asignación.".to_string()
+                        } else {
+                            "Choose a worker, then confirm the assignment.".to_string()
+                        },
+                    )
+                })
+                query=query
+                status=Signal::stored(SearchPickerStatus::Ready)
+                items=items
+                selected_key=selected_key
+                pending=pending
+                on_query_change=Callback::new(move |text: String| query.set(text))
+                on_selection_change=Callback::new(move |
+                    proposal: KeyedResultListSelectionProposal|
+                {
+                    selected_key.set(proposal.key);
+                })
+                on_confirm=on_confirm
+                on_close=Callback::new(move |_| open.set(false))
+                texts=Signal::derive(move || {
+                    if spanish.get() { spanish_texts() } else { english_texts() }
+                })
+                confirm_error=confirm_error
+            />
+        </div>
+    }
+}
+
 #[component]
 pub fn SearchPickerDialogDemo() -> impl IntoView {
     view! {
@@ -199,9 +382,40 @@ pub fn SearchPickerDialogDemo() -> impl IntoView {
                 </div>
             </Section>
 
+            <Section title="Confirmable: search, select, then explicitly confirm">
+                <p class="text-sm text-base-content/75 mb-2">
+                    "Selecting a result -- by click or by "
+                    <kbd class="kbd kbd-sm">"↑"</kbd> " " <kbd class="kbd kbd-sm">"↓"</kbd>
+                    " from the search field -- only moves the selected key. The confirmation
+                     counter stays at zero until the explicit "
+                    <strong>"Confirm"</strong> " button is activated."
+                </p>
+                <p class="text-sm text-base-content/75 mb-2">
+                    "Select " <strong>"Alex Morgan (Region South)"</strong>
+                    ", then search for " <em>"Priya"</em>
+                    ": the selection leaves the visible list but stays named in the summary and
+                     stays confirmable. Escape or Cancel closes without confirming and without
+                     discarding the selection -- reopen and it is still there."
+                </p>
+                <p class="text-sm text-base-content/75 mb-4">
+                    "Confirm is " <code>"aria-disabled"</code>
+                    " (never natively disabled) with nothing selected or while a confirmation is
+                     in flight, so it keeps its place in the tab order and its reason stays
+                     reachable. Toggle failure to see the dialog stay open with the selection
+                     intact when the write fails."
+                </p>
+                <div class="grid grid-cols-1 gap-6 md:grid-cols-2">
+                    <ConfirmableSearchPickerFixture instance="confirm-x" />
+                    <ConfirmableSearchPickerFixture instance="confirm-y" />
+                </div>
+            </Section>
+
             <Section title="Features">
                 <ul class="list-disc list-inside space-y-1 text-base-content/70">
                     <li>"Controlled query, status, and typed keyed items -- the caller owns fetching"</li>
+                    <li>"ConfirmableSearchPickerDialog splits selection from the mutation: no on_select exists on it"</li>
+                    <li>"A selection narrowed out of the results stays named and stays confirmable"</li>
+                    <li>"Confirm fails closed with no selection, a stale key, or a confirmation in flight"</li>
                     <li>"Opening focuses the search field; Escape/Cancel closes and restores focus"</li>
                     <li>"Arrow/Home/End/Enter operate the result list from the search field"</li>
                     <li>"Loading/error/empty/retained-error presentation via PageStatePanel"</li>

@@ -63,8 +63,10 @@ pub use record_header::{
     RecordStatusTone,
 };
 pub use search_picker_dialog::{
-    SearchPickerDialog, SearchPickerDialogTexts, SearchPickerRenderDecision, SearchPickerStatus,
-    search_picker_render_decision,
+    ConfirmableSearchPickerDialog, ConfirmableSearchPickerDialogTexts, SearchPickerConfirmBlock,
+    SearchPickerDialog, SearchPickerDialogTexts, SearchPickerDismissCause,
+    SearchPickerRenderDecision, SearchPickerStatus, resolve_search_picker_confirmation,
+    resolve_search_picker_selection, search_picker_confirm_block, search_picker_render_decision,
 };
 pub use section_heading::{HeadingLevel, SectionHeading};
 pub use selectable_summary::{
