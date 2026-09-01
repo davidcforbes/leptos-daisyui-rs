@@ -376,6 +376,21 @@ fn style_step() -> Step {
 /// [`reactivity_step`]/[`layout_step`]/[`style_step`]) rather than a
 /// dedicated test-host page, and stays in its own file/step rather than
 /// growing `reactivity_smoke.rs` because that suite's check count is pinned.
+/// Focused browser proof for `Modal`'s controlled close contract (ldui-e0fw):
+/// Escape and backdrop activation must reach the owner as a typed proposal
+/// instead of closing the dialog behind its back. Registered here because an
+/// unregistered suite runs in no lane at all -- it compiles, reports nothing,
+/// and the evidence it was written to produce is structurally unobtainable.
+fn modal_close_proposal_step() -> Step {
+    Step {
+        name: "test-modal-close-proposal",
+        run: Run::BrowserSuite {
+            test: "modal_close_proposal_smoke",
+            html_target: None,
+        },
+    }
+}
+
 fn result_list_step() -> Step {
     Step {
         name: "test-keyed-result-list",
@@ -498,6 +513,7 @@ fn full_steps() -> Vec<Step> {
     steps.push(layout_step());
     steps.push(style_step());
     steps.push(result_list_step());
+    steps.push(modal_close_proposal_step());
     steps.push(section_heading_step());
     steps.push(search_picker_dialog_step());
     steps.push(page_quick_actions_step());
@@ -2004,6 +2020,7 @@ fn main() -> ExitCode {
         "test-layout" => run_steps(&[layout_step()]),
         "test-style" => run_steps(&[style_step()]),
         "test-keyed-result-list" => run_steps(&[result_list_step()]),
+        "test-modal-close-proposal" => run_steps(&[modal_close_proposal_step()]),
         "test-section-heading" => run_steps(&[section_heading_step()]),
         "test-search-picker-dialog" => run_steps(&[search_picker_dialog_step()]),
         "test-page-quick-actions" => run_steps(&[page_quick_actions_step()]),
@@ -2024,7 +2041,7 @@ fn main() -> ExitCode {
         other => {
             eprintln!("xtask: unknown subcommand {other:?}");
             eprintln!(
-                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-server-table-column-tools|gen-tokens|check-sibling-tokens|bump>"
+                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-server-table-column-tools|gen-tokens|check-sibling-tokens|bump>"
             );
             ExitCode::from(2)
         }
