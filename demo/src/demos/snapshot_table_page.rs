@@ -1,12 +1,13 @@
 use leptos::prelude::*;
 use leptos_daisyui_rs::components::{
     BadgeColor, Button, EntityBadgePresentation, EntityColumn, EntityColumnChooserTrigger,
-    EntityColumnFilter, EntityColumnFilterOption, EntityGroupCollapseProposal, EntityIconColor,
-    EntityIconPresentation, EntityNullOrder, EntityPageSize, EntityRowAction, EntityRowEmphasis,
-    EntityRowGroup, EntityRowGrouping, EntityTable, EntityTableDisplayProjection,
-    EntityTableMultiSelection, EntityTablePreferenceOwnership, EntityTablePreferencePersistence,
-    EntityTableProjectionScope, EntityTableSelection, EntityTableSelectionCause,
-    EntityTableSelectionProposal, EntityTableTexts, EntityTableViewportFit,
+    EntityColumnFilter, EntityColumnFilterOption, EntityDate, EntityDateFilter,
+    EntityDateFilterProposal, EntityGroupCollapseProposal, EntityIconColor, EntityIconPresentation,
+    EntityNullOrder, EntityPageSize, EntityRowAction, EntityRowEmphasis, EntityRowGroup,
+    EntityRowGrouping, EntityTable, EntityTableDisplayProjection, EntityTableMultiSelection,
+    EntityTablePreferenceOwnership, EntityTablePreferencePersistence, EntityTableProjectionScope,
+    EntityTableSelection, EntityTableSelectionCause, EntityTableSelectionProposal,
+    EntityTableTexts, EntityTableViewportFit,
 };
 use leptos_daisyui_rs::patterns::{
     ActionFeedbackContent, ActionFeedbackState, PageHeader, PageHeaderNavigationLayout,
@@ -1592,6 +1593,10 @@ struct CoordinatorActivityRow {
     kind: String,
     measure: String,
     value: String,
+    /// Machine arrival day, `""` for a record that has none. The fixture keeps
+    /// the model value and the rendered cell deliberately separate so the date
+    /// filter can be proved to compare the former (`ldui-lx5t`).
+    arrived: String,
 }
 
 fn coordinator_activity_rows() -> Rc<Vec<CoordinatorActivityRow>> {
@@ -1608,6 +1613,14 @@ fn coordinator_activity_rows() -> Rc<Vec<CoordinatorActivityRow>> {
                         kind: kind.to_owned(),
                         measure: format!("Intake week {index}"),
                         value: (seed * 10 + slot as u32 * 3 + index).to_string(),
+                        // One kind is deliberately undated: a bounded date
+                        // filter must exclude it, and an unbounded one must
+                        // not.
+                        arrived: if kind == "Actual" {
+                            String::new()
+                        } else {
+                            format!("2026-08-{:02}", seed * 3 + slot as u32 + index)
+                        },
                     })
                 })
             })
@@ -1637,6 +1650,14 @@ fn coordinator_activity_columns() -> Vec<EntityColumn<CoordinatorActivityRow>> {
         })
         .numeric()
         .with_width(120),
+        EntityColumn::text("arrived", "Arrived", |row: &CoordinatorActivityRow| {
+            if row.arrived.is_empty() {
+                "--".to_owned()
+            } else {
+                row.arrived.clone()
+            }
+        })
+        .with_min_width(150),
     ]
 }
 
@@ -1657,6 +1678,8 @@ fn coordinator_activity_columns() -> Vec<EntityColumn<CoordinatorActivityRow>> {
 pub fn EntityTableGroupingFixture() -> impl IntoView {
     let source = coordinator_activity_rows();
     let kind_filter = RwSignal::new(String::new());
+    let arrived_filter = RwSignal::new(String::new());
+    let date_proposal = RwSignal::new("(none)".to_owned());
     let collapsed = RwSignal::new(BTreeSet::<String>::new());
     let collapse_proposals = RwSignal::new(0_u32);
     let accepted = RwSignal::new(BTreeSet::<String>::new());
@@ -1668,13 +1691,18 @@ pub fn EntityTableGroupingFixture() -> impl IntoView {
         let source = Rc::clone(&source);
         Signal::derive_local(move || {
             let kind = kind_filter.get();
-            if kind.is_empty() {
+            // The date surface is ANDed with the column filter, and it
+            // compares the row's own machine value -- never the "--" the
+            // undated rows RENDER.
+            let cutoff = EntityDateFilter::parse_on_or_before(&arrived_filter.get());
+            if kind.is_empty() && !cutoff.constrains() {
                 return Rc::clone(&source);
             }
             Rc::new(
                 source
                     .iter()
-                    .filter(|row| row.kind == kind)
+                    .filter(|row| kind.is_empty() || row.kind == kind)
+                    .filter(|row| cutoff.matches(EntityDate::parse(&row.arrived).ok()))
                     .cloned()
                     .collect::<Vec<_>>(),
             )
@@ -1693,19 +1721,35 @@ pub fn EntityTableGroupingFixture() -> impl IntoView {
         ]
     });
 
-    let filters = vec![EntityColumnFilter::select(
-        "kind",
-        "entity-grouping-kind-filter",
-        Signal::stored("Activity".to_owned()),
-        Signal::derive(move || kind_filter.get()),
-        Signal::stored("All activities".to_owned()),
-        Signal::stored(vec![
-            EntityColumnFilterOption::new("Task", "Task"),
-            EntityColumnFilterOption::new("Goal", "Goal"),
-            EntityColumnFilterOption::new("Actual", "Actual"),
-        ]),
-        Callback::new(move |value: String| kind_filter.set(value)),
-    )];
+    let filters = vec![
+        EntityColumnFilter::select(
+            "kind",
+            "entity-grouping-kind-filter",
+            Signal::stored("Activity".to_owned()),
+            Signal::derive(move || kind_filter.get()),
+            Signal::stored("All activities".to_owned()),
+            Signal::stored(vec![
+                EntityColumnFilterOption::new("Task", "Task"),
+                EntityColumnFilterOption::new("Goal", "Goal"),
+                EntityColumnFilterOption::new("Actual", "Actual"),
+            ]),
+            Callback::new(move |value: String| kind_filter.set(value)),
+        ),
+        EntityColumnFilter::date(
+            "arrived",
+            "entity-grouping-arrived-filter",
+            Signal::stored("Arrived on or before".to_owned()),
+            Signal::derive(move || arrived_filter.get()),
+            Signal::stored("Enter an arrival date as YYYY-MM-DD".to_owned()),
+            Callback::new(move |proposal: EntityDateFilterProposal| {
+                date_proposal.set(format!(
+                    "{}|{:?}|{}|{}",
+                    proposal.raw, proposal.cause, proposal.column_id, proposal.control_id
+                ));
+                arrived_filter.set(proposal.raw);
+            }),
+        ),
+    ];
 
     view! {
         <section
@@ -1741,6 +1785,21 @@ pub fn EntityTableGroupingFixture() -> impl IntoView {
                     </code>
                 </span>
                 <span>
+                    "Arrived cutoff: "
+                    <code data-testid="entity-grouping-arrived-value">
+                        {move || {
+                            let raw = arrived_filter.get();
+                            if raw.is_empty() { "(none)".to_owned() } else { raw }
+                        }}
+                    </code>
+                </span>
+                <span>
+                    "Date proposal: "
+                    <code data-testid="entity-grouping-date-proposal">
+                        {move || date_proposal.get()}
+                    </code>
+                </span>
+                <span>
                     "Exported group column: "
                     <code data-testid="entity-grouping-export-cells">
                         {move || exported_group_cells.get()}
@@ -1766,13 +1825,24 @@ pub fn EntityTableGroupingFixture() -> impl IntoView {
                 >
                     "Expand all groups"
                 </Button>
+                // A native date picker cannot produce an unreadable value, but
+                // a restored URL query or saved view can. This button stands in
+                // for that restore so the error state is reachable.
+                <Button
+                    on:click=move |_| arrived_filter.set("2026-02-30".to_owned())
+                    attr:data-testid="entity-grouping-restore-unreadable-date"
+                >
+                    "Restore an unreadable saved cutoff"
+                </Button>
             </div>
             <EntityTable
                 data=filtered
                 columns=coordinator_activity_columns()
                 row_key=Rc::new(|row: &CoordinatorActivityRow| row.id.clone())
                 dataset_identity="entity-table-grouping-fixture"
-                page_reset_key=Signal::derive(move || kind_filter.get())
+                page_reset_key=Signal::derive(move || {
+                    format!("{}|{}", kind_filter.get(), arrived_filter.get())
+                })
                 column_filters=filters
                 row_grouping=EntityRowGrouping::controlled(
                     Rc::new(|row: &CoordinatorActivityRow| row.coordinator_id.clone()),

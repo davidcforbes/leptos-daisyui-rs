@@ -1373,6 +1373,259 @@ fn controlled_select_filter_keeps_value_identity_separate_from_reactive_labels()
     });
 }
 
+fn date(year: i32, month: u8, day: u8) -> EntityDate {
+    EntityDate::from_ymd(year, month, day).expect("a real calendar day")
+}
+
+#[test]
+fn a_civil_date_accepts_only_real_iso_calendar_days() {
+    // The filter never compares rendered cell text, so the ONE place a string
+    // becomes comparable is here, and every rejection is a named state rather
+    // than a silent fallback.
+    assert_eq!(EntityDate::parse("2026-08-04"), Ok(date(2026, 8, 4)));
+    assert_eq!(
+        EntityDate::parse("  2026-08-04\n"),
+        Ok(date(2026, 8, 4)),
+        "a value restored from a URL or a saved view often carries whitespace"
+    );
+    assert_eq!(EntityDate::parse("2024-02-29"), Ok(date(2024, 2, 29)));
+
+    assert_eq!(EntityDate::parse(""), Err(EntityDateParseError::Empty));
+    assert_eq!(EntityDate::parse("   "), Err(EntityDateParseError::Empty));
+
+    for malformed in [
+        "2026-8-4",
+        "04/08/2026",
+        "2026-08-04T09:30",
+        "20260804",
+        "+2026-08-04",
+        "2026-08-0x",
+        "202\u{00e9}-08-04",
+    ] {
+        assert_eq!(
+            EntityDate::parse(malformed),
+            Err(EntityDateParseError::Malformed),
+            "{malformed} is not an ISO calendar date"
+        );
+    }
+
+    for out_of_range in ["2026-13-01", "2026-00-10", "2026-02-30", "0000-01-01"] {
+        assert_eq!(
+            EntityDate::parse(out_of_range),
+            Err(EntityDateParseError::OutOfRange),
+            "{out_of_range} is shaped right but names no real day"
+        );
+    }
+    assert_eq!(
+        EntityDate::parse("2026-02-29"),
+        Err(EntityDateParseError::OutOfRange),
+        "2026 is not a leap year"
+    );
+    assert_eq!(
+        EntityDate::from_ymd(1900, 2, 29),
+        None,
+        "1900 is not a leap year"
+    );
+    assert_eq!(EntityDate::from_ymd(2000, 2, 29), Some(date(2000, 2, 29)));
+}
+
+#[test]
+fn civil_dates_order_by_calendar_and_round_trip_their_machine_text() {
+    let mut days = vec![date(2026, 1, 9), date(2025, 12, 31), date(2026, 1, 10)];
+    days.sort();
+    assert_eq!(
+        days,
+        vec![date(2025, 12, 31), date(2026, 1, 9), date(2026, 1, 10)],
+        "9 January must sort before 10 January, which text ordering also gets \
+         right only because to_iso zero-pads"
+    );
+    assert_eq!(days[1].to_iso(), "2026-01-09");
+    assert_eq!(EntityDate::parse(&days[1].to_iso()), Ok(days[1]));
+    assert_eq!(days[1].year(), 2026);
+    assert_eq!(days[1].month(), 1);
+    assert_eq!(days[1].day(), 9);
+}
+
+#[test]
+fn an_unbounded_date_filter_hides_nothing_at_all() {
+    // "The user has not filtered" -- so an undated row must survive too.
+    // Getting this backwards empties a table the moment the control renders.
+    let filter = EntityDateFilter::unbounded();
+    assert_eq!(filter.status(), EntityDateFilterStatus::Unconstrained);
+    assert!(!filter.constrains());
+    assert!(filter.matches(Some(date(1999, 1, 1))));
+    assert!(filter.matches(None));
+    assert_eq!(
+        EntityDateFilter::parse_bounds("", "   "),
+        EntityDateFilter::unbounded(),
+        "empty control text on both ends is the identity filter"
+    );
+}
+
+#[test]
+fn both_date_range_ends_are_inclusive() {
+    let filter = EntityDateFilter::between(date(2026, 8, 1), date(2026, 8, 4));
+    assert_eq!(filter.status(), EntityDateFilterStatus::Constrained);
+    assert!(
+        filter.matches(Some(date(2026, 8, 1))),
+        "the start day is in"
+    );
+    assert!(filter.matches(Some(date(2026, 8, 4))), "the end day is in");
+    assert!(!filter.matches(Some(date(2026, 7, 31))));
+    assert!(!filter.matches(Some(date(2026, 8, 5))));
+
+    let single = EntityDateFilter::on(date(2026, 8, 4));
+    assert!(single.matches(Some(date(2026, 8, 4))));
+    assert!(!single.matches(Some(date(2026, 8, 3))));
+}
+
+#[test]
+fn a_half_open_date_filter_compares_one_end_and_excludes_undated_rows() {
+    // The Office "arrived on or before cutoff" shape: only the upper end is
+    // bounded, and a record with no arrival date cannot satisfy it.
+    let cutoff = EntityDateFilter::parse_on_or_before("2026-08-04");
+    assert_eq!(cutoff.status(), EntityDateFilterStatus::Constrained);
+    assert!(cutoff.constrains());
+    assert!(cutoff.start().is_open());
+    assert!(cutoff.matches(Some(date(1970, 1, 1))));
+    assert!(cutoff.matches(Some(date(2026, 8, 4))));
+    assert!(!cutoff.matches(Some(date(2026, 8, 5))));
+    assert!(
+        !cutoff.matches(None),
+        "an undated row must not slip through a bounded filter"
+    );
+
+    let since = EntityDateFilter::parse_on_or_after("2026-08-04");
+    assert!(since.end().is_open());
+    assert!(since.matches(Some(date(2026, 8, 4))));
+    assert!(!since.matches(Some(date(2026, 8, 3))));
+    assert!(!since.matches(None));
+}
+
+#[test]
+fn an_inverted_date_range_matches_nothing_and_reports_why() {
+    let filter = EntityDateFilter::between(date(2026, 8, 5), date(2026, 8, 4));
+    assert_eq!(filter.status(), EntityDateFilterStatus::Impossible);
+    assert!(
+        filter.constrains(),
+        "an impossible filter is excluding everything, so the user must be \
+         able to see and clear it"
+    );
+    assert!(!filter.matches(Some(date(2026, 8, 4))));
+    assert!(!filter.matches(Some(date(2026, 8, 5))));
+    assert!(!filter.matches(None));
+    assert_eq!(filter.invalid_input(), None, "impossible is not unreadable");
+}
+
+#[test]
+fn an_unreadable_date_filter_matches_nothing_and_keeps_the_offending_text() {
+    // Degrading unreadable text to "no constraint" would silently WIDEN the
+    // result set; degrading it to a quiet empty table would hide the cause.
+    // Neither happens: nothing matches and the text is retrievable.
+    let filter = EntityDateFilter::parse_on_or_before("last tuesday");
+    assert_eq!(filter.status(), EntityDateFilterStatus::Invalid);
+    assert!(filter.constrains());
+    assert_eq!(filter.invalid_input(), Some("last tuesday"));
+    assert!(!filter.matches(Some(date(2026, 8, 4))));
+    assert!(!filter.matches(None));
+    assert!(filter.end().is_invalid());
+    assert_eq!(filter.end().date(), None);
+
+    // Unreadable outranks impossible: the actionable message wins.
+    let both = EntityDateFilter::parse_bounds("2026-08-05", "2026-02-30");
+    assert_eq!(both.status(), EntityDateFilterStatus::Invalid);
+    assert_eq!(both.invalid_input(), Some("2026-02-30"));
+
+    assert_eq!(
+        EntityDateBound::parse("2026-02-30"),
+        EntityDateBound::Invalid("2026-02-30".to_owned())
+    );
+    assert_eq!(EntityDateBound::parse("  "), EntityDateBound::Open);
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ArrivalRow {
+    client: &'static str,
+    status: &'static str,
+    arrived: Option<EntityDate>,
+}
+
+fn arrival_rows() -> Vec<ArrivalRow> {
+    vec![
+        ArrivalRow {
+            client: "Ada Lovelace",
+            status: "ready",
+            arrived: Some(date(2026, 8, 1)),
+        },
+        ArrivalRow {
+            client: "Ada Byron",
+            status: "urgent",
+            arrived: Some(date(2026, 8, 4)),
+        },
+        ArrivalRow {
+            client: "Grace Hopper",
+            status: "ready",
+            arrived: Some(date(2026, 8, 9)),
+        },
+        ArrivalRow {
+            client: "Ada Unknown",
+            status: "ready",
+            arrived: None,
+        },
+    ]
+}
+
+/// Applies the three surfaces the way a consumer must: conjunction, with the
+/// date compared against the ROW's own value and never against cell text.
+fn surviving_clients(search: &str, status: &str, cutoff: &EntityDateFilter) -> Vec<&'static str> {
+    arrival_rows()
+        .into_iter()
+        .filter(|row| {
+            search.is_empty() || row.client.to_lowercase().contains(&search.to_lowercase())
+        })
+        .filter(|row| status.is_empty() || row.status == status)
+        .filter(|row| cutoff.matches(row.arrived))
+        .map(|row| row.client)
+        .collect()
+}
+
+#[test]
+fn a_date_filter_composes_with_search_and_column_filters_by_conjunction() {
+    // Alone, the free-text search keeps the undated row.
+    assert_eq!(
+        surviving_clients("ada", "", &EntityDateFilter::unbounded()),
+        vec!["Ada Lovelace", "Ada Byron", "Ada Unknown"]
+    );
+    // Adding the cutoff narrows it and drops the undated row, because a
+    // bounded date filter is a real constraint, not a preference.
+    let cutoff = EntityDateFilter::parse_on_or_before("2026-08-04");
+    assert_eq!(
+        surviving_clients("ada", "", &cutoff),
+        vec!["Ada Lovelace", "Ada Byron"]
+    );
+    // ANDed with a column filter, never ORed: each surface can only remove.
+    assert_eq!(
+        surviving_clients("ada", "ready", &cutoff),
+        vec!["Ada Lovelace"]
+    );
+    assert_eq!(surviving_clients("", "urgent", &cutoff), vec!["Ada Byron"]);
+    // An unreadable cutoff empties the result even where the other two
+    // surfaces match -- and `status()` is what explains the empty table.
+    let unreadable = EntityDateFilter::parse_on_or_before("2026-02-30");
+    assert!(surviving_clients("ada", "ready", &unreadable).is_empty());
+    assert_eq!(unreadable.status(), EntityDateFilterStatus::Invalid);
+    // Clearing the date restores exactly the pre-date result set: the filter
+    // surfaces are independent, so removing one never disturbs the others.
+    assert_eq!(
+        surviving_clients("ada", "ready", &EntityDateFilter::parse_on_or_before("")),
+        vec!["Ada Lovelace", "Ada Unknown"]
+    );
+    assert_eq!(
+        surviving_clients("", "ready", &EntityDateFilter::unbounded()),
+        vec!["Ada Lovelace", "Grace Hopper", "Ada Unknown"]
+    );
+}
+
 #[test]
 #[should_panic(expected = "EntityColumnFilter control_id must not be empty")]
 fn controlled_filter_rejects_an_empty_dom_identity() {
@@ -1385,6 +1638,101 @@ fn controlled_filter_rejects_an_empty_dom_identity() {
             RwSignal::new(String::new()),
             "Filter clients",
             Callback::new(|_| {}),
+        );
+    });
+}
+
+#[test]
+#[should_panic(expected = "EntityColumnFilter control_id must not be empty")]
+fn a_controlled_date_filter_rejects_an_empty_dom_identity() {
+    let owner = Owner::new();
+    owner.with(|| {
+        let _ = EntityColumnFilter::date(
+            "arrived",
+            "",
+            "Arrived",
+            RwSignal::new(String::new()),
+            "Enter a date as YYYY-MM-DD",
+            Callback::new(|_| {}),
+        );
+    });
+}
+
+#[test]
+fn a_controlled_date_filter_only_proposes_and_never_applies() {
+    let owner = Owner::new();
+    owner.with(|| {
+        let label = RwSignal::new("Arrived".to_owned());
+        let value = RwSignal::new("2026-08-04".to_owned());
+        let proposals = Arc::new(Mutex::new(Vec::<EntityDateFilterProposal>::new()));
+        let observed = Arc::clone(&proposals);
+        let filter = EntityColumnFilter::date(
+            "arrived",
+            "awaiting-arrived-filter",
+            label,
+            value,
+            "Enter a date as YYYY-MM-DD",
+            Callback::new(move |proposal| observed.lock().unwrap().push(proposal)),
+        );
+
+        assert_eq!(filter.control_id(), Some("awaiting-arrived-filter"));
+        assert_eq!(filter.label("Arrival date"), "Arrived");
+        assert!(filter.is_active());
+
+        filter.clear();
+        let cleared = proposals.lock().unwrap().last().cloned().expect("proposal");
+        assert_eq!(cleared.raw, "");
+        assert_eq!(cleared.bound, EntityDateBound::Open);
+        assert_eq!(cleared.cause, EntityDateFilterCause::Cleared);
+        assert_eq!(cleared.column_id, "arrived");
+        assert_eq!(
+            cleared.control_id, "awaiting-arrived-filter",
+            "the scope stamp is the caller's own base ID, so header and \
+             responsive copies of one filter propose under one identity"
+        );
+        assert_eq!(cleared.date(), None);
+        assert_eq!(
+            value.get(),
+            "2026-08-04",
+            "a proposal must not mutate the caller-owned value"
+        );
+        assert!(
+            filter.is_active(),
+            "a rejected clear proposal must not disagree with the controlled value"
+        );
+
+        // A proposal carries the complete resulting value ALREADY interpreted,
+        // so a caller storing a parsed filter cannot disagree with the control
+        // about whether the text was readable.
+        let edited = EntityDateFilterProposal::new(
+            "2026-08-09",
+            EntityDateFilterCause::Edited,
+            "arrived",
+            "awaiting-arrived-filter",
+        );
+        assert_eq!(edited.date(), Some(date(2026, 8, 9)));
+        assert_eq!(
+            EntityDateFilterProposal::new(
+                "2026-02-30",
+                EntityDateFilterCause::Edited,
+                "arrived",
+                "awaiting-arrived-filter",
+            )
+            .bound,
+            EntityDateBound::Invalid("2026-02-30".to_owned())
+        );
+
+        // Localized copy is reactive, and an unreadable accepted value stays
+        // ACTIVE -- otherwise the responsive panel would hide the only control
+        // that can recover from it.
+        label.set("Recibido".to_owned());
+        assert_eq!(filter.label("Arrival date"), "Recibido");
+        value.set("last tuesday".to_owned());
+        assert!(filter.is_active());
+        value.set("   ".to_owned());
+        assert!(
+            !filter.is_active(),
+            "whitespace-only text expresses no constraint"
         );
     });
 }
@@ -2290,6 +2638,9 @@ struct ActivityRow {
     id: &'static str,
     coordinator: &'static str,
     kind: &'static str,
+    /// Machine `YYYY-MM-DD` arrival text, exactly as a consumer's own model
+    /// would carry it before a date filter interprets it.
+    arrived: &'static str,
 }
 
 fn activity_rows() -> Vec<ActivityRow> {
@@ -2298,26 +2649,31 @@ fn activity_rows() -> Vec<ActivityRow> {
             id: "a1",
             coordinator: "co-2",
             kind: "Task",
+            arrived: "2026-08-09",
         },
         ActivityRow {
             id: "a2",
             coordinator: "co-1",
             kind: "Task",
+            arrived: "2026-08-01",
         },
         ActivityRow {
             id: "a3",
             coordinator: "co-2",
             kind: "Goal",
+            arrived: "2026-08-10",
         },
         ActivityRow {
             id: "a4",
             coordinator: "co-1",
             kind: "Goal",
+            arrived: "2026-08-04",
         },
         ActivityRow {
             id: "a5",
             coordinator: "co-3",
             kind: "Actual",
+            arrived: "",
         },
     ]
 }
@@ -2543,6 +2899,63 @@ fn collapsing_removes_rows_from_the_displayed_model_but_keeps_an_honest_count() 
     assert_eq!(order.indices.len(), 3);
     assert!(!order.group_keys.iter().any(|key| key == "co-1"));
     assert_eq!(order.group_keys.len(), order.indices.len());
+}
+
+#[test]
+fn a_date_filter_that_empties_a_group_removes_its_heading_with_its_rows() {
+    // Composition with ldui-iyfa: a date filter is an ordinary CHILD-ROW
+    // filter, applied before grouping. A group left with no surviving child
+    // has no run, so its heading cannot outlive its rows -- and an undated
+    // row is excluded by a bounded filter, which is what empties `co-3` here.
+    let cutoff = EntityDateFilter::parse_on_or_before("2026-08-04");
+    let rows: Vec<ActivityRow> = activity_rows()
+        .into_iter()
+        .filter(|row| cutoff.matches(EntityDate::parse(row.arrived).ok()))
+        .collect();
+    assert_eq!(
+        grouped_keys_of(
+            &rows,
+            &grouped_order_of(
+                &rows,
+                &activity_groups(),
+                EntityGroupOrder::Declared,
+                &BTreeSet::new(),
+            )
+        ),
+        vec!["a2", "a4"]
+    );
+
+    let order = grouped_order_of(
+        &rows,
+        &activity_groups(),
+        EntityGroupOrder::Declared,
+        &BTreeSet::new(),
+    );
+    assert_eq!(
+        order
+            .runs
+            .iter()
+            .map(|run| run.key.as_str())
+            .collect::<Vec<_>>(),
+        vec!["co-1"],
+        "co-2 (both rows after the cutoff) and co-3 (undated) lose their headings"
+    );
+
+    // Clearing the date restores every group, headings included.
+    let restored = activity_rows();
+    let cleared = EntityDateFilter::parse_on_or_before("");
+    assert!(
+        restored
+            .iter()
+            .all(|row| cleared.matches(EntityDate::parse(row.arrived).ok()))
+    );
+    let order = grouped_order_of(
+        &restored,
+        &activity_groups(),
+        EntityGroupOrder::Declared,
+        &BTreeSet::new(),
+    );
+    assert_eq!(order.runs.len(), 3);
 }
 
 #[test]

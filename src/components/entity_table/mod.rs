@@ -1,6 +1,7 @@
 //! Generic, typed client-side table for complete dataset snapshots.
 
 mod component;
+mod date_filter;
 mod emphasis;
 mod grouping;
 mod model;
@@ -9,6 +10,10 @@ mod selection;
 mod storage;
 mod types;
 
+pub use date_filter::{
+    EntityDate, EntityDateBound, EntityDateFilter, EntityDateFilterCause, EntityDateFilterProposal,
+    EntityDateFilterStatus, EntityDateParseError,
+};
 pub use emphasis::{EntityRowEmphasis, EntityRowEmphasisClassifier};
 pub use grouping::{
     ENTITY_GROUP_COLUMN_ID, EntityGroupActions, EntityGroupCollapseCause,

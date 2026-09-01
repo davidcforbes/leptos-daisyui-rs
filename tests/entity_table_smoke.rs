@@ -4778,3 +4778,253 @@ async fn entity_table_row_groups_are_accessible_and_never_inflate_counts() {
 
     assert_no_browser_errors(&harness, "EntityTable row grouping").await;
 }
+
+/// `ldui-lx5t`: the opinionated controlled date filter.
+///
+/// Proves what a native predicate test structurally cannot: that ONE
+/// declaration renders in both the header and the responsive panel without
+/// colliding DOM IDs, that its accessible name says which column it filters,
+/// that the control proposes rather than applies, that the responsive
+/// active/clear affordances work, and that an unreadable restored value is
+/// announced instead of silently reading as "no filter" -- which is what a
+/// native date input does on its own, because the browser refuses to display
+/// a value it cannot parse.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
+async fn entity_table_date_filter_is_controlled_localized_and_never_silently_empty() {
+    let harness = harness_at("/components/entity-table-grouping").await;
+    begin_browser_error_capture(&harness).await;
+    wait_for_selector(
+        &harness,
+        "#entity-grouping-table [data-entity-filter-control='arrived']",
+    )
+    .await;
+
+    // Header placement: one control, the caller's own ID verbatim, a real
+    // native date input, and an accessible name naming its column.
+    let header = eval_json(
+        &harness,
+        r#"(() => {
+            const control = document.querySelector('#entity-grouping-table [data-entity-filter-control="arrived"]');
+            const label = control.closest('label');
+            return {
+                total: document.querySelectorAll('[data-entity-filter-control="arrived"]').length,
+                id: control.id,
+                kind: control.dataset.entityFilterKind,
+                placement: control.dataset.entityFilterPlacement,
+                type: control.getAttribute('type'),
+                labelFor: label.getAttribute('for'),
+                accessibleName: label.querySelector('span.sr-only').textContent.trim(),
+                column: control.closest('th')?.dataset.entityColumn,
+                invalid: control.getAttribute('aria-invalid'),
+                describedBy: control.getAttribute('aria-describedby'),
+                value: control.value,
+                rows: document.querySelectorAll('#entity-grouping-table tbody tr[data-entity-row-key]').length,
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(header["total"], json!(1), "{header}");
+    assert_eq!(header["id"], json!("entity-grouping-arrived-filter"));
+    assert_eq!(header["kind"], json!("date"), "{header}");
+    assert_eq!(header["placement"], json!("header"), "{header}");
+    assert_eq!(
+        header["type"],
+        json!("date"),
+        "the shared Input date styling must emit a real native date control: {header}"
+    );
+    assert_eq!(header["labelFor"], header["id"], "{header}");
+    assert_eq!(
+        header["accessibleName"],
+        json!("Arrived on or before"),
+        "the name must say WHICH column, and must be the localized copy: {header}"
+    );
+    assert_eq!(header["column"], json!("arrived"), "{header}");
+    assert_eq!(
+        header["invalid"],
+        Value::Null,
+        "an empty filter is not an error: {header}"
+    );
+    assert_eq!(header["describedBy"], Value::Null, "{header}");
+    assert_eq!(header["value"], json!(""), "{header}");
+    assert_eq!(header["rows"], json!(18), "{header}");
+
+    // Editing proposes an ATOMIC typed value: the complete resulting text, a
+    // typed cause, and the column/control scope stamp.
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => {
+                const control = document.querySelector('[data-entity-filter-control="arrived"]');
+                control.value = '2026-08-05';
+                control.dispatchEvent(new Event('input', { bubbles: true }));
+                return true;
+            })()"#,
+        )
+        .await,
+        json!(true)
+    );
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    let edited = eval_json(
+        &harness,
+        r#"(() => ({
+            proposal: document.querySelector('[data-testid="entity-grouping-date-proposal"]').textContent.trim(),
+            accepted: document.querySelector('[data-testid="entity-grouping-arrived-value"]').textContent.trim(),
+            control: document.querySelector('[data-entity-filter-control="arrived"]').value,
+            groups: Array.from(document.querySelectorAll('#entity-grouping-table tbody[data-entity-group]'))
+                .map(section => section.dataset.entityGroup),
+            arrived: Array.from(document.querySelectorAll('#entity-grouping-table tbody td[data-entity-column="arrived"]'))
+                .map(cell => cell.textContent.trim()),
+        }))()"#,
+    )
+    .await;
+    assert_eq!(
+        edited["proposal"],
+        json!("2026-08-05|Edited|arrived|entity-grouping-arrived-filter"),
+        "{edited}"
+    );
+    assert_eq!(edited["accepted"], json!("2026-08-05"), "{edited}");
+    assert_eq!(edited["control"], json!("2026-08-05"), "{edited}");
+    let arrived_cells = edited["arrived"].as_array().expect("arrived cells").clone();
+    assert!(!arrived_cells.is_empty(), "{edited}");
+    assert!(
+        arrived_cells
+            .iter()
+            .all(|cell| cell.as_str().is_some_and(|text| text <= "2026-08-05")),
+        "the upper range end is inclusive and nothing past it survives: {edited}"
+    );
+    assert!(
+        !arrived_cells.iter().any(|cell| cell == "--"),
+        "a bounded date filter must exclude undated rows, not keep them: {edited}"
+    );
+    assert!(
+        !edited["groups"]
+            .as_array()
+            .expect("groups")
+            .iter()
+            .any(|key| key == "co-3"),
+        "a group the date filter emptied loses its heading with its rows: {edited}"
+    );
+
+    // An unreadable restored value is ANNOUNCED. Without this it would look
+    // exactly like no filter -- the browser blanks a value it cannot parse --
+    // while still hiding every row.
+    click(
+        &harness,
+        "[data-testid='entity-grouping-restore-unreadable-date']",
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    let unreadable = eval_json(
+        &harness,
+        r#"(() => {
+            const control = document.querySelector('[data-entity-filter-control="arrived"]');
+            const describedBy = control.getAttribute('aria-describedby');
+            return {
+                invalid: control.getAttribute('aria-invalid'),
+                hook: control.dataset.entityFilterInvalid,
+                errorClass: control.classList.contains('input-error'),
+                description: describedBy ? document.getElementById(describedBy).textContent.trim() : null,
+                controlValue: control.value,
+                accepted: document.querySelector('[data-testid="entity-grouping-arrived-value"]').textContent.trim(),
+                rows: document.querySelectorAll('#entity-grouping-table tbody tr[data-entity-row-key]').length,
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(unreadable["invalid"], json!("true"), "{unreadable}");
+    assert_eq!(unreadable["hook"], json!("true"), "{unreadable}");
+    assert_eq!(unreadable["errorClass"], json!(true), "{unreadable}");
+    assert_eq!(
+        unreadable["description"],
+        json!("Enter an arrival date as YYYY-MM-DD"),
+        "the description must be the caller's localized copy: {unreadable}"
+    );
+    assert_eq!(
+        unreadable["controlValue"],
+        json!(""),
+        "the browser blanks an unreadable date value, which is precisely why \
+         the error state has to carry the meaning: {unreadable}"
+    );
+    assert_eq!(unreadable["accepted"], json!("2026-02-30"), "{unreadable}");
+    assert_eq!(unreadable["rows"], json!(0), "{unreadable}");
+
+    // Responsive placement: the SAME declaration, a deterministically
+    // suffixed ID, no duplicates, and an active-state clear affordance.
+    harness
+        .set_viewport(ViewportSize::new(390, 844))
+        .await
+        .expect("set compact viewport");
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    let compact = eval_json(
+        &harness,
+        r#"(() => {
+            const control = document.querySelector('[data-entity-filter-control="arrived"]');
+            const ids = Array.from(document.querySelectorAll('[data-entity-filter-control]')).map(c => c.id);
+            return {
+                headerControls: document.querySelectorAll('[data-entity-column-filter-row] [data-entity-filter-control]').length,
+                panelControls: document.querySelectorAll('[data-entity-responsive-filter-panel] [data-entity-filter-control]').length,
+                id: control.id,
+                placement: control.dataset.entityFilterPlacement,
+                accessibleName: control.closest('label').querySelector('span.sr-only').textContent.trim(),
+                labelFor: control.closest('label').getAttribute('for'),
+                uniqueIds: new Set(ids).size === ids.length,
+                clears: document.querySelectorAll('[data-entity-clear-filter="arrived"]').length,
+                invalid: control.getAttribute('aria-invalid'),
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(compact["headerControls"], json!(0), "{compact}");
+    assert_eq!(compact["panelControls"], json!(2), "{compact}");
+    assert_eq!(
+        compact["id"],
+        json!("entity-grouping-arrived-filter-responsive"),
+        "{compact}"
+    );
+    assert_eq!(compact["placement"], json!("responsive"), "{compact}");
+    assert_eq!(compact["labelFor"], compact["id"], "{compact}");
+    assert_eq!(
+        compact["accessibleName"],
+        json!("Arrived on or before"),
+        "{compact}"
+    );
+    assert_eq!(compact["uniqueIds"], json!(true), "{compact}");
+    assert_eq!(
+        compact["clears"],
+        json!(1),
+        "an unreadable filter stays ACTIVE so the user can clear it: {compact}"
+    );
+    assert_eq!(compact["invalid"], json!("true"), "{compact}");
+
+    // Clearing proposes the complete cleared value with its own typed cause.
+    click(&harness, "[data-entity-clear-filter='arrived']").await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let cleared = eval_json(
+        &harness,
+        r#"(() => ({
+            proposal: document.querySelector('[data-testid="entity-grouping-date-proposal"]').textContent.trim(),
+            accepted: document.querySelector('[data-testid="entity-grouping-arrived-value"]').textContent.trim(),
+            invalid: document.querySelector('[data-entity-filter-control="arrived"]').getAttribute('aria-invalid'),
+            clears: document.querySelectorAll('[data-entity-clear-filter="arrived"]').length,
+            rows: document.querySelectorAll('#entity-grouping-table tbody tr[data-entity-row-key]').length,
+        }))()"#,
+    )
+    .await;
+    assert_eq!(
+        cleared["proposal"],
+        json!("|Cleared|arrived|entity-grouping-arrived-filter"),
+        "the clear proposal carries the base control ID, not the \
+         placement-suffixed DOM ID: {cleared}"
+    );
+    assert_eq!(cleared["accepted"], json!("(none)"), "{cleared}");
+    assert_eq!(cleared["invalid"], Value::Null, "{cleared}");
+    assert_eq!(cleared["clears"], json!(0), "{cleared}");
+    assert_eq!(
+        cleared["rows"],
+        json!(18),
+        "clearing the date restores every row, undated ones included: {cleared}"
+    );
+
+    assert_no_browser_errors(&harness, "EntityTable date filter").await;
+}

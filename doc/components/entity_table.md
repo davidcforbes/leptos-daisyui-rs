@@ -361,8 +361,10 @@ inside the colocated `toolbar_actions` callback.
 
 ## Hybrid aligned filters
 
-Prefer `EntityColumnFilter::text(...)` and `EntityColumnFilter::select(...)`
-for ordinary controlled filters. Both require a document-unique base control
+Prefer `EntityColumnFilter::text(...)`, `EntityColumnFilter::select(...)` and
+`EntityColumnFilter::date(...)` for ordinary controlled filters — a consumer
+should never hand-roll a private replacement for one of these. All three
+require a document-unique base control
 ID, a reactive localized label, the accepted value signal, and a replacement
 callback. `text` also accepts a reactive placeholder. `select` accepts a
 reactive localized all-option label and reactive
@@ -376,6 +378,92 @@ callback. Active metadata is derived from the accepted value and cannot drift
 from the rendered control. The header uses the supplied base ID and the
 responsive copy uses its deterministic `-responsive` suffix, avoiding duplicate
 IDs when presentation changes.
+
+### Controlled date filter (ldui-lx5t)
+
+`EntityColumnFilter::date(column_id, control_id, label, value, invalid_hint,
+on_change)` is the framework-owned date control. It carries the same contract
+as `text` and `select` — document-unique base ID, `-responsive` suffix for the
+compact copy, reactive localized label, caller-owned value, proposal-only
+`on_change` — and adds three things that a text field spelling `YYYY-MM-DD`
+cannot give you.
+
+**It is a native `date` input.** The platform picker, its keyboard operation
+and its locale-aware *presentation* come for free, while the value stays the
+machine `YYYY-MM-DD` text a URL query, a saved view and a server all already
+speak. Add `@source inline("input input-xs input-error");` to your
+`input.css`.
+
+**Its proposal is typed.** `on_change` receives an `EntityDateFilterProposal`
+carrying the complete resulting `raw` text, that text already interpreted as
+an `EntityDateBound`, an `EntityDateFilterCause` (`Edited` or `Cleared`), and
+the `column_id` / `control_id` scope stamp — the same shape
+`EntityTableSelectionProposal` uses, so a caller wiring several date filters
+through one callback routes on identity rather than on call order. `control_id`
+is always the caller's own base ID, never the placement-suffixed DOM ID.
+
+**An unreadable value is announced, not swallowed.** A native picker cannot
+produce a bad value, but a restored URL query, saved view or migrated
+preference can. The browser blanks a value a `date` input cannot parse, so
+without an explicit error state an unreadable constraint would look exactly
+like *no* constraint while still hiding every row. When `value` is neither
+empty nor a real calendar day the control adds `aria-invalid`, the daisyUI
+`input-error` treatment, a `data-entity-filter-invalid` hook, and
+`invalid_hint` as its accessible description. It also stays **active** while
+unreadable, so the responsive panel keeps offering the clear action that
+recovers from it.
+
+Every control carries `data-entity-filter-control="<column_id>"`,
+`data-entity-filter-placement="header" | "responsive"` and
+`data-entity-filter-kind="text" | "select" | "date"`. Locate a filter by those,
+never by position.
+
+#### What it compares: `EntityDateFilter`
+
+The filter row is a control surface; the table filters nothing itself. Apply
+the constraint with `EntityDateFilter`, the framework-owned predicate, against
+an `Option<EntityDate>` your own row accessor produces:
+
+```rust,ignore
+let cutoff = EntityDateFilter::parse_on_or_before(&cutoff_text.get());
+let visible: Vec<Matter> = matters
+    .iter()
+    .filter(|matter| cutoff.matches(matter.arrived_on))
+    .cloned()
+    .collect();
+```
+
+`EntityDate` is a timezone-free civil date. Collapsing a timestamp to a
+calendar day is *your* job, because "arrived on or before 4 August" is a claim
+about the calendar the user is reading, not about a point on the UTC timeline.
+Never filter on rendered cell text: that is display copy, and its meaning
+changes with the locale, the column renderer or a format callback.
+
+Both range ends are **inclusive** — the bound variant is named
+`EntityDateBound::Inclusive` so the question cannot be answered by experiment.
+`EntityDateFilter::status()` names each outcome, and `matches` follows it:
+
+| State | `status()` | `matches` |
+| --- | --- | --- |
+| Both ends empty | `Unconstrained` | everything, **including rows with no date** — the user has not filtered |
+| One end bounded (half-open) | `Constrained` | compares that end only; a row with **no date does not pass** |
+| Both bounded, start after end | `Impossible` | nothing — deliberately, and reportably |
+| Either end unreadable | `Invalid` | nothing; `invalid_input()` returns the offending text |
+
+`constrains()` is the active-filter signal: `Impossible` and `Invalid` both
+count as active, because they are excluding everything and the user must be
+able to see and clear that.
+
+The date surface is ANDed with free-text search and with `filterable()` column
+filters, exactly like every other filter: each can only remove rows. Under row
+grouping it is an ordinary child-row filter, so a group whose children it
+removes loses its heading with them (see
+[Controlled accessible row groups](#controlled-accessible-row-groups-ldui-iyfa)).
+
+A two-ended range is expressed by holding two values and calling
+`EntityDateFilter::parse_bounds(start, end)`; `EntityColumnFilter::date`
+itself renders one control, which is the single-cutoff shape the aligned filter
+row has room for.
 
 Use `EntityColumnFilter::new("stable_column_id", renderer)` as the compatible
 escape hatch for unusual controls. Add `.with_responsive(label, active,

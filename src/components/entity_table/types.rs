@@ -1,12 +1,13 @@
 //! Public types used to configure a typed entity table.
 
+use super::date_filter::{EntityDateBound, EntityDateFilterCause, EntityDateFilterProposal};
 use crate::components::badge::{BadgeColor, BadgeStyle};
-use crate::components::input::{Input, InputSize};
+use crate::components::input::{Input, InputSize, InputType};
 use crate::components::select::{Select, SelectSize};
 use leptos::html::{Input as HtmlInput, Select as HtmlSelect};
 use leptos::prelude::{
     AddAnyAttr, AnyView, Callable, Callback, ClassAttribute, CollectView, ElementChild, Get,
-    GetUntracked, IntoAny, LocalStorage, NodeRef, Signal, view,
+    GetUntracked, GlobalAttributes, IntoAny, LocalStorage, NodeRef, Signal, view,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::cmp::Ordering;
@@ -570,13 +571,21 @@ impl EntityColumnFilter {
                         node_ref=node_ref
                         attr:id=id
                         attr:data-entity-filter-control=column_id
+                        attr:data-entity-filter-kind="text"
                         attr:data-entity-filter-placement=entity_filter_placement_name(placement)
                     />
                 </label>
             }
             .into_any()
         });
-        Self::controlled(column_id, control_id, label, value, on_change, renderer)
+        Self::controlled(
+            column_id,
+            control_id,
+            label,
+            Signal::derive(move || !value.get().is_empty()),
+            Callback::new(move |()| on_change.run(String::new())),
+            renderer,
+        )
     }
 
     /// Creates an opinionated controlled single-select filter.
@@ -624,6 +633,7 @@ impl EntityColumnFilter {
                         on_change=controlled_change
                         node_ref=node_ref
                         attr:data-entity-filter-control=column_id
+                        attr:data-entity-filter-kind="select"
                         attr:data-entity-filter-placement=entity_filter_placement_name(placement)
                     >
                         <option value="">{move || all_label.get()}</option>
@@ -642,15 +652,148 @@ impl EntityColumnFilter {
             }
             .into_any()
         });
-        Self::controlled(column_id, control_id, label, value, on_change, renderer)
+        Self::controlled(
+            column_id,
+            control_id,
+            label,
+            Signal::derive(move || !value.get().is_empty()),
+            Callback::new(move |()| on_change.run(String::new())),
+            renderer,
+        )
+    }
+
+    /// Creates an opinionated controlled date filter (`ldui-lx5t`).
+    ///
+    /// The control is a native `date` input in the shared filter styling, so
+    /// it inherits the platform picker, keyboard operation and locale-aware
+    /// *presentation* for free while its value stays the machine `YYYY-MM-DD`
+    /// text every other layer already speaks. It carries the same contract as
+    /// [`Self::text`] and [`Self::select`]: `control_id` is used verbatim in
+    /// the header and with a deterministic suffix in the responsive copy,
+    /// `value` is the sole source of truth, and `on_change` only proposes.
+    ///
+    /// Unlike the other two, the proposal is typed:
+    /// [`EntityDateFilterProposal`] carries the complete resulting text, the
+    /// already-interpreted [`EntityDateBound`], a typed
+    /// [`EntityDateFilterCause`], and the column/control scope stamp -- so a
+    /// caller wiring several date filters through one callback routes on
+    /// identity rather than on call order, exactly as
+    /// [`EntityTableSelectionProposal`](super::EntityTableSelectionProposal)
+    /// does for selection.
+    ///
+    /// # What it compares
+    ///
+    /// Nothing, by itself. The filter row is a control surface; the caller
+    /// applies the constraint to its own rows, and
+    /// [`EntityDateFilter`] is the framework-owned predicate for doing that
+    /// against an [`EntityDate`] accessor rather than against rendered cell
+    /// text. Both range ends are inclusive; see that type for what an empty,
+    /// half-open, impossible or unreadable filter does.
+    ///
+    /// # Unreadable values are visible, not silent
+    ///
+    /// A native picker cannot produce a bad value, but a value restored from
+    /// a URL, a saved view or a migrated preference can be one. When `value`
+    /// is neither empty nor a real `YYYY-MM-DD` day the control adds
+    /// `aria-invalid`, the daisyUI `input-error` treatment, a
+    /// `data-entity-filter-invalid` hook, and `invalid_hint` as its
+    /// accessible description. This matters because the browser refuses to
+    /// display an unparseable value in a `date` input at all -- without the
+    /// error state an unreadable constraint would look exactly like no
+    /// constraint while still hiding every row.
+    ///
+    /// The filter reads as active whenever `value` is non-empty, including
+    /// while it is unreadable, so the responsive panel always offers the
+    /// clear action that recovers from it.
+    ///
+    /// ### Add to `input.css`
+    /// ```css
+    /// @source inline("input input-xs input-error");
+    /// ```
+    pub fn date(
+        column_id: &'static str,
+        control_id: impl Into<String>,
+        label: impl Into<Signal<String>>,
+        value: impl Into<Signal<String>>,
+        invalid_hint: impl Into<Signal<String>>,
+        on_change: Callback<EntityDateFilterProposal>,
+    ) -> Self {
+        let control_id = Rc::<str>::from(control_id.into());
+        assert_valid_entity_filter_control_id(&control_id);
+        let label = label.into();
+        let value = value.into();
+        let invalid_hint = invalid_hint.into();
+        let invalid = Signal::derive(move || EntityDateBound::parse(&value.get()).is_invalid());
+        let renderer_control_id = Rc::clone(&control_id);
+        let renderer = Rc::new(move |placement| {
+            let id = placed_entity_filter_control_id(&renderer_control_id, placement);
+            let label_for = id.clone();
+            let hint_id = format!("{id}-invalid");
+            let described_by = hint_id.clone();
+            let proposal_control_id = renderer_control_id.to_string();
+            let node_ref = NodeRef::<HtmlInput>::new();
+            let restore_ref = node_ref;
+            let controlled_change = Callback::new(move |next: String| {
+                on_change.run(EntityDateFilterProposal::new(
+                    next,
+                    EntityDateFilterCause::Edited,
+                    column_id,
+                    proposal_control_id.clone(),
+                ));
+                if let Some(input) = restore_ref.get() {
+                    input.set_value(&value.get_untracked());
+                }
+            });
+            view! {
+                <label class="block w-full" for=label_for>
+                    <span class="sr-only">{move || label.get()}</span>
+                    <Input
+                        input_type=InputType::Date
+                        size=InputSize::Xs
+                        class="input-bordered w-full bg-table-filter text-table-filter-content"
+                        value=value
+                        on_input=controlled_change
+                        node_ref=node_ref
+                        attr:id=id
+                        attr:data-entity-filter-control=column_id
+                        attr:data-entity-filter-kind="date"
+                        attr:data-entity-filter-placement=entity_filter_placement_name(placement)
+                        attr:data-entity-filter-invalid=move || invalid.get().then_some("true")
+                        attr:aria-invalid=move || invalid.get().then_some("true")
+                        attr:aria-describedby=move || invalid.get().then(|| described_by.clone())
+                        class:input-error=move || invalid.get()
+                    />
+                    <span id=hint_id class="sr-only">
+                        {move || if invalid.get() { invalid_hint.get() } else { String::new() }}
+                    </span>
+                </label>
+            }
+            .into_any()
+        });
+        let clear_control_id = control_id.to_string();
+        Self::controlled(
+            column_id,
+            control_id,
+            label,
+            Signal::derive(move || !value.get().trim().is_empty()),
+            Callback::new(move |()| {
+                on_change.run(EntityDateFilterProposal::new(
+                    String::new(),
+                    EntityDateFilterCause::Cleared,
+                    column_id,
+                    clear_control_id.clone(),
+                ));
+            }),
+            renderer,
+        )
     }
 
     fn controlled(
         column_id: &'static str,
         control_id: Rc<str>,
         label: Signal<String>,
-        value: Signal<String>,
-        on_change: Callback<String>,
+        active: Signal<bool>,
+        on_clear: Callback<()>,
         renderer: EntityControlledColumnFilterRenderer,
     ) -> Self {
         Self {
@@ -658,8 +801,8 @@ impl EntityColumnFilter {
             renderer: EntityColumnFilterRender::Controlled(renderer),
             responsive: Some(EntityColumnFilterResponsive {
                 label,
-                active: Signal::derive(move || !value.get().is_empty()),
-                on_clear: Callback::new(move |_| on_change.run(String::new())),
+                active,
+                on_clear,
             }),
             control_id: Some(control_id),
         }
