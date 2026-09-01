@@ -1,6 +1,6 @@
 use super::types::{
     EventKeyIntent, EventLayout, HourFormat, SchedulerEvent, compute_event_layout,
-    effective_height_px, event_aria_label, event_key_intent, minute_to_percent,
+    effective_height_px, event_key_intent, minute_to_percent, resolve_event_accessible_label,
 };
 use crate::merge_classes;
 use leptos::{html::Div, prelude::*};
@@ -48,6 +48,73 @@ use leptos::{html::Div, prelude::*};
 ///     }
 /// }
 /// ```
+///
+/// ### Event names: what is drawn vs. what is announced
+///
+/// `event_content` and `event_accessible_label` answer two different
+/// questions and must not be conflated. `event_content` controls what a
+/// *sighted* user sees painted inside the block (a title, an owner chip, a
+/// colour swatch). `event_accessible_label` controls what a *screen-reader*
+/// user hears as the block's whole name -- on an interactive scheduler it is
+/// the only name that user gets, so it must stand on its own even when
+/// `event_content` renders something visual-only.
+///
+/// The default accessible name is English interval grammar --
+/// `"{title}, {start} to {end}"`, exactly [`event_aria_label`]'s output --
+/// and every existing call site keeps that default untouched. A localised
+/// page supplies `event_accessible_label` instead: a
+/// `Callback<SchedulerEvent, String>` that receives the whole event (not a
+/// pre-joined string, so it can reorder or inflect) and returns the complete
+/// name. Because the callback runs *inside* the same reactive `aria-label`
+/// closure the default uses, it can read a locale `Signal` and the SAME
+/// rendered event node picks up the new name the moment the signal changes
+/// -- no rebuild, so focus and selection survive a language switch:
+///
+/// ```rust
+/// use leptos::prelude::*;
+/// use leptos_daisyui_rs::components::{DayScheduler, SchedulerEvent, SchedulerEventColor, minute_label};
+///
+/// #[component]
+/// fn LocalizedExample() -> impl IntoView {
+///     let locale = RwSignal::new("es".to_string());
+///     let events = Signal::derive(|| {
+///         vec![SchedulerEvent::new("Cita", 9 * 60, 10 * 60, SchedulerEventColor::Primary)]
+///     });
+///     let selected = RwSignal::new(Option::<usize>::None);
+///
+///     view! {
+///         <DayScheduler
+///             start_hour=8
+///             end_hour=18
+///             events=events
+///             selected_event=selected
+///             on_event_activate=Callback::new(|_| {})
+///             event_accessible_label=Callback::new(move |ev: SchedulerEvent| {
+///                 match locale.get().as_str() {
+///                     // Spanish puts the interval after "de ... a ...", not
+///                     // English's "start to end" -- word order the
+///                     // callback controls that a format string could not.
+///                     "es" => format!(
+///                         "{}, de {} a {}",
+///                         ev.title,
+///                         minute_label(ev.start_min),
+///                         minute_label(ev.end_min),
+///                     ),
+///                     _ => String::new(), // falls back to the English default
+///                 }
+///             })
+///         />
+///     }
+/// }
+/// ```
+///
+/// If the callback returns an empty or whitespace-only string -- a
+/// translation catalogue with a gap, or (as above) a locale branch that
+/// intentionally defers -- the block falls back to the same English
+/// [`event_aria_label`] default rather than emitting an empty `aria-label`.
+/// An event block's accessible name is the *only* name a screen-reader user
+/// gets for it, so an unnamed interactive control is a worse outcome than
+/// a wrong-language one; this fallback keeps every interactive event named.
 ///
 /// ### Add to `input.css`
 /// ```css
@@ -119,6 +186,23 @@ pub fn DayScheduler(
     /// "title, HH:MM to HH:MM"; a display-only scheduler gains no tab stops.
     #[prop(optional, into)]
     on_event_activate: Option<Callback<usize>>,
+
+    /// Optional accessible-name formatter for interactive event blocks: given
+    /// the whole [`SchedulerEvent`], returns the complete string used as
+    /// `aria-label`. Overrides the built-in English
+    /// `"{title}, {start} to {end}"` grammar ([`event_aria_label`]) for
+    /// locales that reorder or inflect the interval differently -- e.g.
+    /// Spanish `"{title}, de {start} a {end}"`. Read inside the same
+    /// reactive `aria-label` closure the default uses, so a callback that
+    /// closes over a locale `Signal` updates the SAME rendered event node
+    /// when that signal changes, without rebuilding the scheduler or losing
+    /// focus/selection. Ignored on display-only schedulers, which emit no
+    /// `aria-label` at all. If the callback returns an empty or
+    /// whitespace-only string, the block falls back to the English default
+    /// rather than going unnamed -- see the component doc's "Event names"
+    /// section for the full contract and a localized example.
+    #[prop(optional, into)]
+    event_accessible_label: Option<Callback<SchedulerEvent, String>>,
 
     /// Optional controlled selection: the index of the selected event, if
     /// any. Clicking or activating an event selects it; the selected block
@@ -328,7 +412,10 @@ pub fn DayScheduler(
                                 tabindex=interactive.then_some(0)
                                 aria-label=move || {
                                     (interactive && pair.get().is_some()).then(|| {
-                                        event_aria_label(&pair.get().unwrap_or_default().0)
+                                        let ev = pair.get().unwrap_or_default().0;
+                                        let formatted =
+                                            event_accessible_label.map(|fmt| fmt.run(ev.clone()));
+                                        resolve_event_accessible_label(&ev, formatted)
                                     })
                                 }
                                 aria-pressed=move || {

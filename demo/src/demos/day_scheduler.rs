@@ -64,6 +64,11 @@ pub fn DaySchedulerDemo() -> impl IntoView {
     ]);
     let selected = RwSignal::new(Option::<usize>::None);
     let last_activated = RwSignal::new(Option::<usize>::None);
+
+    // Localized accessible-name demo (ldui-kx7y): a reactive locale signal
+    // read by the scheduler's `event_accessible_label` callback.
+    let locale = RwSignal::new("en".to_string());
+    let locale_selected = RwSignal::new(Option::<usize>::None);
     let apply_move = move |(idx, delta): (usize, i32)| {
         planned.update(|evs| {
             if let Some(ev) = evs.get_mut(idx) {
@@ -197,6 +202,81 @@ pub fn DaySchedulerDemo() -> impl IntoView {
                         end_hour=18
                         events=basic_events
                         height_px=360.0
+                    />
+                </div>
+            </Section>
+
+            <Section title="Localized accessible names (event_accessible_label)">
+                <p class="text-sm text-base-content/75 mb-2">
+                    "The gutter's " <code>"hour_format"</code>
+                    " already reflects a locale, but a screen-reader user's ONLY name for an "
+                    "interactive event comes from " <code>"aria-label"</code>
+                    ". This scheduler supplies " <code>"event_accessible_label"</code>
+                    ", a callback that reads the locale below and reformats the SAME event "
+                    "node's accessible name reactively -- no rebuild, so selection and focus "
+                    "survive the language switch."
+                </p>
+                <button
+                    type="button"
+                    class="btn btn-sm btn-outline mb-2"
+                    data-testid="sched-locale-toggle"
+                    on:click=move |_| {
+                        locale
+                            .update(|l| {
+                                *l = if l == "en" { "es".to_string() } else { "en".to_string() };
+                            })
+                    }
+                >
+                    "Locale: " {move || locale.get().to_uppercase()}
+                </button>
+                <div class="mb-2 text-sm">
+                    "Selected: "
+                    <code data-testid="sched-locale-selected">
+                        {move || {
+                            locale_selected
+                                .get()
+                                .map(|i| i.to_string())
+                                .unwrap_or_else(|| "(none)".to_string())
+                        }}
+                    </code>
+                </div>
+                <div
+                    class="w-full max-w-2xl rounded-box border border-base-300 bg-base-100 p-2"
+                    id="localized-scheduler"
+                >
+                    <DayScheduler
+                        start_hour=8
+                        end_hour=18
+                        events=Signal::derive(move || {
+                            vec![
+                                SchedulerEvent::new(
+                                    "Intake review",
+                                    9 * 60,
+                                    10 * 60,
+                                    SchedulerEventColor::Primary,
+                                ),
+                            ]
+                        })
+                        selected_event=locale_selected
+                        on_event_activate=Callback::new(|_| {})
+                        event_accessible_label=Callback::new(move |ev: SchedulerEvent| {
+                            match locale.get().as_str() {
+                                // Spanish puts the interval after "de ... a
+                                // ...", not English's "start to end" -- word
+                                // order a format string could not express.
+                                "es" => {
+                                    format!(
+                                        "{}, de {} a {}",
+                                        ev.title,
+                                        minute_label(ev.start_min),
+                                        minute_label(ev.end_min),
+                                    )
+                                }
+                                // English falls back to the component's own
+                                // default rather than duplicating it here.
+                                _ => String::new(),
+                            }
+                        })
                     />
                 </div>
             </Section>

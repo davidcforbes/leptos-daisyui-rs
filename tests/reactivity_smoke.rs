@@ -2275,6 +2275,96 @@ async fn day_scheduler_keyboard_moves_event() {
     assert_eq!(testid_text(&h, "sched-first-times").await, "570-630");
 }
 
+/// DayScheduler localized accessible names (ldui-kx7y): a caller's
+/// `event_accessible_label` callback reads a reactive locale signal and
+/// reformats an interactive event's `aria-label` from English interval
+/// grammar to Spanish (`"to"` -> `"de ... a ..."`) on the SAME DOM node --
+/// proven via node identity, not a fresh query match -- so selection state
+/// survives the language toggle exactly as the un-rebuilt node implies.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn day_scheduler_locale_toggle_updates_accessible_name_in_place() {
+    let h = harness_at("/components/day-scheduler").await;
+    let block = "#localized-scheduler [role=\"button\"]";
+
+    // Tag the node so a later query can prove it's the SAME element, not a
+    // same-selector match on a rebuilt one.
+    eval_json(
+        &h,
+        &format!("window.__schedProbe = document.querySelector('{block}')"),
+    )
+    .await;
+
+    click(&h, block).await;
+    assert_eq!(
+        testid_text(&h, "sched-locale-selected").await,
+        "0",
+        "clicking the event selects it before any locale toggle"
+    );
+
+    let en_label = eval_json(
+        &h,
+        &format!("document.querySelector('{block}').getAttribute('aria-label')"),
+    )
+    .await;
+    assert_eq!(
+        en_label,
+        json!("Intake review, 09:00 to 10:00"),
+        "English default before any locale toggle"
+    );
+
+    click(&h, "[data-testid='sched-locale-toggle']").await;
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+    let same_node_after_es: bool = eval_json(
+        &h,
+        &format!("window.__schedProbe === document.querySelector('{block}')"),
+    )
+    .await
+    .as_bool()
+    .unwrap_or(false);
+    assert!(
+        same_node_after_es,
+        "the SAME event DOM node must carry the updated label, not a rebuilt one"
+    );
+    let es_label = eval_json(
+        &h,
+        &format!("document.querySelector('{block}').getAttribute('aria-label')"),
+    )
+    .await;
+    assert_eq!(
+        es_label,
+        json!("Intake review, de 09:00 a 10:00"),
+        "Spanish interval grammar must fully replace the English 'to' token: {es_label}"
+    );
+    assert_eq!(
+        testid_text(&h, "sched-locale-selected").await,
+        "0",
+        "selection must survive the locale toggle (no rebuild)"
+    );
+
+    click(&h, "[data-testid='sched-locale-toggle']").await;
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+
+    let same_node_after_en: bool = eval_json(
+        &h,
+        &format!("window.__schedProbe === document.querySelector('{block}')"),
+    )
+    .await
+    .as_bool()
+    .unwrap_or(false);
+    assert!(
+        same_node_after_en,
+        "toggling back must still be the same node"
+    );
+    let en_again = eval_json(
+        &h,
+        &format!("document.querySelector('{block}').getAttribute('aria-label')"),
+    )
+    .await;
+    assert_eq!(en_again, en_label, "EN -> ES -> EN must round-trip exactly");
+}
+
 /// ServerDataTable typed query API (beads-uy2r / `on_query_change`): a header
 /// click on the demo's server-owned table emits a TableQuery carrying the
 /// sort (previously a no-op), and page navigation emits the new page — the

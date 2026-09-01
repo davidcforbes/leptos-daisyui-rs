@@ -319,6 +319,65 @@ fn event_aria_label_is_title_plus_time_range() {
     assert_eq!(event_aria_label(&e), "Standup, 09:00 to 09:15");
 }
 
+// ---------------------------------------------------------------------
+// resolve_event_accessible_label (ldui-kx7y): the localization seam for
+// interactive event accessible names.
+// ---------------------------------------------------------------------
+
+#[test]
+fn resolve_accessible_label_defaults_to_english_when_no_formatter_supplied() {
+    // No `event_accessible_label` callback at all (`formatted: None`) --
+    // existing call sites must see the exact current English default.
+    let e = SchedulerEvent::new("Standup", 9 * 60, 9 * 60 + 15, SchedulerEventColor::Primary);
+    assert_eq!(
+        resolve_event_accessible_label(&e, None),
+        "Standup, 09:00 to 09:15"
+    );
+}
+
+#[test]
+fn resolve_accessible_label_uses_the_localized_override_verbatim() {
+    // A caller's formatter can reorder and inflect -- Spanish puts the
+    // interval after "de ... a ...", not English's "start to end".
+    let e = SchedulerEvent::new(
+        "Intake review",
+        9 * 60,
+        10 * 60,
+        SchedulerEventColor::Primary,
+    );
+    let spanish = "Intake review, de 09:00 a 10:00".to_string();
+    assert_eq!(
+        resolve_event_accessible_label(&e, Some(spanish.clone())),
+        spanish
+    );
+    assert!(
+        !spanish.contains(" to "),
+        "the localized proof string must contain no framework-generated English 'to' token"
+    );
+}
+
+#[test]
+fn resolve_accessible_label_falls_back_on_empty_formatter_output() {
+    // A formatter that ran but returned "" (e.g. a translation-catalogue
+    // gap) must not leave the block unnamed -- fall back to English rather
+    // than emitting an empty aria-label.
+    let e = SchedulerEvent::new("Standup", 9 * 60, 9 * 60 + 15, SchedulerEventColor::Primary);
+    assert_eq!(
+        resolve_event_accessible_label(&e, Some(String::new())),
+        "Standup, 09:00 to 09:15"
+    );
+}
+
+#[test]
+fn resolve_accessible_label_falls_back_on_whitespace_only_formatter_output() {
+    // Whitespace-only is treated the same as empty -- " \t\n" is not a name.
+    let e = SchedulerEvent::new("Standup", 9 * 60, 9 * 60 + 15, SchedulerEventColor::Primary);
+    assert_eq!(
+        resolve_event_accessible_label(&e, Some("   \t\n  ".to_string())),
+        "Standup, 09:00 to 09:15"
+    );
+}
+
 #[test]
 fn enter_and_space_activate() {
     assert_eq!(

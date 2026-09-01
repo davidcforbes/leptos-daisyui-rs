@@ -73,7 +73,9 @@ pub fn minute_label(min: u32) -> String {
 
 /// The accessible name of an event block: title plus its time range, so a
 /// screen-reader user hears "Standup, 09:00 to 09:15" rather than a bare
-/// title floating in an unlabeled grid.
+/// title floating in an unlabeled grid. This is the English default --
+/// see [`resolve_event_accessible_label`] for the localizable seam built on
+/// top of it.
 pub fn event_aria_label(ev: &SchedulerEvent) -> String {
     format!(
         "{}, {} to {}",
@@ -81,6 +83,25 @@ pub fn event_aria_label(ev: &SchedulerEvent) -> String {
         minute_label(ev.start_min),
         minute_label(ev.end_min)
     )
+}
+
+/// Resolve the accessible name for an interactive event block from an
+/// optional caller-formatted string (the result of running a
+/// `event_accessible_label` callback, if the component was given one).
+///
+/// `formatted` is `None` when the caller supplied no formatter at all --
+/// falls back to the English [`event_aria_label`] default, byte-for-byte,
+/// so every existing call site is unaffected. `formatted` is also treated
+/// as absent when the caller's formatter ran but returned an empty or
+/// whitespace-only string: a translation catalogue with a gap must never
+/// leave the block *unnamed*, since the accessible name is the only name a
+/// screen-reader user gets for it -- a wrong-language name is a better
+/// outcome than no name.
+pub fn resolve_event_accessible_label(ev: &SchedulerEvent, formatted: Option<String>) -> String {
+    match formatted {
+        Some(label) if !label.trim().is_empty() => label,
+        _ => event_aria_label(ev),
+    }
 }
 
 /// What a key press on a focused event block asks for. The mapping is pure
