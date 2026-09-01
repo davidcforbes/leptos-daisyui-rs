@@ -71,6 +71,16 @@ fn dashboard_kpis() -> Vec<KpiItem> {
     ]
 }
 
+/// The consumer's own reproduction (ldui-orom): exactly three peer
+/// summaries for a Pending reconciliation, matching legacy production.
+fn pending_reconciliation_kpis() -> Vec<KpiItem> {
+    vec![
+        KpiItem::new("pending-items", "Pending items", "184"),
+        KpiItem::new("reconciled", "Reconciled", "3,402").status(KpiStatus::Success),
+        KpiItem::new("exceptions", "Exceptions", "6").status(KpiStatus::Warning),
+    ]
+}
+
 fn office_kpis() -> Vec<KpiItem> {
     vec![
         KpiItem::new("open-matters", "Open matters", "128")
@@ -246,6 +256,33 @@ pub fn KpiStripDemo() -> impl IntoView {
                     <KpiStrip
                         items=Signal::derive(dashboard_kpis)
                         layout=KpiStripLayout::BalancedSix
+                        compact=true
+                    />
+                </div>
+            </Section>
+
+            // ldui-orom. Exactly three peer summaries -- neither existing
+            // profile fills the row: AutoEight opens eight tracks and
+            // BalancedSix opens six, both leaving the row mostly empty at a
+            // desktop width. PeerThree caps at three tracks, so three peers
+            // always fill the row they are given.
+            <Section title="Peer three: three summaries filling the desktop row">
+                <div class="w-full" data-testid="kpi-strip-peer-three">
+                    <KpiStrip
+                        items=Signal::derive(pending_reconciliation_kpis)
+                        layout=KpiStripLayout::PeerThree
+                    />
+                </div>
+            </Section>
+
+            // The narrow-column case ldui-tnyq exists for, on the new
+            // profile: the same three cards must step down to two columns
+            // here rather than asking how wide the window is.
+            <Section title="Peer three in a narrow column">
+                <div class="w-full max-w-md" data-testid="kpi-strip-peer-three-narrow">
+                    <KpiStrip
+                        items=Signal::derive(pending_reconciliation_kpis)
+                        layout=KpiStripLayout::PeerThree
                         compact=true
                     />
                 </div>

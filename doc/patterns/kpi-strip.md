@@ -253,6 +253,7 @@ stays equal regardless of count. The strip never scrolls horizontally.
 |---|---|---|
 | `KpiStripLayout::AutoEight` (default) | 2 / 3 / 4 / 8 | an operational strip of short cards |
 | `KpiStripLayout::BalancedSix` | 2 / 3 / 4 / 6 | a balanced fixed dashboard scorecard |
+| `KpiStripLayout::PeerThree` | 2 / 3 | a fixed row of exactly three peer summaries (ldui-orom) |
 
 ```rust
 view! { <KpiStrip items=items layout=KpiStripLayout::BalancedSix /> }
@@ -273,11 +274,13 @@ control, which costs the label 20px of its row (`ldui-yhvf`):
 
 | profile | rung | container | columns | card |
 |---|---|---|---|---|
-| both | base | 320px | 2 | 152.0px |
-| both | `@sm` | 384px | 3 | 117.3px |
-| both | `@lg` | 512px | 4 | 116.0px |
+| `AutoEight`, `BalancedSix` | base | 320px | 2 | 152.0px |
+| `AutoEight`, `BalancedSix` | `@sm` | 384px | 3 | 117.3px |
+| `AutoEight`, `BalancedSix` | `@lg` | 512px | 4 | 116.0px |
 | `AutoEight` | `@5xl` | 1024px | 8 | 114.0px |
 | `BalancedSix` | `@4xl` | 896px | 6 | 136.0px |
+| `PeerThree` | base | 320px | 2 | 152.0px |
+| `PeerThree` | `@lg` | 512px | 3 | 160.0px |
 
 Six columns start at `@4xl` rather than `@3xl` (768px) because at 768px six
 columns are 114.7px: enough for a bare two-line label, not enough for a
@@ -286,6 +289,19 @@ live. At the 1046px container `ldui-tnyq` measured on a 1680px window,
 `BalancedSix` gives 6 columns of 161.0px against `AutoEight`'s 8 of
 116.8px, so the balanced profile's cards are **wider**: a two-line label, a
 help trigger and a baseline comparison bar all gain room by choosing it.
+
+`PeerThree` diverges from the shared `AutoEight`/`BalancedSix` trunk at its
+very first rung rather than passing through 3 and 4 columns before capping:
+a fixed three-peer row can never render a fourth track, since there is no
+fourth peer to fill it -- that is exactly the "half the row is dead space"
+shape `ldui-orom` reports for `BalancedSix` on a three-item strip. So its
+base rung (2 columns, the same "never a single full-bleed column" floor
+every profile shares) steps straight to its own widest rung, 3 columns, at
+`@lg` (512px). At the 1617.6px container `ldui-orom` reports (a 1696px
+viewport), `AutoEight` renders 8 tracks of 188.2px cards occupying only the
+first 596.6px of the row, `BalancedSix` renders 6 tracks occupying roughly
+half of it, and `PeerThree` renders exactly 3 tracks of roughly 528.5px
+cards spanning the full row.
 
 ### Item counts that do not divide
 

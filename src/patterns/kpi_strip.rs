@@ -866,6 +866,25 @@ const KPI_STRIP_BALANCED_SIX_LADDER: &[KpiStripRung] = &[
     },
 ];
 
+/// `2 / 3` -- the fixed three-peer-summary ladder (`ldui-orom`).
+///
+/// Only two rungs, deliberately: the profile's widest rung IS its column
+/// cap, so there is no intermediate 4-column rung to pass through the way
+/// the shared `AutoEight`/`BalancedSix` trunk does -- a fourth track would
+/// never hold a fourth peer.
+const KPI_STRIP_PEER_THREE_LADDER: &[KpiStripRung] = &[
+    KpiStripRung {
+        prefix: "",
+        min_container_px: 0,
+        columns: 2,
+    },
+    KpiStripRung {
+        prefix: "@lg:",
+        min_container_px: 512,
+        columns: 3,
+    },
+];
+
 /// Which column ladder a [`KpiStrip`] follows -- the typed layout choice
 /// (`ldui-k3ip`).
 ///
@@ -886,11 +905,13 @@ const KPI_STRIP_BALANCED_SIX_LADDER: &[KpiStripRung] = &[
 ///
 /// | profile | rung | container | columns | card |
 /// |---|---|---|---|---|
-/// | both | base | 320px | 2 | 152.0px |
-/// | both | `@sm` | 384px | 3 | 117.3px |
-/// | both | `@lg` | 512px | 4 | 116.0px |
+/// | `AutoEight`, `BalancedSix` | base | 320px | 2 | 152.0px |
+/// | `AutoEight`, `BalancedSix` | `@sm` | 384px | 3 | 117.3px |
+/// | `AutoEight`, `BalancedSix` | `@lg` | 512px | 4 | 116.0px |
 /// | `AutoEight` | `@5xl` | 1024px | 8 | 114.0px |
 /// | `BalancedSix` | `@4xl` | 896px | 6 | 136.0px |
+/// | `PeerThree` | base | 320px | 2 | 152.0px |
+/// | `PeerThree` | `@lg` | 512px | 3 | 160.0px |
 ///
 /// `@4xl` rather than `@3xl` (768px), and that choice is the whole reason
 /// the profile is a type: at 768px six columns are 114.7px, which clears
@@ -898,6 +919,18 @@ const KPI_STRIP_BALANCED_SIX_LADDER: &[KpiStripRung] = &[
 /// is precisely where help-bearing cards live, so the six-column rung
 /// starts where a help-bearing card still holds two label lines. `@4xl`
 /// gives 136.0px, 11px of slack over that floor.
+///
+/// `PeerThree`'s ladder DIVERGES from the shared `AutoEight`/`BalancedSix`
+/// trunk at its very first rung rather than following it up through 3 and
+/// 4 columns before capping: a fixed three-peer row can never render a
+/// fourth track -- there is no fourth peer to fill it, and CSS Grid would
+/// simply leave it empty, which is exactly the "half the row is dead
+/// space" shape `ldui-orom` reports for `BalancedSix`. So the base rung
+/// (2 columns, matching the "never a single full-bleed column" floor every
+/// profile shares) steps directly to the profile's own widest rung, 3
+/// columns, at `@lg` (512px) -- clearing both
+/// [`KPI_CARD_TWO_LINE_FLOOR_PX`] and [`KPI_CARD_HELP_FLOOR_PX`] with room
+/// to spare.
 ///
 /// ### What it does to the consumer's measured strip
 ///
@@ -907,6 +940,16 @@ const KPI_STRIP_BALANCED_SIX_LADDER: &[KpiStripRung] = &[
 /// lays them out as two rows of six. The balanced profile's cards are
 /// WIDER, so nothing inside them -- a two-line label, a help trigger, a
 /// baseline comparison bar -- gets tighter by choosing it.
+///
+/// At the 1617.6px container `ldui-orom` reports (a 1696px viewport), three
+/// items through `AutoEight` render 8 tracks of 188.2px cards and occupy
+/// only the first 596.6px of the row; through `BalancedSix` they render 6
+/// tracks of roughly 256.3px cards and occupy roughly the first 800.8px,
+/// still under half the row. Through `PeerThree` the same three items
+/// render exactly 3 tracks of roughly 528.5px cards and span the full
+/// 1617.6px row -- the profile's widest rung is also its item count's
+/// natural column count, so three peers are never fewer than the tracks
+/// provided for them.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum KpiStripLayout {
     /// `2 / 3 / 4 / 8`. The default and the pre-`ldui-k3ip` behaviour: an
@@ -917,6 +960,11 @@ pub enum KpiStripLayout {
     /// `2 / 3 / 4 / 6`. A balanced fixed dashboard scorecard: twelve peer
     /// cards read as two rows of six, six as one row of six.
     BalancedSix,
+    /// `2 / 3`. A fixed row of exactly three peer summaries -- never more
+    /// tracks than there are peers to fill them, so the row is never left
+    /// half empty the way `AutoEight` and `BalancedSix` both leave it for a
+    /// three-item strip (`ldui-orom`).
+    PeerThree,
 }
 
 impl KpiStripLayout {
@@ -928,6 +976,7 @@ impl KpiStripLayout {
         match self {
             Self::AutoEight => "auto-eight",
             Self::BalancedSix => "balanced-six",
+            Self::PeerThree => "peer-three",
         }
     }
 
@@ -936,6 +985,7 @@ impl KpiStripLayout {
         match self {
             Self::AutoEight => KPI_STRIP_AUTO_EIGHT_LADDER,
             Self::BalancedSix => KPI_STRIP_BALANCED_SIX_LADDER,
+            Self::PeerThree => KPI_STRIP_PEER_THREE_LADDER,
         }
     }
 
@@ -944,6 +994,7 @@ impl KpiStripLayout {
         match self {
             Self::AutoEight => 8,
             Self::BalancedSix => 6,
+            Self::PeerThree => 3,
         }
     }
 
@@ -1057,6 +1108,8 @@ const fn kpi_strip_grid_class(layout: KpiStripLayout, compact: bool) -> &'static
         (KpiStripLayout::BalancedSix, true) => {
             "grid grid-cols-2 @sm:grid-cols-3 @lg:grid-cols-4 @4xl:grid-cols-6 gap-3"
         }
+        (KpiStripLayout::PeerThree, false) => "grid grid-cols-2 @lg:grid-cols-3 gap-4",
+        (KpiStripLayout::PeerThree, true) => "grid grid-cols-2 @lg:grid-cols-3 gap-3",
     }
 }
 
@@ -1687,13 +1740,39 @@ pub fn KpiCard(
 /// assistant rail still fits. `compact` remains a separate padding/gap
 /// choice and never changes the column count.
 ///
+/// ### Three peer summaries filling a desktop row (ldui-orom)
+///
+/// Exactly three peer summaries -- the office Pending reconciliation's own
+/// shape -- read wrong through either existing profile: `AutoEight` opens
+/// eight tracks and leaves the row mostly empty; `BalancedSix` opens six
+/// and still leaves half of it empty. [`KpiStripLayout::PeerThree`] caps at
+/// three tracks, so three peers always fill the row they are given:
+///
+/// ```rust
+/// use leptos::prelude::*;
+/// use leptos_daisyui_rs::patterns::{KpiItem, KpiStrip, KpiStripLayout};
+///
+/// #[component]
+/// fn Example() -> impl IntoView {
+///     let items = Signal::derive(|| {
+///         vec![
+///             KpiItem::new("open", "Open items", "42"),
+///             KpiItem::new("closed", "Closed items", "310"),
+///             KpiItem::new("aging", "Aging over 30 days", "5"),
+///         ]
+///     });
+///
+///     view! { <KpiStrip items=items layout=KpiStripLayout::PeerThree /> }
+/// }
+/// ```
+///
 /// ### Add to `input.css`
 /// ```css
 /// @source inline("@container grid grid-cols-2 @sm:grid-cols-3 @lg:grid-cols-4 gap-3 gap-4 w-full");
-/// @source inline("@5xl:grid-cols-8 @4xl:grid-cols-6");
+/// @source inline("@5xl:grid-cols-8 @4xl:grid-cols-6 @lg:grid-cols-3");
 /// ```
-/// The second line carries both profiles' widest rungs. A consumer that
-/// safelists only its own profile's rung gets a strip stuck at four
+/// The second line carries all three profiles' widest rungs. A consumer
+/// that safelists only its own profile's rung gets a strip stuck at four
 /// columns the day it switches -- silently, since a missing utility is not
 /// an error.
 ///
@@ -1721,7 +1800,8 @@ pub fn KpiStrip(
     /// Defaults to [`KpiStripLayout::AutoEight`], which is exactly the
     /// `2 / 3 / 4 / 8` grid every caller had before this prop existed.
     /// [`KpiStripLayout::BalancedSix`] is the balanced fixed-scorecard
-    /// ladder.
+    /// ladder. [`KpiStripLayout::PeerThree`] is the fixed three-peer-row
+    /// ladder (`ldui-orom`).
     #[prop(optional, into)]
     layout: Signal<KpiStripLayout>,
 
@@ -1984,7 +2064,11 @@ mod tests {
         // padding must not exceed the grid gap separating it from its
         // neighbours, or the cards read as one group.
         // Both profiles, since a new ladder must not smuggle in a new gap.
-        for layout in [KpiStripLayout::AutoEight, KpiStripLayout::BalancedSix] {
+        for layout in [
+            KpiStripLayout::AutoEight,
+            KpiStripLayout::BalancedSix,
+            KpiStripLayout::PeerThree,
+        ] {
             assert!(kpi_card_body_class(false).contains("p-4"));
             assert!(kpi_strip_grid_class(layout, false).contains("gap-4"));
             assert!(kpi_card_body_class(true).contains("p-3"));
@@ -2757,7 +2841,11 @@ mod tests {
     /// string (or the reverse).
     #[test]
     fn kpi_strip_grid_class_is_composed_from_the_declared_ladder() {
-        for layout in [KpiStripLayout::AutoEight, KpiStripLayout::BalancedSix] {
+        for layout in [
+            KpiStripLayout::AutoEight,
+            KpiStripLayout::BalancedSix,
+            KpiStripLayout::PeerThree,
+        ] {
             for (compact, gap) in [(false, "gap-4"), (true, "gap-3")] {
                 let rungs: Vec<String> = layout
                     .ladder()
@@ -2779,7 +2867,11 @@ mod tests {
     /// slip back in.
     #[test]
     fn every_profile_uses_container_queries_not_viewport_breakpoints() {
-        for layout in [KpiStripLayout::AutoEight, KpiStripLayout::BalancedSix] {
+        for layout in [
+            KpiStripLayout::AutoEight,
+            KpiStripLayout::BalancedSix,
+            KpiStripLayout::PeerThree,
+        ] {
             for rung in layout.ladder() {
                 assert!(
                     rung.prefix.is_empty() || rung.prefix.starts_with('@'),
@@ -2805,7 +2897,11 @@ mod tests {
     /// a container starved below that is `ldui-kwup`, not a ladder defect.
     #[test]
     fn every_rung_clears_the_measured_two_line_card_floor() {
-        for layout in [KpiStripLayout::AutoEight, KpiStripLayout::BalancedSix] {
+        for layout in [
+            KpiStripLayout::AutoEight,
+            KpiStripLayout::BalancedSix,
+            KpiStripLayout::PeerThree,
+        ] {
             for rung in layout.ladder() {
                 let container = f64::from(rung.min_container_px).max(320.0);
                 for compact in [false, true] {
@@ -2910,6 +3006,68 @@ mod tests {
         );
     }
 
+    /// THE BEAD'S OWN REPRODUCTION, reproduced exactly: at the 1617.6px
+    /// container measured on a 1696px viewport (ldui-orom), `AutoEight`
+    /// renders eight tracks of 188.2px cards and the three summary cards
+    /// occupy only the first 596.6px; `BalancedSix` renders six tracks and
+    /// still leaves roughly half the row empty. `PeerThree` renders exactly
+    /// three tracks that span the whole 1617.6px row.
+    #[test]
+    fn three_peer_summaries_fill_the_desktop_row() {
+        const CONSUMER_CONTAINER_PX: f64 = 1617.6;
+        let gap = kpi_strip_gap_px(false);
+
+        // THE FIX: three peers through the new profile fill one full row.
+        let peer = KpiStripLayout::PeerThree.columns_at(CONSUMER_CONTAINER_PX);
+        assert_eq!(peer, 3);
+        let fit = kpi_strip_row_fit(3, peer);
+        assert_eq!(fit.full_rows, 1);
+        assert_eq!(fit.last_row, 0);
+        assert_eq!(fit.rows(), 1);
+        assert!(!fit.is_ragged(), "three peers must fill one full row");
+        let card = kpi_strip_card_width_px(CONSUMER_CONTAINER_PX, peer, gap);
+        let spanned = card * 3.0 + gap * 2.0;
+        assert!(
+            (spanned - CONSUMER_CONTAINER_PX).abs() < 1e-9,
+            "three tracks must span the full strip: {spanned} vs {CONSUMER_CONTAINER_PX}"
+        );
+
+        // THE NEGATIVE CONTROL: the bead's own reported numbers for
+        // AutoEight, reproduced exactly -- 188.2px cards occupying only the
+        // first 596.6px of the row.
+        let auto = KpiStripLayout::AutoEight.columns_at(CONSUMER_CONTAINER_PX);
+        assert_eq!(auto, 8);
+        let auto_fit = kpi_strip_row_fit(3, auto);
+        assert!(
+            auto_fit.is_ragged(),
+            "three cards in eight tracks read as an incomplete row"
+        );
+        let auto_card = kpi_strip_card_width_px(CONSUMER_CONTAINER_PX, auto, gap);
+        assert!((auto_card - 188.2).abs() < 0.05, "{auto_card}");
+        let auto_spanned = auto_card * 3.0 + gap * 2.0;
+        assert!((auto_spanned - 596.6).abs() < 0.05, "{auto_spanned}");
+
+        // BalancedSix still leaves roughly half the row empty, per the
+        // bead's description.
+        let balanced = KpiStripLayout::BalancedSix.columns_at(CONSUMER_CONTAINER_PX);
+        assert_eq!(balanced, 6);
+        let balanced_fit = kpi_strip_row_fit(3, balanced);
+        assert!(
+            balanced_fit.is_ragged(),
+            "three cards in six tracks still leave half the row empty"
+        );
+        let balanced_card = kpi_strip_card_width_px(CONSUMER_CONTAINER_PX, balanced, gap);
+        let balanced_spanned = balanced_card * 3.0 + gap * 2.0;
+        assert!(
+            balanced_spanned < CONSUMER_CONTAINER_PX * 0.55,
+            "BalancedSix must still leave roughly half the row empty: {balanced_spanned}"
+        );
+
+        // AutoEight and BalancedSix are unchanged by this bead: same class
+        // strings, same ladders, as pinned by every other geometry test in
+        // this module. This test only adds the third profile.
+    }
+
     /// Six items are one full row of six; the AC's other counts land
     /// deliberately.
     #[test]
@@ -2952,7 +3110,11 @@ mod tests {
     /// never exceeds the profile's declared widest rung.
     #[test]
     fn narrow_containers_step_down_without_horizontal_overflow() {
-        for layout in [KpiStripLayout::AutoEight, KpiStripLayout::BalancedSix] {
+        for layout in [
+            KpiStripLayout::AutoEight,
+            KpiStripLayout::BalancedSix,
+            KpiStripLayout::PeerThree,
+        ] {
             for container in [
                 320.0_f64, 383.0, 384.0, 511.0, 512.0, 767.0, 895.0, 896.0, 1023.0, 1024.0, 1046.0,
                 1680.0, 2560.0,
@@ -2997,7 +3159,11 @@ mod tests {
     /// count.
     #[test]
     fn compact_changes_spacing_and_never_the_column_count() {
-        for layout in [KpiStripLayout::AutoEight, KpiStripLayout::BalancedSix] {
+        for layout in [
+            KpiStripLayout::AutoEight,
+            KpiStripLayout::BalancedSix,
+            KpiStripLayout::PeerThree,
+        ] {
             let normal: Vec<&str> = kpi_strip_grid_class(layout, false)
                 .split_whitespace()
                 .filter(|token| token.contains("grid-cols"))
@@ -3068,9 +3234,14 @@ mod tests {
     fn layout_markers_are_stable_and_distinct() {
         assert_eq!(KpiStripLayout::AutoEight.as_str(), "auto-eight");
         assert_eq!(KpiStripLayout::BalancedSix.as_str(), "balanced-six");
+        assert_eq!(KpiStripLayout::PeerThree.as_str(), "peer-three");
         assert_ne!(
             KpiStripLayout::AutoEight.as_str(),
             KpiStripLayout::BalancedSix.as_str()
+        );
+        assert_ne!(
+            KpiStripLayout::BalancedSix.as_str(),
+            KpiStripLayout::PeerThree.as_str()
         );
         assert!(
             module_source().contains("data-kpi-strip-layout=move || layout.get().as_str()"),
@@ -3092,9 +3263,10 @@ mod tests {
             !module.contains("grid_class: &'static str") && !module.contains("grid_class: String"),
             "an arbitrary class fragment is not a composition contract either"
         );
-        // Two profiles today; the enum is what makes a third additive.
+        // Three profiles today; the enum is what made the third additive.
         assert_eq!(KpiStripLayout::AutoEight.max_columns(), 8);
         assert_eq!(KpiStripLayout::BalancedSix.max_columns(), 6);
+        assert_eq!(KpiStripLayout::PeerThree.max_columns(), 3);
     }
 
     /// Degenerate inputs never divide by zero or panic.
