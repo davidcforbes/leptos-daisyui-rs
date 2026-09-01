@@ -5,8 +5,9 @@ responsive row of consistently sized stat cards. It exists because daisyUI's
 low-level `Stats`/`Stat` pair renders a *joined* strip -- a shared background
 and internal dividers -- so eight metrics composed as `Stat` children inside
 a `Stats` container read as one table row instead of eight independent
-cards. `KpiStrip` builds ordinary bordered, shadowed boxes in a responsive
-CSS grid instead. `Stats`/`Stat` are unchanged and remain independently
+cards. `KpiStrip` builds ordinary bordered boxes in a responsive CSS grid
+instead, each at the framework's declared card elevation (see
+[Card elevation](#card-elevation)). `Stats`/`Stat` are unchanged and remain independently
 usable -- reach for them directly when daisyUI's own joined presentation is
 actually what's wanted.
 
@@ -150,7 +151,7 @@ view! {
 
 ```css
 @source inline("grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-8 gap-3 gap-4");
-@source inline("rounded-box border border-base-300 bg-base-100 shadow-sm h-full min-w-0 overflow-hidden");
+@source inline("rounded-box border border-base-300 bg-base-100 h-full min-w-0 overflow-hidden");
 @source inline("forced-colors:border-[CanvasText]");
 @source inline("h-(--border-width-accent) w-full");
 @source inline("bg-info bg-success bg-warning bg-error");
@@ -161,15 +162,58 @@ view! {
 @source inline("tooltip tooltip-top inline-flex h-4 w-4 items-center justify-center rounded-full border sr-only");
 ```
 
-The `.ld-text-*` classes are **not** listed above and must not be added via
-`@source inline`: they are not Tailwind utilities (`@source` scanning cannot
-generate them), they are plain rules generated into `styles/tokens.css` by
-`cargo xtask gen-tokens` (ldui-h7tw). Import that file once, as shown under
-[CSS Configuration](../../CLAUDE.md#css-configuration), and the ramp resolves
-with no further action -- unlike most of this crate's `--ld-*` custom
-properties (durations, easings, elevation, `.ld-eased`/`.ld-focus-ring`/etc.),
-which still require mounting `UiTokensPreamble`/`UiAnimationsPreamble` at
-runtime. See `src/tokens/preamble.rs` for which family is which.
+The `.ld-text-*` classes and `.ld-card-depth` are **not** listed above and
+must not be added via `@source inline`: they are not Tailwind utilities
+(`@source` scanning cannot generate them), they are plain rules generated
+into `styles/tokens.css` by `cargo xtask gen-tokens` (ldui-h7tw,
+ldui-k4fn). Import that file once, as shown under
+[CSS Configuration](../../CLAUDE.md#css-configuration), and both resolve
+with no further action -- unlike this crate's motion `--ld-*` custom
+properties and classes (durations, easings, `.ld-eased`/`.ld-focus-ring`/
+`.ld-elevated`/etc.), which still require mounting
+`UiTokensPreamble`/`UiAnimationsPreamble` at runtime. See
+`src/tokens/preamble.rs` for which family is which.
+
+## Card elevation
+
+The card's resting depth is the framework's own semantic class,
+`ld-card-depth`, **never** a stock Tailwind `shadow-*` utility
+(ldui-k4fn -- see [`doc/visual-quality/ad-hoc-shadow.md`](../visual-quality/ad-hoc-shadow.md)).
+The rule is one line:
+
+```css
+.ld-card-depth { box-shadow: var(--ld-card-shadow, var(--ld-elevation-4)); }
+```
+
+`--ld-elevation-4` is `ui_tokens::elevation::LEVEL_4`, the shared token
+crate's declared *card resting elevation* -- the same level the Direct2D
+desktop face draws behind a card, and the same level the interactive
+`ld-elevated` rests at, so a static card and a hoverable one sit at one
+depth. It is deliberately **not** `ld-elevated` itself: that class lifts to
+LEVEL_8 with a `translateY(-1px)` on hover, which would make a read-only
+tile look clickable. `ld-card-depth` sets exactly one property and has no
+hover, transition, or transform.
+
+`--ld-card-shadow` is the product-theme hook and is **never declared by this
+crate**. A product that must ship its own approved card shadow sets it once:
+
+```css
+/* the product's own theme stylesheet */
+:root { --ld-card-shadow: 0 1px 4px rgba(0, 0, 0, 0.16); }
+```
+
+Because the framework declares nothing, that needs no `!important`, no
+descendant selector reaching into `KpiCard`'s markup, and no page-local fork
+of the class -- the three things the opinionated-component ownership
+boundary rules out. Remove the declaration and the framework default paints
+again.
+
+Both `.ld-card-depth` and `--ld-elevation-*` ship in the **generated**
+`styles/tokens.css`, not only in `UiTokensPreamble`'s runtime `<style>`. That
+is load-bearing: the class replaced a stock `shadow-sm`, so a runtime-only
+definition would leave a consumer who never mounts the preamble with *no*
+shadow at all -- worse than the drift it fixes, and silent
+(`tests/ld_class_stylesheet_coverage.rs` pins it).
 
 ## Reference
 

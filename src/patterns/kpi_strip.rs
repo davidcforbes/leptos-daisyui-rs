@@ -11,6 +11,9 @@
 //! collapsed gap, or unequal card sizes. `Stats`/`Stat` are unchanged and
 //! remain independently usable; reach for them directly when daisyUI's own
 //! joined presentation is actually what's wanted.
+//!
+//! Card depth is the framework's own static policy, not a stock Tailwind
+//! utility: see [`kpi_card_shell_class`] and `ld-card-depth` (ldui-k4fn).
 
 use crate::components::{StatDeltaTrend, Tooltip};
 use crate::merge_classes;
@@ -273,6 +276,24 @@ fn kpi_card_body_class(compact: bool) -> &'static str {
     }
 }
 
+/// The card shell: geometry, border, background, and the framework's static
+/// card-elevation policy.
+///
+/// Depth comes from `ld-card-depth`, never a stock Tailwind `shadow-*`
+/// utility (ldui-k4fn). The class is an authored rule generated into
+/// `styles/tokens.css` (and mirrored by `UiTokensPreamble`) that paints
+/// `var(--ld-card-shadow, var(--ld-elevation-4))`, so the resting depth is
+/// `ui_tokens::elevation`'s declared "card resting elevation" and a product
+/// theme can substitute its own approved card shadow by setting
+/// `--ld-card-shadow` once, without forking the class or reaching into
+/// KpiCard's markup with a descendant selector.
+///
+/// Deliberately not `ld-elevated`: that class lifts on hover and would make
+/// a read-only tile look interactive.
+fn kpi_card_shell_class() -> &'static str {
+    "flex rounded-box border border-base-300 bg-base-100 ld-card-depth h-full min-w-0 overflow-hidden forced-colors:border-[CanvasText]"
+}
+
 /// Value type-ramp step: the large display size normally, stepping down
 /// one rung in `compact` mode.
 fn kpi_card_value_size_class(compact: bool) -> &'static str {
@@ -343,7 +364,7 @@ fn kpi_card_accessible_name(
 ///
 /// ### Add to `input.css`
 /// ```css
-/// @source inline("rounded-box border border-base-300 bg-base-100 shadow-sm h-full min-w-0 overflow-hidden");
+/// @source inline("rounded-box border border-base-300 bg-base-100 h-full min-w-0 overflow-hidden");
 /// @source inline("forced-colors:border-[CanvasText]");
 /// @source inline("w-(--border-width-accent) shrink-0 self-stretch forced-colors:bg-[CanvasText]");
 /// @source inline("bg-status-blue bg-info bg-success bg-warning bg-error");
@@ -354,12 +375,29 @@ fn kpi_card_accessible_name(
 /// @source inline("tooltip tooltip-top inline-flex h-4 w-4 items-center justify-center rounded-full border sr-only");
 /// ```
 ///
-/// The `ld-text-*` steps are NOT listed above on purpose: they are not
-/// Tailwind utilities, so `@source inline(...)` cannot generate them.
-/// They are authored rules emitted into `styles/tokens.css` by
-/// `cargo xtask gen-tokens`, so a consumer gets them by IMPORTING that
-/// stylesheet (see the crate docs). Listing them here would do nothing
-/// while implying the ramp was handled (ldui-h7tw, ldui-fg2h).
+/// The `ld-text-*` steps and `ld-card-depth` are NOT listed above on
+/// purpose: they are not Tailwind utilities, so `@source inline(...)`
+/// cannot generate them. They are authored rules emitted into
+/// `styles/tokens.css` by `cargo xtask gen-tokens`, so a consumer gets them
+/// by IMPORTING that stylesheet (see the crate docs). Listing them here
+/// would do nothing while implying they were handled (ldui-h7tw,
+/// ldui-fg2h, ldui-k4fn).
+///
+/// ### Card elevation
+///
+/// The card's resting depth is `ld-card-depth`, which paints
+/// `var(--ld-card-shadow, var(--ld-elevation-4))` -- `ui_tokens::elevation`'s
+/// declared card resting level, not a stock Tailwind `shadow-*` utility. A
+/// product theme that must supply its own approved card shadow sets the one
+/// custom property and every card follows:
+///
+/// ```css
+/// :root { --ld-card-shadow: 0 1px 4px rgba(0, 0, 0, 0.16); }
+/// ```
+///
+/// The framework never declares `--ld-card-shadow`, so that override needs
+/// no `!important`, no descendant selector into KpiCard's markup, and no
+/// page-local fork of the class.
 ///
 /// ## Node References
 /// - `node_ref` - References the outer `<div>` element ([HTMLDivElement](https://developer.mozilla.org/en-US/docs/Web/API/HTMLDivElement))
@@ -513,10 +551,7 @@ pub fn KpiCard(
             aria-describedby=help_id
             data-kpi-card=id
             data-kpi-card-unavailable=(!available).then_some("true")
-            class=merge_classes!(
-                "flex rounded-box border border-base-300 bg-base-100 shadow-sm h-full min-w-0 overflow-hidden forced-colors:border-[CanvasText]",
-                class
-            )
+            class=merge_classes!(kpi_card_shell_class(), class)
         >
             {accent}
             <div class=move || kpi_card_body_class(compact.get())>
@@ -627,6 +662,59 @@ pub fn KpiStrip(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ldui-k4fn: the card's depth is the framework's semantic elevation
+    /// class, and no stock Tailwind shadow utility survives anywhere on the
+    /// shell.
+    ///
+    /// A substring check on `shadow-` is deliberately broad: the defect this
+    /// pins was `shadow-sm`, but `shadow-md`/`shadow-lg`/`shadow-xl` would be
+    /// the same violation, and so would a variant-prefixed one
+    /// (`hover:shadow-md`). `ld-card-depth` contains no `shadow-` substring,
+    /// so the two assertions do not fight.
+    #[test]
+    fn kpi_card_shell_uses_the_semantic_elevation_class_not_a_stock_shadow() {
+        let shell = kpi_card_shell_class();
+        assert!(
+            shell.split_whitespace().any(|c| c == "ld-card-depth"),
+            "the KPI card must carry the framework's static elevation class: {shell}"
+        );
+        assert!(
+            !shell.contains("shadow-"),
+            "the KPI card must not carry a stock Tailwind shadow utility \
+             (doc/visual-quality/ad-hoc-shadow.md): {shell}"
+        );
+        assert!(
+            !shell.split_whitespace().any(|c| c == "ld-elevated"),
+            "ld-elevated lifts on hover and would make a read-only card look \
+             interactive: {shell}"
+        );
+    }
+
+    /// The documented `@source inline(...)` contract must not tell consumers
+    /// to safelist a class the component no longer emits, and must not list
+    /// the authored `ld-*` rules `@source inline` cannot generate anyway
+    /// (ldui-fg2h).
+    #[test]
+    fn the_documented_source_inline_contract_matches_what_is_rendered() {
+        let doc = include_str!("kpi_strip.rs");
+        for line in doc.lines() {
+            let t = line.trim_start();
+            if !t.starts_with("/// @source inline(") {
+                continue;
+            }
+            assert!(
+                !t.contains("shadow-"),
+                "the @source inline contract still safelists a stock shadow \
+                 utility the card no longer renders: {t}"
+            );
+            assert!(
+                !t.contains("ld-"),
+                "authored ld-* rules cannot be generated by @source inline \
+                 (ldui-fg2h); they ship in styles/tokens.css: {t}"
+            );
+        }
+    }
 
     #[test]
     fn kpi_status_defaults_to_neutral() {

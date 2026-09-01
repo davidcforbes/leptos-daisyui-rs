@@ -90,6 +90,22 @@ fn demo_profile(font_family: String) -> StyleProfile {
     // spec written for them would encode a mis-parse (it reads the geometry
     // out of the colour's coordinates — negative blur and all). They stay
     // ratcheted until the engine can parse them: PixelProof-0il.
+    //
+    // **Nothing is declared here for KPI cards (ldui-k4fn), on purpose.**
+    // That bead replaced `KpiCard`'s stock Tailwind `shadow-sm` with
+    // `.ld-card-depth`, which paints
+    // `var(--ld-card-shadow, var(--ld-elevation-4))` — and LEVEL_4 is
+    // already in `base.shadows`, because `from_ui_tokens` seeds the profile
+    // from `ui_tokens::elevation::LEVELS`. Landing on the declared
+    // vocabulary is precisely what makes an entry here unnecessary: a
+    // deviation is for a value the token crate does not name, and this one
+    // is named. Adding a KPI entry would be the "undocumented entry"
+    // failure this doc-comment warns about, widening the depth family for
+    // nothing. No page ceiling moved either — no page in `PAGES` renders a
+    // `KpiStrip` today (the fixture that does is
+    // `tests/admin_workbench_smoke.rs`, which asserts the card's computed
+    // shadow against this same `from_ui_tokens` profile via `shadow_ok`,
+    // i.e. the identical declared set and epsilon this sweep uses).
     let mut shadows = base.shadows.clone();
     shadows.extend([
         ShadowSpec::new(0.0, 6.0, 12.0, 0.15).with_spread(-2.0),

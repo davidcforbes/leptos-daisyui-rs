@@ -140,6 +140,24 @@ pub fn ui_tokens_css() -> String {
         ));
     }
 
+    // ldui-k4fn: the framework's STATIC card-elevation policy, emitted here
+    // as well as into the generated `styles/tokens.css`, exactly like the
+    // type ramp above. The generated stylesheet is the primary path — a
+    // consumer that imports it gets this rule with nothing mounted — and
+    // this copy only keeps a runtime-only consumer working. Both derive from
+    // `ui_tokens::elevation`, so they cannot drift.
+    //
+    // Distinct from `ld-elevated` (see `super::animations`) on purpose:
+    // that class is an interaction affordance (rests at LEVEL_4, lifts to
+    // LEVEL_8 with a transform on hover, transitions both), which is wrong
+    // for a read-only card. This rule paints one shadow and nothing else.
+    // `--ld-card-shadow` is deliberately left undefined so the fallback
+    // paints and a product theme can substitute its approved card shadow by
+    // setting that one property on `:root`.
+    css.push_str(
+        "\n.ld-card-depth {\n  box-shadow: var(--ld-card-shadow, var(--ld-elevation-4));\n}\n",
+    );
+
     css
 }
 

@@ -18,7 +18,9 @@
 
 mod common;
 
-use common::{assert_no_browser_errors, begin_browser_error_capture, click, harness_at};
+use common::{
+    assert_no_browser_errors, begin_browser_error_capture, body_font_family, click, harness_at,
+};
 use pixelproof_web::ViewportSize;
 use serde_json::{Value, json};
 
@@ -664,4 +666,203 @@ async fn kpi_cards_carry_a_left_accent_edge_blue_by_default_ldui_kmpa() {
     );
 
     assert_no_browser_errors(&h, "admin-workbench kpi accent edge").await;
+}
+
+/// A theme's approved card shadow, injected the way a product actually ships
+/// one: a single `:root` custom-property declaration in its own stylesheet.
+/// Deliberately not a value from `ui_tokens::elevation`, so a substitution
+/// that silently did nothing would still read as the framework default.
+const THEME_CARD_SHADOW: &str = "0px 3px 9px rgba(0, 0, 0, 0.33)";
+
+/// ldui-k4fn: KPI cards rest at the framework's declared, NON-interactive
+/// card elevation, and a product theme can substitute its own approved card
+/// shadow by setting one custom property.
+///
+/// Reads computed style, never class names. A class-level assertion passes
+/// while the class resolves to nothing -- which is exactly the ldui-h7tw
+/// failure mode this bead had to avoid, because the class replaced a stock
+/// `shadow-sm` and a rule that does not resolve leaves the card with NO
+/// shadow at all.
+///
+/// Three properties, each of which fails independently:
+///
+/// 1. The resting shadow parses as ONE layer and matches
+///    `ui_tokens::elevation::LEVEL_4` -- the declared "card resting
+///    elevation". Tailwind's `shadow-sm` is two layers, so the single-layer
+///    parse alone rejects what this replaced.
+/// 2. That shadow is on the active [`ldui_audit::StyleProfile`] -- the same
+///    profile and the same `shadow_ok` epsilon the depth family sweeps with,
+///    so this cannot pass while `cargo xtask test-style` would report the
+///    card.
+/// 3. A `:root { --ld-card-shadow: ... }` rule in a separate stylesheet
+///    overrides it with no `!important`, no descendant selector into
+///    KpiCard's markup, and no fork of the class -- and removing that
+///    stylesheet restores the framework default, proving the override is a
+///    substitution rather than a one-way overwrite.
+#[tokio::test]
+#[ignore = "requires demo dev server (cargo xtask test-admin-workbench)"]
+async fn kpi_cards_rest_at_the_declared_card_elevation_ldui_k4fn() {
+    let h = harness_at(PAGE).await;
+    begin_browser_error_capture(&h).await;
+    h.set_viewport(ViewportSize::new(1440, 900))
+        .await
+        .expect("set viewport");
+
+    // Parses ONE computed `box-shadow` layer into the component form
+    // `ShadowSpec` compares on. A multi-layer value (every stock Tailwind
+    // `shadow-*` is at least two) fails the pattern and comes back null,
+    // which is itself a finding rather than a skipped check.
+    const PARSE: &str = r#"
+        const parse = v => {
+            const m = /^rgba?\(([^)]+)\)\s+(-?[\d.]+)px\s+(-?[\d.]+)px\s+(-?[\d.]+)px(?:\s+(-?[\d.]+)px)?(\s+inset)?$/.exec(v.trim());
+            if (!m) return null;
+            const c = m[1].split(',').map(s => parseFloat(s.trim()));
+            return {
+                r: c[0], g: c[1], b: c[2], a: c.length > 3 ? c[3] : 1,
+                offsetX: +m[2], offsetY: +m[3], blur: +m[4],
+                spread: m[5] ? +m[5] : 0, inset: !!m[6],
+            };
+        };
+        const card = document.querySelector('[data-kpi-card]');
+    "#;
+
+    let resting = eval_json(
+        &h,
+        &format!(
+            r#"(() => {{
+            {PARSE}
+            const cs = getComputedStyle(card);
+            return {{
+                raw: cs.boxShadow,
+                parsed: parse(cs.boxShadow),
+                transform: cs.transform,
+                classes: card.className,
+                cardCount: document.querySelectorAll('[data-kpi-card]').length,
+            }};
+        }})()"#
+        ),
+    )
+    .await;
+
+    assert!(
+        resting["cardCount"].as_u64().unwrap_or(0) >= 2,
+        "fixture must actually render KPI cards: {resting}"
+    );
+
+    // No stock Tailwind elevation utility survives on the card, and the
+    // interactive `ld-elevated` was not reached for either.
+    let classes = resting["classes"].as_str().unwrap_or_default().to_owned();
+    assert!(
+        !classes.split_whitespace().any(|c| c.contains("shadow-")),
+        "KPI card still carries a stock Tailwind shadow utility: {classes}"
+    );
+    assert!(
+        classes.split_whitespace().any(|c| c == "ld-card-depth"),
+        "KPI card is missing the framework's static elevation class: {classes}"
+    );
+    assert_eq!(
+        resting["transform"],
+        json!("none"),
+        "a read-only KPI card must not carry a lift transform (that is \
+         ld-elevated's job, and it is not what a KPI tile is): {resting}"
+    );
+
+    let parsed = &resting["parsed"];
+    assert!(
+        !parsed.is_null(),
+        "the KPI card's resting box-shadow is not a single declared layer -- \
+         `none` means the ld-card-depth rule did not resolve (the ldui-h7tw \
+         trap: a class defined only by the runtime preamble), and a \
+         multi-layer value means a stock Tailwind shadow-* is still \
+         painting. Got {:?}",
+        resting["raw"]
+    );
+
+    let spec = shadow_spec(parsed);
+
+    // 1. It is the declared CARD resting level, not merely some shadow.
+    let level_4 = ui_tokens::elevation::LEVEL_4;
+    assert!(
+        (spec.offset_x - level_4.offset_x as f64).abs() < 0.5
+            && (spec.offset_y - level_4.offset_y as f64).abs() < 0.5
+            && (spec.blur - level_4.blur as f64).abs() < 0.5
+            && (spec.opacity - level_4.opacity as f64).abs() < 0.01
+            && spec.spread.abs() < 0.5
+            && !spec.inset,
+        "KPI card must rest at ui_tokens::elevation::LEVEL_4 \
+         ({level_4:?}); computed {:?} parsed to {spec:?}",
+        resting["raw"]
+    );
+
+    // 2. …and the depth family's own profile agrees, with its own epsilon.
+    let profile = ldui_audit::from_ui_tokens(body_font_family(&h).await);
+    assert!(
+        profile.shadow_ok(&spec),
+        "KPI card's resting shadow is off the active StyleProfile's declared \
+         set -- `cargo xtask test-style` would report it as ad-hoc depth \
+         (doc/visual-quality/ad-hoc-shadow.md). Got {spec:?}"
+    );
+
+    // 3. Product-theme override, then restore.
+    let overridden = eval_json(
+        &h,
+        &format!(
+            r#"(() => {{
+            {PARSE}
+            const s = document.createElement('style');
+            s.id = 'ldui-k4fn-theme-probe';
+            s.textContent = ':root {{ --ld-card-shadow: {THEME_CARD_SHADOW}; }}';
+            document.head.appendChild(s);
+            const applied = getComputedStyle(card).boxShadow;
+            s.remove();
+            return {{ applied, parsed: parse(applied), restored: getComputedStyle(card).boxShadow }};
+        }})()"#
+        ),
+    )
+    .await;
+
+    let themed = &overridden["parsed"];
+    assert!(
+        !themed.is_null(),
+        "a theme's --ld-card-shadow did not resolve to a single shadow: {overridden}"
+    );
+    let themed = shadow_spec(themed);
+    assert!(
+        (themed.offset_y - 3.0).abs() < 0.5
+            && (themed.blur - 9.0).abs() < 0.5
+            && (themed.opacity - 0.33).abs() < 0.01,
+        "a product theme setting only `--ld-card-shadow` on :root must \
+         replace the framework default with no page-local selector; the card \
+         still painted {:?} ({themed:?})",
+        overridden["applied"]
+    );
+    assert_eq!(
+        overridden["restored"], resting["raw"],
+        "removing the theme stylesheet must restore the framework default, \
+         proving the hook is a substitution and not a one-way overwrite: \
+         {overridden}"
+    );
+
+    assert_no_browser_errors(&h, "admin-workbench kpi card elevation").await;
+}
+
+/// Rebuild a [`ldui_audit::ShadowSpec`] from the JS parser's output, so the
+/// comparison runs against the same struct (and the same epsilon) the depth
+/// sweep uses rather than a hand-rolled tolerance.
+fn shadow_spec(parsed: &Value) -> ldui_audit::ShadowSpec {
+    let n = |k: &str| {
+        parsed[k]
+            .as_f64()
+            .unwrap_or_else(|| panic!("{k} in {parsed}"))
+    };
+    let mut spec = ldui_audit::ShadowSpec::new(
+        n("offsetX"),
+        n("offsetY"),
+        n("blur"),
+        parsed["a"].as_f64().unwrap_or(1.0),
+    )
+    .with_spread(n("spread"));
+    spec.color = [n("r"), n("g"), n("b")];
+    spec.inset = parsed["inset"].as_bool().unwrap_or(false);
+    spec
 }
