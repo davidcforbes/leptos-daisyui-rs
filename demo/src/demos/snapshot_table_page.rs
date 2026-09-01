@@ -1,10 +1,10 @@
 use leptos::prelude::*;
 use leptos_daisyui_rs::components::{
     BadgeColor, Button, EntityBadgePresentation, EntityColumn, EntityColumnChooserTrigger,
-    EntityColumnFilter, EntityIconColor, EntityIconPresentation, EntityNullOrder, EntityRowAction,
-    EntityRowEmphasis, EntityTable, EntityTableDisplayProjection, EntityTablePreferenceOwnership,
-    EntityTablePreferencePersistence, EntityTableProjectionScope, EntityTableSelection,
-    EntityTableTexts, EntityTableViewportFit,
+    EntityColumnFilter, EntityIconColor, EntityIconPresentation, EntityNullOrder, EntityPageSize,
+    EntityRowAction, EntityRowEmphasis, EntityTable, EntityTableDisplayProjection,
+    EntityTablePreferenceOwnership, EntityTablePreferencePersistence, EntityTableProjectionScope,
+    EntityTableSelection, EntityTableTexts, EntityTableViewportFit,
 };
 use leptos_daisyui_rs::patterns::{
     ActionFeedbackContent, ActionFeedbackState, PageHeader, PageHeaderNavigationLayout,
@@ -670,16 +670,25 @@ pub fn SnapshotTablePageControlsFixture() -> impl IntoView {
 pub fn EntityTableViewportFitFixture() -> impl IntoView {
     let height = RwSignal::new(520_u32);
     let alternate_copy = RwSignal::new(false);
-    let data: Signal<Rc<Vec<FixtureRow>>, LocalStorage> = RwSignal::new_local(Rc::new(
-        (1..=60)
-            .map(|index| FixtureRow {
-                id: format!("fit-{index:02}"),
-                client: format!("Viewport client {index:02}"),
-                status: if index % 3 == 0 { "Urgent" } else { "Ready" }.to_owned(),
-            })
-            .collect::<Vec<_>>(),
-    ))
-    .into();
+    // ldui-5p06's headline story: 17 rows is the count that used to render
+    // five rows under a control reading `25`, advertising four pages.
+    let resolved_page_size = RwSignal::new(Option::<EntityPageSize>::None);
+    // Held as a stable `Rc` rather than rebuilt per read: the table's
+    // sorted-index cache keys on row identity, so a fresh allocation on every
+    // `get` would thrash it and re-key every rendered row.
+    let build_rows = |count: usize| {
+        Rc::new(
+            (1..=count)
+                .map(|index| FixtureRow {
+                    id: format!("fit-{index:02}"),
+                    client: format!("Viewport client {index:02}"),
+                    status: if index % 3 == 0 { "Urgent" } else { "Ready" }.to_owned(),
+                })
+                .collect::<Vec<_>>(),
+        )
+    };
+    let rows = RwSignal::new_local(build_rows(60));
+    let data: Signal<Rc<Vec<FixtureRow>>, LocalStorage> = rows.into();
     let columns = Signal::derive_local(move || {
         vec![
             EntityColumn::text(
@@ -737,7 +746,25 @@ pub fn EntityTableViewportFitFixture() -> impl IntoView {
                 <Button attr:data-testid="viewport-fit-locale" on_click=Callback::new(move |_| alternate_copy.update(|value| *value = !*value))>
                     "Toggle localized copy"
                 </Button>
+                <Button attr:data-testid="viewport-fit-rows-17" on_click=Callback::new(move |_| rows.set(build_rows(17)))>
+                    "17 rows"
+                </Button>
+                <Button attr:data-testid="viewport-fit-rows-60" on_click=Callback::new(move |_| rows.set(build_rows(60)))>
+                    "60 rows"
+                </Button>
             </div>
+            <p class="text-sm text-base-content/75">
+                "Resolved page size: "
+                <code data-testid="viewport-fit-resolved">
+                    {move || match resolved_page_size.get() {
+                        Some(page_size) if page_size.is_auto() => {
+                            format!("auto:{}", page_size.rows())
+                        }
+                        Some(page_size) => format!("fixed:{}", page_size.rows()),
+                        None => "none".to_owned(),
+                    }}
+                </code>
+            </p>
             <div
                 class="min-h-0 w-full"
                 style=move || format!("height: {}px", height.get())
@@ -755,6 +782,9 @@ pub fn EntityTableViewportFitFixture() -> impl IntoView {
                     )
                     texts=texts
                     page_size_control_id="viewport-fit-page-size"
+                    on_page_size_resolved=Callback::new(move |page_size| {
+                        resolved_page_size.set(Some(page_size));
+                    })
                 />
             </div>
         </section>

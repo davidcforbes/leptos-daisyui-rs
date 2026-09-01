@@ -1603,13 +1603,131 @@ pub enum EntityColumnChooserTrigger {
     Icon,
 }
 
+/// What the user asked rows-per-page to be, before any layout is measured.
+///
+/// This is the persistable half of the pagination decision: it is a stable
+/// user preference, never a measured row count. The measured count is
+/// transient presentation state and is combined with this intent exactly once
+/// per render by
+/// [`resolve_entity_page_size`](super::resolve_entity_page_size), which
+/// produces the single [`EntityPageSize`] the body, summary, control, and
+/// pager all read.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EntityPageSizeIntent {
+    /// Fit the page to the measured viewport. Only offered by a table that
+    /// opted into [`EntityTableViewportFit`]; anywhere else it resolves to the
+    /// explicit [`EntityTablePreferences::page_size`].
+    #[default]
+    Auto,
+    /// Always page at [`EntityTablePreferences::page_size`], scrolling the
+    /// table region when the viewport cannot show that many rows.
+    Fixed,
+}
+
+/// The one resolved rows-per-page decision for a single render.
+///
+/// `EntityTable` derives exactly one of these per render and every consumer of
+/// a page size reads it: the rendered body, the `Showing x-y of z` summary,
+/// the rows-per-page control's selected value and label, and the pager's page
+/// count. Because the mode and the row count are one indivisible value, the
+/// control cannot advertise a size the body is not rendering (ldui-5p06).
+///
+/// The fields are private and the only constructors clamp the row count, so
+/// three wrong states are unrepresentable rather than merely avoided:
+///
+/// - a row count with no mode (an "effective size" nobody can label, which is
+///   how a control showing `25` came to sit over a five-row page);
+/// - a mode with no row count (an `Auto` the summary and pager cannot use);
+/// - a zero row count (an empty page, and a division by zero in page counting).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EntityPageSize {
+    intent: EntityPageSizeIntent,
+    rows: usize,
+}
+
+impl EntityPageSize {
+    /// A viewport-fitted decision currently rendering `rows` rows.
+    #[must_use]
+    pub const fn auto(rows: usize) -> Self {
+        Self {
+            intent: EntityPageSizeIntent::Auto,
+            rows: if rows == 0 { 1 } else { rows },
+        }
+    }
+
+    /// An explicit decision rendering up to `rows` rows.
+    #[must_use]
+    pub const fn fixed(rows: usize) -> Self {
+        Self {
+            intent: EntityPageSizeIntent::Fixed,
+            rows: if rows == 0 { 1 } else { rows },
+        }
+    }
+
+    /// Rows this page actually renders. Always at least one.
+    #[must_use]
+    pub const fn rows(self) -> usize {
+        self.rows
+    }
+
+    /// The intent this decision resolved from.
+    #[must_use]
+    pub const fn intent(self) -> EntityPageSizeIntent {
+        self.intent
+    }
+
+    /// Whether the row count came from a viewport measurement.
+    #[must_use]
+    pub const fn is_auto(self) -> bool {
+        matches!(self.intent, EntityPageSizeIntent::Auto)
+    }
+
+    /// The rows-per-page `<option>` value that represents this decision.
+    #[must_use]
+    pub fn control_value(self) -> String {
+        if self.is_auto() {
+            ENTITY_PAGE_SIZE_AUTO_VALUE.to_owned()
+        } else {
+            self.rows.to_string()
+        }
+    }
+
+    /// The localized rows-per-page `<option>` label for this decision.
+    ///
+    /// Auto substitutes the measured row count into
+    /// [`EntityTableTexts::rows_per_page_auto`], so the control reads
+    /// `Auto (5)` rather than a number the body never renders.
+    #[must_use]
+    pub fn control_label(self, texts: &EntityTableTexts) -> String {
+        if self.is_auto() {
+            texts
+                .rows_per_page_auto
+                .replace("{rows}", &self.rows.to_string())
+        } else {
+            self.rows.to_string()
+        }
+    }
+}
+
+/// The rows-per-page `<option>` value that selects viewport-fitted paging.
+pub const ENTITY_PAGE_SIZE_AUTO_VALUE: &str = "auto";
+
 /// Versioned user preferences persisted independently of a dataset snapshot.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EntityTablePreferences {
     /// Consumer-defined schema version used to invalidate incompatible payloads.
     pub schema_version: u16,
-    /// Number of rows rendered per page.
+    /// Number of rows rendered per page in [`EntityPageSizeIntent::Fixed`],
+    /// and the fallback before a viewport-fit measurement exists.
     pub page_size: usize,
+    /// Whether rows-per-page follows the viewport or the explicit `page_size`.
+    ///
+    /// This is the only persisted half of the pagination decision: a measured
+    /// row count is transient presentation state and is never stored here
+    /// (ldui-5p06).
+    #[serde(default)]
+    pub page_size_mode: EntityPageSizeIntent,
     /// Current local ordering.
     pub sort: EntitySort,
     /// Explicit display order of stable column identifiers.
@@ -1627,6 +1745,7 @@ impl EntityTablePreferences {
         Self {
             schema_version,
             page_size: 25,
+            page_size_mode: EntityPageSizeIntent::Auto,
             sort: EntitySort::System,
             column_order: Vec::new(),
             hidden_columns: BTreeSet::new(),
@@ -1640,6 +1759,12 @@ impl EntityTablePreferences {
 /// The derived row capacity is presentation state. It never replaces or
 /// persists [`EntityTablePreferences::page_size`], which remains the fixed-mode
 /// value and the safe fallback for very short viewports.
+///
+/// Supplying this policy adds an explicit `Auto` choice to the rows-per-page
+/// control and makes it the default. It no longer overrides an explicit
+/// numeric choice: selecting `25` records
+/// [`EntityPageSizeIntent::Fixed`] and renders up to 25 rows, scrolling the
+/// table region (ldui-5p06).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EntityTableViewportFit {
     height: Option<String>,
@@ -1753,6 +1878,9 @@ pub struct EntityTableTexts {
     pub region_label: String,
     /// Label for the page-size control.
     pub rows_per_page: String,
+    /// Rows-per-page option label for viewport-fitted paging, with a `{rows}`
+    /// placeholder carrying the row count currently rendered.
+    pub rows_per_page_auto: String,
     /// Accessible label for the column chooser.
     pub choose_columns: String,
     /// Label for the responsive controlled-filter panel.
@@ -1816,6 +1944,7 @@ impl Default for EntityTableTexts {
         Self {
             region_label: "Data table".to_owned(),
             rows_per_page: "Rows per page".to_owned(),
+            rows_per_page_auto: "Auto ({rows})".to_owned(),
             choose_columns: "Choose columns".to_owned(),
             filters: "Filters".to_owned(),
             filter_active: "Filter active".to_owned(),

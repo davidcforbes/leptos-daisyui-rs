@@ -46,7 +46,7 @@ erase the compile-time distinction the snapshot component exists to provide.
 | `row_key: EntityRowKey<T>` | Stable identity used for keyed DOM rows and activation. |
 | `dataset_identity: Signal<String>` | Identifies the downloaded dataset; a change resets only the current page. |
 | `page_reset_key` | Optional identity for local view-state changes that should reset only paging. |
-| `viewport_fit` | Optional `EntityTableViewportFit`; derives visible row capacity from a definite parent or CSS height without changing the saved page-size preference. |
+| `viewport_fit` | Optional `EntityTableViewportFit`; adds an explicit `Auto` rows-per-page choice that derives visible row capacity from a definite parent or CSS height, without changing the saved page-size preference. |
 | `compact_row: EntityCompactRow<T>` | Default, static, or reactive single-cell renderer used at compact breakpoints without duplicating rows. |
 | `column_filters: EntityColumnFilters` | Controlled one-to-one filter controls aligned beneath stable desktop columns. |
 | `source_data` | Optional authoritative source membership used only for safe post-removal focus recovery. |
@@ -55,6 +55,7 @@ erase the compile-time distinction the snapshot component exists to provide.
 | `storage_key` | Legacy local-storage compatibility prop; mutually exclusive with `preference_ownership`. |
 | `page_size_control_id` | Optional stable caller-owned DOM ID for the rows-per-page select, which renders in the footer row (see below). |
 | `toolbar_actions` | Optional caller-rendered table utilities placed before the framework-owned column chooser, in the top toolbar. |
+| `on_page_size_resolved` | Optional callback receiving the resolved `EntityPageSize` whenever it changes, including after a `viewport_fit` resize. |
 | `on_display_projection` | Optional callback receiving one atomic read-only snapshot of ordered visible columns plus sorted/filtered rows and current-page bounds. |
 | `projection_action_columns` | `Exclude` by default; set `EntityTableActionColumnPolicy::Include` only when action-copy intentionally belongs in the projection. |
 | `column_chooser_trigger` | Reactive `Text` (default) or compact framework-owned `Icon` presentation; the localized accessible name is unchanged. |
@@ -67,6 +68,71 @@ For the canonical page, pass a state-minted
 page supplies its filtered rows as `data` and the complete displayed snapshot
 as `source_data`. Standalone tables should preserve the same distinction and
 give each page-size control a collision-safe `page_size_control_id`.
+
+## Rows per page: one resolved value (ldui-5p06)
+
+A viewport-fitted table used to render a fitted row count while its
+rows-per-page control and pager described a different size -- an Office Setup
+comparison showed the control reading `25` over a five-row body advertising
+four pages. Auto-fit is now an explicit *choice*, and there is exactly one
+resolved page size per render.
+
+**The type.** `EntityPageSize` pairs a mode with the row count actually
+rendered. Its fields are private and both constructors clamp the count, so a
+row count with no mode, a mode with no row count, and a zero row count are all
+unrepresentable rather than merely avoided. It is produced only by
+`resolve_entity_page_size(intent, auto_available, configured_rows,
+measured_rows)`, the single place the stored intent and the transient
+measurement are combined:
+
+| Inputs | Result |
+|---|---|
+| No `viewport_fit` policy | `Fixed(configured)` -- a stored `Auto` cannot label a table that never measures. |
+| `Auto`, a measurement exists | `Auto(measured)`. |
+| `Auto`, before the first measurement | `Auto(configured)` -- what the first paint genuinely renders. |
+| `Fixed` | `Fixed(configured)`, whatever was measured. Choosing `25` renders up to 25 rows and the region scrolls. |
+
+The rendered body, the `{start}-{end} of {total}` summary, the rows-per-page
+control's selected value and label, and the pager's page count all read that
+one value. The table exposes it as `data-entity-effective-page-size` (rows)
+and `data-entity-page-size-mode` (`auto` / `fixed`).
+
+**The control.** With `viewport_fit`, the select's options are `Auto`, 25, 50,
+100 and `Auto` is the default. The `Auto` option's *value* is `auto` -- stable
+across resizes, so a resize never moves the user's selection -- while its
+*label* carries the fitted count from
+`EntityTableTexts::rows_per_page_auto` (default `"Auto ({rows})"`, so
+`Auto (5)`). Localize that key like any other; it is never hardcoded English.
+Without `viewport_fit` the option list and behavior are exactly as before.
+
+**Controlled state.** `EntityTablePreferences` gained
+`page_size_mode: EntityPageSizeIntent` (`Auto` | `Fixed`, `#[serde(default)]`
+so pre-existing payloads keep today's auto-fit behavior). A satellite persists
+**only** that intent and the numeric `page_size` -- both explicit user
+choices, both emitted together in one normalized replacement by the ordinary
+preference-change callback. It must **not** persist the measured row count:
+that is transient presentation state belonging to one viewport at one moment.
+When a consumer needs the effective size (for a caption, an export footer, or
+telemetry), read it from `on_page_size_resolved`; no consumer should measure
+the DOM or keep duplicate pagination state.
+
+```rust
+<EntityTable
+    // ...
+    viewport_fit=EntityTableViewportFit::fill_parent()
+    preference_ownership=EntityTablePreferenceOwnership::controlled(
+        preferences.into(),
+        Callback::new(move |replacement| {
+            // Persist the explicit choice: `page_size` + `page_size_mode`.
+            preferences.set(replacement);
+        }),
+    )
+    on_page_size_resolved=Callback::new(move |page_size: EntityPageSize| {
+        // Transient. Display it; never store it.
+        effective_rows.set(page_size.rows());
+    })
+/>
+```
 
 ## Toolbar and footer placement (ldui-z0n1)
 

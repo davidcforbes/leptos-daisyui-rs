@@ -9,8 +9,8 @@ use super::model::{
     SortedIndexCache, emit_normalized_preference_change,
     entity_table_display_projection_from_indices, focus_target, move_column, next_sort,
     next_sort_additive, normalize_preferences, ordered_columns, page_after_dataset_change,
-    page_after_row_delta, reset_columns, reset_sort, set_preferred_width, sorted_indices,
-    toggle_hidden_column,
+    page_after_row_delta, reset_columns, reset_sort, resolve_entity_page_size, set_preferred_width,
+    sorted_indices, toggle_hidden_column,
 };
 use super::selection::{
     EntityTableSelection, entity_row_aria_selected, entity_row_hover_class, entity_row_is_selected,
@@ -18,12 +18,13 @@ use super::selection::{
 };
 use super::storage::{load_preferences, save_preferences};
 use super::types::{
-    EntityCellPresentation, EntityColumn, EntityColumnAlignment, EntityColumnChooserTrigger,
-    EntityColumnFilter, EntityColumnFilterPlacement, EntityColumnFilters, EntityColumnKind,
-    EntityColumns, EntityCompactRow, EntityRowKey, EntityRowRenderer, EntitySort,
-    EntitySortDirection, EntityTableActionColumnPolicy, EntityTableDisplayProjection,
-    EntityTablePreferenceOwnership, EntityTablePreferencePersistence, EntityTablePreferences,
-    EntityTableTexts, EntityTableViewportFit, EntityTextOverflow, entity_alignment_class,
+    ENTITY_PAGE_SIZE_AUTO_VALUE, EntityCellPresentation, EntityColumn, EntityColumnAlignment,
+    EntityColumnChooserTrigger, EntityColumnFilter, EntityColumnFilterPlacement,
+    EntityColumnFilters, EntityColumnKind, EntityColumns, EntityCompactRow, EntityPageSize,
+    EntityPageSizeIntent, EntityRowKey, EntityRowRenderer, EntitySort, EntitySortDirection,
+    EntityTableActionColumnPolicy, EntityTableDisplayProjection, EntityTablePreferenceOwnership,
+    EntityTablePreferencePersistence, EntityTablePreferences, EntityTableTexts,
+    EntityTableViewportFit, EntityTextOverflow, entity_alignment_class,
     entity_compact_alignment_class, entity_header_justify_class, entity_text_overflow_style,
     normalize_entity_secondary_text,
 };
@@ -71,14 +72,24 @@ pub(crate) fn next_entity_page_size_id() -> String {
     )
 }
 
-pub(super) fn effective_page_size(
+/// Combines this table's stored intent with its transient measurement into the
+/// one [`EntityPageSize`] every part of the render reads (ldui-5p06).
+///
+/// A thin adapter over
+/// [`resolve_entity_page_size`](super::model::resolve_entity_page_size) that
+/// reads the intent off the supplied preferences, so no call site has to pair
+/// `page_size` with `page_size_mode` by hand.
+pub(super) fn resolved_page_size(
+    preferences: &EntityTablePreferences,
+    auto_available: bool,
     measured_rows: Option<usize>,
-    configured_page_size: usize,
-) -> usize {
-    match measured_rows {
-        Some(rows) => rows.max(1),
-        None => configured_page_size.max(1),
-    }
+) -> EntityPageSize {
+    resolve_entity_page_size(
+        preferences.page_size_mode,
+        auto_available,
+        preferences.page_size.max(1),
+        measured_rows,
+    )
 }
 
 /// Marks one stable, repeatable row action for framework-owned focus recovery.
@@ -402,21 +413,43 @@ impl<T: 'static> DatasetTransitionController<T> {
     }
 }
 
+/// Applies one rows-per-page selection, then reasserts the control's live DOM
+/// value from the supplied preferences.
+///
+/// Both halves of the decision move in one preference update, so a controlled
+/// consumer never observes an `Auto` intent paired with the previous numeric
+/// size (or the reverse). `auto_available` mirrors whether this table opted
+/// into viewport-fit paging: without it an `auto` request is ignored, exactly
+/// as an unknown numeric request is.
 pub(super) fn apply_page_size_change<T: 'static>(
     preferences: PreferenceState<T>,
     current_page: RwSignal<usize>,
+    auto_available: bool,
     requested_value: &str,
     reassert_live_value: impl FnOnce(String),
 ) {
-    if let Ok(page_size) = requested_value.parse::<usize>()
+    if requested_value == ENTITY_PAGE_SIZE_AUTO_VALUE {
+        if auto_available {
+            preferences
+                .update(|preferences| preferences.page_size_mode = EntityPageSizeIntent::Auto);
+            current_page.set(0);
+        }
+    } else if let Ok(page_size) = requested_value.parse::<usize>()
         && ENTITY_PAGE_SIZE_CHOICES.contains(&page_size)
     {
-        preferences.update(|preferences| preferences.page_size = page_size);
+        preferences.update(|preferences| {
+            preferences.page_size = page_size;
+            preferences.page_size_mode = EntityPageSizeIntent::Fixed;
+        });
         current_page.set(0);
     }
 
-    let supplied_value =
-        preferences.with_untracked(|preferences| preferences.page_size.to_string());
+    // Reread rather than echo the request: a controlled consumer may decline
+    // or delay it. The measurement is deliberately omitted -- a control value
+    // names the mode, never the measured row count.
+    let supplied_value = preferences.with_untracked(|preferences| {
+        resolved_page_size(preferences, auto_available, None).control_value()
+    });
     reassert_live_value(supplied_value);
 }
 
@@ -555,6 +588,17 @@ pub fn EntityTable<T>(
     /// stays stable across re-renders.
     #[prop(optional, into)]
     page_size_control_id: MaybeProp<String>,
+    /// Emits the resolved rows-per-page decision whenever it changes.
+    ///
+    /// This is how a consumer learns the effective page size without measuring
+    /// the DOM or keeping duplicate pagination state (ldui-5p06). Under
+    /// `viewport_fit` it fires again after a resize changes the fitted row
+    /// count. Persist [`EntityTablePreferences::page_size_mode`] and
+    /// [`EntityTablePreferences::page_size`] from the preference-change
+    /// callback instead — those are the explicit user choice; the row count
+    /// reported here is transient presentation state.
+    #[prop(optional)]
+    on_page_size_resolved: Option<Callback<EntityPageSize>>,
     /// Shows separate reset-sort and reset-columns actions.
     #[prop(optional, default = false)]
     show_reset_actions: bool,
@@ -642,14 +686,38 @@ where
     });
     let configured_page_size =
         Signal::derive(move || preferences.with(|preferences| preferences.page_size.max(1)));
-    let page_capacity = Signal::derive(move || {
-        effective_page_size(
-            viewport_fit_enabled
-                .then(|| measured_page_size.get())
-                .flatten(),
+    // ── The one resolved page size (ldui-5p06) ──
+    // Everything downstream -- the rendered body, the `Showing x-y of z`
+    // summary, the rows-per-page control, the pager, and the exported display
+    // projection -- reads this and nothing else. There is deliberately no
+    // second "how many rows" signal for them to disagree over. A `Memo` rather
+    // than a derived signal so the resolved value settles before any observer
+    // (including `on_page_size_resolved`) sees it.
+    let page_size: Memo<EntityPageSize> = Memo::new(move |_| {
+        let measured = viewport_fit_enabled
+            .then(|| measured_page_size.get())
+            .flatten();
+        preferences
+            .with(|preferences| resolved_page_size(preferences, viewport_fit_enabled, measured))
+    });
+    // What choosing `Auto` would render right now, used for the control's
+    // `Auto (n)` option label. Identical to `page_size` whenever auto is the
+    // active intent, because it is the same resolution.
+    let auto_page_size: Memo<EntityPageSize> = Memo::new(move |_| {
+        let measured = viewport_fit_enabled
+            .then(|| measured_page_size.get())
+            .flatten();
+        resolve_entity_page_size(
+            EntityPageSizeIntent::Auto,
+            viewport_fit_enabled,
             configured_page_size.get(),
+            measured,
         )
     });
+
+    if let Some(on_page_size_resolved) = on_page_size_resolved {
+        Effect::new(move |_| on_page_size_resolved.run(page_size.get()));
+    }
 
     if let Some(reactive_columns) = reactive_columns {
         let initial_run = StoredValue::new(true);
@@ -685,8 +753,9 @@ where
 
     Effect::new(move |_| {
         let total_rows = data.get().len();
-        let page_size = page_capacity.get();
-        let next_page = page_after_row_delta(current_page.get_untracked(), page_size, total_rows);
+        let rows_per_page = page_size.get().rows();
+        let next_page =
+            page_after_row_delta(current_page.get_untracked(), rows_per_page, total_rows);
         if next_page != current_page.get_untracked() {
             current_page.set(next_page);
         }
@@ -745,7 +814,7 @@ where
     });
 
     let total_rows = Signal::derive_local(move || data.get().len());
-    let total_pages = Signal::derive(move || page_count(total_rows.get(), page_capacity.get()));
+    let total_pages = Signal::derive(move || page_count(total_rows.get(), page_size.get().rows()));
     let page_row_keys = Signal::derive_local(move || {
         let rows = data.get();
         let columns = column_store.get_value();
@@ -760,7 +829,7 @@ where
                 )
             })
             .expect("entity-table sort cache is still mounted");
-        let bounds = page_bounds(current_page.get(), page_capacity.get(), indices.len());
+        let bounds = page_bounds(current_page.get(), page_size.get().rows(), indices.len());
         let row_key = row_key.get_value();
         indices[bounds]
             .iter()
@@ -789,7 +858,7 @@ where
                 &preferences_value,
                 indices.as_slice(),
                 current_page.get(),
-                page_capacity.get(),
+                page_size.get().rows(),
                 row_key.get_value().as_ref(),
                 projection_action_columns,
             ));
@@ -804,7 +873,7 @@ where
         let source_rows = source_data.get();
         let rendered_rows = data.get();
         let mut preferences_value = preferences.get();
-        preferences_value.page_size = page_capacity.get();
+        preferences_value.page_size = page_size.get().rows();
         let columns = column_store.get_value();
         let row_key = row_key.get_value();
         let source_keys = source_rows
@@ -923,7 +992,7 @@ where
             let _ = header_descriptors.get();
             let _ = texts.get();
             let _ = preferences.get();
-            let _ = page_capacity.get();
+            let _ = page_size.get();
             schedule_measure();
         });
 
@@ -978,8 +1047,11 @@ where
             data-entity-table="true"
             data-table-data-mode="client-snapshot"
             data-entity-viewport-fit=viewport_fit_enabled.then_some("true")
-            data-entity-effective-page-size=move || page_capacity.get().to_string()
+            data-entity-effective-page-size=move || page_size.get().rows().to_string()
             data-entity-configured-page-size=move || configured_page_size.get().to_string()
+            data-entity-page-size-mode=move || {
+                if page_size.get().is_auto() { "auto" } else { "fixed" }
+            }
         >
             {move || {
                 let filters = column_filters.get();
@@ -1829,14 +1901,13 @@ where
                             label=Signal::derive(move || {
                                 Some(texts.with(|texts| texts.rows_per_page.clone()))
                             })
-                            value=Signal::derive(move || {
-                                preferences.with(|preferences| preferences.page_size.to_string())
-                            })
+                            value=Signal::derive(move || page_size.get().control_value())
                             node_ref=page_size_select
                             on_change=Callback::new(move |value: String| {
                                 apply_page_size_change(
                                     preferences,
                                     current_page,
+                                    viewport_fit_enabled,
                                     &value,
                                     move |supplied_value| {
                                         if let Some(select) = page_size_select.get() {
@@ -1846,8 +1917,21 @@ where
                                 );
                             })
                         >
-                            {ENTITY_PAGE_SIZE_CHOICES.into_iter().map(|page_size| view! {
-                                <option value=page_size.to_string()>{page_size}</option>
+                            // Auto is a rows-per-page CHOICE, not a silent
+                            // override of one: its option carries the row
+                            // count it currently resolves to, so the control
+                            // can never read `25` over a five-row page.
+                            {viewport_fit_enabled.then(|| view! {
+                                <option value=ENTITY_PAGE_SIZE_AUTO_VALUE>
+                                    {move || {
+                                        texts.with(|texts| auto_page_size.get().control_label(texts))
+                                    }}
+                                </option>
+                            })}
+                            {ENTITY_PAGE_SIZE_CHOICES.into_iter().map(|choice| view! {
+                                <option value=choice.to_string()>
+                                    {EntityPageSize::fixed(choice).control_value()}
+                                </option>
                             }).collect_view()}
                         </Select>
                     </label>
@@ -1857,8 +1941,8 @@ where
                             if total == 0 {
                                 return String::new();
                             }
-                            let page_size = page_capacity.get();
-                            let (start, end) = row_range(current_page.get(), page_size, total);
+                            let rows_per_page = page_size.get().rows();
+                            let (start, end) = row_range(current_page.get(), rows_per_page, total);
                             texts
                                 .with(|texts| texts.row_range.clone())
                                 .replace("{start}", &start.to_string())
@@ -1907,7 +1991,7 @@ where
                             current_page.update(|page| {
                                 *page = clamp_page(
                                     page.saturating_add(1),
-                                    page_capacity.get_untracked(),
+                                    page_size.get_untracked().rows(),
                                     total_rows.get_untracked(),
                                 );
                             });

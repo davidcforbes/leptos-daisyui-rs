@@ -256,6 +256,206 @@ async fn viewport_fit_snapshot(harness: &pixelproof_web::Harness) -> Value {
     .await
 }
 
+/// Reads the four surfaces ldui-5p06 requires to agree -- the rendered body,
+/// the `Showing x-y of z` summary, the rows-per-page control, and the pager --
+/// plus the consumer-visible `on_page_size_resolved` readout, in ONE
+/// evaluation so they are sampled from a single rendered frame.
+async fn page_size_agreement_snapshot(harness: &pixelproof_web::Harness) -> Value {
+    eval_json(
+        harness,
+        r#"(() => {
+            const root = document.querySelector('#entity-viewport-fit-fixture [data-entity-table]');
+            const select = root.querySelector('#viewport-fit-page-size');
+            const selectedOption = select.options[select.selectedIndex];
+            const rows = root.querySelectorAll('[data-entity-table-grid] tbody tr').length;
+            const summary = root.querySelector('[data-entity-table-footer] span.text-sm')
+                ?.textContent.trim() ?? null;
+            const match = /Showing (\d+)-(\d+) of (\d+)/.exec(summary ?? '');
+            const pageButtons = Array.from(root.querySelectorAll('[data-entity-page]'))
+                .filter(button => /^\d+$/.test(button.dataset.entityPage));
+            return {
+                mode: root.dataset.entityPageSizeMode,
+                effective: Number(root.dataset.entityEffectivePageSize),
+                configured: Number(root.dataset.entityConfiguredPageSize),
+                rows,
+                controlValue: select.value,
+                controlLabel: selectedOption ? selectedOption.textContent.trim() : null,
+                optionValues: Array.from(select.options).map(option => option.value),
+                summary,
+                summaryStart: match ? Number(match[1]) : null,
+                summaryEnd: match ? Number(match[2]) : null,
+                summaryTotal: match ? Number(match[3]) : null,
+                advertisedPages: pageButtons.length,
+                lastAdvertisedPage: pageButtons.length
+                    ? Number(pageButtons.at(-1).dataset.entityPage)
+                    : null,
+                nextDisabled: root.querySelector('[data-entity-page="next"]').disabled,
+                resolved: document.querySelector('[data-testid="viewport-fit-resolved"]')
+                    ?.textContent.trim() ?? null,
+            };
+        })()"#,
+    )
+    .await
+}
+
+fn assert_one_page_size_everywhere(snapshot: &Value, context: &str) {
+    let effective = snapshot["effective"]
+        .as_u64()
+        .unwrap_or_else(|| panic!("{context}: no effective page size: {snapshot}"));
+    let total = snapshot["summaryTotal"]
+        .as_u64()
+        .unwrap_or_else(|| panic!("{context}: no summary total: {snapshot}"));
+    let start = snapshot["summaryStart"].as_u64().expect("summary start");
+    let end = snapshot["summaryEnd"].as_u64().expect("summary end");
+
+    assert_eq!(
+        snapshot["rows"].as_u64(),
+        Some(effective.min(total)),
+        "{context}: the body renders a different count than the resolved page size: {snapshot}"
+    );
+    assert_eq!(
+        end - start + 1,
+        snapshot["rows"].as_u64().expect("rendered rows"),
+        "{context}: the summary range disagrees with the rendered body: {snapshot}"
+    );
+    assert_eq!(
+        snapshot["lastAdvertisedPage"].as_u64(),
+        Some(total.div_ceil(effective)),
+        "{context}: the pager advertises a page count from a different size: {snapshot}"
+    );
+    // The control names the MODE, and its label carries the resolved count --
+    // it can never read a number the body is not rendering.
+    let control_value = snapshot["controlValue"].as_str().expect("control value");
+    let control_label = snapshot["controlLabel"].as_str().expect("control label");
+    if snapshot["mode"] == json!("auto") {
+        assert_eq!(control_value, "auto", "{context}: {snapshot}");
+        assert!(
+            control_label.contains(&effective.to_string()),
+            "{context}: the auto option must name the rows it fitted: {snapshot}"
+        );
+        assert_eq!(
+            snapshot["resolved"].as_str(),
+            Some(format!("auto:{effective}").as_str()),
+            "{context}: on_page_size_resolved disagrees with the DOM: {snapshot}"
+        );
+    } else {
+        assert_eq!(
+            control_value,
+            effective.to_string(),
+            "{context}: {snapshot}"
+        );
+        assert_eq!(
+            control_label,
+            effective.to_string(),
+            "{context}: {snapshot}"
+        );
+        assert_eq!(
+            snapshot["resolved"].as_str(),
+            Some(format!("fixed:{effective}").as_str()),
+            "{context}: on_page_size_resolved disagrees with the DOM: {snapshot}"
+        );
+    }
+}
+
+async fn choose_page_size(harness: &pixelproof_web::Harness, value: &str) {
+    let expression = format!(
+        r#"(() => {{
+            const select = document.querySelector('#viewport-fit-page-size');
+            select.value = {value:?};
+            select.dispatchEvent(new Event('change', {{ bubbles: true }}));
+            return select.value;
+        }})()"#
+    );
+    assert_eq!(
+        eval_json(harness, &expression).await,
+        json!(value),
+        "the rows-per-page control did not accept `{value}`"
+    );
+    tokio::time::sleep(Duration::from_millis(250)).await;
+}
+
+/// ldui-5p06: with 17 rows, a control reading `25` may never sit over a
+/// five-row body advertising four pages. Auto is an explicit choice that names
+/// its own fitted count; a numeric choice renders that many rows.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
+async fn seventeen_rows_cannot_show_twenty_five_while_rendering_five() {
+    let harness = harness_at("/components/entity-table-viewport-fit").await;
+    wait_for_selector(
+        &harness,
+        "#entity-viewport-fit-fixture [data-entity-table-grid] tbody tr",
+    )
+    .await;
+    begin_browser_error_capture(&harness).await;
+    click(&harness, "[data-testid='viewport-fit-rows-17']").await;
+    click(&harness, "[data-testid='viewport-fit-short']").await;
+    tokio::time::sleep(Duration::from_millis(400)).await;
+
+    // Auto: the control says so, and names the rows it fitted.
+    let auto = page_size_agreement_snapshot(&harness).await;
+    assert_eq!(auto["mode"], json!("auto"), "{auto}");
+    assert_eq!(auto["summaryTotal"], json!(17), "{auto}");
+    assert_eq!(
+        auto["optionValues"],
+        json!(["auto", "25", "50", "100"]),
+        "viewport-fit tables offer Auto as a first-class choice: {auto}"
+    );
+    assert_one_page_size_everywhere(&auto, "auto fit over 17 rows");
+    assert!(
+        auto["controlLabel"]
+            .as_str()
+            .is_none_or(|label| label.trim() != "25"),
+        "the control must never read a bare 25 while auto-fitting: {auto}"
+    );
+
+    // Explicit 25 over 17 rows: every row renders, on exactly one page.
+    choose_page_size(&harness, "25").await;
+    let fixed = page_size_agreement_snapshot(&harness).await;
+    assert_eq!(fixed["mode"], json!("fixed"), "{fixed}");
+    assert_eq!(fixed["effective"], json!(25), "{fixed}");
+    assert_eq!(
+        fixed["rows"],
+        json!(17),
+        "choosing 25 must render all 17 rows, not a fitted five: {fixed}"
+    );
+    assert_eq!(
+        fixed["lastAdvertisedPage"],
+        json!(1),
+        "17 rows at 25 per page is one page, never four: {fixed}"
+    );
+    assert_eq!(fixed["nextDisabled"], json!(true), "{fixed}");
+    assert_eq!(fixed["summary"], json!("Showing 1-17 of 17"), "{fixed}");
+    assert_one_page_size_everywhere(&fixed, "explicit 25 over 17 rows");
+
+    // A resize must not disturb an explicit choice.
+    click(&harness, "[data-testid='viewport-fit-tall']").await;
+    tokio::time::sleep(Duration::from_millis(350)).await;
+    let after_resize = page_size_agreement_snapshot(&harness).await;
+    assert_eq!(after_resize["mode"], json!("fixed"), "{after_resize}");
+    assert_eq!(after_resize["effective"], json!(25), "{after_resize}");
+    assert_one_page_size_everywhere(&after_resize, "explicit 25 after a resize");
+
+    // Back to Auto, then across two desktop heights: the control's VALUE is
+    // stable (so the selection never moves under the user) while the fitted
+    // count and every surface reading it move together.
+    choose_page_size(&harness, "auto").await;
+    let tall = page_size_agreement_snapshot(&harness).await;
+    assert_eq!(tall["mode"], json!("auto"), "{tall}");
+    assert_one_page_size_everywhere(&tall, "auto fit at the tall height");
+
+    click(&harness, "[data-testid='viewport-fit-default']").await;
+    tokio::time::sleep(Duration::from_millis(350)).await;
+    let default_height = page_size_agreement_snapshot(&harness).await;
+    assert_eq!(default_height["mode"], json!("auto"), "{default_height}");
+    assert_eq!(
+        default_height["controlValue"], tall["controlValue"],
+        "a resize must not move the control's selected value: {default_height}"
+    );
+    assert_one_page_size_everywhere(&default_height, "auto fit at the default height");
+
+    assert_no_browser_errors(&harness, "EntityTable resolved page size").await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
 async fn viewport_fit_paging_remeasures_without_persisting_or_nesting_scroll() {

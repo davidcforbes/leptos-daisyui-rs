@@ -12,22 +12,23 @@ pub use model::{
     ENTITY_PAGE_SIZE_CHOICES, EntityColumnMove, EntityFocusRecord, EntityFocusTarget,
     entity_table_display_projection, focus_target, move_column, next_sort, next_sort_additive,
     normalize_preferences, ordered_columns, page_after_dataset_change, page_after_row_delta,
-    reset_columns, reset_sort, set_preferred_width, sorted_indices, toggle_hidden_column,
-    valid_page_size,
+    reset_columns, reset_sort, resolve_entity_page_size, set_preferred_width, sorted_indices,
+    toggle_hidden_column, valid_page_size,
 };
 pub use selection::EntityTableSelection;
 pub use storage::{decode_preferences, encode_preferences};
 pub use types::{
-    EntityBadgeCell, EntityBadgePresentation, EntityCellPresentation, EntityCellRenderer,
-    EntityColumn, EntityColumnAlignment, EntityColumnChooserTrigger, EntityColumnFilter,
-    EntityColumnFilterOption, EntityColumnFilterRenderer, EntityColumnFilters, EntityColumnKind,
-    EntityColumns, EntityCompactRow, EntityComparator, EntityIconCell, EntityIconColor,
-    EntityIconPresentation, EntityNullOrder, EntityPreparedSortComparator, EntityPrimaryTextCell,
-    EntityRowKey, EntityRowRenderer, EntitySecondaryTextCell, EntitySort, EntitySortColumn,
-    EntitySortDirection, EntitySortKey, EntitySortKeyFactory, EntityTableActionColumnPolicy,
-    EntityTableDisplayColumn, EntityTableDisplayProjection, EntityTableDisplayRow,
-    EntityTablePreferenceOwnership, EntityTablePreferencePersistence, EntityTablePreferences,
-    EntityTableProjectionScope, EntityTableTexts, EntityTableViewportFit, EntityTextOverflow,
+    ENTITY_PAGE_SIZE_AUTO_VALUE, EntityBadgeCell, EntityBadgePresentation, EntityCellPresentation,
+    EntityCellRenderer, EntityColumn, EntityColumnAlignment, EntityColumnChooserTrigger,
+    EntityColumnFilter, EntityColumnFilterOption, EntityColumnFilterRenderer, EntityColumnFilters,
+    EntityColumnKind, EntityColumns, EntityCompactRow, EntityComparator, EntityIconCell,
+    EntityIconColor, EntityIconPresentation, EntityNullOrder, EntityPageSize, EntityPageSizeIntent,
+    EntityPreparedSortComparator, EntityPrimaryTextCell, EntityRowKey, EntityRowRenderer,
+    EntitySecondaryTextCell, EntitySort, EntitySortColumn, EntitySortDirection, EntitySortKey,
+    EntitySortKeyFactory, EntityTableActionColumnPolicy, EntityTableDisplayColumn,
+    EntityTableDisplayProjection, EntityTableDisplayRow, EntityTablePreferenceOwnership,
+    EntityTablePreferencePersistence, EntityTablePreferences, EntityTableProjectionScope,
+    EntityTableTexts, EntityTableViewportFit, EntityTextOverflow,
 };
 
 #[cfg(test)]

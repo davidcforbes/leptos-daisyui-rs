@@ -1,7 +1,7 @@
 use super::*;
 use crate::components::badge::{BadgeColor, BadgeStyle};
-use crate::components::data_table::{clamp_page, page_bounds, page_count};
-use leptos::prelude::{Callback, Get, IntoAny, RwSignal, Set, Signal, StoredValue};
+use crate::components::data_table::{clamp_page, page_bounds, page_count, row_range};
+use leptos::prelude::{Callback, Get, IntoAny, RwSignal, Set, Signal, StoredValue, Update};
 use leptos::reactive::owner::Owner;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -653,7 +653,7 @@ fn controlled_page_size_change_reasserts_a_synchronously_accepted_value() {
         let current_page = RwSignal::new(3);
         let live_value = RefCell::new(None::<String>);
 
-        super::component::apply_page_size_change(preferences, current_page, "50", |value| {
+        super::component::apply_page_size_change(preferences, current_page, false, "50", |value| {
             live_value.replace(Some(value));
         });
 
@@ -686,7 +686,7 @@ fn controlled_page_size_change_restores_a_declined_or_delayed_value() {
         let current_page = RwSignal::new(3);
         let live_value = RefCell::new(None::<String>);
 
-        super::component::apply_page_size_change(preferences, current_page, "50", |value| {
+        super::component::apply_page_size_change(preferences, current_page, false, "50", |value| {
             live_value.replace(Some(value));
         });
 
@@ -1495,14 +1495,288 @@ fn viewport_fit_policy_is_explicit_and_does_not_replace_the_preference() {
 
     let preferences = EntityTablePreferences::new(1);
     assert_eq!(
-        super::component::effective_page_size(Some(11), preferences.page_size),
+        super::component::resolved_page_size(&preferences, true, Some(11)).rows(),
         11
     );
     assert_eq!(
-        super::component::effective_page_size(None, preferences.page_size),
+        super::component::resolved_page_size(&preferences, true, None).rows(),
         25
     );
-    assert_eq!(preferences.page_size, 25);
+    assert_eq!(
+        preferences.page_size, 25,
+        "a measured capacity is presentation state and never edits the preference"
+    );
+}
+
+// ── One resolved page size (ldui-5p06) ──
+//
+// The defect: a viewport-fitted body rendered five rows and a four-page pager
+// while the rows-per-page control read `25`. These pin the single resolution
+// every one of those four surfaces now derives from.
+
+#[test]
+fn auto_fit_resolution_reports_the_measured_rows_and_says_it_is_auto() {
+    let resolved = resolve_entity_page_size(EntityPageSizeIntent::Auto, true, 25, Some(5));
+    assert!(resolved.is_auto());
+    assert_eq!(resolved.intent(), EntityPageSizeIntent::Auto);
+    assert_eq!(resolved.rows(), 5);
+}
+
+#[test]
+fn an_explicit_numeric_choice_renders_that_many_rows_despite_a_smaller_fit() {
+    // The bead's headline case: 17 rows and a five-row viewport must not show
+    // `25` over a five-row page. Choosing 25 means 25.
+    let resolved = resolve_entity_page_size(EntityPageSizeIntent::Fixed, true, 25, Some(5));
+    assert!(!resolved.is_auto());
+    assert_eq!(resolved.rows(), 25);
+    assert_eq!(resolved.control_value(), "25");
+    assert_eq!(
+        page_count(17, resolved.rows()),
+        1,
+        "17 rows at an explicit 25 is one page, never four"
+    );
+}
+
+#[test]
+fn auto_before_the_first_measurement_is_still_labeled_auto() {
+    // First paint renders the configured fallback. Reporting that as `Fixed`
+    // would make the control flip 25 -> Auto(5) as if the user had acted.
+    let resolved = resolve_entity_page_size(EntityPageSizeIntent::Auto, true, 25, None);
+    assert!(resolved.is_auto());
+    assert_eq!(resolved.rows(), 25, "the body really does render 25 here");
+    assert_eq!(resolved.control_value(), "auto");
+}
+
+#[test]
+fn auto_is_unavailable_without_a_viewport_fit_policy() {
+    // A preference restored from a fitting table must not label a table that
+    // never measures anything `Auto`.
+    for measured in [None, Some(5)] {
+        let resolved = resolve_entity_page_size(EntityPageSizeIntent::Auto, false, 50, measured);
+        assert!(!resolved.is_auto(), "measured={measured:?}");
+        assert_eq!(resolved.rows(), 50);
+        assert_eq!(resolved.control_value(), "50");
+    }
+}
+
+#[test]
+fn a_resolution_can_never_carry_zero_rows() {
+    // A zero would render an empty page and divide by zero in page counting.
+    assert_eq!(EntityPageSize::auto(0).rows(), 1);
+    assert_eq!(EntityPageSize::fixed(0).rows(), 1);
+    assert_eq!(
+        resolve_entity_page_size(EntityPageSizeIntent::Auto, true, 0, Some(0)).rows(),
+        1
+    );
+    let mut zeroed = EntityTablePreferences::new(1);
+    zeroed.page_size = 0;
+    assert_eq!(
+        super::component::resolved_page_size(&zeroed, false, None).rows(),
+        1
+    );
+}
+
+#[test]
+fn body_summary_control_and_pager_all_read_the_same_resolution() {
+    // The four surfaces the bead names, derived from one value. The check that
+    // matters is that no surface is allowed a second source: each is computed
+    // here exactly the way `EntityTable` computes it.
+    let texts = EntityTableTexts::default();
+    let total_rows = 17;
+    for (intent, measured, expected_rows, expected_value, expected_label) in [
+        (EntityPageSizeIntent::Auto, Some(5), 5, "auto", "Auto (5)"),
+        (EntityPageSizeIntent::Auto, Some(7), 7, "auto", "Auto (7)"),
+        (EntityPageSizeIntent::Fixed, Some(5), 25, "25", "25"),
+    ] {
+        let resolved = resolve_entity_page_size(intent, true, 25, measured);
+        let rows = resolved.rows();
+        assert_eq!(rows, expected_rows);
+        // Control: selected value and visible label.
+        assert_eq!(resolved.control_value(), expected_value);
+        assert_eq!(resolved.control_label(&texts), expected_label);
+        // Pager.
+        let pages = page_count(total_rows, rows);
+        // Summary.
+        let (start, end) = row_range(0, rows, total_rows);
+        // Body.
+        let rendered = page_bounds(0, rows, total_rows).len();
+        assert_eq!(rendered, rows.min(total_rows), "body vs resolution: {rows}");
+        assert_eq!(end - start + 1, rendered, "summary vs body: {rows}");
+        assert_eq!(pages, total_rows.div_ceil(rows), "pager vs resolution");
+        assert_eq!(
+            pages == 1,
+            rendered == total_rows,
+            "a single page must mean every row is rendered: {rows}"
+        );
+    }
+}
+
+#[test]
+fn the_control_label_is_localizable_rather_than_hardcoded_english() {
+    let texts = EntityTableTexts {
+        rows_per_page_auto: "Automatique ({rows} lignes)".to_owned(),
+        ..EntityTableTexts::default()
+    };
+    assert_eq!(
+        EntityPageSize::auto(7).control_label(&texts),
+        "Automatique (7 lignes)"
+    );
+}
+
+#[test]
+fn choosing_auto_records_the_intent_without_touching_the_numeric_preference() {
+    let owner = Owner::new();
+    owner.with(|| {
+        let current = RwSignal::new(EntityTablePreferences::new(1));
+        current.update(|preferences| {
+            preferences.page_size = 50;
+            preferences.page_size_mode = EntityPageSizeIntent::Fixed;
+        });
+        let preferences = super::component::PreferenceState::new(
+            EntityTablePreferenceOwnership::controlled(
+                current.into(),
+                Callback::new(move |replacement| current.set(replacement)),
+            ),
+            StoredValue::new_local(columns()),
+            1,
+        );
+        let current_page = RwSignal::new(2);
+        let live_value = RefCell::new(None::<String>);
+
+        super::component::apply_page_size_change(
+            preferences,
+            current_page,
+            true,
+            "auto",
+            |value| {
+                live_value.replace(Some(value));
+            },
+        );
+
+        assert_eq!(current.get().page_size_mode, EntityPageSizeIntent::Auto);
+        assert_eq!(
+            current.get().page_size,
+            50,
+            "the explicit numeric preference survives an Auto selection"
+        );
+        assert_eq!(current_page.get(), 0);
+        assert_eq!(live_value.into_inner().as_deref(), Some("auto"));
+    });
+}
+
+#[test]
+fn choosing_a_number_leaves_auto_in_one_atomic_preference_replacement() {
+    let owner = Owner::new();
+    owner.with(|| {
+        let current = RwSignal::new(EntityTablePreferences::new(1));
+        let emitted = Arc::new(Mutex::new(Vec::new()));
+        let emitted_for_callback = Arc::clone(&emitted);
+        let preferences = super::component::PreferenceState::new(
+            EntityTablePreferenceOwnership::controlled(
+                current.into(),
+                Callback::new(move |replacement: EntityTablePreferences| {
+                    current.set(replacement.clone());
+                    emitted_for_callback
+                        .lock()
+                        .expect("controlled callback lock is available")
+                        .push(replacement);
+                }),
+            ),
+            StoredValue::new_local(columns()),
+            1,
+        );
+        let current_page = RwSignal::new(3);
+        let live_value = RefCell::new(None::<String>);
+
+        super::component::apply_page_size_change(preferences, current_page, true, "50", |value| {
+            live_value.replace(Some(value));
+        });
+
+        let emitted = emitted
+            .lock()
+            .expect("controlled callback lock is available");
+        assert_eq!(
+            emitted.len(),
+            1,
+            "the mode and the number must move together, not in two replacements"
+        );
+        assert_eq!(emitted[0].page_size, 50);
+        assert_eq!(emitted[0].page_size_mode, EntityPageSizeIntent::Fixed);
+        assert_eq!(live_value.into_inner().as_deref(), Some("50"));
+    });
+}
+
+#[test]
+fn an_auto_request_is_ignored_by_a_table_that_never_measures() {
+    let owner = Owner::new();
+    owner.with(|| {
+        let current = RwSignal::new(EntityTablePreferences::new(1));
+        let preferences = super::component::PreferenceState::new(
+            EntityTablePreferenceOwnership::controlled(
+                current.into(),
+                Callback::new(move |replacement| current.set(replacement)),
+            ),
+            StoredValue::new_local(columns()),
+            1,
+        );
+        let current_page = RwSignal::new(2);
+        let live_value = RefCell::new(None::<String>);
+
+        super::component::apply_page_size_change(
+            preferences,
+            current_page,
+            false,
+            "auto",
+            |value| {
+                live_value.replace(Some(value));
+            },
+        );
+
+        assert_eq!(current_page.get(), 2, "an ignored request pages nothing");
+        assert_eq!(
+            live_value.into_inner().as_deref(),
+            Some("25"),
+            "the control snaps back to the numeric value actually in force"
+        );
+    });
+}
+
+#[test]
+fn a_stored_page_size_mode_survives_a_preference_round_trip() {
+    let columns = columns();
+    let mut preferences = EntityTablePreferences::new(1);
+    preferences.page_size_mode = EntityPageSizeIntent::Fixed;
+    let payload = encode_preferences(&preferences).expect("preferences encode");
+    let decoded = decode_preferences(&payload, 1, &columns);
+    assert_eq!(decoded.page_size_mode, EntityPageSizeIntent::Fixed);
+
+    // A payload written before this field existed defaults to Auto, which is
+    // the pre-ldui-5p06 behavior of every viewport-fit table.
+    let legacy = decode_preferences(
+        r#"{"schema_version":1,"page_size":25,"sort":"system","hidden_columns":[],"column_widths":{}}"#,
+        1,
+        &columns,
+    );
+    assert_eq!(legacy.page_size_mode, EntityPageSizeIntent::Auto);
+    assert_eq!(legacy.page_size, 25);
+}
+
+#[test]
+fn a_resize_changes_only_the_measured_half_of_the_resolution() {
+    // Two desktop heights: the intent, the numeric preference, and the
+    // control's selected value are all identical across them, so a resize
+    // cannot move the user's selection or the control's focus.
+    let preferences = EntityTablePreferences::new(1);
+    let tall = super::component::resolved_page_size(&preferences, true, Some(14));
+    let short = super::component::resolved_page_size(&preferences, true, Some(6));
+    assert_eq!(tall.control_value(), short.control_value());
+    assert_eq!(tall.intent(), short.intent());
+    assert_ne!(tall.rows(), short.rows());
+    assert_eq!(
+        (tall.rows(), short.rows()),
+        (14, 6),
+        "both heights report their own fit"
+    );
 }
 
 #[test]

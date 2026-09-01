@@ -1,9 +1,10 @@
 //! Pure ordering, pagination, visibility, and resize behavior.
 
 use super::types::{
-    EntityColumn, EntityComparator, EntityPreparedSortComparator, EntitySort, EntitySortDirection,
-    EntityTableActionColumnPolicy, EntityTableDisplayColumn, EntityTableDisplayProjection,
-    EntityTableDisplayRow, EntityTablePreferences,
+    EntityColumn, EntityComparator, EntityPageSize, EntityPageSizeIntent,
+    EntityPreparedSortComparator, EntitySort, EntitySortDirection, EntityTableActionColumnPolicy,
+    EntityTableDisplayColumn, EntityTableDisplayProjection, EntityTableDisplayRow,
+    EntityTablePreferences,
 };
 use crate::components::data_table::{
     ColumnVisibilityAction, MAX_COLUMN_WIDTH, clamp_page, column_visibility_action,
@@ -18,6 +19,50 @@ pub const ENTITY_PAGE_SIZE_CHOICES: [usize; 3] = [25, 50, 100];
 /// Returns whether a row count is one of the opinionated choices.
 pub fn valid_page_size(page_size: usize) -> bool {
     ENTITY_PAGE_SIZE_CHOICES.contains(&page_size)
+}
+
+/// Resolves the one [`EntityPageSize`] a render is allowed to use.
+///
+/// This is the single place a rows-per-page intent and a measured viewport
+/// capacity are combined, which is what keeps the rendered body, the result
+/// summary, the rows-per-page control, and the pager from describing different
+/// page sizes (ldui-5p06). It is total over its four inputs:
+///
+/// - auto unavailable (no `viewport_fit` policy) resolves fixed, whatever the
+///   stored intent says, so a preference restored from a table that did fit
+///   the viewport cannot label a non-fitting table `Auto`;
+/// - `Auto` with a measurement is that measurement;
+/// - `Auto` before the first measurement lands is the configured size, still
+///   labeled `Auto`, because that is genuinely what the body renders on the
+///   first paint;
+/// - `Fixed` ignores the measurement entirely — an explicit `25` renders up to
+///   25 rows and the table region scrolls.
+///
+/// ```
+/// use leptos_daisyui_rs::components::{
+///     EntityPageSizeIntent, resolve_entity_page_size,
+/// };
+///
+/// let fitted = resolve_entity_page_size(EntityPageSizeIntent::Auto, true, 25, Some(5));
+/// assert_eq!(fitted.rows(), 5);
+/// assert!(fitted.is_auto());
+///
+/// let explicit = resolve_entity_page_size(EntityPageSizeIntent::Fixed, true, 25, Some(5));
+/// assert_eq!(explicit.rows(), 25);
+/// assert!(!explicit.is_auto());
+/// ```
+pub fn resolve_entity_page_size(
+    intent: EntityPageSizeIntent,
+    auto_available: bool,
+    configured_rows: usize,
+    measured_rows: Option<usize>,
+) -> EntityPageSize {
+    match (auto_available, intent) {
+        (true, EntityPageSizeIntent::Auto) => {
+            EntityPageSize::auto(measured_rows.unwrap_or(configured_rows))
+        }
+        _ => EntityPageSize::fixed(configured_rows),
+    }
 }
 
 /// Cycles one sortable column through system, ascending, descending, and system order.

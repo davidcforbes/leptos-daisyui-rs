@@ -374,6 +374,7 @@ pub fn ClientSnapshotListDemo() -> impl IntoView {
             EntityTableTexts {
                 region_label: "Tabla de clientes".to_owned(),
                 rows_per_page: "Filas por página".to_owned(),
+                rows_per_page_auto: "Automático ({rows})".to_owned(),
                 choose_columns: "Elegir columnas".to_owned(),
                 filters: "Filtros de columnas".to_owned(),
                 filter_active: "Filtro activo".to_owned(),
