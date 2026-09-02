@@ -57,6 +57,7 @@ cargo xtask test-bar-chart-divergence  # BarChart signed divergence + a11y (ldui
 cargo xtask test-heatmap-matrix        # Heatmap two-axis grid + hidden matrix (ldui-8d94)
 cargo xtask test-collapse-naming       # Collapse toggle id/name + title-derived accessible name (ldui-3k00)
 cargo xtask test-data-table-fit        # DataTable undeclared columns fit w-full; declared tracks scroll (ldui-qsqz)
+cargo xtask test-snapshot-table-page-filter-actions  # SnapshotTablePage's opt-in count/Reset/Save row (ldui-nj3q)
 cargo xtask gen-tokens [--check]     # regenerate styles/tokens.css from ui-tokens
 cargo xtask check-sibling-tokens     # preamble.rs's ui_tokens refs must exist on the sibling's DEFAULT branch
 cargo xtask bump patch|minor|major   # bump the library version (human-chosen level)
@@ -72,6 +73,28 @@ never seeded and no element carried `tabindex=0`), a `method="dialog"` close
 button did nothing (this crate's `Button` defaults to `type="button"`, unlike
 daisyUI's documented raw-`<button>` idiom), and focus was lost whenever a row
 group collapsed. Run the lane before believing the coverage.
+
+**Do not touch the tree while a browser lane is running -- `cargo fmt`
+counts.** xtask builds the stylesheet, stamps `demo/.ldui-css-stamp`, then
+starts `trunk serve`; trunk *watches* `../src` and `demo/src`, so any write
+there re-runs the `build-css.mjs` pre-build hook and rewrites that stamp while
+the already-served `dist` stylesheet still carries the old one. The suite then
+fails on the `ldui-hun` guard:
+
+```
+STALE STYLESHEET (ldui-hun): the CSS loaded by <route> is not the CSS that was
+last built.
+  expected marker: ldui-css-stamp-<B>   (from demo/.ldui-css-stamp)
+  markers found in the served stylesheets: ldui-css-stamp-<A>
+```
+
+That is the guard working, not a fixture defect: **the marker mismatch in the
+message is the whole diagnosis**, so re-run on a quiescent tree rather than
+investigating the test (the re-run is fast -- everything is already compiled).
+Finish every edit, including the per-package `cargo fmt` this repo requires,
+*before* launching a lane. The same message with the stamps *matching* is a
+different failure -- a tailwind build that never ran (missing
+`demo/node_modules`).
 
 **A suite registered in no xtask lane runs nowhere.** It compiles, never
 executes, and the evidence it exists to produce is structurally unobtainable.
@@ -265,6 +288,32 @@ validates generation/revision, keeps the complete snapshot in
 `EntityTable::source_data`, and derives dataset/page-size select IDs from the
 page contract. Standalone `DatasetSelector`/`EntityTable` calls supply
 `control_id`/`page_size_control_id`; do not patch IDs into the DOM.
+
+### Recent additions (2026-09-02, later: SnapshotTablePage filter actions)
+
+`SnapshotTablePage` grows an optional `filter_actions:
+SnapshotFilterActionsConfig` (ldui-nj3q). Supplied, the `filters` slot composes
+the framework `FilterBar` around the consumer's own content, yielding the
+localized `{visible} of {total} results` count, one Reset, and one explicit
+Save as Default. Absent, the slot renders exactly as before.
+
+**A consumer of the composite must never compose `FilterBar` beside it** --
+that reintroduces the page-local furniture the opinionated contract exists to
+remove. Reach for `filter_actions` instead.
+
+The config carries **no counts**. Visible comes from the identity-bound
+`LocalResultSummary` minted by `state`, total from the authoritative displayed
+snapshot, both read by the page -- so a consumer cannot pair a count with the
+wrong generation, exactly as the selector and table configs already forbid.
+The result string reuses `FilterBar`'s own `result_count` template, so one
+page's copy cannot drift from another's. Save feedback renders in `FilterBar`'s
+own live region rather than through `ActionFeedback`, which is keyed by the
+page's action-key type `K` that a save has no way to mint.
+
+Proven by `cargo xtask test-snapshot-table-page-filter-actions`, whose fixture
+mounts **both** configurations on one document so every positive assertion
+carries its negative control on the same run. See
+[`doc/patterns/client-snapshot-list.md`](./doc/patterns/client-snapshot-list.md).
 
 ### Recent additions (2026-09-02, consumer-audit bead wave + comprehensive validation)
 
