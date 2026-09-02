@@ -31,7 +31,7 @@ mod common;
 
 use common::{
     assert_no_browser_errors, begin_browser_error_capture, click, click_svg_fraction, harness_at,
-    move_pointer_to_svg_fraction, oracle,
+    move_pointer_to_svg_fraction, oracle, wait_for_selector,
 };
 use pixelproof_web::{Key, ViewportSize};
 use serde_json::json;
@@ -5901,4 +5901,126 @@ async fn a_refused_checkbox_configuration_renders_an_alert_and_no_input() {
         "a refused configuration must render no control at all: {refused}"
     );
     assert_no_browser_errors(&h, "refused checkbox configuration").await;
+}
+
+/// RecordHeader's rightmost quick-action tooltip must never spill past its
+/// own row (ldui-q73d), at the exact viewport the consumer reported. This
+/// is asserted three times because a daisyUI tooltip bubble is laid out
+/// with `opacity: 0` even before any hover -- so the row must already be
+/// spill-free at rest -- and the placement must hold once the bubble is
+/// actually shown, by pointer hover and by real keyboard focus.
+///
+/// The fixture (`/components/record_header`, `record-header-edge-tooltip`)
+/// deliberately reproduces the bug report's shape: one status plus three
+/// glyph actions inside a constrained (`max-w-sm`) container.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo make test-visual)"]
+async fn record_header_edge_action_tooltip_never_spills_the_row() {
+    const SCOPE: &str = r#"[data-testid="record-header-edge-tooltip"]"#;
+    const EMAIL_TRIGGER: &str =
+        r#"[data-testid="record-header-edge-tooltip"] [data-record-action="email"]"#;
+    const ARCHIVE_TRIGGER: &str =
+        r#"[data-testid="record-header-edge-tooltip"] [data-record-action="archive"]"#;
+    const PROBE_JS: &str = r#"(() => {
+        const scope = document.querySelector('[data-testid="record-header-edge-tooltip"]');
+        const section = scope.querySelector('[data-record-header="true"]');
+        const cluster = scope.querySelector('[data-record-actions="true"]');
+        const trigger = scope.querySelector('[data-record-action="archive"]');
+        const tooltip = trigger.closest('.tooltip');
+        return {
+            sectionSpills: section.scrollWidth > section.clientWidth,
+            clusterSpills: cluster.scrollWidth > cluster.clientWidth,
+            pageSpills: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+            tooltipClass: tooltip.className,
+            tipOpacity: getComputedStyle(tooltip, '::before').opacity,
+            ariaLabel: trigger.getAttribute('aria-label'),
+            dataTip: tooltip.getAttribute('data-tip'),
+            focused: document.activeElement === trigger,
+        };
+    })()"#;
+
+    let h = harness_at("/components/record_header").await;
+    // The consumer's own reported viewport (op-dlfua.7.55), not the suite's
+    // default 1280x800 smoke size -- the defect is a fixed-geometry spill,
+    // not a responsive-breakpoint one.
+    h.set_viewport(ViewportSize::new(1694, 1262))
+        .await
+        .expect("set the consumer-reported viewport");
+    begin_browser_error_capture(&h).await;
+    wait_for_selector(&h, SCOPE).await;
+
+    // At rest: no hover, no focus yet. The tooltip bubble is already laid
+    // out (opacity: 0), so the row must already be spill-free.
+    let rest = eval_json(&h, PROBE_JS).await;
+    assert_eq!(rest["sectionSpills"], json!(false), "at rest: {rest}");
+    assert_eq!(rest["clusterSpills"], json!(false), "at rest: {rest}");
+    assert_eq!(rest["pageSpills"], json!(false), "at rest: {rest}");
+    assert_eq!(
+        rest["ariaLabel"], rest["dataTip"],
+        "the tip and the accessible name must be the same string: {rest}"
+    );
+    assert!(
+        rest["tooltipClass"]
+            .as_str()
+            .is_some_and(|classes| classes.split(' ').any(|c| c == "tooltip-left")),
+        "the rightmost action in this constrained container must flip to \
+         tooltip-left, computed from measured geometry: {rest}"
+    );
+
+    // Real CDP pointer hover: the bubble becomes visible, and the row must
+    // stay spill-free while it is.
+    move_pointer_to_svg_fraction(&h, ARCHIVE_TRIGGER, 0.5, 0.5).await;
+    let hovered = eval_json(&h, PROBE_JS).await;
+    assert_eq!(hovered["tipOpacity"], json!("1"), "hovered: {hovered}");
+    assert_eq!(hovered["sectionSpills"], json!(false), "hovered: {hovered}");
+    assert_eq!(hovered["clusterSpills"], json!(false), "hovered: {hovered}");
+    assert_eq!(hovered["pageSpills"], json!(false), "hovered: {hovered}");
+    assert!(
+        hovered["tooltipClass"]
+            .as_str()
+            .is_some_and(|classes| classes.split(' ').any(|c| c == "tooltip-left")),
+        "hovered: {hovered}"
+    );
+
+    // Real keyboard focus: focus the preceding action, then Tab onto the
+    // rightmost one, so the browser's own focus-visible heuristic applies
+    // exactly as it would for a real keyboard user.
+    h.page()
+        .find_element(EMAIL_TRIGGER)
+        .await
+        .expect("find the email action to focus before tabbing")
+        .focus()
+        .await
+        .expect("focus the email action");
+    h.press_key_sequence(&[Key::Tab])
+        .await
+        .expect("tab from email onto the rightmost action");
+    let keyboard_focused = eval_json(&h, PROBE_JS).await;
+    assert_eq!(
+        keyboard_focused["focused"],
+        json!(true),
+        "Tab must land on the rightmost action: {keyboard_focused}"
+    );
+    assert_eq!(
+        keyboard_focused["tipOpacity"],
+        json!("1"),
+        "keyboard-focused: {keyboard_focused}"
+    );
+    assert_eq!(
+        keyboard_focused["sectionSpills"],
+        json!(false),
+        "keyboard-focused: {keyboard_focused}"
+    );
+    assert_eq!(
+        keyboard_focused["clusterSpills"],
+        json!(false),
+        "keyboard-focused: {keyboard_focused}"
+    );
+    assert_eq!(
+        keyboard_focused["pageSpills"],
+        json!(false),
+        "keyboard-focused: {keyboard_focused}"
+    );
+
+    assert_no_browser_errors(&h, "record header edge-action tooltip containment").await;
 }

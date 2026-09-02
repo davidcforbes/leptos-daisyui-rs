@@ -84,6 +84,22 @@ pub fn RecordHeaderDemo() -> impl IntoView {
                 </div>
             </Section>
 
+            <Section title="Edge-safe tooltip -- rightmost action's help stays inside a constrained container (ldui-q73d)">
+                <div class="w-full max-w-sm" data-testid="record-header-edge-tooltip">
+                    <RecordHeader
+                        id="record-header-edge-tooltip-title"
+                        title="Meridian Textiles"
+                        status=Some(RecordStatus::new("Active").tone(RecordStatusTone::Success))
+                        actions=vec![
+                            RecordQuickAction::new("call", "phone", "Call account"),
+                            RecordQuickAction::new("email", "mail", "Email account"),
+                            RecordQuickAction::new("archive", "trash", "Archive account"),
+                        ]
+                        on_action=on_action
+                    />
+                </div>
+            </Section>
+
             <Section title="No-Hire style -- no avatar, no links, no badges, two glyph actions">
                 <div class="w-full" data-testid="record-header-no-hire">
                     <RecordHeader

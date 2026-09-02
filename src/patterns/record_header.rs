@@ -18,11 +18,15 @@
 use super::section_heading::HeadingLevel;
 use crate::components::{
     Badge, BadgeColor, BadgeSize, BadgeStyle, Button, ButtonShape, ButtonSize, ButtonStyle, Icon,
-    IconSize, LinkButton, Tooltip,
+    IconSize, LinkButton, Tooltip, TooltipPosition,
 };
 use crate::merge_classes;
 use crate::widgets::{AvatarBadge, AvatarBadgeSize, initials_from_name};
-use leptos::{html::Section, prelude::*};
+use leptos::{
+    html::{Div, Section},
+    prelude::*,
+};
+use web_sys::wasm_bindgen::JsCast;
 
 /// Reactive framework-owned copy for `RecordHeader`'s own generated text.
 ///
@@ -769,7 +773,7 @@ pub fn RecordHeader(
                                     data-record-actions="true"
                                 >
                                     {actions.into_iter()
-                                        .map(|action| render_action(action, &texts, on_action))
+                                        .map(|action| render_action(action, &texts, on_action, node_ref))
                                         .collect_view()}
                                 </div>
                             })}
@@ -1022,14 +1026,103 @@ fn render_badge(badge: RecordBadge) -> AnyView {
     .into_any()
 }
 
+/// Conservative estimate of half the width (CSS px) a hovering daisyUI
+/// tooltip bubble will render at, from the length of the text alone.
+///
+/// DaisyUI's tooltip has no DOM node to measure ahead of time -- its
+/// visible content is a `::before` pseudo-element whose text comes from a
+/// `data-tip` attribute -- so there is nothing a real
+/// `getBoundingClientRect` call can read before the control is hovered or
+/// focused. This stands in: average glyph width plus the bubble's own
+/// inline padding (`padding-inline: .5rem` each side in daisyUI's tooltip
+/// CSS), capped at daisyUI's own `max-width: 20rem` for the bubble. It
+/// leans wide on purpose -- overestimating only flips a control that would
+/// in fact have fit without flipping, while underestimating lets the exact
+/// spill this pattern exists to prevent back in.
+fn estimated_tooltip_half_width(label_len: usize) -> f64 {
+    const AVG_GLYPH_PX: f64 = 7.0;
+    const BUBBLE_INLINE_PADDING_PX: f64 = 16.0;
+    const MAX_BUBBLE_WIDTH_PX: f64 = 320.0;
+    let natural = (label_len as f64) * AVG_GLYPH_PX + BUBBLE_INLINE_PADDING_PX;
+    natural.min(MAX_BUBBLE_WIDTH_PX) / 2.0
+}
+
+/// Chooses which edge of the trigger a tooltip bubble should hang off of,
+/// from real geometry -- never from an action's position in the list. A
+/// trigger with less than `half_width` of room to the row's right edge
+/// flips to `Left`; one with less room to the left (an unusual layout, but
+/// not an impossible one) flips to `Right`; a trigger with room on both
+/// sides keeps daisyUI's own default `Top`, centred on the trigger. This is
+/// what keeps the fix correct as the action count changes: whichever
+/// control ends up nearest an edge is the one that flips, regardless of
+/// whether it happens to be first, last, or in the middle.
+fn resolved_tooltip_position(
+    row_left: f64,
+    row_right: f64,
+    trigger_left: f64,
+    trigger_width: f64,
+    half_width: f64,
+) -> TooltipPosition {
+    let trigger_center = trigger_left + trigger_width / 2.0;
+    let right_room = row_right - trigger_center;
+    let left_room = trigger_center - row_left;
+    if right_room < half_width && left_room >= half_width {
+        TooltipPosition::Left
+    } else if left_room < half_width && right_room >= half_width {
+        TooltipPosition::Right
+    } else {
+        TooltipPosition::Top
+    }
+}
+
+/// Measures `row` (RecordHeader's own root section) and `trigger` (the
+/// tooltip's wrapping div) and writes the resulting placement into
+/// `position`. A no-op until both have mounted, so it is safe to call from
+/// an effect that runs before the first paint as well as from a later
+/// hover/focus event.
+fn measure_and_set_tooltip_position(
+    row: NodeRef<Section>,
+    trigger: NodeRef<Div>,
+    position: RwSignal<TooltipPosition>,
+    label_len: usize,
+) {
+    let (Some(row_el), Some(trigger_el)) = (row.get_untracked(), trigger.get_untracked()) else {
+        return;
+    };
+    let row_rect = row_el
+        .unchecked_ref::<web_sys::Element>()
+        .get_bounding_client_rect();
+    let trigger_rect = trigger_el
+        .unchecked_ref::<web_sys::Element>()
+        .get_bounding_client_rect();
+    let half_width = estimated_tooltip_half_width(label_len);
+    position.set(resolved_tooltip_position(
+        row_rect.left(),
+        row_rect.right(),
+        trigger_rect.left(),
+        trigger_rect.width(),
+        half_width,
+    ));
+}
+
 /// One glyph quick action, wrapped in a tooltip carrying the same string as
 /// its accessible name.
+///
+/// The tooltip's placement is measured against `row` (RecordHeader's own
+/// root section) rather than hardcoded to the action's position in the
+/// list -- see [`resolved_tooltip_position`]. It is computed once the
+/// control mounts (a hovering-but-invisible tooltip bubble still occupies
+/// layout space, so the row must never spill even before the first hover)
+/// and re-measured on hover/focus in case the surrounding layout has since
+/// reflowed.
 fn render_action(
     action: RecordQuickAction,
     texts: &RecordHeaderTexts,
     on_action: Option<Callback<String>>,
+    row: NodeRef<Section>,
 ) -> AnyView {
     let name = action.accessible_name(texts);
+    let label_len = name.chars().count();
     let state_marker = action.state.as_str();
     let extra_class = quick_action_class(&action.state);
     let actionable = action.state.is_actionable();
@@ -1098,7 +1191,34 @@ fn render_action(
         .into_any()
     };
 
-    view! { <Tooltip tip=name>{control}</Tooltip> }.into_any()
+    let tooltip_ref = NodeRef::<Div>::new();
+    let tooltip_position = RwSignal::new(TooltipPosition::default());
+
+    // Runs once the tooltip and the row it is measured against have both
+    // mounted -- before the first paint, so a spilling default `Top`
+    // placement never becomes visible even for an instant.
+    Effect::new(move |_| {
+        if row.get().is_some() && tooltip_ref.get().is_some() {
+            measure_and_set_tooltip_position(row, tooltip_ref, tooltip_position, label_len);
+        }
+    });
+
+    view! {
+        <Tooltip
+            node_ref=tooltip_ref
+            tip=name
+            position=tooltip_position
+            on:pointerenter=move |_| {
+                measure_and_set_tooltip_position(row, tooltip_ref, tooltip_position, label_len);
+            }
+            on:focusin=move |_| {
+                measure_and_set_tooltip_position(row, tooltip_ref, tooltip_position, label_len);
+            }
+        >
+            {control}
+        </Tooltip>
+    }
+    .into_any()
 }
 
 #[cfg(test)]
@@ -1512,6 +1632,62 @@ mod tests {
         );
     }
 
+    // -- tooltip edge containment (ldui-q73d) -------------------------------
+
+    #[test]
+    fn tooltip_half_width_grows_with_label_length_then_caps() {
+        let short = estimated_tooltip_half_width(4);
+        let longer = estimated_tooltip_half_width(20);
+        assert!(short < longer);
+        // daisyUI's own `max-width: 20rem` (320px) bounds the bubble, so an
+        // absurdly long label must not push the half-width past 160px.
+        let absurd = estimated_tooltip_half_width(1000);
+        assert_eq!(absurd, 160.0);
+    }
+
+    #[test]
+    fn tooltip_position_stays_top_with_room_on_both_sides() {
+        // A 400px-wide row, trigger centred in the middle at x=200.
+        assert_eq!(
+            resolved_tooltip_position(0.0, 400.0, 184.0, 32.0, 64.0),
+            TooltipPosition::Top
+        );
+    }
+
+    /// The defect this pattern exists to fix: a trigger flush against the
+    /// row's right edge flips to `Left` rather than spilling past it.
+    #[test]
+    fn tooltip_position_flips_left_when_the_right_edge_has_no_room() {
+        // Row is 400px wide; trigger sits at its right edge (368-400).
+        assert_eq!(
+            resolved_tooltip_position(0.0, 400.0, 368.0, 32.0, 64.0),
+            TooltipPosition::Left
+        );
+    }
+
+    /// The mirror case: a trigger flush against the row's LEFT edge flips to
+    /// `Right`. Proves the decision is symmetric geometry, not a "last
+    /// action" special case that only ever produces `Left`.
+    #[test]
+    fn tooltip_position_flips_right_when_the_left_edge_has_no_room() {
+        assert_eq!(
+            resolved_tooltip_position(0.0, 400.0, 0.0, 32.0, 64.0),
+            TooltipPosition::Right
+        );
+    }
+
+    /// A row too narrow for the bubble on either side degrades to the
+    /// default `Top` rather than picking an edge that also overflows --
+    /// there is no placement that fully contains it, so this is not a
+    /// regression, just the least-bad fallback.
+    #[test]
+    fn tooltip_position_falls_back_to_top_when_neither_edge_has_room() {
+        assert_eq!(
+            resolved_tooltip_position(0.0, 40.0, 4.0, 32.0, 64.0),
+            TooltipPosition::Top
+        );
+    }
+
     /// Disabled styling must never use `btn-disabled` (which sets
     /// `pointer-events: none` and would hide the tooltip carrying the
     /// reason) nor an `opacity-*` utility (which the style audit rejects
@@ -1602,7 +1778,26 @@ mod tests {
             .1;
         assert!(render.contains("let name = action.accessible_name(texts);"));
         assert!(render.contains("attr:aria-label=name.clone()"));
-        assert!(render.contains("view! { <Tooltip tip=name>{control}</Tooltip> }"));
+        assert!(render.contains("node_ref=tooltip_ref"));
+        assert!(render.contains("tip=name"));
+        assert!(render.contains("position=tooltip_position"));
+    }
+
+    /// The rightmost (or any edge-adjacent) action's tooltip must be placed
+    /// from measured row/trigger geometry, never from the action's index in
+    /// the list -- a hardcoded "last action" special case would silently
+    /// stop covering the edge once a consumer adds or reorders actions.
+    #[test]
+    fn action_tooltip_placement_is_measured_not_indexed() {
+        let render = component_source()
+            .split_once("fn render_action(")
+            .expect("render_action source")
+            .1;
+        assert!(!render.contains("is_last"));
+        assert!(!render.contains(".last()"));
+        assert!(render.contains(
+            "measure_and_set_tooltip_position(row, tooltip_ref, tooltip_position, label_len)"
+        ));
     }
 
     /// The feedback region must be a polite live region, or a keyed outcome
