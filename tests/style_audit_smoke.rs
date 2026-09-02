@@ -277,6 +277,92 @@ const PAGES: &[(&str, &[(&str, usize)])] = &[
             (family::COMPONENT_DRIFT, 0),
         ],
     ),
+    // ldui-ddhr: the opinionated patterns were the newest and most
+    // consumer-facing surface in this library, and none of them were swept.
+    // Three implementers in one wave predicted a ratchet would move; none did,
+    // because these pages were never measured. Ceilings start at 0 and are
+    // filled from the actual counts, per this file's no-slack rule.
+    (
+        "/components/kpi_strip",
+        &[
+            (family::TYPOGRAPHY, 0),
+            (family::SHAPE, 0),
+            (family::DEPTH, 0),
+            (family::GRID, 0),
+            (family::INTERNAL, 0),
+            (family::COMPONENT_DRIFT, 0),
+        ],
+    ),
+    (
+        "/components/record_header",
+        &[
+            (family::TYPOGRAPHY, 0),
+            (family::SHAPE, 0),
+            (family::DEPTH, 0),
+            // 44, first measured under ldui-ddhr (38 before ldui-q73d added
+            // its edge-tooltip section). Every finding is a declared 6px
+            // row/column gap on the flex row holding the glyph quick actions.
+            // 6px is off the canonical scale, but the same 6.00 gap already
+            // sits in /components/data-table's ratcheted findings, so it comes
+            // from a shared source rather than this pattern. Traced separately
+            // rather than leaving the page unmeasured, which is the outcome
+            // this bead exists to prevent.
+            (family::GRID, 44),
+            (family::INTERNAL, 0),
+            (family::COMPONENT_DRIFT, 0),
+        ],
+    ),
+    (
+        "/components/selectable_summary",
+        &[
+            (family::TYPOGRAPHY, 0),
+            (family::SHAPE, 0),
+            (family::DEPTH, 0),
+            (family::GRID, 0),
+            (family::INTERNAL, 0),
+            (family::COMPONENT_DRIFT, 0),
+        ],
+    ),
+    (
+        "/components/section_heading",
+        &[
+            (family::TYPOGRAPHY, 0),
+            (family::SHAPE, 0),
+            (family::DEPTH, 0),
+            (family::GRID, 0),
+            (family::INTERNAL, 0),
+            (family::COMPONENT_DRIFT, 0),
+        ],
+    ),
+    (
+        "/components/search_picker_dialog",
+        &[
+            (family::TYPOGRAPHY, 0),
+            (family::SHAPE, 0),
+            // 4, first measured under ldui-ddhr: daisyUI's `.alert` shadow,
+            // authored in oklch()/oklab() which the engine's shadow parser
+            // cannot read, so a declared spec would encode a mis-parse.
+            // Ratcheted until PixelProof-0il teaches the parser oklch.
+            (family::DEPTH, 4),
+            (family::GRID, 0),
+            (family::INTERNAL, 0),
+            (family::COMPONENT_DRIFT, 0),
+        ],
+    ),
+    (
+        "/components/day-scheduler",
+        &[
+            // 4, first measured under ldui-ddhr: daisyUI's own `kbd-xs` step
+            // at 10px, the same framework-supplied size already declared on
+            // other pages. Not this page's debt.
+            (family::TYPOGRAPHY, 4),
+            (family::SHAPE, 0),
+            (family::DEPTH, 0),
+            (family::GRID, 0),
+            (family::INTERNAL, 0),
+            (family::COMPONENT_DRIFT, 0),
+        ],
+    ),
 ];
 
 async fn audit_page(path: &str, ceilings: &[(&str, usize)]) {
@@ -316,6 +402,18 @@ style_audit_test!(card_style_is_within_ceiling, 1);
 style_audit_test!(data_table_style_is_within_ceiling, 2);
 style_audit_test!(kanban_style_is_within_ceiling, 3);
 style_audit_test!(charts_style_is_within_ceiling, 4);
+
+// ldui-ddhr. The macro takes an INDEX, so a PAGES entry with no invocation
+// here is listed and never swept. Adding the entries alone left this suite
+// green at five tests while appearing to cover eleven pages -- a check that
+// passes because it measures nothing, which is precisely the failure this
+// bead was filed about.
+style_audit_test!(kpi_strip_style_is_within_ceiling, 5);
+style_audit_test!(record_header_style_is_within_ceiling, 6);
+style_audit_test!(selectable_summary_style_is_within_ceiling, 7);
+style_audit_test!(section_heading_style_is_within_ceiling, 8);
+style_audit_test!(search_picker_dialog_style_is_within_ceiling, 9);
+style_audit_test!(day_scheduler_style_is_within_ceiling, 10);
 
 /// Negative control: prove the sweep + merge actually detects things, across
 /// both the engine's style families and the daisyUI drift heuristics.

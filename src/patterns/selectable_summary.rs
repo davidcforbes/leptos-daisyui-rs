@@ -434,7 +434,7 @@ fn card_class(selected: bool, disabled: bool) -> String {
         "border-solid"
     };
     format!(
-        "flex h-full w-full min-w-0 overflow-hidden rounded-box border shadow-sm {selection} {interactivity}"
+        "flex h-full w-full min-w-0 overflow-hidden rounded-box border ld-card-depth {selection} {interactivity}"
     )
 }
 
@@ -544,7 +544,12 @@ fn focus_card(target: Option<web_sys::EventTarget>, id: &str) {
 ///
 /// ### Add to `input.css`
 /// ```css
-/// @source inline("flex h-full w-full min-w-0 overflow-hidden rounded-box border shadow-sm");
+/// @source inline("flex h-full w-full min-w-0 overflow-hidden rounded-box border");
+///
+/// `ld-card-depth` is deliberately NOT listed above: it is an authored rule
+/// emitted into `styles/tokens.css` by `cargo xtask gen-tokens`, not a
+/// Tailwind utility, so `@source inline(...)` cannot generate it (ldui-fg2h).
+/// A consumer gets it by importing that stylesheet.
 /// @source inline("border-solid border-dashed cursor-not-allowed");
 /// @source inline("border-base-300 border-primary ring-2 ring-primary bg-base-100 bg-base-200");
 /// @source inline("forced-colors:border-[CanvasText] forced-colors:border-[Highlight]");

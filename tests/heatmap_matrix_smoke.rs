@@ -11,7 +11,7 @@
 //! are.
 //!
 //! Every test drives `/components/charts`, whose typed fixture is three offices
-//! by twelve KPIs with one reported gap, an exact zero, and both judgement
+//! by six KPIs with one reported gap, an exact zero, and both judgement
 //! hues in play.
 
 mod common;
@@ -180,7 +180,10 @@ async fn the_data_table_states_a_row_by_column_matrix() {
         .expect("the header row exists");
     assert_eq!(
         headers.len(),
-        13,
+        // 7 = the corner cell naming the row axis plus one header per KPI.
+        // Six KPIs since the fixture was de-crowded to stop slanted headers
+        // overlapping (OVERLAP is a hard failure, never ratcheted).
+        7,
         "the corner cell names the row axis, then one header per KPI"
     );
     assert_eq!(headers[0]["text"], json!("Office"));
@@ -200,7 +203,7 @@ async fn the_data_table_states_a_row_by_column_matrix() {
         );
         assert_eq!(
             row["cells"].as_array().expect("cells").len(),
-            12,
+            6,
             "every coordinate has a cell, so a gap is heard at its own position"
         );
     }
@@ -352,7 +355,7 @@ async fn home_and_end_stay_in_the_row_while_control_reaches_the_grid_corners() {
     press_on(&harness, "south", "sla", "End", false).await;
     assert_eq!(
         focused_cell(&harness).await,
-        json!({ "rowKey": "south", "columnKey": "overdue" })
+        json!({ "rowKey": "south", "columnKey": "first-touch" })
     );
 
     press_on(&harness, "south", "sla", "Home", false).await;
@@ -365,7 +368,7 @@ async fn home_and_end_stay_in_the_row_while_control_reaches_the_grid_corners() {
     press_on(&harness, "south", "sla", "End", true).await;
     assert_eq!(
         focused_cell(&harness).await,
-        json!({ "rowKey": "east", "columnKey": "overdue" })
+        json!({ "rowKey": "east", "columnKey": "first-touch" })
     );
 
     press_on(&harness, "south", "sla", "Home", true).await;
@@ -649,8 +652,8 @@ async fn a_reporting_only_heatmap_gains_no_button_roles_or_tab_stops() {
     assert_eq!(posture["rows"], json!(1));
     assert_eq!(
         posture["columns"],
-        json!(12),
-        "one office by twelve KPIs, stated in full"
+        json!(6),
+        "one office by six KPIs, stated in full"
     );
 
     assert_no_browser_errors(&harness, "reporting-only heatmap").await;

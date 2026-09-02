@@ -2456,12 +2456,12 @@ pub fn r() -> f32 { radius::CARD }
     }
 
     #[test]
-    fn reactivity_lane_has_exactly_68_browser_checks() {
+    fn reactivity_lane_has_exactly_69_browser_checks() {
         let source = include_str!("../../tests/reactivity_smoke.rs");
         assert_eq!(
             source.matches("#[tokio::test").count(),
-            68,
-            "the explicitly requested reactivity lane must keep its 68 checks \
+            69,
+            "the explicitly requested reactivity lane must keep its 69 checks \
              (45 + 5 added for ldui-2bt3's ServerDataTable viewport-fit query \
              sizing: offset growth/floor-retain/scroll, rapid narrow-resize \
              settling, declined-proposal retention, cursor First-reset, and \
@@ -2470,7 +2470,7 @@ pub fn r() -> f32 { radius::CARD }
              control added after the reviewer's era-carry-forward CRITICAL \
              fix; + 1 added for ldui-8hba's collapsed FilterSidebar toggle \
              hit-target regression, Left/Right x with/without \
-             header_actions; \n             + 1 added for ldui-j0mt's categorical LineChart secondary value \n             axis, which also raised that suite's own rootCount from 2 to 3 \n             because the charts demo gained a dual-axis chart; \n             + 1 added for ldui-kx7y's localizable DayScheduler event \n             accessible name, proving EN->ES->EN by same-DOM-node identity; \n             + 12 added for ldui-fqan's controlled Checkbox contract, including a \n             DECLINED click on a mixed box, which is what proves the component \n             re-asserts accepted truth rather than following the browser's \n             native toggle; \n             + 2 added for ldui-vshu's externally placed FilterSidebar toggle)"
+             header_actions; \n             + 1 added for ldui-j0mt's categorical LineChart secondary value \n             axis, which also raised that suite's own rootCount from 2 to 3 \n             because the charts demo gained a dual-axis chart; \n             + 1 added for ldui-kx7y's localizable DayScheduler event \n             accessible name, proving EN->ES->EN by same-DOM-node identity; \n             + 12 added for ldui-fqan's controlled Checkbox contract, including a \n             DECLINED click on a mixed box, which is what proves the component \n             re-asserts accepted truth rather than following the browser's \n             native toggle; \n             + 2 added for ldui-vshu's externally placed FilterSidebar toggle; \n             + 1 added for ldui-q73d's edge-action tooltip containment)"
         );
     }
 

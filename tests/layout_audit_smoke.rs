@@ -91,6 +91,29 @@ const PAGES: &[(&str, usize, usize)] = &[
     // stays 0 (an edge-tick label collision was found and fixed at the
     // source in visible_tick_indices rather than absorbed here).
     ("/components/charts", 33, 0),
+    // ldui-ddhr: the opinionated patterns were the newest, most
+    // consumer-facing surface in the library and NONE of them were swept.
+    // Three implementers in one wave predicted their demo changes would move
+    // a ratchet; none did, because these pages were not measured at all. The
+    // spacing and typography rules exist precisely because those defects are
+    // invisible in review, so leaving the patterns out inverted the intent.
+    // Ceilings below are the measured counts, added with the same no-slack
+    // rule as every other page.
+    ("/components/kpi_strip", 0, 0),
+    // 44, measured on this page's FIRST ever sweep (ldui-ddhr; 38 before
+    // ldui-q73d added its edge-tooltip section). Every finding
+    // is a declared 6px row/column-gap on the flex row that holds the glyph
+    // quick actions, each wrapped in a daisyUI `.tooltip`. 6px is off the
+    // canonical scale, but it is NOT new debt from this pattern: the same
+    // 6.00 gap already appears among /components/data-table's ratcheted
+    // findings, so it comes from a shared source. Traced separately rather
+    // than blocking this page from being measured at all - which is the
+    // outcome this bead exists to prevent. Lower it when that lands.
+    ("/components/record_header", 44, 0),
+    ("/components/selectable_summary", 0, 0),
+    ("/components/section_heading", 0, 0),
+    ("/components/search_picker_dialog", 0, 0),
+    ("/components/day-scheduler", 0, 0),
 ];
 
 async fn audit_page(path: &str, max_grid: usize, max_internal: usize) {
@@ -148,6 +171,18 @@ audit_test!(tab_layout_is_clean, 3);
 audit_test!(data_table_layout_is_clean, 4);
 audit_test!(kanban_layout_is_clean, 5);
 audit_test!(charts_layout_is_clean, 6);
+
+// ldui-ddhr. An entry in PAGES alone sweeps NOTHING -- the macro takes an
+// index, so a page without its own invocation here is listed and never
+// measured. Adding the six entries and stopping there left the suite green at
+// nine tests while claiming to cover fifteen pages, which is the exact shape
+// of the gap this bead was filed about.
+audit_test!(kpi_strip_layout_is_clean, 7);
+audit_test!(record_header_layout_is_clean, 8);
+audit_test!(selectable_summary_layout_is_clean, 9);
+audit_test!(section_heading_layout_is_clean, 10);
+audit_test!(search_picker_dialog_layout_is_clean, 11);
+audit_test!(day_scheduler_layout_is_clean, 12);
 
 /// Negative control: prove the sweep actually detects things.
 ///
