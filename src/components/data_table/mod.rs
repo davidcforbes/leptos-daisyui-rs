@@ -99,9 +99,7 @@ pub use filter::{
     has_filterable_columns, prune_stale_column_filters, prune_stale_filters,
     row_matches_column_filters, row_matches_filters, row_matches_search, validate_filter_options,
 };
-pub(crate) use geometry::{
-    StableColumnTrack, StableTableColGroup, stable_column_width, stable_table_content_style,
-};
+pub(crate) use geometry::{StableColumnTrack, StableTableColGroup, stable_table_content_style};
 pub(crate) use pagination::{PageSlot, page_window, row_range};
 pub use pagination::{clamp_page, page_bounds, page_count};
 pub(crate) use resize::{

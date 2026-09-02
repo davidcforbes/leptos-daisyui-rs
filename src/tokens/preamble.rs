@@ -154,8 +154,15 @@ pub fn ui_tokens_css() -> String {
     // `--ld-card-shadow` is deliberately left undefined so the fallback
     // paints and a product theme can substitute its approved card shadow by
     // setting that one property on `:root`.
+    // ldui-xr7i: this rule composes with Tailwind v4's ring/inset variables
+    // exactly as its own `shadow-*` utilities do. A bare `box-shadow:` here
+    // wins the WHOLE property over a layered `ring-*`/`focus-visible:ring-*`
+    // utility on the same element and silently discards the ring -- which is
+    // how SelectableSummaryCard lost its selection ring the day it adopted
+    // this class. Transparent fallbacks keep it valid where no ring utility
+    // ever registered the variables.
     css.push_str(
-        "\n.ld-card-depth {\n  box-shadow: var(--ld-card-shadow, var(--ld-elevation-4));\n}\n",
+        "\n.ld-card-depth {\n  --tw-shadow: var(--ld-card-shadow, var(--ld-elevation-4));\n  box-shadow: var(--tw-inset-shadow, 0 0 #0000), var(--tw-inset-ring-shadow, 0 0 #0000), var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);\n}\n",
     );
 
     css

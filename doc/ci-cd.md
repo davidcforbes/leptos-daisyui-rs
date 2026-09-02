@@ -95,6 +95,7 @@ Each step is scoped per-crate; that scoping **is** the xtask's logic.
 | `test-audit` | `cargo test -p ldui-audit --lib` | The audit crate's browser-free tests: the generated sweep JS (rule ids, the per-family cap, the percentage-radius conversion) and the drift/engine report merge. |
 | `test-daisyui5` | `cargo test -p leptos-daisyui-rs --test no_dead_daisyui4_classes` | Source scan (no browser) guarding against `.form-control` / `.label-text` / `.label-text-alt` coming back — removed in daisyUI 5, so they are silently inert. |
 | `test-svg-paint` | `cargo test -p leptos-daisyui-rs --test svg_paint_routing` | Source scan (no browser) over **all of `src/`**: no `fill=`/`stroke=`/`stop-color=`/`flood-color=`/`lighting-color=` may carry a custom property, and any non-literal value must be a `charts::paint` binding. `var()` substitution is not specified to run in a presentation attribute, so a token there degrades to `fill: black` or `stroke: none` **silently, with no console error**. It has to be its own step because `test-lib` runs unit tests only — an integration test not named here never runs in the gate at all. Scoped to `src/charts` originally, which is exactly how it read green over four live defects in `src/components/gantt/` (ldui-1g5, widened in ldui-xxc). |
+| `test-ld-class-coverage` | `cargo test -p leptos-daisyui-rs --test ld_class_stylesheet_coverage` | Source scan (no browser): every literal `ld-*` class a component or demo page emits must be defined by a stylesheet this crate ships (`styles/tokens.css`, `ui_tokens_css()` or `ui_animations_css()`), and the type ramp must work from `styles/tokens.css` alone -- ldui-h7tw's defect class. Registered as its own step in ldui-n1iv: it had been referenced by comments as "the test that asserts it" while running in no lane at all, and failed locally on a stray literal the same day both gates read green. |
 
 ### Pattern-scoped verification
 
@@ -221,8 +222,13 @@ reuses that same verified server for the 51-check reactivity/DOM-oracle suite
 (`test-keyed-result-list`, ldui-r1z), the focused `SectionHeading`
 browser proof (`test-section-heading`, ldui-lwu), the focused
 `SearchPickerDialog` browser proof (`test-search-picker-dialog`, ldui-i95p),
-and the focused `ServerDataTable` column-tools browser proof
-(`test-server-table-column-tools`, ldui-9j16).
+the focused `ServerDataTable` column-tools browser proof
+(`test-server-table-column-tools`, ldui-9j16), and the focused `Collapse`
+toggle-naming browser proof (`test-collapse-naming`, ldui-3k00: the internal
+checkbox carries id/name and is named by its visible title, axe-clean), and
+the focused `DataTable` column-track fit proof (`test-data-table-fit`,
+ldui-qsqz: ten undeclared columns fit a 1280px container with auto tracks;
+declared tracks that cannot fit scroll the wrapper instead of spilling).
 That catalog server is the real `wasm32-unknown-unknown` release build, so a
 second standalone `trunk build --release` would only repeat the same pipeline
 and is intentionally absent. It is a **separate task**, not part of the
@@ -242,8 +248,10 @@ from `verify-full`.
 
 ### Gate cadence during a live Beads drain
 
-`cargo xtask verify` is the 14-step native gate listed in the table above.
-`cargo xtask verify-full` adds ten browser/Wasm checks and reports 24 steps.
+`cargo xtask verify` is the 15-step native gate listed in the table above.
+`cargo xtask verify-full` adds nineteen browser/Wasm checks and reports 34 steps
+(re-count `full_steps()` in `xtask/src/main.rs` whenever a lane is added; this
+figure has drifted before).
 Say which command is running before starting it; "the verification gate" is
 ambiguous because the two commands have materially different cost and coverage.
 

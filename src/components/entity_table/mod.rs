@@ -58,6 +58,8 @@ pub use types::{
 };
 
 #[cfg(test)]
+pub(crate) use component::entity_region_tabindex;
+#[cfg(test)]
 pub(crate) use emphasis::{
     entity_row_emphasis_cell_class, entity_row_emphasis_for, entity_row_emphasis_row_class,
 };

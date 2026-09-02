@@ -13,7 +13,7 @@ use crate::components::data_table::filter::{
     row_matches_search,
 };
 use crate::components::data_table::geometry::{
-    StableColumnTrack, StableTableColGroup, stable_column_width, stable_table_content_style,
+    StableColumnTrack, StableTableColGroup, stable_table_content_style,
 };
 use crate::components::data_table::header::DataTableHeader;
 use crate::components::data_table::pagination::page_count;
@@ -565,9 +565,10 @@ pub fn DataTable(
         columns
             .into_iter()
             .map(|column| {
-                let track = StableColumnTrack::new(
+                let track = StableColumnTrack::resolve(
                     column.id,
-                    stable_column_width(widths.get(column.id).copied(), column.min_width),
+                    widths.get(column.id).copied(),
+                    column.min_width,
                 );
                 if flexible_column == Some(column.id) {
                     track.flexible()

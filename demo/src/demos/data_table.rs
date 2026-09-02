@@ -4,6 +4,61 @@ use leptos_daisyui_rs::components::*;
 use leptos_daisyui_rs::widgets::{DataTable as WidgetDataTable, TableColumn as WidgetTableColumn};
 use std::collections::{BTreeSet, HashMap, HashSet};
 
+/// Ten narrow-content columns for the column-track fit fixture (ldui-qsqz).
+/// With `declared = None` every column is undeclared (auto track); with
+/// `Some(px)` the first two declare that minimum width so the declared
+/// tracks cannot fit a 1280px container.
+fn fit_columns(declared: Option<u32>) -> Vec<Column> {
+    let ids = [
+        ("sym", "Sym"),
+        ("qty", "Qty"),
+        ("cost", "Cost"),
+        ("mkt", "Mkt"),
+        ("pnl", "P&L"),
+        ("delta", "Delta"),
+        ("gamma", "Gamma"),
+        ("vega", "Vega"),
+        ("var", "VaR"),
+        ("overdue", "Overdue"),
+    ];
+    ids.into_iter()
+        .enumerate()
+        .map(|(index, (id, header))| {
+            let column = Column::new(id, header);
+            match declared {
+                Some(width) if index < 2 => column.with_min_width(width),
+                _ => column,
+            }
+        })
+        .collect()
+}
+
+fn fit_rows(count: usize) -> Vec<HashMap<&'static str, String>> {
+    (0..count)
+        .map(|i| {
+            let mut row = HashMap::new();
+            row.insert("sym", format!("SYM{i:02}"));
+            row.insert("qty", format!("{}", 10 + i));
+            row.insert("cost", format!("{:.2}", 100.0 + i as f64));
+            row.insert("mkt", format!("{:.2}", 101.5 + i as f64));
+            row.insert("pnl", format!("{:.2}", 1.5 * i as f64));
+            row.insert("delta", format!("{:.2}", 0.5 + 0.01 * i as f64));
+            row.insert("gamma", format!("{:.3}", 0.01 * i as f64));
+            row.insert("vega", format!("{:.2}", 0.2 * i as f64));
+            row.insert("var", format!("{:.2}", 12.0 + i as f64));
+            row.insert(
+                "overdue",
+                if i % 2 == 0 {
+                    "no".into()
+                } else {
+                    "yes".into()
+                },
+            );
+            row
+        })
+        .collect()
+}
+
 #[component]
 pub fn DataTableDemo() -> impl IntoView {
     // Sample user data
@@ -1049,6 +1104,34 @@ pub fn DataTableDemo() -> impl IntoView {
                     })
                     attr:id="keyboard-sort-table"
                 />
+            </Section>
+
+            // ldui-qsqz: ten columns that declare no width must fit a 1280px
+            // container (they used to get 160px tracks each: 1600px, wider
+            // than a 1440px viewport). Browser proof: tests/data_table_fit_smoke.rs.
+            <Section title="Column-track fit -- ten undeclared columns fit a 1280px container (ldui-qsqz)">
+                <p class="text-sm opacity-70 mb-4">
+                    "No column declares a width, so every track is auto and the table fits w-full."
+                </p>
+                <div class="w-full max-w-7xl" data-testid="data-table-fit-undeclared">
+                    <DataTable
+                        data=RwSignal::new(fit_rows(6))
+                        columns=RwSignal::new(fit_columns(None))
+                        column_chooser=true
+                        page_size=10
+                    />
+                </div>
+                <p class="text-sm opacity-70 mb-4 mt-6">
+                    "Two columns declare 400px minimums, so the declared tracks cannot fit and the wrapper scrolls instead of spilling."
+                </p>
+                <div class="w-full max-w-7xl" data-testid="data-table-fit-declared">
+                    <DataTable
+                        data=RwSignal::new(fit_rows(6))
+                        columns=RwSignal::new(fit_columns(Some(400)))
+                        column_chooser=true
+                        page_size=10
+                    />
+                </div>
             </Section>
 
             // Sortable vs Non-Sortable Columns

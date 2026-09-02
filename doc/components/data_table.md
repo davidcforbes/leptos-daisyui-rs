@@ -38,6 +38,18 @@ occupy a reserved slot and mounted header/filter nodes remain keyed by column,
 so sorting changes row order and accessible sort state without repainting the
 shell, changing column widths, or moving the scroll origin.
 
+Only a column with a resize preference or a declared `.with_min_width(px)`
+gets a pixel `<col>` track. A column that declares nothing is an **auto
+track** (`data-table-column-track-auto="true"`): the fixed layout shares the
+remaining table width between such columns, so a table with no declared
+widths fits `w-full` in any container, exactly as it did before stable
+geometry (ldui-qsqz). Each undeclared column still contributes a 96px floor to
+the scroll wrapper's `min-width`, so in a container narrower than that the
+wrapper scrolls horizontally (its `overflow-x: auto` is the affordance) rather
+than squeezing columns into slivers. Declared tracks never shrink: when their
+sum exceeds the container, the wrapper scrolls and the table never spills past
+its container.
+
 ### Row identity and absolute indices
 
 Sorting reorders an **index permutation**, never `data` itself. Every index the component hands you — `selected_rows`, `on_row_activate`, `cell_renderers`, `row_class_fn` — is an **absolute index into `data`**, so it survives pagination and sorting. A row on page 5 of a descending sort reports the same index it had on page 1 unsorted.

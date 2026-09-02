@@ -240,6 +240,25 @@ fn gate_steps() -> Vec<Step> {
             ],
             None,
         ),
+        // ldui-n1iv: the `ld-*` stylesheet-coverage guard (ldui-h7tw's defect
+        // class -- a class a component emits that no shipped stylesheet
+        // defines) was referenced by comments as the thing that "asserts it"
+        // and registered in no lane, so it never ran: it failed locally on a
+        // stray literal the same day both `verify` and `verify-full` read
+        // green. Same shape as the two steps above -- a native integration
+        // test that `test-lib`'s `--lib` cannot reach.
+        cmd(
+            "test-ld-class-coverage",
+            "cargo",
+            &[
+                "test",
+                "-p",
+                "leptos-daisyui-rs",
+                "--test",
+                "ld_class_stylesheet_coverage",
+            ],
+            None,
+        ),
     ]
 }
 
@@ -543,6 +562,39 @@ fn server_table_column_tools_step() -> Step {
     }
 }
 
+/// Focused browser proof for `Collapse`'s toggle identity and accessible name
+/// (ldui-3k00): the internal checkbox carries id/name and is named by its
+/// visible `CollapseTitle` (or an explicit `aria_label`), Chrome's own
+/// accessible-name computation resolves it, the title click still toggles,
+/// and the fixture is axe-clean. Lives on the general demo app
+/// (`html_target: None`) and stays in its own file/step for the same reason
+/// as [`result_list_step`]/[`section_heading_step`].
+fn collapse_naming_step() -> Step {
+    Step {
+        name: "test-collapse-naming",
+        run: Run::BrowserSuite {
+            test: "collapse_naming_smoke",
+            html_target: None,
+        },
+    }
+}
+
+/// Focused browser proof for `DataTable` column-track fit (ldui-qsqz): ten
+/// columns that declare no width fit a 1280px container with no pixel
+/// `<col>` tracks and no overflow, while declared widths that cannot fit
+/// keep their tracks and scroll inside the wrapper instead of spilling.
+/// Lives on the general demo app (`html_target: None`) and stays in its own
+/// file/step for the same reason as [`result_list_step`].
+fn data_table_fit_step() -> Step {
+    Step {
+        name: "test-data-table-fit",
+        run: Run::BrowserSuite {
+            test: "data_table_fit_smoke",
+            html_target: None,
+        },
+    }
+}
+
 /// The full release gate. The catalog browser suites are deliberately
 /// consecutive: [`run_steps`] reuses one verified release server for adjacent
 /// suites targeting the same HTML entry point.
@@ -565,6 +617,8 @@ fn full_steps() -> Vec<Step> {
     steps.push(page_quick_actions_step());
     steps.push(admin_workbench_step());
     steps.push(server_table_column_tools_step());
+    steps.push(collapse_naming_step());
+    steps.push(data_table_fit_step());
     steps
 }
 
@@ -1591,8 +1645,15 @@ fn tokens_css() -> String {
     // card below inherits the substitution — no page-local selector, no fork
     // of the class, and no specificity contest, because there is no
     // framework declaration to outrank.
+    // ldui-xr7i: this rule composes with Tailwind v4's ring/inset variables
+    // exactly as its own `shadow-*` utilities do. A bare `box-shadow:` here
+    // wins the WHOLE property over a layered `ring-*`/`focus-visible:ring-*`
+    // utility on the same element and silently discards the ring -- which is
+    // how SelectableSummaryCard lost its selection ring the day it adopted
+    // this class. Transparent fallbacks keep it valid where no ring utility
+    // ever registered the variables.
     css.push_str(
-        "  .ld-card-depth {\n    box-shadow: var(--ld-card-shadow, var(--ld-elevation-4));\n  }\n",
+        "  .ld-card-depth {\n    --tw-shadow: var(--ld-card-shadow, var(--ld-elevation-4));\n    box-shadow: var(--tw-inset-shadow, 0 0 #0000), var(--tw-inset-ring-shadow, 0 0 #0000), var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);\n  }\n",
     );
     css.push_str("}\n");
 
@@ -2161,6 +2222,8 @@ fn main() -> ExitCode {
         "test-snapshot-table-delta" => run_steps(&[snapshot_table_delta_step()]),
         "test-snapshot-table-page-controls" => run_steps(&[snapshot_table_page_controls_step()]),
         "test-server-table-column-tools" => run_steps(&[server_table_column_tools_step()]),
+        "test-collapse-naming" => run_steps(&[collapse_naming_step()]),
+        "test-data-table-fit" => run_steps(&[data_table_fit_step()]),
         "gen-tokens" => {
             let check = std::env::args().any(|a| a == "--check");
             gen_tokens(check)
@@ -2174,7 +2237,7 @@ fn main() -> ExitCode {
         other => {
             eprintln!("xtask: unknown subcommand {other:?}");
             eprintln!(
-                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-selectable-summary|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-server-table-column-tools|gen-tokens|check-sibling-tokens|bump>"
+                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-selectable-summary|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-server-table-column-tools|test-collapse-naming|test-data-table-fit|gen-tokens|check-sibling-tokens|bump>"
             );
             ExitCode::from(2)
         }
@@ -2223,7 +2286,8 @@ mod tests {
                 "test-xtask",
                 "test-audit",
                 "test-daisyui5",
-                "test-svg-paint"
+                "test-svg-paint",
+                "test-ld-class-coverage"
             ]
         );
     }
@@ -2537,6 +2601,65 @@ pub fn r() -> f32 { radius::CARD }
             full_steps()
                 .iter()
                 .any(|s| s.name == "test-keyed-result-list")
+        );
+    }
+
+    /// ldui-n1iv: the stylesheet-coverage guard must be a native GATE step,
+    /// not merely a file under `tests/` -- `test-lib` is `--lib` only, so an
+    /// integration test not named as its own step runs nowhere.
+    #[test]
+    fn ld_class_coverage_is_a_native_gate_step() {
+        let gate = gate_steps();
+        let step = gate
+            .iter()
+            .find(|s| s.name == "test-ld-class-coverage")
+            .expect("test-ld-class-coverage must be in the native gate");
+        let Run::Cmd { program, args, .. } = &step.run else {
+            panic!("test-ld-class-coverage must be a native cargo command");
+        };
+        assert_eq!(*program, "cargo");
+        assert!(
+            args.iter().any(|a| a == "ld_class_stylesheet_coverage"),
+            "{args:?}"
+        );
+        assert!(args.iter().any(|a| a == "--test"), "{args:?}");
+    }
+
+    #[test]
+    fn data_table_fit_step_is_in_process_and_full_only() {
+        let step = data_table_fit_step();
+        assert_eq!(step.name, "test-data-table-fit");
+        assert!(matches!(
+            step.run,
+            Run::BrowserSuite {
+                test: "data_table_fit_smoke",
+                html_target: None
+            }
+        ));
+        assert!(!gate_steps().iter().any(|s| s.name == "test-data-table-fit"));
+        assert!(full_steps().iter().any(|s| s.name == "test-data-table-fit"));
+    }
+
+    #[test]
+    fn collapse_naming_step_is_in_process_and_full_only() {
+        let step = collapse_naming_step();
+        assert_eq!(step.name, "test-collapse-naming");
+        assert!(matches!(
+            step.run,
+            Run::BrowserSuite {
+                test: "collapse_naming_smoke",
+                html_target: None
+            }
+        ));
+        assert!(
+            !gate_steps()
+                .iter()
+                .any(|s| s.name == "test-collapse-naming")
+        );
+        assert!(
+            full_steps()
+                .iter()
+                .any(|s| s.name == "test-collapse-naming")
         );
     }
 
@@ -2854,7 +2977,8 @@ pub fn r() -> f32 { radius::CARD }
                 "test-xtask",
                 "test-audit",
                 "test-daisyui5",
-                "test-svg-paint"
+                "test-svg-paint",
+                "test-ld-class-coverage"
             ]
         );
     }
@@ -3271,10 +3395,11 @@ mod gen_tokens_tests {
         let css = tokens_css();
         assert!(
             css.contains(
-                "  .ld-card-depth {\n    box-shadow: var(--ld-card-shadow, var(--ld-elevation-4));\n  }\n"
+                "  .ld-card-depth {\n    --tw-shadow: var(--ld-card-shadow, var(--ld-elevation-4));\n    box-shadow: var(--tw-inset-shadow, 0 0 #0000), var(--tw-inset-ring-shadow, 0 0 #0000), var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);\n  }\n"
             ),
-            "the static card-elevation rule is missing or has lost its \
-             --ld-card-shadow override hook:\n{css}"
+            "the static card-elevation rule is missing, has lost its \
+             --ld-card-shadow override hook, or no longer composes with \
+             Tailwind's ring variables (ldui-xr7i):\n{css}"
         );
     }
 

@@ -11,7 +11,7 @@ use crate::components::data_table::filter::{
     has_filterable_columns,
 };
 use crate::components::data_table::geometry::{
-    StableColumnTrack, StableTableColGroup, stable_column_width, stable_table_content_style,
+    StableColumnTrack, StableTableColGroup, stable_table_content_style,
 };
 use crate::components::data_table::header::DataTableHeader;
 use crate::components::data_table::selection::row_is_interactive;
@@ -158,9 +158,10 @@ fn server_stable_tracks(
     leading
         .into_iter()
         .chain(columns.into_iter().map(|column| {
-            let track = StableColumnTrack::new(
+            let track = StableColumnTrack::resolve(
                 column.id,
-                stable_column_width(widths.get(column.id).copied(), column.min_width),
+                widths.get(column.id).copied(),
+                column.min_width,
             );
             if flexible_column == Some(column.id) {
                 track.flexible()
@@ -2827,7 +2828,7 @@ pub fn ServerDataTable(
                                     .collect_view()}
                             </Menu>
                             <div class="border-t border-base-300 p-2">
-                                <p class="px-2 pb-1 text-xs font-semibold text-base-content/65">
+                                <p class="px-2 pb-1 text-xs font-semibold text-base-content/75">
                                     {move || column_tools_texts.with(|texts| texts.column_order.clone())}
                                 </p>
                                 <ol

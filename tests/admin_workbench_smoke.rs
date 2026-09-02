@@ -687,10 +687,13 @@ const THEME_CARD_SHADOW: &str = "0px 3px 9px rgba(0, 0, 0, 0.33)";
 ///
 /// Three properties, each of which fails independently:
 ///
-/// 1. The resting shadow parses as ONE layer and matches
+/// 1. The resting shadow parses as ONE painted layer and matches
 ///    `ui_tokens::elevation::LEVEL_4` -- the declared "card resting
-///    elevation". Tailwind's `shadow-sm` is two layers, so the single-layer
-///    parse alone rejects what this replaced.
+///    elevation". Tailwind's `shadow-sm` is two painted layers, so the
+///    single-painted-layer parse alone rejects what this replaced. (The
+///    transparent zero placeholders `ld-card-depth` composes around its
+///    one layer, so rings can coexist with it -- ldui-xr7i -- paint
+///    nothing and are not layers in this sense.)
 /// 2. That shadow is on the active [`ldui_audit::StyleProfile`] -- the same
 ///    profile and the same `shadow_ok` epsilon the depth family sweeps with,
 ///    so this cannot pass while `cargo xtask test-style` would report the
@@ -709,12 +712,18 @@ async fn kpi_cards_rest_at_the_declared_card_elevation_ldui_k4fn() {
         .await
         .expect("set viewport");
 
-    // Parses ONE computed `box-shadow` layer into the component form
-    // `ShadowSpec` compares on. A multi-layer value (every stock Tailwind
-    // `shadow-*` is at least two) fails the pattern and comes back null,
+    // Parses a computed `box-shadow` into the ONE painted layer, in the
+    // component form `ShadowSpec` compares on. `ld-card-depth` composes
+    // with Tailwind's ring variables the way Tailwind's own shadow
+    // utilities do (ldui-xr7i), so the computed value carries fully
+    // transparent zero-geometry placeholder layers (`rgba(0, 0, 0, 0) 0px
+    // 0px 0px 0px`) around the real one; those paint nothing and are
+    // dropped, exactly as the depth audit drops them by opacity. Anything
+    // other than exactly one remaining layer -- `none`, or the two opaque
+    // layers every stock Tailwind `shadow-*` paints -- comes back null,
     // which is itself a finding rather than a skipped check.
     const PARSE: &str = r#"
-        const parse = v => {
+        const parseLayer = v => {
             const m = /^rgba?\(([^)]+)\)\s+(-?[\d.]+)px\s+(-?[\d.]+)px\s+(-?[\d.]+)px(?:\s+(-?[\d.]+)px)?(\s+inset)?$/.exec(v.trim());
             if (!m) return null;
             const c = m[1].split(',').map(s => parseFloat(s.trim()));
@@ -723,6 +732,14 @@ async fn kpi_cards_rest_at_the_declared_card_elevation_ldui_k4fn() {
                 offsetX: +m[2], offsetY: +m[3], blur: +m[4],
                 spread: m[5] ? +m[5] : 0, inset: !!m[6],
             };
+        };
+        const parse = v => {
+            if (!v || v === 'none') return null;
+            const layers = v.split(/,(?![^(]*\))/).map(parseLayer);
+            if (layers.some(l => l === null)) return null;
+            const painted = layers.filter(l =>
+                !(l.a === 0 && l.offsetX === 0 && l.offsetY === 0 && l.blur === 0 && l.spread === 0));
+            return painted.length === 1 ? painted[0] : null;
         };
         const card = document.querySelector('[data-kpi-card]');
     "#;
@@ -771,11 +788,11 @@ async fn kpi_cards_rest_at_the_declared_card_elevation_ldui_k4fn() {
     let parsed = &resting["parsed"];
     assert!(
         !parsed.is_null(),
-        "the KPI card's resting box-shadow is not a single declared layer -- \
+        "the KPI card's resting box-shadow is not a single painted layer -- \
          `none` means the ld-card-depth rule did not resolve (the ldui-h7tw \
-         trap: a class defined only by the runtime preamble), and a \
-         multi-layer value means a stock Tailwind shadow-* is still \
-         painting. Got {:?}",
+         trap: a class defined only by the runtime preamble), and more than \
+         one PAINTED layer (transparent zero placeholders excluded) means a \
+         stock Tailwind shadow-* is still painting. Got {:?}",
         resting["raw"]
     );
 

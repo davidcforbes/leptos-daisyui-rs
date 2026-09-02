@@ -121,6 +121,7 @@
     line-height: var(--text-small--line-height);
   }
   .ld-card-depth {
-    box-shadow: var(--ld-card-shadow, var(--ld-elevation-4));
+    --tw-shadow: var(--ld-card-shadow, var(--ld-elevation-4));
+    box-shadow: var(--tw-inset-shadow, 0 0 #0000), var(--tw-inset-ring-shadow, 0 0 #0000), var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
   }
 }

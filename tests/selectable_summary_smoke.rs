@@ -138,6 +138,10 @@ async fn card(h: &pixelproof_web::Harness, fixture: &str, id: &str) -> Value {
                     countItalic: count ? getComputedStyle(count).fontStyle : null,
                     disabled: card.disabled,
                     boxShadow: style.boxShadow,
+                    outlineStyle: style.outlineStyle,
+                    outlineWidth: style.outlineWidth,
+                    outlineOffset: style.outlineOffset,
+                    outlineColor: style.outlineColor,
                     borderWidth: style.borderTopWidth,
                     glyphs: card.querySelectorAll('svg').length,
                 }};
@@ -371,7 +375,13 @@ async fn a_disabled_card_cannot_be_selected_by_pointer_either() {
 
 /// Selection is carried by a ring -- present or absent, not a hue swap --
 /// and never changes the border WIDTH, so selecting a card cannot reflow
-/// the grid.
+/// the grid. The ring is an outline (ldui-xr7i), and the card's resting
+/// elevation must survive selection: the regression this pins was a
+/// box-shadow ring silently discarded by the `ld-card-depth` elevation
+/// rule, leaving selected and unselected cards with an identical shadow.
+/// Keyboard focus is the framework's `ld-focus-ring` (primary, offset 2),
+/// so a focused selected card shows its ring 2px outside the selection
+/// outline and is never indistinguishable from a merely selected one.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires demo dev server (needs an xtask step: test-selectable-summary)"]
 async fn selection_adds_a_ring_without_reflowing_the_grid() {
@@ -383,13 +393,53 @@ async fn selection_adds_a_ring_without_reflowing_the_grid() {
 
     assert_eq!(selected["checked"], json!("true"), "{selected}");
     assert_eq!(unselected["checked"], json!("false"), "{unselected}");
-    assert_ne!(
-        selected["boxShadow"], unselected["boxShadow"],
-        "the selected card must carry a ring the unselected one does not: {selected}"
+    assert_eq!(selected["outlineStyle"], json!("solid"), "{selected}");
+    assert_eq!(selected["outlineWidth"], json!("2px"), "{selected}");
+    assert_eq!(selected["outlineOffset"], json!("0px"), "{selected}");
+    assert_eq!(
+        unselected["outlineStyle"],
+        json!("none"),
+        "the unselected card must carry no ring at all: {unselected}"
     );
     assert_eq!(
         selected["borderWidth"], unselected["borderWidth"],
         "selection must not change the border width: {selected} vs {unselected}"
+    );
+    // Elevation is a fixed property of the card and must not vanish under
+    // selection (nor be replaced by the ring): both states carry the same
+    // declared card shadow.
+    assert!(
+        selected["boxShadow"]
+            .as_str()
+            .is_some_and(|s| s.contains("0px 2px 4px")),
+        "the selected card must keep its ld-card-depth elevation: {selected}"
+    );
+    assert_eq!(
+        selected["boxShadow"], unselected["boxShadow"],
+        "elevation is independent of selection: {selected} vs {unselected}"
+    );
+
+    // Keyboard focus on the selected card is visibly distinct from selection:
+    // ArrowLeft from the card after it moves focus back onto it by keyboard,
+    // so the browser applies :focus-visible and the offset outline paints.
+    click(
+        &h,
+        &format!("{CHECKS} [data-selectable-summary-card=\"missing-email\"]"),
+    )
+    .await;
+    press_key(&h, "ArrowLeft", "ArrowLeft", 37, None).await;
+    let focused = card(&h, CHECKS, "duplicate-records").await;
+    assert_eq!(focused["checked"], json!("true"), "{focused}");
+    assert_eq!(
+        focused["outlineOffset"],
+        json!("2px"),
+        "a keyboard-focused selected card must show the framework focus ring at offset 2: {focused}"
+    );
+    assert_eq!(focused["outlineWidth"], json!("2px"), "{focused}");
+    assert_eq!(focused["outlineStyle"], json!("solid"), "{focused}");
+    assert_ne!(
+        focused["outlineOffset"], selected["outlineOffset"],
+        "focus must sit visibly outside the selection outline: {focused} vs {selected}"
     );
 
     assert_no_browser_errors(&h, "selection_adds_a_ring_without_reflowing_the_grid").await;

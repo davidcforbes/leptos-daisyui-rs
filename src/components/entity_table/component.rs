@@ -56,7 +56,7 @@ use crate::components::checkbox::{Checkbox, CheckboxSize};
 use crate::components::data_table::{
     FALLBACK_HEADER_HEIGHT, FALLBACK_ROW_HEIGHT, MAX_COLUMN_WIDTH, PageSlot, StableColumnTrack,
     StableTableColGroup, auto_page_size_for_height, clamp_page, effective_min_width,
-    keyboard_resized_width, page_window, stable_column_width, stable_table_content_style,
+    keyboard_resized_width, page_window, stable_table_content_style,
 };
 use crate::components::icon::{Icon, IconSize};
 use crate::components::menu::{Menu, MenuCheckItem};
@@ -1045,11 +1045,10 @@ where
             .get()
             .into_iter()
             .map(|column| {
-                let track = StableColumnTrack::new(
+                let track = StableColumnTrack::resolve(
                     column.id,
-                    widths.get(column.id).copied().unwrap_or_else(|| {
-                        stable_column_width(None, column.initial_width.or(column.min_width))
-                    }),
+                    widths.get(column.id).copied().map(f64::from),
+                    column.initial_width.or(column.min_width),
                 );
                 if flexible_column_id.get() == Some(column.id) {
                     track.flexible()
@@ -1591,6 +1590,15 @@ where
         Some(height) => format!("height: {height}; max-height: {height}"),
         None => "height: 100%".to_owned(),
     });
+    // Keyboard reachability of the scroll container (ldui-0bwg). Interactive
+    // rows carry the table's single roving tab stop, so the region itself
+    // stays out of the tab order (`-1`: focusable by script for focus
+    // recovery, never a second stop). Non-interactive rows have no stop at
+    // all, and a region that scrolls (`viewport_fit`, or the compact layout
+    // on a narrow viewport) would then be unreachable from the keyboard --
+    // axe `scrollable-region-focusable` -- so the region is the stop instead.
+    let region_tabindex = entity_region_tabindex(on_row_activate.is_some() || selection.is_some());
+
     let region_class = if viewport_fit_enabled {
         "min-h-0 w-full flex-1 overflow-auto rounded-box border border-table-grid bg-base-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
     } else {
@@ -1842,7 +1850,7 @@ where
                             })}
                         </Menu>
                         <div class="border-t border-base-300 p-2">
-                            <p class="px-2 pb-1 text-xs font-semibold text-base-content/65">
+                            <p class="px-2 pb-1 text-xs font-semibold text-base-content/75">
                                 {move || texts.with(|texts| texts.column_order.clone())}
                             </p>
                             <ol
@@ -2031,7 +2039,7 @@ where
                 node_ref=table_region
                 class=region_class
                 role="region"
-                tabindex="-1"
+                tabindex=region_tabindex
                 aria-label=move || texts.with(|texts| texts.region_label.clone())
                 data-entity-focus-region="true"
                 data-entity-column-generation=move || semantic_generation.get().to_string()
@@ -2421,7 +2429,7 @@ where
                                     <td
                                         colspan=move || body_colspan.get()
                                         data-entity-empty-state=move || empty_state.get().as_str()
-                                        class="border border-table-grid py-10 text-center text-base-content/65 forced-colors:border-[CanvasText]"
+                                        class="border border-table-grid py-10 text-center text-base-content/75 forced-colors:border-[CanvasText]"
                                     >
                                         {move || empty_state_message.get()}
                                     </td>
@@ -2490,7 +2498,7 @@ where
                                         <td
                                             colspan=move || body_colspan.get()
                                             data-entity-empty-state=move || empty_state.get().as_str()
-                                            class="border border-table-grid py-10 text-center text-base-content/65 forced-colors:border-[CanvasText]"
+                                            class="border border-table-grid py-10 text-center text-base-content/75 forced-colors:border-[CanvasText]"
                                         >
                                             {move || empty_state_message.get()}
                                         </td>
@@ -3283,6 +3291,14 @@ fn render_row_cells<T: Clone + 'static>(
     .into_any()
 }
 
+/// `tabindex` of the table's scroll region (ldui-0bwg). With interactive rows
+/// the rows are the roving tab stop and the region must not add a second one;
+/// without them the region is the only thing a keyboard user can land on to
+/// scroll the table, so it joins the tab order.
+pub(crate) fn entity_region_tabindex(rows_interactive: bool) -> &'static str {
+    if rows_interactive { "-1" } else { "0" }
+}
+
 fn focus_record_from_event(event: &web_sys::FocusEvent, scope: &str) -> Option<EntityFocusRecord> {
     let target = event
         .target()
@@ -3641,7 +3657,7 @@ fn render_default_compact_row<T: 'static>(row: &T, columns: &[EntityColumn<T>]) 
                     data-entity-column-kind=kind.as_str()
                     data-entity-tabular-numbers=(kind == EntityColumnKind::Numeric).then_some("true")
                 >
-                    <span class="text-xs font-medium uppercase tracking-wide text-base-content/60">
+                    <span class="text-xs font-medium uppercase tracking-wide text-base-content/75">
                         {column.header}
                     </span>
                     <span class=move || merge_classes!(

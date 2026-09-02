@@ -5671,3 +5671,266 @@ async fn choose_external_focus_status(harness: &pixelproof_web::Harness, value: 
     assert_eq!(eval_json(harness, &expression).await, json!(value));
     tokio::time::sleep(Duration::from_millis(250)).await;
 }
+
+/// Empty-state contrast (ldui-usqz): with zero matching rows the table
+/// renders a single `td[data-entity-empty-state]` cell, and its muted text
+/// must still clear WCAG AA. The cell used `text-base-content/65`, which
+/// axe measured at 3.83:1 on a white theme (12px normal weight is not
+/// large text, so 4.5:1 is required); the crate's AA-passed muted step is
+/// 75% base-content. Proven by the same vendored axe-core the consumer's
+/// gate runs, plus a direct class read so a future edit back to a lighter
+/// step fails here before it fails downstream.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
+async fn empty_state_cell_clears_aa_contrast() {
+    let harness = harness_at("/components/client-snapshot-list").await;
+    begin_browser_error_capture(&harness).await;
+    wait_for_selector(&harness, "[data-entity-table-grid] tbody tr").await;
+
+    let searched = eval_json(
+        &harness,
+        r#"(() => {
+            const search = document.querySelector('[data-filter-search] input');
+            search.value = 'zzz-no-such-row-zzz';
+            search.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+            return true;
+        })()"#,
+    )
+    .await;
+    assert_eq!(searched, json!(true));
+    wait_for_selector(&harness, "td[data-entity-empty-state]").await;
+
+    let cell = eval_json(
+        &harness,
+        r#"(() => {
+            const cell = document.querySelector('td[data-entity-empty-state]');
+            const style = getComputedStyle(cell);
+            return {
+                classes: cell.className,
+                text: cell.textContent.trim(),
+                fontSize: style.fontSize,
+                color: style.color,
+            };
+        })()"#,
+    )
+    .await;
+    let classes = cell["classes"].as_str().unwrap_or_default();
+    assert!(
+        classes.split(' ').any(|c| c == "text-base-content/75"),
+        "empty-state cell must use the AA-passed 75% muted step: {cell}"
+    );
+    assert!(
+        !classes.contains("text-base-content/65"),
+        "the 65% step measured 3.83:1 and must not return: {cell}"
+    );
+
+    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
+        .expect("load vendored axe-core");
+    let report = axe.run(harness.page()).await.expect("run axe-core");
+    report
+        .assert_no_blocking("entity-table-empty-state")
+        .unwrap_or_else(|error| {
+            panic!(
+                "{error}; {}\nviolations: {:#?}",
+                report.summary(),
+                report.violations
+            )
+        });
+    let contrast_on_cell = eval_json(
+        &harness,
+        r#"(async () => {
+            const report = await axe.run(document.querySelector('td[data-entity-empty-state]'), {
+                runOnly: { type: 'rule', values: ['color-contrast'] },
+                resultTypes: ['violations'],
+            });
+            return report.violations.map(v => ({
+                id: v.id,
+                nodes: v.nodes.map(node => ({ target: node.target, summary: node.failureSummary })),
+            }));
+        })()"#,
+    )
+    .await;
+    assert_eq!(
+        contrast_on_cell,
+        json!([]),
+        "axe color-contrast must pass on the empty-state cell: {contrast_on_cell}"
+    );
+    assert_no_browser_errors(&harness, "entity table empty-state contrast").await;
+}
+
+/// Scroll-region keyboard reachability (ldui-0bwg). The viewport-fit fixture
+/// has non-interactive rows (no `on_row_activate`, no `selection`), so with
+/// 17 rows in a 180px budget the region scrolls and nothing inside it can
+/// take focus: the region itself must be the tab stop (`tabindex="0"`,
+/// focusable, axe `scrollable-region-focusable` clean). The interactive
+/// client-snapshot list keeps `tabindex="-1"` so its roving row stop stays
+/// the only one.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
+async fn scrolling_region_with_non_interactive_rows_is_keyboard_reachable() {
+    let harness = harness_at("/components/entity-table-viewport-fit").await;
+    wait_for_selector(
+        &harness,
+        "#entity-viewport-fit-fixture [data-entity-table-grid] tbody tr",
+    )
+    .await;
+    begin_browser_error_capture(&harness).await;
+    click(&harness, "[data-testid='viewport-fit-rows-17']").await;
+    click(&harness, "[data-testid='viewport-fit-short']").await;
+    tokio::time::sleep(Duration::from_millis(400)).await;
+
+    let region = eval_json(
+        &harness,
+        r#"(() => {
+            const region = document.querySelector('#entity-viewport-fit-fixture [data-entity-focus-region]');
+            const rows = [...region.querySelectorAll('tbody tr')];
+            region.focus();
+            return {
+                tabindex: region.getAttribute('tabindex'),
+                scrolls: region.scrollHeight > region.clientHeight,
+                focused: document.activeElement === region,
+                interactiveRows: rows.filter(row => row.getAttribute('tabindex') === '0').length,
+                role: region.getAttribute('role'),
+                label: region.getAttribute('aria-label'),
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(
+        region["scrolls"],
+        json!(true),
+        "fixture must scroll: {region}"
+    );
+    assert_eq!(
+        region["interactiveRows"],
+        json!(0),
+        "fixture rows must be non-interactive: {region}"
+    );
+    assert_eq!(region["tabindex"], json!("0"), "{region}");
+    assert_eq!(
+        region["focused"],
+        json!(true),
+        "region.focus() must take focus: {region}"
+    );
+    assert_eq!(region["role"], json!("region"), "{region}");
+    assert!(
+        region["label"].as_str().is_some_and(|l| !l.is_empty()),
+        "{region}"
+    );
+
+    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
+        .expect("load vendored axe-core");
+    let _page_report = axe
+        .run(harness.page())
+        .await
+        .expect("inject and run axe-core");
+    let scrollable = eval_json(
+        &harness,
+        r#"(async () => {
+            const report = await axe.run(document.querySelector('#entity-viewport-fit-fixture'), {
+                runOnly: { type: 'rule', values: ['scrollable-region-focusable'] },
+                resultTypes: ['violations'],
+            });
+            return report.violations.map(v => ({
+                id: v.id,
+                nodes: v.nodes.map(node => ({ target: node.target, summary: node.failureSummary })),
+            }));
+        })()"#,
+    )
+    .await;
+    assert_eq!(
+        scrollable,
+        json!([]),
+        "scrollable-region-focusable must pass: {scrollable}"
+    );
+    assert_no_browser_errors(&harness, "viewport-fit region keyboard reachability").await;
+
+    // Interactive rows: the region stays out of the tab order.
+    let interactive = harness_at("/components/client-snapshot-list").await;
+    wait_for_selector(&interactive, "[data-entity-table-grid] tbody tr").await;
+    let roving = eval_json(
+        &interactive,
+        r#"(() => {
+            const region = document.querySelector('[data-entity-focus-region]');
+            const stops = [...region.querySelectorAll('tbody tr[tabindex="0"]')].length;
+            return { tabindex: region.getAttribute('tabindex'), rowStops: stops };
+        })()"#,
+    )
+    .await;
+    assert_eq!(roving["tabindex"], json!("-1"), "{roving}");
+    assert!(roving["rowStops"].as_i64().unwrap_or(0) >= 1, "{roving}");
+}
+
+/// Compact-row field labels clear AA on a narrow viewport (ldui-usqz, second
+/// site). Below `lg` every row renders its compact presentation, whose
+/// uppercase field labels used `text-base-content/60` (3.36:1): the
+/// consumer's gate reported 45 color-contrast findings at 390x844, one per
+/// visible row label. Now the AA-passed 75% step; proven by axe's
+/// color-contrast rule scoped to the table at exactly that viewport.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
+async fn compact_row_labels_clear_aa_contrast_on_a_narrow_viewport() {
+    let harness = harness_at("/components/client-snapshot-list").await;
+    harness
+        .set_viewport(ViewportSize::new(390, 844))
+        .await
+        .expect("narrow viewport");
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    begin_browser_error_capture(&harness).await;
+    wait_for_selector(&harness, "[data-entity-table-grid] tbody tr").await;
+
+    let labels = eval_json(
+        &harness,
+        r#"(() => {
+            const labels = [...document.querySelectorAll('[data-entity-table-grid] tbody tr td span.uppercase')]
+                .filter(el => el.offsetParent !== null);
+            return {
+                visible: labels.length,
+                weak: labels.filter(el => el.className.includes('text-base-content/60')).length,
+                strong: labels.filter(el => el.className.includes('text-base-content/75')).length,
+            };
+        })()"#,
+    )
+    .await;
+    assert!(
+        labels["visible"].as_u64().unwrap_or(0) >= 1,
+        "compact labels must render at 390px: {labels}"
+    );
+    assert_eq!(
+        labels["weak"],
+        json!(0),
+        "the 60% step must not return: {labels}"
+    );
+    assert_eq!(
+        labels["strong"], labels["visible"],
+        "every compact label uses the 75% step: {labels}"
+    );
+
+    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
+        .expect("load vendored axe-core");
+    let _page_report = axe
+        .run(harness.page())
+        .await
+        .expect("inject and run axe-core");
+    let contrast = eval_json(
+        &harness,
+        r#"(async () => {
+            const report = await axe.run(document.querySelector('[data-entity-table-grid]'), {
+                runOnly: { type: 'rule', values: ['color-contrast'] },
+                resultTypes: ['violations'],
+            });
+            return report.violations.map(v => ({
+                id: v.id,
+                nodes: v.nodes.slice(0, 5).map(node => ({ target: node.target, summary: node.failureSummary })),
+                count: v.nodes.length,
+            }));
+        })()"#,
+    )
+    .await;
+    assert_eq!(
+        contrast,
+        json!([]),
+        "axe color-contrast must pass on the compact table at 390x844: {contrast}"
+    );
+    assert_no_browser_errors(&harness, "compact row label contrast").await;
+}

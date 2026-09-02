@@ -3428,3 +3428,19 @@ fn a_declared_group_carries_optional_compact_metadata() {
     assert_eq!(groups[0].label(), "Ana Ruiz");
     assert_eq!(groups[0].meta(), Some("3 of 5 complete"));
 }
+
+// -- scroll-region keyboard reachability (ldui-0bwg) ------------------------
+
+/// Non-interactive rows leave the table with no tab stop, so the scroll
+/// region must be the stop (axe `scrollable-region-focusable`).
+#[test]
+fn region_joins_the_tab_order_when_rows_are_not_interactive() {
+    assert_eq!(entity_region_tabindex(false), "0");
+}
+
+/// Interactive rows already carry the single roving tab stop; the region
+/// must not add a second one.
+#[test]
+fn region_stays_out_of_the_tab_order_when_rows_are_interactive() {
+    assert_eq!(entity_region_tabindex(true), "-1");
+}

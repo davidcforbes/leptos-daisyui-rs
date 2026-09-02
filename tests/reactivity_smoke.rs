@@ -5913,6 +5913,12 @@ async fn a_refused_checkbox_configuration_renders_an_alert_and_no_input() {
 /// The fixture (`/components/record_header`, `record-header-edge-tooltip`)
 /// deliberately reproduces the bug report's shape: one status plus three
 /// glyph actions inside a constrained (`max-w-sm`) container.
+///
+/// It then reflows the header twice (narrow -> stacked, wide -> row) and
+/// asserts the placement follows: the first attempt at this fix measured
+/// once at mount and passed every native test while the browser check
+/// failed at rest, because the page mounts at Chrome's narrow default size
+/// (stacked, trigger mid-row) and the consumer viewport is applied after.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires demo dev server (cargo make test-visual)"]
 async fn record_header_edge_action_tooltip_never_spills_the_row() {
@@ -6021,6 +6027,49 @@ async fn record_header_edge_action_tooltip_never_spills_the_row() {
         json!(false),
         "keyboard-focused: {keyboard_focused}"
     );
+
+    // Reflow round-trip. Below the `lg` breakpoint the header stacks its
+    // identity and edge rows and the edge row is left-aligned, so the same
+    // trigger sits mid-row with room on both sides: the placement must
+    // return to daisyUI's default `Top` (a stuck `Left` would hang the
+    // bubble over the status chip). Widening again puts the trigger back
+    // flush against the right edge, and the placement must flip back to
+    // `Left` -- proving it is re-measured on reflow rather than frozen at
+    // whatever geometry the first paint happened to have, which is exactly
+    // how the first attempt at this fix failed (the harness mounts the page
+    // narrow and applies the viewport afterwards).
+    h.set_viewport(ViewportSize::new(800, 600))
+        .await
+        .expect("narrow the viewport below the lg breakpoint");
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let stacked = eval_json(&h, PROBE_JS).await;
+    assert!(
+        stacked["tooltipClass"]
+            .as_str()
+            .is_some_and(|classes| classes.split(' ').any(|c| c == "tooltip-top")),
+        "stacked (mid-row, room on both sides) must return to tooltip-top: {stacked}"
+    );
+    // No cluster assertion here: mid-row, the centred `Top` bubble overhangs
+    // its own inner action group by design (every daisyUI tooltip does), and
+    // that group clips nothing -- the containment that matters is the
+    // section and the document, which must both stay spill-free.
+    assert_eq!(stacked["sectionSpills"], json!(false), "stacked: {stacked}");
+    assert_eq!(stacked["pageSpills"], json!(false), "stacked: {stacked}");
+
+    h.set_viewport(ViewportSize::new(1694, 1262))
+        .await
+        .expect("restore the consumer-reported viewport");
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    let widened = eval_json(&h, PROBE_JS).await;
+    assert!(
+        widened["tooltipClass"]
+            .as_str()
+            .is_some_and(|classes| classes.split(' ').any(|c| c == "tooltip-left")),
+        "widened back to the row layout must re-measure and flip to tooltip-left: {widened}"
+    );
+    assert_eq!(widened["sectionSpills"], json!(false), "widened: {widened}");
+    assert_eq!(widened["clusterSpills"], json!(false), "widened: {widened}");
+    assert_eq!(widened["pageSpills"], json!(false), "widened: {widened}");
 
     assert_no_browser_errors(&h, "record header edge-action tooltip containment").await;
 }

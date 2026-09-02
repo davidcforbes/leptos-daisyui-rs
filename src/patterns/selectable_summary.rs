@@ -414,17 +414,31 @@ fn card_body_class() -> &'static str {
 /// The card's outer button classes.
 ///
 /// Selection is carried by a ring (a shape that is simply absent when
-/// unselected, not a hue swap) plus a primary border. Rings are box-shadows
-/// and forced-colors mode removes them, so the selected card additionally
-/// claims the system `Highlight` border colour while an unselected one
-/// claims `CanvasText` -- two distinct system colours, so selection
-/// survives in a palette the author does not control. Border WIDTH is
-/// identical in both states, so selecting a card never shifts the grid.
+/// unselected, not a hue swap) plus a primary border. The ring is an
+/// `outline` (ldui-xr7i), not a `ring-*` box-shadow: the card's resting
+/// depth is `ld-card-depth`, and the style audit's DEPTH family treats every
+/// opaque box-shadow layer as elevation, so a box-shadow ring reads as a
+/// rogue shadow while an outline is what it is -- a selection affordance
+/// that paints outside the border box and never enters layout. Forced-colors
+/// mode keeps outlines but the selected card additionally claims the system
+/// `Highlight` border colour while an unselected one claims `CanvasText` --
+/// two distinct system colours, so selection survives in a palette the
+/// author does not control. Border WIDTH is identical in both states, so
+/// selecting a card never shifts the grid.
+///
+/// Keyboard focus is the framework-wide `ld-focus-ring` the card's
+/// `Pressable` shell carries (an unlayered runtime rule: 2px primary
+/// outline at offset 2 on `:focus-visible`), which outranks any layered
+/// utility. A focused selected card therefore shows the ring 2px further
+/// out than its selection outline -- the gap is what distinguishes the two
+/// states -- and this function must NOT add `focus-visible:` outline
+/// utilities of its own: they can never win against that rule and would
+/// only document an intent the DOM does not carry.
 ///
 /// Disabled adds a dashed border -- again a shape, not a hue.
 fn card_class(selected: bool, disabled: bool) -> String {
     let selection = if selected {
-        "border-primary ring-2 ring-primary bg-base-200 forced-colors:border-[Highlight]"
+        "border-primary outline-2 outline-offset-0 outline-primary bg-base-200 forced-colors:border-[Highlight]"
     } else {
         "border-base-300 bg-base-100 forced-colors:border-[CanvasText]"
     };
@@ -551,7 +565,7 @@ fn focus_card(target: Option<web_sys::EventTarget>, id: &str) {
 /// Tailwind utility, so `@source inline(...)` cannot generate it (ldui-fg2h).
 /// A consumer gets it by importing that stylesheet.
 /// @source inline("border-solid border-dashed cursor-not-allowed");
-/// @source inline("border-base-300 border-primary ring-2 ring-primary bg-base-100 bg-base-200");
+/// @source inline("border-base-300 border-primary outline-2 outline-offset-0 outline-primary bg-base-100 bg-base-200");
 /// @source inline("forced-colors:border-[CanvasText] forced-colors:border-[Highlight]");
 /// @source inline("w-(--border-width-accent) shrink-0 self-stretch forced-colors:bg-[CanvasText]");
 /// @source inline("bg-status-blue bg-success bg-warning bg-error bg-base-300");
@@ -1240,16 +1254,24 @@ mod tests {
         assert!(!unselected.contains("border-2"));
     }
 
-    /// A ring is present-or-absent, not a hue swap; and because
-    /// forced-colors mode drops box-shadows, the selected card claims a
-    /// DIFFERENT system border colour so selection survives a palette the
+    /// A ring is present-or-absent, not a hue swap; it is an OUTLINE, never
+    /// a `ring-*` box-shadow (ldui-xr7i: a box-shadow ring is discarded by
+    /// the card's `ld-card-depth` elevation and counted as a rogue shadow by
+    /// the depth audit); and the selected card claims a DIFFERENT system
+    /// border colour so selection survives a forced-colors palette the
     /// author does not control.
     #[test]
     fn selection_survives_forced_colors_mode() {
+        // Keyboard focus is the shell's framework-wide `ld-focus-ring`; a
+        // hand-rolled `focus-visible:` outline here can never outrank it.
+        assert!(!card_class(true, false).contains("focus-visible:"));
+        assert!(!card_class(false, false).contains("focus-visible:"));
         let selected = card_class(true, false);
         let unselected = card_class(false, false);
-        assert!(selected.contains("ring-2 ring-primary"));
+        assert!(selected.contains("outline-2 outline-offset-0 outline-primary"));
+        assert!(!selected.contains("ring-"));
         assert!(!unselected.contains("ring-"));
+        assert!(!unselected.contains("outline-primary"));
         assert!(selected.contains("forced-colors:border-[Highlight]"));
         assert!(unselected.contains("forced-colors:border-[CanvasText]"));
     }

@@ -722,6 +722,50 @@ pub fn RecordHeader(
     node_ref: NodeRef<Section>,
 ) -> impl IntoView {
     let heading_id = (!id.is_empty()).then_some(id);
+
+    // Quick-action tooltip placement is measured against this section's box
+    // (see `render_action`), and that measurement goes stale on ANY reflow
+    // that rearranges the header: the identity and edge rows stacking or
+    // un-stacking at the `lg` breakpoint, a host sidebar collapsing, fonts
+    // finishing loading. A one-shot mount-time measurement is exactly what
+    // shipped first for ldui-q73d, and it failed its own browser check: the
+    // page mounted narrow (stacked, trigger far from either edge -> `Top`),
+    // the viewport was then widened, and the trigger ended up flush against
+    // the right edge with a `Top` bubble spilling past it. Every
+    // rearrangement that moves a trigger relative to the section also
+    // changes the section's inline or block size (stacking changes its
+    // height; a container change changes its width), so a ResizeObserver on
+    // the section is the reflow signal: each notification bumps
+    // `layout_generation`, which every action's placement effect tracks.
+    // (The observer also fires once on `observe`, after layout, so the
+    // first measurement is taken against settled geometry.)
+    let layout_generation = RwSignal::new(0u32);
+    Effect::new(move |_| {
+        let Some(section) = node_ref.get() else {
+            return;
+        };
+        let closure = wasm_bindgen::closure::Closure::wrap(Box::new(
+            move |_entries: js_sys::Array, _observer: web_sys::ResizeObserver| {
+                layout_generation.update(|generation| *generation = generation.wrapping_add(1));
+            },
+        )
+            as Box<dyn FnMut(js_sys::Array, web_sys::ResizeObserver)>);
+        match web_sys::ResizeObserver::new(closure.as_ref().unchecked_ref()) {
+            Ok(observer) => {
+                observer.observe(&section);
+                // `Closure`/`ResizeObserver` are not `Send`/`Sync` but
+                // `on_cleanup` requires both; this only ever runs
+                // single-threaded on wasm32, which `SendWrapper` encodes.
+                let guard = send_wrapper::SendWrapper::new((closure, observer));
+                on_cleanup(move || {
+                    let (closure, observer) = guard.take();
+                    observer.disconnect();
+                    drop(closure);
+                });
+            }
+            Err(_) => drop(closure),
+        }
+    });
     let heading = HeadingSpec {
         level,
         id: heading_id,
@@ -773,7 +817,13 @@ pub fn RecordHeader(
                                     data-record-actions="true"
                                 >
                                     {actions.into_iter()
-                                        .map(|action| render_action(action, &texts, on_action, node_ref))
+                                        .map(|action| render_action(
+                                            action,
+                                            &texts,
+                                            on_action,
+                                            node_ref,
+                                            layout_generation.read_only(),
+                                        ))
                                         .collect_view()}
                                 </div>
                             })}
@@ -1112,14 +1162,16 @@ fn measure_and_set_tooltip_position(
 /// root section) rather than hardcoded to the action's position in the
 /// list -- see [`resolved_tooltip_position`]. It is computed once the
 /// control mounts (a hovering-but-invisible tooltip bubble still occupies
-/// layout space, so the row must never spill even before the first hover)
-/// and re-measured on hover/focus in case the surrounding layout has since
-/// reflowed.
+/// layout space, so the row must never spill even before the first hover),
+/// again whenever the section's ResizeObserver reports a reflow
+/// (`layout_generation`), and on hover/focus as a final belt-and-braces
+/// pass.
 fn render_action(
     action: RecordQuickAction,
     texts: &RecordHeaderTexts,
     on_action: Option<Callback<String>>,
     row: NodeRef<Section>,
+    layout_generation: ReadSignal<u32>,
 ) -> AnyView {
     let name = action.accessible_name(texts);
     let label_len = name.chars().count();
@@ -1196,8 +1248,12 @@ fn render_action(
 
     // Runs once the tooltip and the row it is measured against have both
     // mounted -- before the first paint, so a spilling default `Top`
-    // placement never becomes visible even for an instant.
+    // placement never becomes visible even for an instant -- and again on
+    // every `layout_generation` bump from the section's ResizeObserver, so
+    // the placement follows the header through stacking/un-stacking and
+    // container resizes instead of freezing at first-paint geometry.
     Effect::new(move |_| {
+        layout_generation.track();
         if row.get().is_some() && tooltip_ref.get().is_some() {
             measure_and_set_tooltip_position(row, tooltip_ref, tooltip_position, label_len);
         }
@@ -1781,6 +1837,24 @@ mod tests {
         assert!(render.contains("node_ref=tooltip_ref"));
         assert!(render.contains("tip=name"));
         assert!(render.contains("position=tooltip_position"));
+    }
+
+    /// Placement must follow reflow rather than freeze at first-paint
+    /// geometry -- the shape of the first ldui-q73d attempt's failure, where
+    /// a header that mounted stacked (trigger mid-row -> `Top`) was then
+    /// widened into its row layout and the now edge-flush trigger kept its
+    /// spilling `Top` bubble. The section owns a ResizeObserver that bumps
+    /// `layout_generation`, and every action's placement effect tracks it.
+    #[test]
+    fn action_tooltip_placement_remeasures_on_section_reflow() {
+        let src = component_source();
+        assert!(src.contains("web_sys::ResizeObserver::new"));
+        assert!(src.contains("observer.observe(&section);"));
+        let render = src
+            .split_once("fn render_action(")
+            .expect("render_action source")
+            .1;
+        assert!(render.contains("layout_generation.track();"));
     }
 
     /// The rightmost (or any edge-adjacent) action's tooltip must be placed

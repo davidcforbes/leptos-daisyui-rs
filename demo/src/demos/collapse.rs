@@ -50,6 +50,50 @@ pub fn CollapseDemo() -> impl IntoView {
                     </CollapseContent>
                 </Collapse>
             </Section>
+
+            // ldui-3k00: the checkbox toggle always carries an id, a name and
+            // an accessible name. Browser proof: tests/collapse_naming_smoke.rs.
+            <Section title="Toggle identity and accessible name (ldui-3k00)" col=true>
+                <div id="collapse-naming-fixture" class="flex min-w-0 flex-col gap-4">
+                <div data-testid="collapse-naming-titled">
+                    <Collapse
+                        id="collapse-naming-filters"
+                        name="show_filters"
+                        modifier=CollapseModifier::Arrow
+                        class="border border-base-300 bg-base-100 rounded-box"
+                    >
+                        <CollapseTitle class="text-xl font-medium">"Filters"</CollapseTitle>
+                        <CollapseContent>
+                            <p>"Explicit id and name; the toggle is named by this title."</p>
+                        </CollapseContent>
+                    </Collapse>
+                </div>
+                <div data-testid="collapse-naming-minted">
+                    <Collapse
+                        modifier=CollapseModifier::Arrow
+                        class="border border-base-300 bg-base-100 rounded-box"
+                    >
+                        <CollapseTitle class="text-xl font-medium">"Sort options"</CollapseTitle>
+                        <CollapseContent>
+                            <p>"No id supplied: a minted id doubles as the name."</p>
+                        </CollapseContent>
+                    </Collapse>
+                </div>
+                <div data-testid="collapse-naming-labelled">
+                    <Collapse
+                        id="collapse-naming-advanced"
+                        aria_label="Show advanced options"
+                        modifier=CollapseModifier::Plus
+                        class="border border-base-300 bg-base-100 rounded-box"
+                    >
+                        <CollapseTitle class="text-xl font-medium">"Advanced"</CollapseTitle>
+                        <CollapseContent>
+                            <p>"An explicit aria_label replaces the title as the accessible name."</p>
+                        </CollapseContent>
+                    </Collapse>
+                </div>
+                </div>
+            </Section>
         </ContentLayout>
     }
 }

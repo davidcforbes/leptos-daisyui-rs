@@ -42,9 +42,9 @@ CI/CD is **local-only, two-layer**: logic lives in the `xtask/` crate; cargo-mak
 just delegates. Run the gate before committing:
 
 ```bash
-cargo xtask verify        # 14 native-only checks; no Wasm/Chrome/reactivity lane
+cargo xtask verify        # 15 native-only checks; no Wasm/Chrome/reactivity lane
 cargo make verify         # same, via cargo-make
-cargo xtask verify-full   # 24 steps: verify + ten browser/Wasm lanes (needs npm/trunk/Chrome)
+cargo xtask verify-full   # 34 steps: verify + nineteen browser/Wasm lanes (needs npm/trunk/Chrome)
 cargo xtask test-reactivity          # opt-in 69-check DOM/interaction lane; never implicit in verify
                                      # ⚠️ its check count is PINNED in xtask; adding a
                                      # #[tokio::test] there fails the gate until re-pinned
@@ -55,6 +55,8 @@ cargo xtask test-modal-close-proposal  # Modal Escape/backdrop close proposals (
 cargo xtask test-selectable-summary    # SelectableSummaryGroup radiogroup contract (ldui-l5cw)
 cargo xtask test-bar-chart-divergence  # BarChart signed divergence + a11y (ldui-y2ed)
 cargo xtask test-heatmap-matrix        # Heatmap two-axis grid + hidden matrix (ldui-8d94)
+cargo xtask test-collapse-naming       # Collapse toggle id/name + title-derived accessible name (ldui-3k00)
+cargo xtask test-data-table-fit        # DataTable undeclared columns fit w-full; declared tracks scroll (ldui-qsqz)
 cargo xtask gen-tokens [--check]     # regenerate styles/tokens.css from ui-tokens
 cargo xtask check-sibling-tokens     # preamble.rs's ui_tokens refs must exist on the sibling's DEFAULT branch
 cargo xtask bump patch|minor|major   # bump the library version (human-chosen level)
@@ -263,6 +265,47 @@ validates generation/revision, keeps the complete snapshot in
 `EntityTable::source_data`, and derives dataset/page-size select IDs from the
 page contract. Standalone `DatasetSelector`/`EntityTable` calls supply
 `control_id`/`page_size_control_id`; do not patch IDs into the DOM.
+
+### Recent additions (2026-09-02, consumer-audit bead wave + comprehensive validation)
+
+Eight beads cleared in one session; every fix carries a browser proof in a
+registered lane, and the full 34-step gate plus the screenshot suite were run
+green on the final tree (single-threaded against a detached release server,
+because the shared box was under another session's load -- see
+`doc/ci-cd.md`). What landed, and the trap behind each:
+
+- **RecordHeader edge tooltips** (ldui-q73d) -- placement is re-measured on
+  every reflow via a `ResizeObserver` on the section. A one-shot mount-time
+  measurement is a photograph of first-paint geometry: the harness mounts at
+  Chrome's 800px default and applies the viewport afterwards, so the first
+  attempt measured the *stacked* layout and never re-measured.
+- **Collapse toggle identity** (ldui-3k00) -- `id`/`name`/`aria_label` props;
+  the input is named by its `CollapseTitle` through `CollapseContext`.
+- **EntityTable** -- empty-state/chooser text and the compact-row field
+  labels at the AA-passed 75% step (ldui-usqz; the 60% labels were 45 axe
+  findings per narrow-viewport page); the scroll region is `tabindex=0` only
+  when rows carry no roving stop (ldui-0bwg).
+- **`.ld-card-depth` composes with Tailwind rings** (ldui-xr7i). A bare
+  `box-shadow:` on a component class beats any layered `ring-*` utility and
+  silently discards the ring; the class now sets `--tw-shadow` and the
+  five-part list like Tailwind's own `shadow-*`. `SelectableSummaryCard`'s
+  selection ring is an `outline` (a box-shadow ring counts as a rogue DEPTH
+  finding), and keyboard focus is the framework's `ld-focus-ring`, which
+  outranks any `focus-visible:` utility you might add.
+- **`test-ld-class-coverage` is a native gate step** (ldui-n1iv). `test-lib`
+  is `--lib` only; an integration test not named as its own step runs nowhere.
+- **DataTable column tracks** (ldui-qsqz) -- a column that declares no width
+  is an *auto* track (no `<col>` width, 96px floor toward the scroll minimum);
+  ten undeclared columns fit `w-full` again instead of forcing 1600px.
+- **Screenshot baselines** for modal-open and tab-default recaptured
+  (ldui-fx46); they predated shipped fixtures.
+
+Two hazards of a shared workstation, recorded in memory: a sibling session
+that kills `cargo`/`trunk`/`xtask` machine-wide and races on `demo/dist`
+(serve from a dist outside the repo; run suites single-threaded; a runner
+that restarts the server before each suite), and `demo/node_modules`
+vanishing mid-session (the stylesheet-stamp panic at
+`tests/common/mod.rs:273` is the signature; `npm install` in `demo/`).
 
 ### Recent additions (2026-08-25, merged to main)
 
