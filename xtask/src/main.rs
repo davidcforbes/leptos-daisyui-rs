@@ -340,6 +340,21 @@ fn snapshot_table_page_controls_step() -> Step {
     }
 }
 
+/// Focused browser proof for the opt-in framework utility row on
+/// `SnapshotTablePage` (ldui-nj3q): the localized visible/total result count,
+/// one Reset, and one explicit Save as Default obtained from the composite
+/// itself. The same fixture also mounts a `SnapshotTablePage` that does NOT
+/// opt in, so every assertion carries its own negative control.
+fn snapshot_table_page_filter_actions_step() -> Step {
+    Step {
+        name: "test-snapshot-table-page-filter-actions",
+        run: Run::BrowserSuite {
+            test: "snapshot_table_page_filter_actions_smoke",
+            html_target: Some("client-snapshot-test-host.html"),
+        },
+    }
+}
+
 fn pattern_steps(pattern: &str, lane: PatternLane) -> Result<Vec<Step>, String> {
     pattern_checks::checks_for(pattern, lane)?
         .iter()
@@ -604,6 +619,7 @@ fn full_steps() -> Vec<Step> {
     steps.push(snapshot_table_step());
     steps.push(snapshot_table_delta_step());
     steps.push(snapshot_table_page_controls_step());
+    steps.push(snapshot_table_page_filter_actions_step());
     steps.push(reactivity_step());
     steps.push(layout_step());
     steps.push(style_step());
@@ -2221,6 +2237,9 @@ fn main() -> ExitCode {
         "test-admin-workbench" => run_steps(&[admin_workbench_step()]),
         "test-snapshot-table-delta" => run_steps(&[snapshot_table_delta_step()]),
         "test-snapshot-table-page-controls" => run_steps(&[snapshot_table_page_controls_step()]),
+        "test-snapshot-table-page-filter-actions" => {
+            run_steps(&[snapshot_table_page_filter_actions_step()])
+        }
         "test-server-table-column-tools" => run_steps(&[server_table_column_tools_step()]),
         "test-collapse-naming" => run_steps(&[collapse_naming_step()]),
         "test-data-table-fit" => run_steps(&[data_table_fit_step()]),
@@ -2237,7 +2256,7 @@ fn main() -> ExitCode {
         other => {
             eprintln!("xtask: unknown subcommand {other:?}");
             eprintln!(
-                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-selectable-summary|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-server-table-column-tools|test-collapse-naming|test-data-table-fit|gen-tokens|check-sibling-tokens|bump>"
+                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-selectable-summary|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-snapshot-table-page-filter-actions|test-server-table-column-tools|test-collapse-naming|test-data-table-fit|gen-tokens|check-sibling-tokens|bump>"
             );
             ExitCode::from(2)
         }

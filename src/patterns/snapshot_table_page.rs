@@ -1,8 +1,9 @@
 //! Typed Layer 3 composition root for client-snapshot table pages.
 
 use super::{
-    ActionFeedback, ActionFeedbackModel, ActionFeedbackTexts, DatasetOption, DatasetSelector,
-    DatasetSelectorTexts, LocalResultSummary, PageStatePanel, PageStatePanelTexts,
+    ActionFeedback, ActionFeedbackModel, ActionFeedbackTexts, ActiveFilterChip, DatasetOption,
+    DatasetSelector, DatasetSelectorTexts, FilterBar, FilterBarTexts, FilterResultSummary,
+    LocalResultSummary, PageStatePanel, PageStatePanelTexts, SnapshotDefaultSave,
     SnapshotLocalRowProjection, SnapshotTablePhase, SnapshotTableState,
 };
 use crate::components::{
@@ -267,6 +268,103 @@ impl<R: 'static> SnapshotEntityTableConfig<R> {
     }
 }
 
+/// Framework-owned utility-row furniture for a snapshot table page
+/// (`ldui-nj3q`): the localized visible/total result count, one Reset, and
+/// one explicit Save as Default.
+///
+/// Supplying it opts [`SnapshotTablePage`]'s `filters` slot into the
+/// framework [`FilterBar`], which then owns the row's layout, the result
+/// string, and both actions. Omitting it leaves the `filters` slot exactly
+/// as it renders today -- the consumer's content, unwrapped.
+///
+/// Deliberately carries no counts. Visible and total are the values the page
+/// already owns -- the identity-bound [`LocalResultSummary`] minted by
+/// `state`, and the authoritative displayed snapshot -- so a consumer cannot
+/// pair a count with the wrong generation by supplying one here. Like the
+/// selector and table configs, no field's type can carry rows, dataset
+/// identity, revision, count, or generation.
+pub struct SnapshotFilterActionsConfig {
+    texts: Signal<FilterBarTexts>,
+    on_reset: Option<Callback<()>>,
+    default_save: Option<SnapshotDefaultSave>,
+    active_filters: Option<Signal<Vec<ActiveFilterChip>>>,
+    on_remove: Option<Callback<String>>,
+    show_result_count: bool,
+    class: &'static str,
+}
+
+impl Default for SnapshotFilterActionsConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SnapshotFilterActionsConfig {
+    /// Creates a utility row that renders only the framework result count.
+    ///
+    /// Reset and Save as Default are added explicitly, so a page that offers
+    /// neither still gets a single framework-owned place for the count.
+    pub fn new() -> Self {
+        Self {
+            texts: Signal::stored(FilterBarTexts::default()),
+            on_reset: None,
+            default_save: None,
+            active_filters: None,
+            on_remove: None,
+            show_result_count: true,
+            class: "",
+        }
+    }
+
+    /// Supplies reactive framework-owned copy, including the `{visible}` /
+    /// `{total}` result template and both action labels.
+    pub fn with_texts(mut self, texts: impl Into<Signal<FilterBarTexts>>) -> Self {
+        self.texts = texts.into();
+        self
+    }
+
+    /// Adds the one canonical Reset action. The consumer owns what resetting
+    /// means; the framework owns the label, placement, and enablement.
+    pub const fn on_reset(mut self, callback: Callback<()>) -> Self {
+        self.on_reset = Some(callback);
+        self
+    }
+
+    /// Adds the explicit, persistence-neutral Save as Default action. Its
+    /// pending / saved / conflict / failure copy renders in the same row's
+    /// live region.
+    pub fn with_default_save(mut self, binding: SnapshotDefaultSave) -> Self {
+        self.default_save = Some(binding);
+        self
+    }
+
+    /// Adds controlled active-filter chips. Their presence is also what lets
+    /// Reset report "nothing to reset" by disabling itself; without them
+    /// Reset stays enabled.
+    pub fn with_active_filters(
+        mut self,
+        chips: impl Into<Signal<Vec<ActiveFilterChip>>>,
+        on_remove: Callback<String>,
+    ) -> Self {
+        self.active_filters = Some(chips.into());
+        self.on_remove = Some(on_remove);
+        self
+    }
+
+    /// Hides the framework result count while keeping the actions. Rarely
+    /// right: the count is the reason the row exists.
+    pub const fn show_result_count(mut self, show: bool) -> Self {
+        self.show_result_count = show;
+        self
+    }
+
+    /// Adds outer filter-row classes.
+    pub const fn with_class(mut self, class: &'static str) -> Self {
+        self.class = class;
+        self
+    }
+}
+
 /// Canonical, explicit composition root for one complete client-snapshot page.
 ///
 /// The component owns slot order and identity wiring only. Consumers still own
@@ -294,6 +392,12 @@ pub fn SnapshotTablePage<R, V, E, M, K>(
     kpis: Option<Children>,
     /// Controlled local-filter utility content.
     filters: Children,
+    /// Optional framework-owned result count, Reset, and Save as Default
+    /// (`ldui-nj3q`). When supplied, `filters` is composed inside the
+    /// framework [`FilterBar`]; when absent, the `filters` slot renders
+    /// exactly as before.
+    #[prop(optional)]
+    filter_actions: Option<SnapshotFilterActionsConfig>,
     /// Reactive dataset loading/display/error/retry copy.
     #[prop(into, default = Signal::stored(DatasetSelectorTexts::default()))]
     dataset_texts: Signal<DatasetSelectorTexts>,
@@ -446,6 +550,41 @@ where
         })
     });
 
+    // `ldui-nj3q`: the opt-in utility row. The counts are read here, from
+    // the same identity-bound proof the render decision uses, rather than
+    // accepted from the caller -- `SnapshotFilterActionsConfig` has no field
+    // that could carry one. `FilterResultSummary` is `Copy + Send + Sync`,
+    // so the two `LocalStorage` sources are bridged through a plain signal
+    // exactly as `generation_marker`/`loading`/`load_error` already are.
+    let filters_slot = filter_actions.map(|config| {
+        let SnapshotFilterActionsConfig {
+            texts,
+            on_reset,
+            default_save,
+            active_filters,
+            on_remove,
+            show_result_count,
+            class,
+        } = config;
+        let result_summary = RwSignal::new(FilterResultSummary::new(0, 0));
+        Effect::new(move |_| {
+            let total = authoritative_rows.with(|rows| rows.len());
+            let visible = effective_local_result
+                .get()
+                .map_or(total, |summary| summary.filtered_count());
+            result_summary.set(FilterResultSummary::new(visible, total));
+        });
+        (
+            texts,
+            on_reset,
+            default_save,
+            active_filters,
+            on_remove,
+            show_result_count.then_some(Signal::from(result_summary)),
+            class,
+        )
+    });
+
     let dataset_id = format!("{contract_id}-dataset");
     let kpis_id = format!("{contract_id}-kpis");
     let filters_id = format!("{contract_id}-filters");
@@ -482,7 +621,33 @@ where
             {kpis.map(|kpis| view! {
                 <div id=kpis_id data-snapshot-page-slot="kpis">{kpis()}</div>
             })}
-            <div id=filters_id data-snapshot-page-slot="filters">{filters()}</div>
+            <div id=filters_id data-snapshot-page-slot="filters">
+                {match filters_slot {
+                    None => filters().into_any(),
+                    Some((
+                        texts,
+                        on_reset,
+                        default_save,
+                        active_filters,
+                        on_remove,
+                        result,
+                        class,
+                    )) => view! {
+                        <FilterBar
+                            texts=texts
+                            nostrip:on_reset=on_reset
+                            nostrip:default_save=default_save
+                            nostrip:active_filters=active_filters
+                            nostrip:on_remove=on_remove
+                            nostrip:result=result
+                            class=class
+                        >
+                            {filters()}
+                        </FilterBar>
+                    }
+                    .into_any(),
+                }}
+            </div>
             <div id=feedback_id class="space-y-2" data-snapshot-page-slot="feedback">
                 {move || state.with(|state| {
                     let summary = effective_local_result.get();
@@ -578,6 +743,9 @@ where
 mod tests {
     use super::*;
     use crate::components::{EntityTablePreferenceOwnership, EntityTablePreferences};
+    use crate::patterns::{
+        FilterSchema, SnapshotDefaultSaveState, SnapshotViewDefaults, filter_result_summary,
+    };
 
     #[derive(Clone)]
     struct Row;
@@ -627,6 +795,122 @@ mod tests {
                 Callback::new(move |next| preferences.set(next)),
             ),
         )
+    }
+
+    /// `ldui-nj3q`: the utility-row config defaults to the count alone, and
+    /// its type has no field that could carry a count, rows, dataset
+    /// identity, revision, or generation -- the page reads all of those from
+    /// `state`.
+    #[test]
+    fn filter_actions_config_defaults_to_the_count_alone() {
+        let config = SnapshotFilterActionsConfig::new();
+        assert!(config.show_result_count);
+        assert!(config.on_reset.is_none());
+        assert!(config.default_save.is_none());
+        assert!(config.active_filters.is_none());
+        assert!(config.on_remove.is_none());
+        assert_eq!(config.class, "");
+        assert_eq!(
+            config.texts.get_untracked().result_count,
+            "{visible} of {total} results"
+        );
+        assert_eq!(config.texts.get_untracked().reset, "Reset");
+        assert_eq!(config.texts.get_untracked().save_default, "Save as Default");
+    }
+
+    /// `ldui-nj3q`: every builder lands on its private field, including the
+    /// localized copy a Spanish consumer supplies.
+    #[test]
+    fn filter_actions_builders_forward_to_typed_fields() {
+        let resets = RwSignal::new(0_u32);
+        let removed = RwSignal::new(String::new());
+        let saves = RwSignal::new(0_u32);
+        let preferences = EntityTablePreferences::new(1);
+        let schema = FilterSchema::<()>::new("office", &["status"]);
+        let defaults = schema
+            .project_defaults([("status", serde_json::json!("urgent"))], preferences)
+            .expect("schema projects the fixture defaults");
+        let spanish = FilterBarTexts {
+            result_count: "{visible} de {total} resultados".to_owned(),
+            reset: "Restablecer".to_owned(),
+            save_default: "Guardar como predeterminado".to_owned(),
+            clean_reason: "Los valores predeterminados ya están guardados".to_owned(),
+            ..FilterBarTexts::default()
+        };
+
+        let config = SnapshotFilterActionsConfig::new()
+            .with_texts(Signal::stored(spanish))
+            .on_reset(Callback::new(move |()| resets.update(|count| *count += 1)))
+            .with_default_save(SnapshotDefaultSave::new(
+                Signal::stored(defaults),
+                Signal::stored(SnapshotDefaultSaveState::Dirty),
+                Callback::new(move |_: SnapshotViewDefaults| saves.update(|count| *count += 1)),
+            ))
+            .with_active_filters(
+                Signal::stored(vec![ActiveFilterChip::new("status", "Status", "Urgent")]),
+                Callback::new(move |key: String| removed.set(key)),
+            )
+            .show_result_count(false)
+            .with_class("mt-2");
+
+        assert!(!config.show_result_count);
+        assert_eq!(config.class, "mt-2");
+        assert_eq!(
+            config.texts.get_untracked().result_count,
+            "{visible} de {total} resultados"
+        );
+        assert_eq!(config.texts.get_untracked().reset, "Restablecer");
+        assert_eq!(
+            config.texts.get_untracked().save_default,
+            "Guardar como predeterminado"
+        );
+
+        config.on_reset.expect("on_reset was set").run(());
+        assert_eq!(resets.get_untracked(), 1);
+
+        config
+            .on_remove
+            .expect("on_remove was set")
+            .run("status".to_owned());
+        assert_eq!(removed.get_untracked(), "status");
+        assert_eq!(
+            config
+                .active_filters
+                .expect("active_filters was set")
+                .get_untracked()
+                .len(),
+            1
+        );
+
+        let save = config.default_save.expect("default_save was set");
+        assert_eq!(save.state(), SnapshotDefaultSaveState::Dirty);
+        // Reading the projected payload must never perform persistence.
+        let payload = save.defaults();
+        assert_eq!(saves.get_untracked(), 0);
+        assert_eq!(
+            payload.filters().get("status"),
+            Some(&serde_json::json!("urgent"))
+        );
+    }
+
+    /// `ldui-nj3q` negative control: the localized result string comes from
+    /// `FilterBar`'s own template, so one page's copy cannot drift from
+    /// another's.
+    #[test]
+    fn filter_actions_result_string_is_owned_by_filter_bar() {
+        let english = FilterBarTexts::default();
+        assert_eq!(
+            filter_result_summary(FilterResultSummary::new(3, 3), &english),
+            "3 of 3 results"
+        );
+        let spanish = FilterBarTexts {
+            result_count: "{visible} de {total} resultados".to_owned(),
+            ..FilterBarTexts::default()
+        };
+        assert_eq!(
+            filter_result_summary(FilterResultSummary::new(1, 3), &spanish),
+            "1 de 3 resultados"
+        );
     }
 
     /// `ldui-myhh` / `ldui-5ano`: every typed behavior-only builder actually

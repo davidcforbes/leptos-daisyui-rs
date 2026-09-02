@@ -167,6 +167,58 @@ view! {
 }
 ```
 
+## Framework utility row on the composite
+
+The layout above is what a page composing `FilterBar` and `EntityTable`
+directly renders. A page that adopts `SnapshotTablePage` must **not** compose
+`FilterBar` beside it -- that reintroduces exactly the page-local furniture
+the opinionated composite exists to remove. Instead, opt the composite's
+`filters` slot into the framework row with `filter_actions` (`ldui-nj3q`):
+
+```rust,no_run
+let filter_actions = SnapshotFilterActionsConfig::new()
+    .with_texts(filter_texts)
+    .on_reset(reset_filters)
+    .with_active_filters(active_chips, remove_filter)
+    .with_default_save(SnapshotDefaultSave::new(defaults, save_state, on_save));
+
+view! {
+    <SnapshotTablePage
+        contract_id="no-hires"
+        state=state
+        local_rows=local_rows
+        header=header
+        dataset_selector=selector
+        filters=filter_controls
+        filter_actions=filter_actions
+        entity_table=table
+        action_key_label=action_key_label
+    />
+}
+```
+
+What the composite then owns, and what stays with the consumer:
+
+| Concern | Owner |
+|---|---|
+| `{visible} of {total} results` | The page. Both counts come from the identity-bound `LocalResultSummary` minted by `state` and the authoritative displayed snapshot -- `SnapshotFilterActionsConfig` has no field that could carry a count, so a consumer cannot pair one with the wrong generation. |
+| Reset label, placement, enablement | The framework. Supplying `with_active_filters` is what lets Reset report "nothing to reset" by disabling itself; without chips it stays enabled. |
+| What resetting means | The consumer, through `on_reset`. |
+| Save as Default label, accessible name, disabled reason, and pending/saved/conflict/failure copy | The framework, from one `FilterBarTexts`. |
+| The save payload, its revision check, and every save state transition | The consumer, through `SnapshotDefaultSave` and `FilterSchema::project_defaults`. |
+
+The consumer's own `filters` content is composed inside the row rather than
+displaced by it, so utility-only selects keep rendering where they did.
+Column-mapped controls still belong in `EntityColumnFilters`, not here.
+
+**Omitting `filter_actions` changes nothing.** The `filters` slot renders the
+consumer's content unwrapped, with no filter bar, no count, and neither
+action -- which is what
+`demo/src/demos/snapshot_table_page.rs::SnapshotTablePageFilterActionsFixture`
+mounts as the negative control beside the opted-in page, and what
+`tests/snapshot_table_page_filter_actions_smoke.rs` asserts against every
+positive claim.
+
 ## Behavior-only EntityTable passthroughs
 
 `SnapshotEntityTableConfig` owns the internally rendered `EntityTable`'s
@@ -243,6 +295,7 @@ Run the focused native and real-browser lane first, then the repository gate:
 ```powershell
 cargo xtask verify-pattern client-snapshot-list --inner
 cargo xtask verify-pattern client-snapshot-list --browser
+cargo xtask test-snapshot-table-page-filter-actions
 cargo xtask verify-full
 ```
 

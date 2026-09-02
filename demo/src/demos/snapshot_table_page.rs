@@ -6,15 +6,17 @@ use leptos_daisyui_rs::components::{
     EntityGroupCollapseProposal, EntityIconColor, EntityIconPresentation, EntityNullOrder,
     EntityPageSize, EntityRowAction, EntityRowEmphasis, EntityRowGroup, EntityRowGrouping,
     EntityTable, EntityTableDisplayProjection, EntityTableMultiSelection,
-    EntityTablePreferenceOwnership, EntityTablePreferencePersistence, EntityTableProjectionScope,
-    EntityTableSelection, EntityTableSelectionCause, EntityTableSelectionProposal,
-    EntityTableTexts, EntityTableViewportFit,
+    EntityTablePreferenceOwnership, EntityTablePreferencePersistence, EntityTablePreferences,
+    EntityTableProjectionScope, EntityTableSelection, EntityTableSelectionCause,
+    EntityTableSelectionProposal, EntityTableTexts, EntityTableViewportFit,
 };
 use leptos_daisyui_rs::patterns::{
-    ActionFeedbackContent, ActionFeedbackState, PageHeader, PageHeaderNavigationLayout,
-    SnapshotData, SnapshotDatasetOption, SnapshotDatasetSelectorConfig, SnapshotDeltaDisposition,
-    SnapshotDeltaHandle, SnapshotEntityTableConfig, SnapshotLocalRowProjection,
-    SnapshotRequestHandle, SnapshotTablePage, SnapshotTableState, SnapshotTransitionDisposition,
+    ActionFeedbackContent, ActionFeedbackState, ActiveFilterChip, FilterBarTexts, FilterSchema,
+    PageHeader, PageHeaderNavigationLayout, SnapshotData, SnapshotDatasetOption,
+    SnapshotDatasetSelectorConfig, SnapshotDefaultSave, SnapshotDefaultSaveState,
+    SnapshotDeltaDisposition, SnapshotDeltaHandle, SnapshotEntityTableConfig,
+    SnapshotFilterActionsConfig, SnapshotLocalRowProjection, SnapshotRequestHandle,
+    SnapshotTablePage, SnapshotTableState, SnapshotTransitionDisposition, SnapshotViewDefaults,
 };
 use std::collections::BTreeSet;
 use std::rc::Rc;
@@ -666,6 +668,257 @@ pub fn SnapshotTablePageControlsFixture() -> impl IntoView {
                 </span>
             </div>
             <pre data-testid="controls-export-output" class="text-xs">{move || export_output.get()}</pre>
+        </section>
+    }
+}
+
+/// Spanish copy for the framework utility row, proving the count template
+/// and both action labels are localizable through one `FilterBarTexts`.
+fn spanish_filter_bar_texts() -> FilterBarTexts {
+    FilterBarTexts {
+        region_label: "Filtros".to_owned(),
+        active_none: "Sin filtros activos".to_owned(),
+        active_one: "1 filtro activo".to_owned(),
+        active_many: "{count} filtros activos".to_owned(),
+        remove_filter: "Quitar el filtro {label}".to_owned(),
+        result_count: "{visible} de {total} resultados".to_owned(),
+        reset: "Restablecer".to_owned(),
+        save_default: "Guardar como predeterminado".to_owned(),
+        clean_reason: "Los valores predeterminados ya están guardados".to_owned(),
+        pending_reason: "Se está guardando la vista predeterminada".to_owned(),
+        pending_feedback: "Guardando la vista predeterminada".to_owned(),
+        saved_feedback: "Vista predeterminada guardada".to_owned(),
+        conflict_feedback: "Conflicto de vista predeterminada: {message}".to_owned(),
+        failure_feedback: "No se pudo guardar la vista predeterminada: {message}".to_owned(),
+    }
+}
+
+/// Focused browser fixture for the opt-in framework utility row
+/// (`ldui-nj3q`): the visible/total result count, one Reset, and one explicit
+/// Save as Default obtained from `SnapshotTablePage` itself rather than from
+/// a consumer-composed `FilterBar`.
+///
+/// Renders BOTH configurations on one page on purpose. `#snapshot-actions`
+/// opts in; `#snapshot-plain` does not and must keep rendering exactly as it
+/// does today -- no filter bar, no count, no Reset, no Save as Default. The
+/// absent case is the negative control for every assertion about the
+/// opted-in case.
+#[component]
+pub fn SnapshotTablePageFilterActionsFixture() -> impl IntoView {
+    type State = SnapshotTableState<FixtureRow, String, String, (), String>;
+
+    fn seeded_state() -> State {
+        let mut initial = State::new();
+        let request = initial
+            .start_request("office-mx".to_owned())
+            .expect("initial filter-actions request");
+        assert_eq!(
+            initial.complete(request, snapshot("office-mx", "mx-r1")),
+            SnapshotTransitionDisposition::Applied
+        );
+        initial
+    }
+
+    fn selector_config() -> SnapshotDatasetSelectorConfig<String> {
+        SnapshotDatasetSelectorConfig::new(
+            "Office",
+            Signal::stored(vec![SnapshotDatasetOption::new(
+                "office-mx".to_owned(),
+                "Mexico City",
+            )]),
+            Arc::new(|value: &String| value.clone()),
+            Callback::new(|_: String| {}),
+        )
+    }
+
+    fn table_config() -> SnapshotEntityTableConfig<FixtureRow> {
+        SnapshotEntityTableConfig::new(
+            columns(),
+            Rc::new(|row: &FixtureRow| row.id.clone()),
+            EntityTablePreferenceOwnership::uncontrolled(
+                EntityTablePreferencePersistence::Disabled,
+            ),
+        )
+    }
+
+    let state = RwSignal::new_local(seeded_state());
+    let plain_state = RwSignal::new_local(seeded_state());
+    let filter_mode = RwSignal::new("all");
+    let local_rows = RwSignal::new_local(Option::<SnapshotLocalRowProjection<FixtureRow>>::None);
+
+    Effect::new(move |_| {
+        let mode = filter_mode.get();
+        let projection = state.with(|state| {
+            let displayed = state.view(None).displayed()?;
+            let rows = displayed
+                .rows()
+                .iter()
+                .filter(|row| match mode {
+                    "urgent" => row.status == "Urgent",
+                    "none" => false,
+                    _ => true,
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            state.local_row_projection(Rc::new(rows))
+        });
+        local_rows.set(projection);
+    });
+
+    let spanish = RwSignal::new(false);
+    let texts = Signal::derive(move || {
+        if spanish.get() {
+            spanish_filter_bar_texts()
+        } else {
+            FilterBarTexts::default()
+        }
+    });
+
+    let reset_clicks = RwSignal::new(0_u32);
+    let on_reset = Callback::new(move |()| {
+        reset_clicks.update(|count| *count += 1);
+        filter_mode.set("all");
+    });
+
+    let chips = Signal::derive(move || match filter_mode.get() {
+        "urgent" => vec![ActiveFilterChip::new("status", "Status", "Urgent")],
+        "none" => vec![ActiveFilterChip::new("status", "Status", "No matches")],
+        _ => Vec::new(),
+    });
+    let on_remove = Callback::new(move |_key: String| filter_mode.set("all"));
+
+    let save_state = RwSignal::new(SnapshotDefaultSaveState::Clean);
+    let saved_filter_value = RwSignal::new(String::from("(none)"));
+    let defaults = Signal::derive(move || {
+        FilterSchema::<()>::new("office", &["status"])
+            .project_defaults(
+                [(
+                    "status",
+                    serde_json::Value::String(filter_mode.get().to_owned()),
+                )],
+                EntityTablePreferences::new(1),
+            )
+            .expect("fixture defaults project through the declared schema")
+    });
+    let on_save = Callback::new(move |payload: SnapshotViewDefaults| {
+        saved_filter_value.set(
+            payload
+                .filters()
+                .get("status")
+                .map_or_else(|| "(none)".to_owned(), ToString::to_string),
+        );
+        save_state.set(SnapshotDefaultSaveState::Saved);
+    });
+
+    let filter_actions = SnapshotFilterActionsConfig::new()
+        .with_texts(texts)
+        .on_reset(on_reset)
+        .with_active_filters(chips, on_remove)
+        .with_default_save(SnapshotDefaultSave::new(defaults, save_state, on_save));
+
+    let mode_buttons = move || {
+        view! {
+            <div class="flex flex-wrap gap-2" aria-label="Filter-actions fixture controls">
+                <Button
+                    attr:data-testid="actions-filter-all"
+                    attr:aria-pressed=move || (filter_mode.get() == "all").to_string()
+                    on_click=Callback::new(move |_| filter_mode.set("all"))
+                >
+                    "All rows"
+                </Button>
+                <Button
+                    attr:data-testid="actions-filter-urgent"
+                    attr:aria-pressed=move || (filter_mode.get() == "urgent").to_string()
+                    on_click=Callback::new(move |_| filter_mode.set("urgent"))
+                >
+                    "Urgent only"
+                </Button>
+            </div>
+        }
+    };
+
+    view! {
+        <section id="snapshot-filter-actions-fixture" class="space-y-6">
+            <div class="flex flex-wrap gap-2" aria-label="Filter-actions fixture harness">
+                <Button
+                    attr:data-testid="actions-locale-es"
+                    on_click=Callback::new(move |_| spanish.set(true))
+                >
+                    "Español"
+                </Button>
+                <Button
+                    attr:data-testid="actions-locale-en"
+                    on_click=Callback::new(move |_| spanish.set(false))
+                >
+                    "English"
+                </Button>
+                <Button
+                    attr:data-testid="actions-save-dirty"
+                    on_click=Callback::new(move |_| {
+                        save_state.set(SnapshotDefaultSaveState::Dirty);
+                    })
+                >
+                    "Mark view dirty"
+                </Button>
+                <Button
+                    attr:data-testid="actions-save-conflict"
+                    on_click=Callback::new(move |_| {
+                        save_state.set(SnapshotDefaultSaveState::Conflict(
+                            "A newer default exists.".to_owned(),
+                        ));
+                    })
+                >
+                    "Force save conflict"
+                </Button>
+                <span>
+                    "Reset clicks: "
+                    <code data-testid="actions-reset-clicks">
+                        {move || reset_clicks.get().to_string()}
+                    </code>
+                </span>
+                <span>
+                    "Saved status: "
+                    <code data-testid="actions-saved-filter">
+                        {move || saved_filter_value.get()}
+                    </code>
+                </span>
+            </div>
+
+            <SnapshotTablePage
+                contract_id="snapshot-actions"
+                state=state.into()
+                local_rows=local_rows.into()
+                header=Box::new(|| view! {
+                    <PageHeader
+                        title="Snapshot table filter actions"
+                        subtitle="Framework-owned result count, Reset, and Save as Default."
+                    />
+                }.into_any())
+                dataset_selector=selector_config()
+                filters=Box::new(move || mode_buttons().into_any())
+                filter_actions=filter_actions
+                entity_table=table_config()
+                action_key_label=Rc::new(|key: &String| key.clone())
+            />
+
+            <SnapshotTablePage
+                contract_id="snapshot-plain"
+                state=plain_state.into()
+                header=Box::new(|| view! {
+                    <PageHeader
+                        title="Snapshot table without filter actions"
+                        subtitle="Negative control: the same composite, no opt-in."
+                    />
+                }.into_any())
+                dataset_selector=selector_config()
+                filters=Box::new(|| view! {
+                    <div class="flex flex-wrap gap-2" aria-label="Plain fixture controls">
+                        <Button attr:data-testid="plain-filter-all">"All rows"</Button>
+                    </div>
+                }.into_any())
+                entity_table=table_config()
+                action_key_label=Rc::new(|key: &String| key.clone())
+            />
         </section>
     }
 }

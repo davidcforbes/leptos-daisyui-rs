@@ -92,7 +92,7 @@ pub use snapshot_table::{
 };
 pub use snapshot_table_page::{
     SnapshotDatasetOption, SnapshotDatasetSelectorConfig, SnapshotEntityTableConfig,
-    SnapshotTablePage,
+    SnapshotFilterActionsConfig, SnapshotTablePage,
 };
 
 #[cfg(test)]

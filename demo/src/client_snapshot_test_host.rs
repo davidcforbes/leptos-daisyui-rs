@@ -21,7 +21,7 @@ use snapshot_table_page::{
     EntityTableGroupingFixture, EntityTableMultiSelectionFixture,
     EntityTablePageSizeIdentityFixture, EntityTablePresentationFixture,
     EntityTableSelectionFixture, EntityTableViewportFitFixture, SnapshotTablePageControlsFixture,
-    SnapshotTablePageFixture,
+    SnapshotTablePageFilterActionsFixture, SnapshotTablePageFixture,
 };
 
 fn main() {
@@ -49,6 +49,9 @@ fn main() {
         let snapshot_controls_fixture = web_sys::window()
             .and_then(|window| window.location().pathname().ok())
             .is_some_and(|path| path.ends_with("/snapshot-table-page-controls"));
+        let snapshot_filter_actions_fixture = web_sys::window()
+            .and_then(|window| window.location().pathname().ok())
+            .is_some_and(|path| path.ends_with("/snapshot-table-page-filter-actions"));
         let viewport_fit_fixture = web_sys::window()
             .and_then(|window| window.location().pathname().ok())
             .is_some_and(|path| path.ends_with("/entity-table-viewport-fit"));
@@ -98,6 +101,8 @@ fn main() {
                     view! { <EntityTablePresentationFixture /> }.into_any()
                 } else if viewport_fit_fixture {
                     view! { <EntityTableViewportFitFixture /> }.into_any()
+                } else if snapshot_filter_actions_fixture {
+                    view! { <SnapshotTablePageFilterActionsFixture /> }.into_any()
                 } else if snapshot_controls_fixture {
                     view! { <SnapshotTablePageControlsFixture /> }.into_any()
                 } else if snapshot_fixture {
