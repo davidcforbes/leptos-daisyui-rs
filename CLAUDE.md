@@ -45,14 +45,55 @@ just delegates. Run the gate before committing:
 cargo xtask verify        # 14 native-only checks; no Wasm/Chrome/reactivity lane
 cargo make verify         # same, via cargo-make
 cargo xtask verify-full   # 24 steps: verify + ten browser/Wasm lanes (needs npm/trunk/Chrome)
-cargo xtask test-reactivity          # opt-in 51-check DOM/interaction lane; never implicit in verify
+cargo xtask test-reactivity          # opt-in 69-check DOM/interaction lane; never implicit in verify
+                                     # ⚠️ its check count is PINNED in xtask; adding a
+                                     # #[tokio::test] there fails the gate until re-pinned
 cargo xtask test-layout              # layout audit: overlap/grid/internal<=external over the real DOM
 cargo xtask test-style               # style audit: typography/shape/depth + daisyUI component-drift, ratcheted per page
 cargo xtask test-keyed-result-list   # focused KeyedResultList browser proof: stable-key selection across duplicate labels/reorders/removals
+cargo xtask test-modal-close-proposal  # Modal Escape/backdrop close proposals (ldui-e0fw)
+cargo xtask test-selectable-summary    # SelectableSummaryGroup radiogroup contract (ldui-l5cw)
+cargo xtask test-bar-chart-divergence  # BarChart signed divergence + a11y (ldui-y2ed)
+cargo xtask test-heatmap-matrix        # Heatmap two-axis grid + hidden matrix (ldui-8d94)
 cargo xtask gen-tokens [--check]     # regenerate styles/tokens.css from ui-tokens
 cargo xtask check-sibling-tokens     # preamble.rs's ui_tokens refs must exist on the sibling's DEFAULT branch
 cargo xtask bump patch|minor|major   # bump the library version (human-chosen level)
 ```
+
+**Browser coverage that only COMPILES proves nothing.** Agents hand off
+browser suites compile-only (`--no-run`), because only the operator can safely
+rebuild the shared demo. Every such suite, on its FIRST actual execution, has
+failed — and several failures were real product defects invisible to 3000+
+native tests: `Heatmap` and `BarChart` were both unreachable by keyboard (their
+reconcile effect returns early on its first run, so the roving tab stop was
+never seeded and no element carried `tabindex=0`), a `method="dialog"` close
+button did nothing (this crate's `Button` defaults to `type="button"`, unlike
+daisyUI's documented raw-`<button>` idiom), and focus was lost whenever a row
+group collapsed. Run the lane before believing the coverage.
+
+**A suite registered in no xtask lane runs nowhere.** It compiles, never
+executes, and the evidence it exists to produce is structurally unobtainable.
+Seven registration-or-pin gaps occurred in a single session. Adding a
+`#[tokio::test]` to `reactivity_smoke.rs` also breaks its pinned count. Verify
+a new check by the TEST COUNT changing, never by the suite passing — the same
+trap hit the audits themselves: adding pages to `PAGES` swept nothing, because
+coverage comes from per-page `audit_test!(name, index)` invocations, and both
+suites stayed green while appearing to cover six more pages.
+
+**Never identify an element by document position.** A positional selector does
+not fail when the layout changes; it silently starts describing something else.
+`'[data-entity-table] label select'` meant the page-size control only while it
+was the first label-select in the table, and after ldui-z0n1 moved that control
+the query returned the *status filter* while still passing. Use stable data
+hooks (`data-entity-page-size-control`, `data-entity-row-range`,
+`data-kpi-strip-layout`, `data-heatmap-cell`).
+
+**`@container` collapses a content-sized parent.** `container-type: inline-size`
+makes an element's inline size independent of its contents, so a parent that
+sizes to content — a bare `<div>` in a `flex` row, or `max-w-*` with no width —
+measures it as contributing nothing and collapses to zero. `KpiStrip` cards
+rendered ~2px wide with no error, correct markup and every class present. Give
+the strip's PARENT a width; the component cannot supply it.
 
 **Repo-specific gotchas the gate encodes (do NOT run these directly):**
 `cargo fmt --all` reaches into sibling repos — fmt **per-package**
