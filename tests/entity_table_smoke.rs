@@ -5110,6 +5110,101 @@ fn page_rows(state: &Value) -> f64 {
         .unwrap_or_else(|| panic!("missing row count: {state}"))
 }
 
+/// The footer's `Showing {start}-{end} of {total}`, as numbers.
+fn parse_row_range(state: &Value) -> (usize, usize, usize) {
+    let range = state["range"]
+        .as_str()
+        .unwrap_or_else(|| panic!("missing row range: {state}"));
+    let digits = range
+        .split(|character: char| !character.is_ascii_digit())
+        .filter(|part| !part.is_empty())
+        .map(|part| part.parse::<usize>().expect("row-range number"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        digits.len(),
+        3,
+        "expected three numbers in the row range {range:?}"
+    );
+    (digits[0], digits[1], digits[2])
+}
+
+/// Visits every page by driving the NEXT control until it is disabled.
+///
+/// Deliberately not the numbered buttons: those come from
+/// `page_window(current_page, total_pages, MAX_VISIBLE_PAGES)` and are a
+/// sliding WINDOW, so at a small measured capacity they show seven of twenty-odd
+/// pages. Enumerating from them silently visits a prefix of the table and every
+/// aggregate computed over it is quietly wrong -- which is exactly how a
+/// perfectly good page plan was accused of dropping rows.
+async fn walk_group_paging_pages(harness: &pixelproof_web::Harness) -> Vec<Value> {
+    let mut states = vec![group_paging_page_state(harness).await];
+    // Bounded so a pager that never disables `next` fails as a test failure
+    // rather than hanging the lane.
+    for _ in 0..500 {
+        let advanced = eval_json(
+            harness,
+            r#"(() => {
+                const next = document.querySelector(
+                    '#entity-group-paging-table [data-entity-page="next"]'
+                );
+                if (!next) return 'missing';
+                if (next.disabled || next.getAttribute('aria-disabled') === 'true') {
+                    return 'end';
+                }
+                next.click();
+                return 'advanced';
+            })()"#,
+        )
+        .await;
+        match advanced.as_str() {
+            Some("advanced") => {}
+            Some("end") => return states,
+            other => panic!("the pager's next control was unusable: {other:?}"),
+        }
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        states.push(group_paging_page_state(harness).await);
+    }
+    panic!("the pager never reached a last page after 500 steps");
+}
+
+/// Asserts the visited pages partition rows `1..=total` exactly.
+///
+/// Three properties at once, and the third is the one that makes an incomplete
+/// walk impossible to miss: each page's footer range must have the length the
+/// page actually rendered, the ranges must be contiguous from 1, and the last
+/// one must END at the total. A walk that stopped early fails on that last
+/// check naming the page it stopped at.
+fn assert_pages_partition_every_row(states: &[Value], total: usize) {
+    assert!(!states.is_empty(), "no pages were visited");
+    let mut expected_start = 1_usize;
+    for (index, state) in states.iter().enumerate() {
+        let (start, end, reported_total) = parse_row_range(state);
+        let page = index + 1;
+        assert_eq!(
+            reported_total, total,
+            "page {page} reports a different dataset total: {state}"
+        );
+        assert_eq!(
+            start, expected_start,
+            "page {page} does not continue the previous page's rows: {state}"
+        );
+        assert_eq!(
+            end - start + 1,
+            page_rows(state) as usize,
+            "page {page}'s footer range does not describe the rows it rendered: {state}"
+        );
+        expected_start = end + 1;
+    }
+    assert_eq!(
+        expected_start - 1,
+        total,
+        "the walk covered {} of {total} rows across {} pages -- the pages must partition every \
+         displayed row, and the walk must reach the last one",
+        expected_start - 1,
+        states.len()
+    );
+}
+
 /// ldui-5in5: a group that fits inside one page capacity is never split merely
 /// to fill the previous page's remainder; one that cannot fit keeps the
 /// existing continuation heading, and every count stays truthful either way.
@@ -5228,20 +5323,17 @@ async fn grouped_pages_keep_a_fitting_group_whole_and_stay_truthful() {
     // hard-coded shape: a continuation may only ever belong to a group that is
     // larger than a page.
     choose_group_paging_page_size(&harness, "auto").await;
-    let mut states = vec![group_paging_page_state(&harness).await];
-    let page_count = states[0]["pages"]
-        .as_array()
-        .map_or(0, |pages| pages.len())
-        .max(1);
-    for page in 2..=page_count {
-        go_to_group_paging_page(&harness, page).await;
-        states.push(group_paging_page_state(&harness).await);
-    }
+    let states = walk_group_paging_pages(&harness).await;
+    // The partition proof, which also proves the WALK is complete -- see
+    // `assert_pages_partition_every_row`. This assertion is the one that would
+    // have caught the enumeration bug immediately, because it fails on the
+    // first page whose range does not continue the previous one rather than
+    // only in an aggregate sum at the end.
+    assert_pages_partition_every_row(&states, 81);
+
     let capacity = states.iter().map(page_rows).fold(0.0_f64, f64::max);
     assert!(capacity > 0.0, "auto paging rendered no rows");
-    let mut seen_rows = 0.0;
     for state in &states {
-        seen_rows += page_rows(state);
         let continued = state["continued"].as_array().expect("continued flags");
         let totals = state["group_totals"].as_array().expect("group totals");
         for (index, flag) in continued.iter().enumerate() {
@@ -5258,10 +5350,6 @@ async fn grouped_pages_keep_a_fitting_group_whole_and_stay_truthful() {
             );
         }
     }
-    assert_eq!(
-        seen_rows, 81.0,
-        "the auto pages must still partition every displayed row"
-    );
 
     assert_no_browser_errors(&harness, "grouped page planning").await;
 }
