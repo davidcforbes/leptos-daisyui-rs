@@ -61,6 +61,7 @@ pub use types::{
     EntityTablePreferencePersistence, EntityTablePreferences, EntityTableProjectionScope,
     EntityTableTexts, EntityTableViewportFit, EntityTextOverflow,
 };
+pub use types::{EntityDraftCommit, EntityDraftRow};
 
 #[cfg(test)]
 pub(crate) use component::entity_region_tabindex;

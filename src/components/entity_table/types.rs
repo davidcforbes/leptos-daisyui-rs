@@ -1,7 +1,7 @@
 //! Public types used to configure a typed entity table.
 
 use super::date_filter::{EntityDateBound, EntityDateFilterCause, EntityDateFilterProposal};
-use super::draft_edit::EntityCellEditor;
+use super::draft_edit::{EntityCellEditor, EntityEditOutcome, EntityEditTarget};
 use crate::components::badge::{BadgeColor, BadgeStyle};
 use crate::components::input::{Input, InputSize, InputType};
 use crate::components::select::{Select, SelectSize};
@@ -1422,6 +1422,56 @@ pub struct EntityColumn<T> {
     pub editor: Option<EntityCellEditor<T>>,
 }
 
+/// What the table hands the consumer when Save is pressed (`ldui-ff2f`).
+///
+/// The table never writes. It surrenders the edited row and a `resolve`
+/// handle, then waits: the session stays in flight until the consumer answers,
+/// which is what keeps a failed write from silently discarding the user's
+/// typing.
+pub struct EntityDraftCommit<T> {
+    /// The edited row. The consumer validates and persists this.
+    pub row: T,
+    /// Which row was submitted — a new draft, or an existing row by key.
+    pub target: EntityEditTarget,
+    /// Answers the commit. Until this runs the table stays in flight, so Save
+    /// cannot fire twice and the row cannot change underneath the write.
+    pub resolve: Callback<EntityEditOutcome>,
+}
+
+/// Opt-in inline draft-row and per-row editing (`ldui-ff2f`).
+///
+/// Absent — the default — the table has no `+`, no edit mode and no extra
+/// DOM: byte-identical to a table that never heard of this feature.
+pub struct EntityDraftRow<T: 'static> {
+    /// Builds the blank row `+` inserts. The consumer owns the type, so the
+    /// framework never has to invent a `T`.
+    pub new_row: Rc<dyn Fn() -> T>,
+    /// Fired on Save.
+    pub on_commit: Callback<EntityDraftCommit<T>, ()>,
+}
+
+impl<T: 'static> EntityDraftRow<T> {
+    /// Enables inline editing for this table.
+    pub fn new(
+        new_row: impl Fn() -> T + 'static,
+        on_commit: Callback<EntityDraftCommit<T>, ()>,
+    ) -> Self {
+        Self {
+            new_row: Rc::new(new_row),
+            on_commit,
+        }
+    }
+}
+
+impl<T: 'static> Clone for EntityDraftRow<T> {
+    fn clone(&self) -> Self {
+        Self {
+            new_row: Rc::clone(&self.new_row),
+            on_commit: self.on_commit,
+        }
+    }
+}
+
 impl<T> Clone for EntityColumn<T> {
     fn clone(&self) -> Self {
         Self {
@@ -2075,6 +2125,12 @@ pub struct EntityTableTexts {
     pub choose_columns: String,
     /// Label for the responsive controlled-filter panel.
     pub filters: String,
+    /// Label and accessible name for the inline-edit `+` action (`ldui-ff2f`).
+    pub add_row: String,
+    /// Label the row action shows while that row is being edited.
+    pub save_row: String,
+    /// Label the row action shows when the row can be edited.
+    pub edit_row: String,
     /// Active-filter status shown beside a chooser item that cannot be hidden.
     pub filter_active: String,
     /// Clear-filter template with a `{column}` placeholder.
@@ -2197,6 +2253,9 @@ impl Default for EntityTableTexts {
             rows_per_page_auto: "Auto ({rows})".to_owned(),
             choose_columns: "Choose columns".to_owned(),
             filters: "Filters".to_owned(),
+            add_row: "Add row".to_owned(),
+            save_row: "Save".to_owned(),
+            edit_row: "Edit".to_owned(),
             filter_active: "Filter active".to_owned(),
             clear_filter: "Clear {column} filter".to_owned(),
             column_order: "Column order".to_owned(),

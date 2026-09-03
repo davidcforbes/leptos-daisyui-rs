@@ -1,5 +1,6 @@
 //! Reactive renderer for the typed client-side table model.
 
+use super::draft_edit::{EntityEditPhase, EntityEditState};
 use super::emphasis::{
     EntityRowEmphasis, EntityRowEmphasisClassifier, entity_row_emphasis_cell_class,
     entity_row_emphasis_for, entity_row_emphasis_row_class,
@@ -42,9 +43,9 @@ use super::storage::{load_preferences, save_preferences};
 use super::types::{
     ENTITY_PAGE_SIZE_AUTO_VALUE, EntityCellPresentation, EntityColumn, EntityColumnAlignment,
     EntityColumnChooserTrigger, EntityColumnFilter, EntityColumnFilterPlacement,
-    EntityColumnFilters, EntityColumnKind, EntityColumns, EntityCompactRow, EntityEmptyState,
-    EntityPageSize, EntityPageSizeIntent, EntityRowKey, EntityRowRenderer, EntitySort,
-    EntitySortDirection, EntityTableActionColumnPolicy, EntityTableDisplayProjection,
+    EntityColumnFilters, EntityColumnKind, EntityColumns, EntityCompactRow, EntityDraftRow,
+    EntityEmptyState, EntityPageSize, EntityPageSizeIntent, EntityRowKey, EntityRowRenderer,
+    EntitySort, EntitySortDirection, EntityTableActionColumnPolicy, EntityTableDisplayProjection,
     EntityTablePreferenceOwnership, EntityTablePreferencePersistence, EntityTablePreferences,
     EntityTableTexts, EntityTableViewportFit, EntityTextOverflow, entity_alignment_class,
     entity_compact_alignment_class, entity_header_justify_class, entity_text_overflow_style,
@@ -576,6 +577,10 @@ pub fn EntityTable<T>(
     /// presentation state and never changes persisted table preferences.
     #[prop(optional)]
     viewport_fit: Option<EntityTableViewportFit>,
+    /// Opt-in inline draft-row and per-row editing (`ldui-ff2f`). Absent, the
+    /// table renders no `+`, has no edit mode, and emits no extra DOM.
+    #[prop(optional)]
+    draft_row: Option<EntityDraftRow<T>>,
     /// Optional renderer for the single-cell compact row layout.
     #[prop(optional, into)]
     compact_row: EntityCompactRow<T>,
@@ -864,6 +869,14 @@ where
     let compact_filter_layout = compact_filter_layout_signal();
     let source_data = source_data.unwrap_or(data);
     let focus_scope = focus_scope.unwrap_or(dataset_identity);
+    // `ldui-ff2f`. `LocalStorage` because `T` is not required to be
+    // `Send + Sync` -- the same reason `data` itself is local. When
+    // `draft_row` is absent this signal exists but never leaves `Idle`, and
+    // every render path below is gated on `draft_row.is_some()`, so an
+    // opted-out table emits exactly the DOM it did before.
+    let draft_row = StoredValue::new_local(draft_row);
+    let edit_state = RwSignal::new_local(EntityEditState::<T>::new());
+    let editing_enabled = draft_row.with_value(Option::is_some);
     let viewport_fit_enabled = viewport_fit.is_some();
     let viewport_fit_height = viewport_fit
         .as_ref()
@@ -1617,6 +1630,18 @@ where
             data-entity-page-size-mode=move || {
                 if page_size.get().is_auto() { "auto" } else { "fixed" }
             }
+            // `ldui-ff2f`: a stable hook for the edit phase, so a test names
+            // the state rather than inferring it from which controls happen
+            // to be disabled. Absent entirely on an opted-out table.
+            data-entity-edit-phase=move || {
+                editing_enabled.then(|| {
+                    edit_state.with(|state| match state.phase() {
+                        EntityEditPhase::Idle => "idle",
+                        EntityEditPhase::Drafting { .. } => "drafting",
+                        EntityEditPhase::Committing { .. } => "committing",
+                    })
+                })
+            }
         >
             {move || {
                 let filters = column_filters.get();
@@ -1704,6 +1729,30 @@ where
                     <div class="contents" data-entity-toolbar-actions="true">
                         {render_actions()}
                     </div>
+                })}
+                // `ldui-ff2f`: the framework-owned `+`. Rendered only when the
+                // table opted in, and disabled while a row is already live --
+                // the reducer would refuse a second session anyway
+                // (`IgnoredBusy`), but a button that silently does nothing is
+                // worse than one that says it cannot.
+                {editing_enabled.then(|| view! {
+                    <Button
+                        class="btn-sm btn-primary"
+                        attr:data-entity-draft-add="true"
+                        attr:aria-label=move || texts.with(|texts| texts.add_row.clone())
+                        disabled=Signal::derive(move || edit_state.with(EntityEditState::is_editing))
+                        on_click=Callback::new(move |_| {
+                            let blank = draft_row
+                                .with_value(|config| config.as_ref().map(|c| (c.new_row)()));
+                            if let Some(blank) = blank {
+                                edit_state.update(|state| {
+                                    state.begin_draft(blank);
+                                });
+                            }
+                        })
+                    >
+                        {move || texts.with(|texts| texts.add_row.clone())}
+                    </Button>
                 })}
 
                 <div
