@@ -142,7 +142,10 @@ pub fn DataTableColumnChooser(
                 tabindex="0"
                 role="button"
                 aria-label="Choose columns"
-                class="btn btn-ghost btn-sm btn-square"
+                // One icon has no inter-child spacing. Override daisyUI's 6px
+                // `.btn` gap so this trigger stays on the declared grid even
+                // when it appears after the audit settle beat (ldui-utrp).
+                class="btn btn-ghost btn-sm btn-square gap-0"
             >
                 <Icon name="settings" />
             </div>
