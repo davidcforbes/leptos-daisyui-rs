@@ -10,6 +10,42 @@
 
 **Spec:** `doc/plans/2026-09-03-entity-table-inline-edit-design.md`
 
+## Session handoff (2026-09-03)
+
+- Task 1 is complete in `b64346c`: the pure accepted/pending snapshot gate is
+  covered by native freeze, latest-wins, release, idle-update, and rejection
+  tests.
+- Task 2 is complete in `7e38ffa`: exactly one
+  `EntityColumn::action(...).inline_edit_host()` is required when editing is
+  enabled, the host is required/visible, and the discarded
+  `EntityRowActionSpec` API is gone from `EntityTable`.
+- Task 3 is implemented in the next checkpoint: all five table-generation
+  inputs flow through one accepted snapshot; refreshes coalesce while editing;
+  Cancel or Accepted publishes the latest raw envelope before returning to
+  Idle; Rejected leaves it pending; and each consumer resolver is guarded by
+  its commit sequence. Dynamically minted resolver callbacks must be allocated
+  under the durable component `Owner` (not the transient Save-event owner), or
+  Leptos disposes them before an asynchronous consumer can answer.
+- Verification completed for Task 3: `cargo xtask fmt-check`,
+  `cargo check -p leptos-daisyui-rs`, and
+  `cargo test -p leptos-daisyui-rs edit_snapshot_gate -- --nocapture` pass. The
+  browser RED proof showed refresh 1 replacing the visible rows during
+  `Drafting`; after the gate implementation the new latest-refresh test passed.
+  That same run exposed the transient-owner resolver defect described above.
+  The owner-lifetime fix compiles, but its final browser rerun was interrupted
+  during the WASM rebuild at the user's request to save and exit. Resume by
+  running the exact command below before starting Task 4.
+- Rust 1.98.0's Windows `rust-lld` reproducibly crashes linking the large debug
+  WASM host with exit `0xc0000005`. The identical source links successfully
+  with the already-installed Rust 1.95.0 toolchain. Keep this workaround
+  process-local:
+
+  ```powershell
+  $env:RUSTUP_TOOLCHAIN = '1.95.0-x86_64-pc-windows-msvc'; cargo xtask test-entity-draft-row
+  ```
+
+Tasks 4-8 have not been started.
+
 ## Global Constraints
 
 - The working tree already contains an uncommitted partial implementation in `component.rs`, `draft_edit/tests.rs`, `mod.rs`, and `types.rs`. Preserve useful work, but replace its synthetic extra action cell and `EntityRowActionSpec` API with the approved marked-column design. Do not reset these files wholesale.

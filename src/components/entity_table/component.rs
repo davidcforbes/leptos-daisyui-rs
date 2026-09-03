@@ -1,6 +1,9 @@
 //! Reactive renderer for the typed client-side table model.
 
-use super::draft_edit::{EntityEditCommit, EntityEditPhase, EntityEditState, EntityEditTarget};
+use super::draft_edit::{
+    EntityEditCommit, EntityEditDisposition, EntityEditOutcome, EntityEditPhase,
+    EntityEditSnapshotGate, EntityEditState, EntityEditTarget,
+};
 use super::emphasis::{
     EntityRowEmphasis, EntityRowEmphasisClassifier, entity_row_emphasis_cell_class,
     entity_row_emphasis_for, entity_row_emphasis_row_class,
@@ -75,6 +78,21 @@ use web_sys::wasm_bindgen::JsCast;
 const MAX_VISIBLE_PAGES: usize = 7;
 static ENTITY_CHOOSER_ID: AtomicU64 = AtomicU64::new(0);
 static ENTITY_PAGE_SIZE_ID: AtomicU64 = AtomicU64::new(0);
+
+/// The related inputs that must advance as one coherent table generation.
+///
+/// While inline editing owns the surface, raw input changes are coalesced in
+/// [`EntityEditSnapshotGate`]. Every sort, page, focus, and render calculation
+/// below reads only the accepted envelope, so no part of the table can observe
+/// a newer generation before the edit is saved or discarded.
+#[derive(Clone)]
+struct EntityTableInputSnapshot<T> {
+    data: Rc<Vec<T>>,
+    source_data: Rc<Vec<T>>,
+    dataset_identity: String,
+    page_reset_key: Option<String>,
+    focus_scope: String,
+}
 
 fn next_entity_chooser_id() -> String {
     format!(
@@ -873,8 +891,11 @@ where
     let compact_row = CompactRowStore::new(compact_row);
     let column_filters = column_filter_signal(column_filters);
     let compact_filter_layout = compact_filter_layout_signal();
-    let source_data = source_data.unwrap_or(data);
-    let focus_scope = focus_scope.unwrap_or(dataset_identity);
+    let input_data = data;
+    let input_source_data = source_data.unwrap_or(input_data);
+    let input_dataset_identity = dataset_identity;
+    let input_page_reset_key = page_reset_key;
+    let input_focus_scope = focus_scope.unwrap_or(input_dataset_identity);
     // `ldui-ff2f`. `LocalStorage` because `T` is not required to be
     // `Send + Sync` -- the same reason `data` itself is local. When
     // `draft_row` is absent this signal exists but never leaves `Idle`, and
@@ -886,6 +907,69 @@ where
     let draft_row = StoredValue::new_local(draft_row);
     let edit_state = RwSignal::new_local(EntityEditState::<T>::new());
     let editing_enabled = draft_row.with_value(Option::is_some);
+    let initial_input_snapshot = EntityTableInputSnapshot {
+        data: input_data.get_untracked(),
+        source_data: input_source_data.get_untracked(),
+        dataset_identity: input_dataset_identity.get_untracked(),
+        page_reset_key: input_page_reset_key.map(|signal| signal.get_untracked()),
+        focus_scope: input_focus_scope.get_untracked(),
+    };
+    let snapshot_gate = RwSignal::new_local(EntityEditSnapshotGate::new(initial_input_snapshot));
+
+    // Subscribe to the five raw inputs together. The reducer read is
+    // deliberately untracked: entering edit mode must freeze the accepted
+    // envelope, not look like a provider refresh itself.
+    Effect::new(move |_| {
+        let next = EntityTableInputSnapshot {
+            data: input_data.get(),
+            source_data: input_source_data.get(),
+            dataset_identity: input_dataset_identity.get(),
+            page_reset_key: input_page_reset_key.map(|signal| signal.get()),
+            focus_scope: input_focus_scope.get(),
+        };
+        let editing = edit_state.with_untracked(EntityEditState::is_editing);
+        snapshot_gate.update(|gate| gate.observe(next, editing));
+    });
+
+    // These shadow the public inputs for the remainder of the component. No
+    // downstream consumer can accidentally bypass the edit boundary.
+    let data: Signal<Rc<Vec<T>>, LocalStorage> =
+        Signal::derive_local(move || snapshot_gate.with(|gate| Rc::clone(&gate.accepted().data)));
+    let source_data: Signal<Rc<Vec<T>>, LocalStorage> = Signal::derive_local(move || {
+        snapshot_gate.with(|gate| Rc::clone(&gate.accepted().source_data))
+    });
+    let dataset_identity: Signal<String> =
+        Signal::derive(move || snapshot_gate.with(|gate| gate.accepted().dataset_identity.clone()));
+    let page_reset_key: Option<Signal<String, LocalStorage>> = input_page_reset_key.map(|_| {
+        Signal::derive_local(move || {
+            snapshot_gate.with(|gate| {
+                gate.accepted()
+                    .page_reset_key
+                    .clone()
+                    .expect("configured page reset key is present in every snapshot")
+            })
+        })
+    });
+    let focus_scope: Signal<String, LocalStorage> = Signal::derive_local(move || {
+        snapshot_gate.with(|gate| gate.accepted().focus_scope.clone())
+    });
+
+    // Read raw inputs again at the transition boundary. This covers a
+    // consumer that synchronously replaces its data and resolves Accepted in
+    // one callback before the observation effect has had a chance to run.
+    let release_snapshot_before_idle = Callback::new(move |()| {
+        let current = EntityTableInputSnapshot {
+            data: input_data.get_untracked(),
+            source_data: input_source_data.get_untracked(),
+            dataset_identity: input_dataset_identity.get_untracked(),
+            page_reset_key: input_page_reset_key.map(|signal| signal.get_untracked()),
+            focus_scope: input_focus_scope.get_untracked(),
+        };
+        snapshot_gate.update(|gate| {
+            gate.observe(current, true);
+            gate.release();
+        });
+    });
     // Save hands the row and a `resolve` handle to the consumer and then
     // WAITS. The table never writes, and the session stays in flight until
     // the answer arrives -- which is what stops a failed write from silently
@@ -896,37 +980,49 @@ where
     // A `LocalStorage` handle is itself `Send + Sync` (it is an arena index);
     // only its contents are thread-bound.
     let pending_commit = StoredValue::new_local(Option::<EntityEditCommit<T>>::None);
-    let resolve_commit = Callback::new(move |outcome| {
-        let commit = pending_commit.with_value(Clone::clone);
-        if let Some(commit) = commit {
-            edit_state.update(|state| {
-                // A superseded handle is discarded here by the reducer's own
-                // sequence check, so a slow first attempt cannot resolve a
-                // later one.
-                state.resolve(&commit, outcome);
-            });
-            pending_commit.set_value(None);
-        }
-    });
+    // A resolve handle is minted from inside Save's event callback. Allocate
+    // its arena-backed `Callback` under the component owner explicitly;
+    // otherwise the transient event owner disposes it as soon as Save returns,
+    // before an asynchronous consumer can answer.
+    let component_owner = Owner::current().expect("EntityTable requires a reactive owner");
     let commit_draft = Callback::new(move |()| {
         let commit = edit_state.try_update(|state| state.commit().ok()).flatten();
         let Some(commit) = commit else {
             return;
         };
+        let sequence = commit.sequence();
         let row = commit.row().clone();
         let target = commit.target().clone();
         pending_commit.set_value(Some(commit));
+        let resolve = component_owner.with(|| {
+            Callback::new(move |outcome: EntityEditOutcome| {
+                let current = pending_commit.with_value(Clone::clone);
+                let Some(current) = current.filter(|current| current.sequence() == sequence) else {
+                    return;
+                };
+                if matches!(&outcome, EntityEditOutcome::Accepted) {
+                    release_snapshot_before_idle.run(());
+                }
+                let disposition = edit_state
+                    .try_update(|state| state.resolve(&current, outcome))
+                    .unwrap_or(EntityEditDisposition::IgnoredStale);
+                if disposition == EntityEditDisposition::Applied {
+                    pending_commit.set_value(None);
+                }
+            })
+        });
         draft_row.with_value(|config| {
             if let Some(config) = config {
                 config.on_commit.run(EntityDraftCommit {
                     row: row.clone(),
                     target: target.clone(),
-                    resolve: resolve_commit,
+                    resolve,
                 });
             }
         });
     });
     let cancel_draft = Callback::new(move |()| {
+        release_snapshot_before_idle.run(());
         edit_state.update(|state| {
             state.cancel();
         });

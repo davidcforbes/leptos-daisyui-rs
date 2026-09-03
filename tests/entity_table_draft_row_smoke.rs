@@ -56,6 +56,13 @@ async fn snapshot(harness: &pixelproof_web::Harness) -> Value {
                     draft?.querySelector('[data-entity-draft-save]')?.disabled ?? null,
                 // Inert treatment: every data row while a row is live.
                 dataRowCount: dataRows.length,
+                renderedRows: dataRows.map(row =>
+                    ['id', 'client', 'status']
+                        .map(column => row.querySelector(
+                            `td[data-entity-column="${column}"]`
+                        )?.textContent?.trim() ?? '')
+                        .join('|')
+                ),
                 inertRows: dataRows.filter(
                     r => r.getAttribute('aria-disabled') === 'true'
                 ).length,
@@ -77,6 +84,26 @@ async fn snapshot(harness: &pixelproof_web::Harness) -> Value {
         })()"#,
     )
     .await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-entity-draft-row)"]
+async fn refreshes_wait_for_edit_completion_and_only_the_latest_is_published() {
+    let harness = harness_at("/components/entity-table-draft-row").await;
+    wait_for_selector(&harness, "#draft-optin [data-entity-row-key]").await;
+    let before = snapshot(&harness).await["renderedRows"].clone();
+
+    click(&harness, "#draft-optin [data-entity-draft-add]").await;
+    click(&harness, "[data-testid='draft-refresh-1']").await;
+    assert_eq!(snapshot(&harness).await["renderedRows"], before);
+    click(&harness, "[data-testid='draft-refresh-2']").await;
+    assert_eq!(snapshot(&harness).await["renderedRows"], before);
+
+    click(&harness, "#draft-optin [data-entity-draft-cancel]").await;
+    assert_eq!(
+        snapshot(&harness).await["renderedRows"],
+        json!(["refresh-2|Refresh 2|Generation 2"])
+    );
 }
 
 async fn type_into(harness: &pixelproof_web::Harness, column: &str, value: &str) {
@@ -194,6 +221,7 @@ async fn draft_row_edits_commit_and_cancel_without_touching_a_plain_table() {
 
     // --- Rejection keeps the user's input --------------------------------
     click(&harness, "[data-testid='draft-reject']").await;
+    assert_no_browser_errors(&harness, "entity-table draft rejection callback").await;
     let rejected = snapshot(&harness).await;
     assert_eq!(rejected["phase"], json!("drafting"));
     assert_eq!(rejected["draftPresent"], json!(true));

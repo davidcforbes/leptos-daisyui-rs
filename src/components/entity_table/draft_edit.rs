@@ -222,13 +222,11 @@ pub enum EntityEditDisposition {
 /// Input changes remain pending while `editing` is true. A caller publishes
 /// the newest one immediately before returning the edit reducer to `Idle`.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[allow(dead_code)] // Used by EntityTable in the next implementation slice.
 pub(crate) struct EntityEditSnapshotGate<S> {
     accepted: S,
     pending: Option<S>,
 }
 
-#[allow(dead_code)] // Used by EntityTable in the next implementation slice.
 impl<S> EntityEditSnapshotGate<S> {
     /// Starts with the snapshot the table has already accepted for display.
     pub(crate) const fn new(accepted: S) -> Self {

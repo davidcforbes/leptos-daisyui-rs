@@ -940,10 +940,29 @@ pub fn SnapshotTablePageFilterActionsFixture() -> impl IntoView {
 #[component]
 pub fn EntityTableDraftRowFixture() -> impl IntoView {
     let data = RwSignal::new_local(rows("office-mx"));
+    let source_data = RwSignal::new_local(rows("office-mx"));
+    let dataset_identity = RwSignal::new(String::from("draft-optin"));
+    let page_reset_key = RwSignal::new(String::from("draft-page-0"));
+    let focus_scope = RwSignal::new(String::from("draft-scope-0"));
+    let refresh_generation = RwSignal::new(0_u8);
     let plain_data = RwSignal::new_local(rows("office-mx"));
     let commits = RwSignal::new(0_u32);
     let last_committed = RwSignal::new(String::from("(none)"));
     let pending_resolve = RwSignal::new(Option::<Callback<EntityEditOutcome>>::None);
+
+    let apply_refresh = move |generation: u8| {
+        refresh_generation.set(generation);
+        let next = Rc::new(vec![FixtureRow {
+            id: format!("refresh-{generation}"),
+            client: format!("Refresh {generation}"),
+            status: format!("Generation {generation}"),
+        }]);
+        data.set(Rc::clone(&next));
+        source_data.set(next);
+        dataset_identity.set(format!("draft-optin-{generation}"));
+        page_reset_key.set(format!("refresh-{generation}"));
+        focus_scope.set(format!("draft-scope-{generation}"));
+    };
 
     let editable_columns = || {
         vec![
@@ -982,6 +1001,18 @@ pub fn EntityTableDraftRowFixture() -> impl IntoView {
 
             <div class="flex flex-wrap items-center gap-2">
                 <Button
+                    attr:data-testid="draft-refresh-1"
+                    on_click=Callback::new(move |_| apply_refresh(1))
+                >
+                    "Refresh 1"
+                </Button>
+                <Button
+                    attr:data-testid="draft-refresh-2"
+                    on_click=Callback::new(move |_| apply_refresh(2))
+                >
+                    "Refresh 2"
+                </Button>
+                <Button
                     attr:data-testid="draft-accept"
                     on_click=Callback::new(move |_| {
                         if let Some(resolve) = pending_resolve.get_untracked() {
@@ -1018,9 +1049,12 @@ pub fn EntityTableDraftRowFixture() -> impl IntoView {
             <div data-testid="draft-optin-table" id="draft-optin">
                 <EntityTable
                     data=data
+                    source_data=source_data.into()
                     columns=editable_columns()
                     row_key=Rc::new(|row: &FixtureRow| row.id.clone())
-                    dataset_identity="draft-optin"
+                    dataset_identity=dataset_identity
+                    page_reset_key=page_reset_key
+                    focus_scope=focus_scope
                     draft_row=EntityDraftRow::new(
                         || FixtureRow {
                             id: "draft-new".to_owned(),
