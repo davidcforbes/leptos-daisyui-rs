@@ -650,16 +650,16 @@ fn actual_series() -> LineSeries {
                 if index == 6 {
                     LinePoint::missing()
                 } else {
-                    let mut point =
-                        LinePoint::new(value).with_display_value(format!("{value:.0} resolved"));
+                    // `display_value` stays descriptive for tooltips and the
+                    // accessible table; the always-painted SVG label is kept
+                    // compact enough for the category pitch (ldui-b3rp).
+                    let mut point = LinePoint::new(value)
+                        .with_display_value(format!("{value:.0} resolved"))
+                        .with_data_label(format!("{value:.0}"));
                     if index == 0 {
                         point.marker_color = Some("var(--color-success)".to_string());
                     }
-                    if index == 0 || index == 13 {
-                        point.with_data_label(format!("{value:.0}"))
-                    } else {
-                        point
-                    }
+                    point
                 }
             })
             .collect(),
@@ -709,14 +709,13 @@ fn target_series() -> LineSeries {
         name: "Target".to_string(),
         points: values
             .into_iter()
-            .enumerate()
-            .map(|(index, value)| {
-                let point = LinePoint::new(value).with_display_value(format!("Target {value:.0}"));
-                if index == 9 {
-                    point.with_data_label("56 target")
-                } else {
-                    point
-                }
+            .map(|value| {
+                // The series name already supplies "Target" around the SVG;
+                // retain it in descriptive surfaces without repeating it in
+                // every always-visible label (ldui-b3rp).
+                LinePoint::new(value)
+                    .with_display_value(format!("Target {value:.0}"))
+                    .with_data_label(format!("{value:.0}"))
             })
             .collect(),
         color: "var(--color-accent)".to_string(),
@@ -728,7 +727,10 @@ fn target_series() -> LineSeries {
             stroke_width: 1.0,
         },
         show_data_labels: true,
-        label_placement: LineLabelPlacement::default(),
+        // Keep the baseline labels opposite the Actual labels. The placement
+        // API exists specifically so close series do not paint both sets on
+        // the same side of their markers (ldui-b3rp).
+        label_placement: LineLabelPlacement::Below,
         axis: LineValueAxis::Primary,
     }
 }

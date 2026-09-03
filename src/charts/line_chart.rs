@@ -70,6 +70,43 @@ pub(super) fn tick_anchor(i: usize, tick_count: usize) -> &'static str {
     }
 }
 
+/// Minimum distance between label baselines that share a category x-position.
+///
+/// Categorical labels use a 12-unit SVG font. Chromium's glyph box is about
+/// 16.7 viewBox units tall with the showcase line-height, so 18 leaves a small
+/// visible gap after the responsive SVG scale is applied.
+const DATA_LABEL_BASELINE_SEPARATION: f64 = 18.0;
+
+/// Moves a colliding label farther in its declared direction.
+///
+/// Fixed Above/Below marker offsets alone are insufficient when series
+/// converge: the difference between the marker values can cancel those
+/// offsets and put both labels on the same baseline. Moving only away from the
+/// marker preserves the placement contract while keeping every caller-owned
+/// label visible. Rechecking is necessary because clearing one occupied lane
+/// can enter another when more than two labelled series share a category.
+fn resolve_data_label_y(initial_y: f64, placement: LineLabelPlacement, occupied: &[f64]) -> f64 {
+    let mut resolved = initial_y;
+    loop {
+        let conflict = occupied
+            .iter()
+            .copied()
+            .filter(|other| (resolved - other).abs() < DATA_LABEL_BASELINE_SEPARATION)
+            .reduce(|left, right| match placement {
+                LineLabelPlacement::Above => left.min(right),
+                LineLabelPlacement::Below => left.max(right),
+            });
+
+        let Some(conflict) = conflict else {
+            return resolved;
+        };
+        resolved = match placement {
+            LineLabelPlacement::Above => conflict - DATA_LABEL_BASELINE_SEPARATION,
+            LineLabelPlacement::Below => conflict + DATA_LABEL_BASELINE_SEPARATION,
+        };
+    }
+}
+
 /// SVG-based line chart component.
 ///
 /// Renders a responsive polyline chart with optional dot markers and axis
@@ -756,6 +793,7 @@ fn render_categorical(
         .collect_view();
     let mut marker_views = Vec::new();
     let mut data_label_views = Vec::new();
+    let mut data_label_ys = vec![Vec::new(); chart.categories.len()];
     for series in &chart.series {
         for (index, point) in series.points.iter().enumerate() {
             let Some(value) = point.value else {
@@ -792,13 +830,19 @@ fn render_categorical(
                 let anchor = tick_anchor(index, chart.categories.len());
                 let (fill, style) = paint_attrs(series.color.clone());
                 let clearance = marker_size(&series.marker) + 5.0;
-                let (label_y, placement) = match series.label_placement {
+                let (initial_label_y, placement) = match series.label_placement {
                     LineLabelPlacement::Above => (value_y - clearance, "above"),
                     // `+ 12.0` rather than `+ clearance`: text hangs DOWN from
                     // its baseline, so a below-marker label needs the glyph
                     // height cleared too or it overlaps the node it labels.
                     LineLabelPlacement::Below => (value_y + clearance + 7.0, "below"),
                 };
+                let label_y = resolve_data_label_y(
+                    initial_label_y,
+                    series.label_placement,
+                    &data_label_ys[index],
+                );
+                data_label_ys[index].push(label_y);
                 data_label_views.push(view! {
                     <text x=svg_number(projections.category_x(index)) y=svg_number(label_y)
                         text-anchor=anchor fill=fill style=style font-size="12" font-weight="600"
@@ -2029,5 +2073,45 @@ mod tests {
         assert_eq!(tick_anchor(2, 5), "middle");
         // A single tick has no "edge" to avoid clipping toward -- stays centered.
         assert_eq!(tick_anchor(0, 1), "middle");
+    }
+
+    /// `ldui-b3rp`: opposite placements are constraints, not merely fixed
+    /// offsets. A higher Below-series marker can otherwise cancel the two
+    /// offsets and put its label directly on an Above-series label.
+    #[test]
+    fn converging_series_labels_separate_in_their_declared_directions() {
+        // These are the pre-fix W02 baseline positions from the showcase:
+        // Chromium measured only 1.96 viewBox units between 20px glyph boxes.
+        let occupied = [191.46];
+        let colliding = 193.42;
+
+        let below = resolve_data_label_y(colliding, LineLabelPlacement::Below, &occupied);
+        assert!(
+            below - occupied[0] >= DATA_LABEL_BASELINE_SEPARATION,
+            "Below must move downward past the occupied label: {below}"
+        );
+
+        let above = resolve_data_label_y(colliding, LineLabelPlacement::Above, &occupied);
+        assert!(
+            occupied[0] - above >= DATA_LABEL_BASELINE_SEPARATION,
+            "Above must move upward past the occupied label: {above}"
+        );
+    }
+
+    #[test]
+    fn label_resolution_rechecks_every_occupied_lane() {
+        // Clearing 90 upward lands near 60, so a one-pass resolver would
+        // simply exchange one collision for another.
+        let occupied = [60.0, 90.0];
+        let resolved = resolve_data_label_y(100.0, LineLabelPlacement::Above, &occupied);
+        assert!(
+            occupied
+                .iter()
+                .all(|other| (resolved - other).abs() >= DATA_LABEL_BASELINE_SEPARATION)
+        );
+        assert!(resolved < 60.0, "Above keeps moving upward: {resolved}");
+
+        let clear = resolve_data_label_y(130.0, LineLabelPlacement::Below, &occupied);
+        assert_eq!(clear, 130.0, "a clear lane must not drift");
     }
 }

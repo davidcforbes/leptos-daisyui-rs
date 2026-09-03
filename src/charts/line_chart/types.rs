@@ -58,11 +58,11 @@ pub struct LineSeries {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum LineLabelPlacement {
     /// Above the marker. The default, and what every existing labelled chart
-    /// already draws.
+    /// already draws. Collision resolution may move it farther upward.
     #[default]
     Above,
     /// Below the marker, so a second series can be labelled without colliding
-    /// with the first.
+    /// with the first. Collision resolution may move it farther downward.
     Below,
 }
 
