@@ -28,7 +28,11 @@ async fn shell_snapshot(harness: &pixelproof_web::Harness) -> Value {
             const end = top.querySelector('[data-app-shell-top-bar-end]');
             const body = root.querySelector('[data-app-shell-body]');
             const main = body.querySelector('[role="main"]');
-            const status = root.querySelector(':scope > :last-child');
+            // ldui-7442: a stable hook, not ':scope > :last-child'. This
+            // element is measured geometrically below, and a positional
+            // selector does not fail when the layout changes -- it starts
+            // describing whatever is last and keeps reporting numbers.
+            const status = root.querySelector('[data-app-shell-status-bar-region]');
             const box = element => {
                 const rect = element.getBoundingClientRect();
                 return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width };
@@ -71,7 +75,14 @@ async fn shell_snapshot(harness: &pixelproof_web::Harness) -> Value {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires current demo server"]
 async fn app_shell_top_bar_stays_pinned_and_wraps_without_page_overflow() {
-    let harness = harness_at("/app-shell").await;
+    // `/components/app-shell`, not `/app-shell`: every demo page except the
+    // landing route is nested under the `/components` ParentRoute, and the
+    // Router's fallback is a bare "Page not found" string with no `<main>`,
+    // so the wrong path does not 404 visibly -- it hangs the harness for the
+    // full 60s selector budget and then reports "did the app mount?"
+    // (ldui-a8an). This suite was registered in no xtask lane, so it had
+    // never run and the wrong route had never been observed.
+    let harness = harness_at("/components/app-shell").await;
     begin_browser_error_capture(&harness).await;
 
     let legacy = eval_json(

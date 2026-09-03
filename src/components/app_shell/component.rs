@@ -774,8 +774,18 @@ pub fn AppShellStatusBar(
     children: Children,
 ) -> impl IntoView {
     view! {
+        // `data-app-shell-status-bar-region` mirrors the top bar's convention
+        // exactly: the AppShell root carries the presence FLAG
+        // (`data-app-shell-status-bar="present|absent"`) and the region element
+        // carries its own locator, as `data-app-shell-top-bar-region` does
+        // (`ldui-7442`). The names must differ, or a document-level query for
+        // the region would match the root's flag instead. Without this hook a
+        // test can only reach the status bar positionally (`:scope >
+        // :last-child`), which does not fail when something is appended after
+        // it -- it silently starts measuring the wrong element.
         <div
             node_ref=node_ref
+            data-app-shell-status-bar-region
             class=move || {
                 merge_classes!(
                     "flex shrink-0 items-center gap-2 border-t border-base-300 bg-base-200 px-4 text-xs text-base-content/80",

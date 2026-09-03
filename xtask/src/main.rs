@@ -259,6 +259,18 @@ fn gate_steps() -> Vec<Step> {
             ],
             None,
         ),
+        cmd(
+            "test-bare-buttons",
+            "cargo",
+            &[
+                "test",
+                "-p",
+                "leptos-daisyui-rs",
+                "--test",
+                "no_bare_library_buttons",
+            ],
+            None,
+        ),
     ]
 }
 
@@ -336,6 +348,32 @@ fn snapshot_table_page_controls_step() -> Step {
         run: Run::BrowserSuite {
             test: "snapshot_table_page_controls_smoke",
             html_target: Some("client-snapshot-test-host.html"),
+        },
+    }
+}
+
+/// Browser proof for the AppShell region contract (ldui-a8an registered it;
+/// ldui-7442 gave the status bar the stable hook it asserts on). Lives on the
+/// general demo app at `/app-shell`.
+fn app_shell_step() -> Step {
+    Step {
+        name: "test-app-shell",
+        run: Run::BrowserSuite {
+            test: "app_shell_smoke",
+            html_target: None,
+        },
+    }
+}
+
+/// Browser proof that `Field` mints its own control id and that later
+/// standalone controls do not inherit it. The suite's own `#[ignore]` message
+/// has always named this command; until ldui-a8an it did not exist.
+fn field_context_scoping_step() -> Step {
+    Step {
+        name: "test-field-context-scoping",
+        run: Run::BrowserSuite {
+            test: "field_context_scoping",
+            html_target: None,
         },
     }
 }
@@ -635,6 +673,8 @@ fn full_steps() -> Vec<Step> {
     steps.push(server_table_column_tools_step());
     steps.push(collapse_naming_step());
     steps.push(data_table_fit_step());
+    steps.push(app_shell_step());
+    steps.push(field_context_scoping_step());
     steps
 }
 
@@ -2237,6 +2277,8 @@ fn main() -> ExitCode {
         "test-admin-workbench" => run_steps(&[admin_workbench_step()]),
         "test-snapshot-table-delta" => run_steps(&[snapshot_table_delta_step()]),
         "test-snapshot-table-page-controls" => run_steps(&[snapshot_table_page_controls_step()]),
+        "test-app-shell" => run_steps(&[app_shell_step()]),
+        "test-field-context-scoping" => run_steps(&[field_context_scoping_step()]),
         "test-snapshot-table-page-filter-actions" => {
             run_steps(&[snapshot_table_page_filter_actions_step()])
         }
@@ -2256,7 +2298,7 @@ fn main() -> ExitCode {
         other => {
             eprintln!("xtask: unknown subcommand {other:?}");
             eprintln!(
-                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-selectable-summary|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-snapshot-table-page-filter-actions|test-server-table-column-tools|test-collapse-naming|test-data-table-fit|gen-tokens|check-sibling-tokens|bump>"
+                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-selectable-summary|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-snapshot-table-page-filter-actions|test-server-table-column-tools|test-collapse-naming|test-data-table-fit|test-app-shell|test-field-context-scoping|gen-tokens|check-sibling-tokens|bump>"
             );
             ExitCode::from(2)
         }
@@ -2306,7 +2348,8 @@ mod tests {
                 "test-audit",
                 "test-daisyui5",
                 "test-svg-paint",
-                "test-ld-class-coverage"
+                "test-ld-class-coverage",
+                "test-bare-buttons"
             ]
         );
     }
@@ -2997,7 +3040,8 @@ pub fn r() -> f32 { radius::CARD }
                 "test-audit",
                 "test-daisyui5",
                 "test-svg-paint",
-                "test-ld-class-coverage"
+                "test-ld-class-coverage",
+                "test-bare-buttons"
             ]
         );
     }
