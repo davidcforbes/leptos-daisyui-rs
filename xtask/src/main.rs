@@ -352,6 +352,22 @@ fn snapshot_table_page_controls_step() -> Step {
     }
 }
 
+/// Browser proof for `EntityTable` inline draft-row editing (ldui-ff2f):
+/// `+` inserts an editable row, only opted-in columns get editors, every
+/// other row goes inert, Save waits for the consumer's resolve, a rejection
+/// keeps the typing, and Escape leaves no phantom row. The fixture also
+/// mounts a table that did NOT opt in, so every claim has its negative
+/// control on the same run.
+fn entity_draft_row_step() -> Step {
+    Step {
+        name: "test-entity-draft-row",
+        run: Run::BrowserSuite {
+            test: "entity_table_draft_row_smoke",
+            html_target: Some("client-snapshot-test-host.html"),
+        },
+    }
+}
+
 /// Browser proof for the AppShell region contract (ldui-a8an registered it;
 /// ldui-7442 gave the status bar the stable hook it asserts on). Lives on the
 /// general demo app at `/app-shell`.
@@ -658,6 +674,7 @@ fn full_steps() -> Vec<Step> {
     steps.push(snapshot_table_delta_step());
     steps.push(snapshot_table_page_controls_step());
     steps.push(snapshot_table_page_filter_actions_step());
+    steps.push(entity_draft_row_step());
     steps.push(reactivity_step());
     steps.push(layout_step());
     steps.push(style_step());
@@ -2298,6 +2315,7 @@ fn main() -> ExitCode {
         "test-admin-workbench" => run_steps(&[admin_workbench_step()]),
         "test-snapshot-table-delta" => run_steps(&[snapshot_table_delta_step()]),
         "test-snapshot-table-page-controls" => run_steps(&[snapshot_table_page_controls_step()]),
+        "test-entity-draft-row" => run_steps(&[entity_draft_row_step()]),
         "test-app-shell" => run_steps(&[app_shell_step()]),
         "test-field-context-scoping" => run_steps(&[field_context_scoping_step()]),
         "test-snapshot-table-page-filter-actions" => {
@@ -2319,7 +2337,7 @@ fn main() -> ExitCode {
         other => {
             eprintln!("xtask: unknown subcommand {other:?}");
             eprintln!(
-                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-selectable-summary|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-snapshot-table-page-filter-actions|test-server-table-column-tools|test-collapse-naming|test-data-table-fit|test-app-shell|test-field-context-scoping|gen-tokens|check-sibling-tokens|bump>"
+                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-selectable-summary|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-snapshot-table-page-filter-actions|test-server-table-column-tools|test-collapse-naming|test-data-table-fit|test-app-shell|test-field-context-scoping|test-entity-draft-row|gen-tokens|check-sibling-tokens|bump>"
             );
             ExitCode::from(2)
         }

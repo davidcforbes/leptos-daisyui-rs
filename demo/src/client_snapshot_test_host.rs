@@ -17,8 +17,8 @@ use leptos::prelude::*;
 use leptos_daisyui_rs::test_mode;
 use leptos_daisyui_rs::tokens::{UiAnimationsPreamble, UiTokensPreamble};
 use snapshot_table_page::{
-    EntityTableEmphasisFixture, EntityTableExternalFocusFixture, EntityTableGroupPagingFixture,
-    EntityTableGroupingFixture, EntityTableMultiSelectionFixture,
+    EntityTableDraftRowFixture, EntityTableEmphasisFixture, EntityTableExternalFocusFixture,
+    EntityTableGroupPagingFixture, EntityTableGroupingFixture, EntityTableMultiSelectionFixture,
     EntityTablePageSizeIdentityFixture, EntityTablePresentationFixture,
     EntityTableSelectionFixture, EntityTableViewportFitFixture, SnapshotTablePageControlsFixture,
     SnapshotTablePageFilterActionsFixture, SnapshotTablePageFixture,
@@ -52,6 +52,9 @@ fn main() {
         let snapshot_filter_actions_fixture = web_sys::window()
             .and_then(|window| window.location().pathname().ok())
             .is_some_and(|path| path.ends_with("/snapshot-table-page-filter-actions"));
+        let draft_row_fixture = web_sys::window()
+            .and_then(|window| window.location().pathname().ok())
+            .is_some_and(|path| path.ends_with("/entity-table-draft-row"));
         let viewport_fit_fixture = web_sys::window()
             .and_then(|window| window.location().pathname().ok())
             .is_some_and(|path| path.ends_with("/entity-table-viewport-fit"));
@@ -101,6 +104,8 @@ fn main() {
                     view! { <EntityTablePresentationFixture /> }.into_any()
                 } else if viewport_fit_fixture {
                     view! { <EntityTableViewportFitFixture /> }.into_any()
+                } else if draft_row_fixture {
+                    view! { <EntityTableDraftRowFixture /> }.into_any()
                 } else if snapshot_filter_actions_fixture {
                     view! { <SnapshotTablePageFilterActionsFixture /> }.into_any()
                 } else if snapshot_controls_fixture {

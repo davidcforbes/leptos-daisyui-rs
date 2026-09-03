@@ -1,8 +1,9 @@
 use leptos::prelude::*;
 use leptos_daisyui_rs::components::{
-    BadgeColor, Button, EntityBadgePresentation, EntityColumn, EntityColumnChooserTrigger,
-    EntityColumnFilter, EntityColumnFilterOption, EntityDate, EntityDateFilter,
-    EntityDateFilterProposal, EntityFocusRequest, EntityFocusRequestResolution,
+    BadgeColor, Button, EntityBadgePresentation, EntityCellEditor, EntityColumn,
+    EntityColumnChooserTrigger, EntityColumnFilter, EntityColumnFilterOption, EntityDate,
+    EntityDateFilter, EntityDateFilterProposal, EntityDraftCommit, EntityDraftRow,
+    EntityEditOutcome, EntityFocusRequest, EntityFocusRequestResolution,
     EntityGroupCollapseProposal, EntityIconColor, EntityIconPresentation, EntityNullOrder,
     EntityPageSize, EntityRowAction, EntityRowEmphasis, EntityRowGroup, EntityRowGrouping,
     EntityTable, EntityTableDisplayProjection, EntityTableMultiSelection,
@@ -919,6 +920,126 @@ pub fn SnapshotTablePageFilterActionsFixture() -> impl IntoView {
                 entity_table=table_config()
                 action_key_label=Rc::new(|key: &String| key.clone())
             />
+        </section>
+    }
+}
+
+/// Focused browser fixture for `EntityTable` inline draft-row editing
+/// (`ldui-ff2f`).
+///
+/// Mounts BOTH configurations on one document, the pattern `ldui-nj3q` used:
+/// `#draft-optin` opts in, `#draft-plain` does not. The claim that an
+/// un-opted table renders unchanged is then proven on the same run rather
+/// than asserted — a negative control for every positive assertion.
+///
+/// The consumer's side of the contract is visible too: Save hands over a row
+/// and a `resolve` handle, and this fixture deliberately does NOT resolve it
+/// automatically. The Accept / Reject buttons stand in for a real async
+/// write, so a test can observe the in-flight `Committing` state that a
+/// synchronous fixture would skip straight past.
+#[component]
+pub fn EntityTableDraftRowFixture() -> impl IntoView {
+    let data = RwSignal::new_local(rows("office-mx"));
+    let plain_data = RwSignal::new_local(rows("office-mx"));
+    let commits = RwSignal::new(0_u32);
+    let last_committed = RwSignal::new(String::from("(none)"));
+    let pending_resolve = RwSignal::new(Option::<Callback<EntityEditOutcome>>::None);
+
+    let editable_columns = || {
+        vec![
+            EntityColumn::text("client", "Client", |row: &FixtureRow| row.client.clone())
+                .required()
+                .with_min_width(220)
+                .editable(EntityCellEditor::text(
+                    |row: &FixtureRow| row.client.clone(),
+                    |row: &mut FixtureRow, value| row.client = value,
+                )),
+            // Deliberately NOT editable: proves a derived column keeps
+            // rendering read-only text even inside the live row.
+            EntityColumn::text("id", "Id", |row: &FixtureRow| row.id.clone()).with_min_width(140),
+            EntityColumn::text("status", "Status", |row: &FixtureRow| row.status.clone())
+                .with_min_width(120)
+                .editable(EntityCellEditor::text(
+                    |row: &FixtureRow| row.status.clone(),
+                    |row: &mut FixtureRow, value| row.status = value,
+                )),
+        ]
+    };
+
+    let on_commit = Callback::new(move |commit: EntityDraftCommit<FixtureRow>| {
+        commits.update(|count| *count += 1);
+        last_committed.set(format!("{}|{}", commit.row.client, commit.row.status));
+        // Held, not resolved: the table stays in flight until a button below
+        // answers, which is the whole point of the resolve handle.
+        pending_resolve.set(Some(commit.resolve));
+    });
+
+    view! {
+        <section id="draft-row-fixture" class="mx-auto max-w-4xl space-y-6 bg-base-100 p-4">
+            <h1 class="ld-text-display font-semibold">"Inline draft-row editing"</h1>
+
+            <div class="flex flex-wrap items-center gap-2">
+                <Button
+                    attr:data-testid="draft-accept"
+                    on_click=Callback::new(move |_| {
+                        if let Some(resolve) = pending_resolve.get_untracked() {
+                            resolve.run(EntityEditOutcome::Accepted);
+                            pending_resolve.set(None);
+                        }
+                    })
+                >
+                    "Accept commit"
+                </Button>
+                <Button
+                    attr:data-testid="draft-reject"
+                    on_click=Callback::new(move |_| {
+                        if let Some(resolve) = pending_resolve.get_untracked() {
+                            resolve.run(EntityEditOutcome::Rejected("Name taken".to_owned()));
+                            pending_resolve.set(None);
+                        }
+                    })
+                >
+                    "Reject commit"
+                </Button>
+                <span>
+                    "Commits: "
+                    <code data-testid="draft-commit-count">
+                        {move || commits.get().to_string()}
+                    </code>
+                </span>
+                <span>
+                    "Last: "
+                    <code data-testid="draft-last-committed">{move || last_committed.get()}</code>
+                </span>
+            </div>
+
+            <div data-testid="draft-optin-table" id="draft-optin">
+                <EntityTable
+                    data=data
+                    columns=editable_columns()
+                    row_key=Rc::new(|row: &FixtureRow| row.id.clone())
+                    dataset_identity="draft-optin"
+                    draft_row=EntityDraftRow::new(
+                        || FixtureRow {
+                            id: "draft-new".to_owned(),
+                            client: String::new(),
+                            status: String::new(),
+                        },
+                        on_commit,
+                    )
+                />
+            </div>
+
+            // Negative control: same columns, no draft_row. Must render no `+`,
+            // no draft row, and no data-entity-edit-phase at all.
+            <div data-testid="draft-plain-table" id="draft-plain">
+                <EntityTable
+                    data=plain_data
+                    columns=editable_columns()
+                    row_key=Rc::new(|row: &FixtureRow| row.id.clone())
+                    dataset_identity="draft-plain"
+                />
+            </div>
         </section>
     }
 }
