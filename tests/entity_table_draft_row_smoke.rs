@@ -14,6 +14,7 @@
 
 mod common;
 
+use chromiumoxide::cdp::browser_protocol::input::{DispatchKeyEventParams, DispatchKeyEventType};
 use common::{
     assert_no_browser_errors, begin_browser_error_capture, click, harness_at, wait_for_selector,
 };
@@ -26,7 +27,78 @@ async fn eval_json(harness: &pixelproof_web::Harness, expression: &str) -> Value
         .await
         .expect("evaluate draft-row fixture")
         .into_value()
-        .expect("draft-row expression returns JSON")
+        .unwrap_or_else(|error| {
+            panic!("draft-row expression returns JSON (`{expression}`): {error}")
+        })
+}
+
+async fn press_key(
+    harness: &pixelproof_web::Harness,
+    key: &str,
+    code: &str,
+    key_code: i64,
+    text: Option<&str>,
+) {
+    let mut down = DispatchKeyEventParams::builder()
+        .r#type(DispatchKeyEventType::KeyDown)
+        .key(key)
+        .code(code)
+        .windows_virtual_key_code(key_code)
+        .native_virtual_key_code(key_code);
+    if let Some(text) = text {
+        down = down.text(text);
+    }
+    harness
+        .page()
+        .execute(down.build().expect("key-down params"))
+        .await
+        .expect("dispatch key-down");
+    harness
+        .page()
+        .execute(
+            DispatchKeyEventParams::builder()
+                .r#type(DispatchKeyEventType::KeyUp)
+                .key(key)
+                .code(code)
+                .windows_virtual_key_code(key_code)
+                .native_virtual_key_code(key_code)
+                .build()
+                .expect("key-up params"),
+        )
+        .await
+        .expect("dispatch key-up");
+    tokio::time::sleep(std::time::Duration::from_millis(harness.config().settle_ms)).await;
+}
+
+async fn press_tab(harness: &pixelproof_web::Harness) {
+    press_key(harness, "Tab", "Tab", 9, None).await;
+}
+
+async fn press_escape(harness: &pixelproof_web::Harness) {
+    press_key(harness, "Escape", "Escape", 27, None).await;
+}
+
+async fn press_arrow_right(harness: &pixelproof_web::Harness) {
+    press_key(harness, "ArrowRight", "ArrowRight", 39, None).await;
+}
+
+async fn type_text(harness: &pixelproof_web::Harness, value: &str) {
+    for character in value.chars() {
+        let key = character.to_string();
+        let code = if character.is_ascii_alphabetic() {
+            format!("Key{}", character.to_ascii_uppercase())
+        } else {
+            String::new()
+        };
+        press_key(
+            harness,
+            &key,
+            &code,
+            i64::from(character.to_ascii_uppercase() as u8),
+            Some(&key),
+        )
+        .await;
+    }
 }
 
 async fn snapshot(harness: &pixelproof_web::Harness) -> Value {
@@ -79,6 +151,18 @@ async fn snapshot(harness: &pixelproof_web::Harness) -> Value {
                 retireCount: document
                     .querySelector('[data-testid="draft-retire-count"]')
                     ?.textContent?.trim() ?? null,
+                filterProposals: document
+                    .querySelector('[data-testid="draft-filter-proposals"]')
+                    ?.textContent?.trim() ?? null,
+                toolbarClicks: document
+                    .querySelector('[data-testid="draft-toolbar-clicks"]')
+                    ?.textContent?.trim() ?? null,
+                rowActivations: document
+                    .querySelector('[data-testid="draft-row-activations"]')
+                    ?.textContent?.trim() ?? null,
+                selectionProposals: document
+                    .querySelector('[data-testid="draft-selection-proposals"]')
+                    ?.textContent?.trim() ?? null,
                 // Negative control.
                 plainPhase: plain?.dataset.entityEditPhase ?? null,
                 plainAddPresent: plain?.querySelector('[data-entity-draft-add]') !== null,
@@ -86,6 +170,292 @@ async fn snapshot(harness: &pixelproof_web::Harness) -> Value {
                 plainInertRows: Array.from(
                     plain?.querySelectorAll('[data-entity-row-key]') ?? []
                 ).filter(r => r.getAttribute('aria-disabled') === 'true').length,
+            };
+        })()"#,
+    )
+    .await
+}
+
+async fn active_control(harness: &pixelproof_web::Harness) -> Value {
+    eval_json(
+        harness,
+        r#"(() => {
+            const active = document.activeElement;
+            return {
+                tag: active?.tagName ?? null,
+                value: active?.value ?? null,
+                editInput: active?.dataset.entityEditInput ?? null,
+                draftInput: active?.dataset.entityDraftInput ?? null,
+                editState: active?.dataset.entityRowEditState ?? null,
+                draftAdd: active?.hasAttribute('data-entity-draft-add') ?? false,
+                draftSave: active?.hasAttribute('data-entity-draft-save') ?? false,
+                rowKey: active?.closest('[data-entity-row-key]')
+                    ?.dataset.entityRowKey ?? null,
+                action: active?.closest('[data-entity-row-action]')
+                    ?.dataset.entityRowAction ?? null,
+                tableRegion: active?.hasAttribute('data-entity-focus-region') ?? false,
+            };
+        })()"#,
+    )
+    .await
+}
+
+/// The single live row owns keyboard focus while every competing table
+/// mutation is natively inert. Escape restores a stable, target-specific stop.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-entity-draft-row)"]
+async fn edit_mode_owns_focus_and_locks_table_mutations() {
+    let harness = harness_at("/components/entity-table-draft-row").await;
+    wait_for_selector(&harness, "#draft-optin [data-entity-row-key='office-mx-1']").await;
+    begin_browser_error_capture(&harness).await;
+
+    // Draft entry focuses the first real editor. Sequential Tab then follows
+    // declared field order and lands on Save without traversing frozen rows.
+    click(&harness, "#draft-optin [data-entity-draft-add]").await;
+    let first = active_control(&harness).await;
+    assert_eq!(
+        first["editInput"],
+        json!("client"),
+        "draft entry focus: {first}"
+    );
+    assert_eq!(
+        first["draftInput"],
+        json!("client"),
+        "draft compatibility hook: {first}"
+    );
+    type_text(&harness, "X").await;
+    let typed = active_control(&harness).await;
+    assert_eq!(
+        typed["value"],
+        json!("X"),
+        "typing must arrive through real Chromium key events and retain focus: {typed}"
+    );
+    press_tab(&harness).await;
+    assert_eq!(active_control(&harness).await["editInput"], json!("status"));
+    press_tab(&harness).await;
+    let draft_save = active_control(&harness).await;
+    assert_eq!(
+        draft_save["draftSave"],
+        json!(true),
+        "Tab lands on Save: {draft_save}"
+    );
+    assert_eq!(draft_save["action"], json!("inline-edit"));
+
+    press_escape(&harness).await;
+    assert_eq!(snapshot(&harness).await["phase"], json!("idle"));
+    assert_eq!(active_control(&harness).await["draftAdd"], json!(true));
+
+    // Existing-row entry uses the same focus path and freezes every competing
+    // table operation, including consumer-owned descendants.
+    click(
+        &harness,
+        "#draft-optin [data-entity-row-key='office-mx-1'] [data-entity-row-edit-state='edit']",
+    )
+    .await;
+    let existing_focus = active_control(&harness).await;
+    assert_eq!(
+        existing_focus["editInput"],
+        json!("client"),
+        "existing entry focus: {existing_focus}"
+    );
+    assert_eq!(existing_focus["rowKey"], json!("office-mx-1"));
+
+    let before = lock_state(&harness).await;
+    assert_eq!(
+        before["toolbarInert"],
+        json!(true),
+        "toolbar lock: {before}"
+    );
+    assert_eq!(
+        before["headInert"],
+        json!(true),
+        "header/filter lock: {before}"
+    );
+    assert_eq!(before["footerInert"], json!(true), "paging lock: {before}");
+    assert_eq!(
+        before["liveInert"],
+        json!(false),
+        "live row remains active: {before}"
+    );
+    assert_eq!(
+        before["otherInert"],
+        json!(true),
+        "other rows are natively inert: {before}"
+    );
+    assert_eq!(before["otherAriaDisabled"], json!("true"));
+    assert_eq!(
+        before["everyControlInsideInert"],
+        json!(true),
+        "all competing controls are covered: {before}"
+    );
+    assert_eq!(
+        before["nextDisabled"],
+        json!(false),
+        "fixture must have a meaningful next-page action: {before}"
+    );
+
+    assert_eq!(
+        eval_json(
+            &harness,
+            r##"(() => {
+                const button = document.querySelector(
+                    "#draft-optin [data-entity-row-key='office-mx-2'] [data-entity-inline-edit-host] button"
+                );
+                button.focus();
+                return document.activeElement === button;
+            })()"##,
+        )
+        .await,
+        json!(false),
+        "an inert descendant cannot take focus"
+    );
+
+    click(
+        &harness,
+        "#draft-optin [data-entity-row-key='office-mx-2'] [data-entity-inline-edit-host] [data-fixture-retire]",
+    )
+    .await;
+    click(
+        &harness,
+        "#draft-optin [data-entity-row-key='office-mx-2'] td[data-entity-column='client']",
+    )
+    .await;
+    click(
+        &harness,
+        "#draft-optin [data-testid='draft-toolbar-action']",
+    )
+    .await;
+    click(&harness, "#draft-optin [data-entity-sort-column='client']").await;
+    click(
+        &harness,
+        "#draft-optin [data-entity-filter-control='status'][data-entity-filter-placement='header']",
+    )
+    .await;
+    type_text(&harness, "Z").await;
+    click(&harness, "#draft-optin [data-entity-column-chooser]").await;
+    click(&harness, "#draft-optin [data-entity-page='next']").await;
+    click(
+        &harness,
+        "#draft-optin [data-entity-page-size-control] select",
+    )
+    .await;
+    click(
+        &harness,
+        "#draft-optin th[data-entity-column='client'] [role='separator']",
+    )
+    .await;
+    press_arrow_right(&harness).await;
+
+    let after = lock_state(&harness).await;
+    assert_eq!(
+        after, before,
+        "real pointer/key attempts must not sort, filter, page, resize, select, activate, retire, or open table controls"
+    );
+
+    press_escape(&harness).await;
+    assert_eq!(snapshot(&harness).await["phase"], json!("idle"));
+    let restored = active_control(&harness).await;
+    assert_eq!(restored["rowKey"], json!("office-mx-1"));
+    assert_eq!(restored["editState"], json!("edit"));
+    assert_eq!(restored["action"], json!("inline-edit"));
+
+    // Escape cannot cancel a write after Save has crossed the consumer
+    // boundary. A rejection returns to Drafting, where Escape is truthful.
+    click(
+        &harness,
+        "#draft-optin [data-entity-row-key='office-mx-1'] [data-entity-row-edit-state='edit']",
+    )
+    .await;
+    press_tab(&harness).await;
+    press_tab(&harness).await;
+    click(
+        &harness,
+        "#draft-optin [data-entity-row-key='office-mx-1'] [data-entity-row-edit-state='save']",
+    )
+    .await;
+    assert_eq!(snapshot(&harness).await["phase"], json!("committing"));
+    press_escape(&harness).await;
+    assert_eq!(
+        snapshot(&harness).await["phase"],
+        json!("committing"),
+        "Escape must not claim an in-flight write was cancelled"
+    );
+    click(&harness, "[data-testid='draft-reject']").await;
+    click(
+        &harness,
+        "#draft-optin [data-entity-row-key='office-mx-1'] [data-entity-edit-input='client']",
+    )
+    .await;
+    press_escape(&harness).await;
+    assert_eq!(snapshot(&harness).await["phase"], json!("idle"));
+
+    // If releasing the pending snapshot removes the edited row, recovery uses
+    // the named table region rather than guessing a neighboring row.
+    click(
+        &harness,
+        "#draft-optin [data-entity-row-key='office-mx-1'] [data-entity-row-edit-state='edit']",
+    )
+    .await;
+    click(&harness, "[data-testid='draft-refresh-2']").await;
+    click(
+        &harness,
+        "#draft-optin [data-entity-row-key='office-mx-1'] [data-entity-edit-input='client']",
+    )
+    .await;
+    press_escape(&harness).await;
+    assert_eq!(snapshot(&harness).await["phase"], json!("idle"));
+    assert_eq!(active_control(&harness).await["tableRegion"], json!(true));
+
+    assert_no_browser_errors(&harness, "EntityTable edit locks and keyboard focus").await;
+}
+
+async fn lock_state(harness: &pixelproof_web::Harness) -> Value {
+    eval_json(
+        harness,
+        r#"(() => {
+            const root = document.querySelector('#draft-optin [data-entity-table]');
+            const table = root?.querySelector('[data-entity-table-grid]');
+            const live = root?.querySelector('[data-entity-row-key="office-mx-1"]');
+            const other = root?.querySelector('[data-entity-row-key="office-mx-2"]');
+            const sort = root?.querySelector('[data-entity-sort-column="client"]');
+            const filter = root?.querySelector(
+                '[data-entity-filter-control="status"][data-entity-filter-placement="header"]'
+            );
+            const next = root?.querySelector('[data-entity-page="next"]');
+            const chooser = root?.querySelector('[data-entity-column-chooser]');
+            const separator = root?.querySelector('th[data-entity-column="client"] [role="separator"]');
+            const toolbarAction = root?.querySelector('[data-testid="draft-toolbar-action"]');
+            const pageSize = root?.querySelector('[data-entity-page-size-control] select');
+            const lockedControls = [sort, filter, next, chooser, separator, toolbarAction, pageSize];
+            const read = testid => document.querySelector(`[data-testid="${testid}"]`)
+                ?.textContent?.trim() ?? null;
+            return {
+                phase: root?.dataset.entityEditPhase ?? null,
+                toolbarInert: root?.querySelector('[data-entity-table-toolbar]')
+                    ?.hasAttribute('inert') ?? false,
+                headInert: table?.querySelector('thead')?.hasAttribute('inert') ?? false,
+                footerInert: root?.querySelector('[data-entity-table-footer]')
+                    ?.hasAttribute('inert') ?? false,
+                liveInert: live?.hasAttribute('inert') ?? null,
+                otherInert: other?.hasAttribute('inert') ?? null,
+                otherAriaDisabled: other?.getAttribute('aria-disabled') ?? null,
+                everyControlInsideInert: lockedControls.every(
+                    control => control !== null && control.closest('[inert]') !== null
+                ),
+                rowKeys: Array.from(root?.querySelectorAll('[data-entity-row-key]') ?? [])
+                    .map(row => row.dataset.entityRowKey),
+                sortDirection: table?.querySelector('th[data-entity-column="client"]')
+                    ?.dataset.entitySortDirection ?? null,
+                filterValue: filter?.value ?? null,
+                pageSize: pageSize?.value ?? null,
+                nextDisabled: next?.disabled ?? null,
+                chooserOpen: root?.querySelector('[data-entity-column-chooser-open]') !== null,
+                resizeNow: separator?.getAttribute('aria-valuenow') ?? null,
+                retireCount: read('draft-retire-count'),
+                filterProposals: read('draft-filter-proposals'),
+                toolbarClicks: read('draft-toolbar-clicks'),
+                rowActivations: read('draft-row-activations'),
+                selectionProposals: read('draft-selection-proposals'),
             };
         })()"#,
     )

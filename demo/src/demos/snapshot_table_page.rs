@@ -47,6 +47,18 @@ fn rows(dataset: &str) -> Rc<Vec<FixtureRow>> {
     )
 }
 
+fn draft_fixture_rows() -> Rc<Vec<FixtureRow>> {
+    Rc::new(
+        (1..=30)
+            .map(|index| FixtureRow {
+                id: format!("office-mx-{index}"),
+                client: format!("Mexico City Client {index}"),
+                status: if index == 1 { "Urgent" } else { "Ready" }.to_owned(),
+            })
+            .collect(),
+    )
+}
+
 fn snapshot(dataset: &str, revision: &str) -> SnapshotData<FixtureRow, String, ()> {
     let rows = rows(dataset);
     SnapshotData::new(
@@ -939,8 +951,8 @@ pub fn SnapshotTablePageFilterActionsFixture() -> impl IntoView {
 /// synchronous fixture would skip straight past.
 #[component]
 pub fn EntityTableDraftRowFixture() -> impl IntoView {
-    let data = RwSignal::new_local(rows("office-mx"));
-    let source_data = RwSignal::new_local(rows("office-mx"));
+    let data = RwSignal::new_local(draft_fixture_rows());
+    let source_data = RwSignal::new_local(draft_fixture_rows());
     let dataset_identity = RwSignal::new(String::from("draft-optin"));
     let page_reset_key = RwSignal::new(String::from("draft-page-0"));
     let focus_scope = RwSignal::new(String::from("draft-scope-0"));
@@ -950,6 +962,12 @@ pub fn EntityTableDraftRowFixture() -> impl IntoView {
     let last_committed = RwSignal::new(String::from("(none)"));
     let last_target = RwSignal::new(String::from("(none)"));
     let retired_rows = RwSignal::new(Vec::<String>::new());
+    let filter_value = RwSignal::new(String::new());
+    let filter_proposals = RwSignal::new(0_u32);
+    let toolbar_clicks = RwSignal::new(0_u32);
+    let row_activations = RwSignal::new(0_u32);
+    let selection_proposals = RwSignal::new(0_u32);
+    let selected_key = RwSignal::new(Option::<String>::None);
     let pending_resolve = RwSignal::new(Option::<Callback<EntityEditOutcome>>::None);
 
     let apply_refresh = move |generation: u8| {
@@ -1022,19 +1040,16 @@ pub fn EntityTableDraftRowFixture() -> impl IntoView {
         // answers, which is the whole point of the resolve handle.
         pending_resolve.set(Some(commit.resolve));
     });
-    let draft_filters = vec![EntityColumnFilter::new("status", || {
-        view! {
-            <label class="block w-full">
-                <span class="sr-only">"Filter status"</span>
-                <input
-                    class="input input-xs w-full"
-                    data-testid="draft-status-filter"
-                    type="text"
-                />
-            </label>
-        }
-        .into_any()
-    })];
+    let draft_filters = vec![EntityColumnFilter::text(
+        "status",
+        "draft-status-filter",
+        "Filter status",
+        filter_value,
+        "Filter status",
+        Callback::new(move |_proposal: String| {
+            filter_proposals.update(|count| *count += 1);
+        }),
+    )];
 
     view! {
         <section id="draft-row-fixture" class="mx-auto max-w-4xl space-y-6 bg-base-100 p-4">
@@ -1095,6 +1110,30 @@ pub fn EntityTableDraftRowFixture() -> impl IntoView {
                         {move || retired_rows.with(|rows| rows.len()).to_string()}
                     </code>
                 </span>
+                <span>
+                    "Filter proposals: "
+                    <code data-testid="draft-filter-proposals">
+                        {move || filter_proposals.get().to_string()}
+                    </code>
+                </span>
+                <span>
+                    "Toolbar clicks: "
+                    <code data-testid="draft-toolbar-clicks">
+                        {move || toolbar_clicks.get().to_string()}
+                    </code>
+                </span>
+                <span>
+                    "Row activations: "
+                    <code data-testid="draft-row-activations">
+                        {move || row_activations.get().to_string()}
+                    </code>
+                </span>
+                <span>
+                    "Selection proposals: "
+                    <code data-testid="draft-selection-proposals">
+                        {move || selection_proposals.get().to_string()}
+                    </code>
+                </span>
             </div>
 
             <div data-testid="draft-optin-table" id="draft-optin">
@@ -1107,6 +1146,26 @@ pub fn EntityTableDraftRowFixture() -> impl IntoView {
                     dataset_identity=dataset_identity
                     page_reset_key=page_reset_key
                     focus_scope=focus_scope
+                    toolbar_actions=Box::new(move || view! {
+                        <Button
+                            class="btn-sm btn-ghost"
+                            attr:data-testid="draft-toolbar-action"
+                            on_click=Callback::new(move |_| {
+                                toolbar_clicks.update(|count| *count += 1);
+                            })
+                        >
+                            "Archive"
+                        </Button>
+                    }.into_any())
+                    on_row_activate=Callback::new(move |_key: String| {
+                        row_activations.update(|count| *count += 1);
+                    })
+                    selection=EntityTableSelection::controlled(
+                        selected_key.into(),
+                        Callback::new(move |_key: Option<String>| {
+                            selection_proposals.update(|count| *count += 1);
+                        }),
+                    )
                     draft_row=EntityDraftRow::new(
                         || FixtureRow {
                             id: "draft-new".to_owned(),

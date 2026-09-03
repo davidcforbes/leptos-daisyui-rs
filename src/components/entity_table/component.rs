@@ -906,6 +906,14 @@ where
         .map_or_else(|| Signal::stored(EntityDraftTexts::default()), |c| c.texts);
     let draft_row = StoredValue::new_local(draft_row);
     let edit_state = RwSignal::new_local(EntityEditState::<T>::new());
+    let edit_locked = Signal::derive_local(move || edit_state.with(EntityEditState::is_editing));
+    let draft_is_live = Memo::new(move |_| {
+        edit_state.with(|state| {
+            state.is_editing() && state.target().is_some_and(EntityEditTarget::is_draft)
+        })
+    });
+    let table_region = NodeRef::<leptos::html::Div>::new();
+    let draft_add_ref = NodeRef::<leptos::html::Button>::new();
     let editing_enabled = draft_row.with_value(Option::is_some);
     let initial_input_snapshot = EntityTableInputSnapshot {
         data: input_data.get_untracked(),
@@ -1022,24 +1030,42 @@ where
         });
     });
     let cancel_draft = Callback::new(move |()| {
-        release_snapshot_before_idle.run(());
-        edit_state.update(|state| {
-            state.cancel();
+        let target = edit_state.with_untracked(|state| {
+            (!state.is_committing())
+                .then(|| state.target().cloned())
+                .flatten()
         });
+        let Some(target) = target else {
+            return;
+        };
+        release_snapshot_before_idle.run(());
+        let disposition = edit_state
+            .try_update(EntityEditState::cancel)
+            .unwrap_or(EntityEditDisposition::IgnoredIdle);
+        if disposition == EntityEditDisposition::Applied {
+            restore_inline_edit_focus(table_region, draft_add_ref, target);
+        }
     });
     // `ldui-ff2f` 3c-ii: the second entry point into the SAME mode. The
     // reducer refuses it while a row is already live, so the two entry points
     // cannot produce two editable rows.
     let begin_row_edit = Callback::new(move |key: String| {
+        if edit_locked.get_untracked() {
+            return;
+        }
         let existing = data.with(|rows| {
             rows.iter()
                 .find(|row| row_key.with_value(|f| f(row)) == key)
                 .cloned()
         });
         if let Some(existing) = existing {
-            edit_state.update(|state| {
-                state.begin_edit(key, existing);
-            });
+            let focus_target = EntityEditTarget::Existing(key.clone());
+            let disposition = edit_state
+                .try_update(|state| state.begin_edit(key, existing))
+                .unwrap_or(EntityEditDisposition::IgnoredIdle);
+            if disposition == EntityEditDisposition::Applied {
+                focus_inline_edit_target(table_region, focus_target);
+            }
         }
     });
     let allow_row_edit =
@@ -1075,7 +1101,6 @@ where
     let previous_dataset = StoredValue::new(dataset_identity.get_untracked());
     let resize_drag = RwSignal::new(Option::<ResizeDrag>::None);
     let focus_record = RwSignal::new_local(Option::<EntityFocusRecord>::None);
-    let table_region = NodeRef::<leptos::html::Div>::new();
     let dataset_transition = DatasetTransitionController::new(current_page, preferences);
     let page_size_select = NodeRef::<leptos::html::Select>::new();
     let column_chooser_open = RwSignal::new(false);
@@ -1506,6 +1531,9 @@ where
                             input.set_checked(state.is_checked());
                             input.set_indeterminate(state.is_indeterminate());
                         }
+                        if edit_locked.get_untracked() {
+                            return;
+                        }
                         let keys = page_row_keys.get_untracked();
                         if keys.is_empty() {
                             return;
@@ -1856,6 +1884,8 @@ where
                     <section
                         class="shrink-0 rounded-box border border-table-grid bg-table-filter p-3 text-table-filter-content forced-colors:border-[CanvasText] forced-colors:bg-[Canvas] forced-colors:text-[CanvasText]"
                         data-entity-responsive-filter-panel="true"
+                        inert=move || edit_locked.get()
+                        aria-disabled=move || edit_locked.get().then_some("true")
                         aria-label=move || texts.with(|texts| texts.filters.clone())
                         aria-live="polite"
                     >
@@ -1915,6 +1945,8 @@ where
             <div
                 class="flex shrink-0 flex-wrap items-center justify-end gap-2"
                 data-entity-table-toolbar="true"
+                inert=move || edit_locked.get()
+                aria-disabled=move || edit_locked.get().then_some("true")
             >
                 {toolbar_actions.map(|render_actions| view! {
                     <div class="contents" data-entity-toolbar-actions="true">
@@ -1928,17 +1960,24 @@ where
                 // worse than one that says it cannot.
                 {editing_enabled.then(|| view! {
                     <Button
+                        node_ref=draft_add_ref
                         class="btn-sm btn-primary"
                         attr:data-entity-draft-add="true"
                         attr:aria-label=move || draft_texts.get().add_row
-                        disabled=Signal::derive(move || edit_state.with(EntityEditState::is_editing))
+                        disabled=Signal::derive(move || edit_locked.get())
                         on_click=Callback::new(move |_| {
+                            if edit_locked.get_untracked() {
+                                return;
+                            }
                             let blank = draft_row
                                 .with_value(|config| config.as_ref().map(|c| (c.new_row)()));
                             if let Some(blank) = blank {
-                                edit_state.update(|state| {
-                                    state.begin_draft(blank);
-                                });
+                                let disposition = edit_state
+                                    .try_update(|state| state.begin_draft(blank))
+                                    .unwrap_or(EntityEditDisposition::IgnoredIdle);
+                                if disposition == EntityEditDisposition::Applied {
+                                    focus_inline_edit_target(table_region, EntityEditTarget::Draft);
+                                }
                             }
                         })
                     >
@@ -2008,7 +2047,14 @@ where
                             EntityColumnChooserTrigger::Text => "btn btn-ghost btn-sm gap-0",
                             EntityColumnChooserTrigger::Icon => "btn btn-ghost btn-sm btn-square gap-0 forced-colors:border forced-colors:border-[ButtonText] forced-colors:text-[ButtonText]",
                         }
-                        on:click=move |_| column_chooser_open.update(|open| *open = !*open)
+                        on:click=move |event: web_sys::MouseEvent| {
+                            if edit_locked.get_untracked() {
+                                event.prevent_default();
+                                event.stop_propagation();
+                                return;
+                            }
+                            column_chooser_open.update(|open| *open = !*open);
+                        }
                     >
                         {move || match column_chooser_trigger.get() {
                             EntityColumnChooserTrigger::Text => view! {
@@ -2043,7 +2089,10 @@ where
                                                     .is_some_and(EntityColumnFilter::is_active)
                                             })
                                         });
-                                        let on_toggle = Callback::new(move |_| {
+                                         let on_toggle = Callback::new(move |_| {
+                                            if edit_locked.get_untracked() {
+                                                return;
+                                            }
                                             column_store.with_value(|columns| {
                                                 preferences.update(|preferences| {
                                                     toggle_hidden_column(
@@ -2145,6 +2194,11 @@ where
                                                         })
                                                     })
                                                     on_click=Callback::new(move |event: web_sys::MouseEvent| {
+                                                        if edit_locked.get_untracked() {
+                                                            event.prevent_default();
+                                                            event.stop_propagation();
+                                                            return;
+                                                        }
                                                         restore_column_move_focus(
                                                             event,
                                                             column_id,
@@ -2195,6 +2249,11 @@ where
                                                         })
                                                     })
                                                     on_click=Callback::new(move |event: web_sys::MouseEvent| {
+                                                        if edit_locked.get_untracked() {
+                                                            event.prevent_default();
+                                                            event.stop_propagation();
+                                                            return;
+                                                        }
                                                         restore_column_move_focus(
                                                             event,
                                                             column_id,
@@ -2231,6 +2290,9 @@ where
                             preferences.with(|preferences| preferences.sort.is_system())
                         })
                         on_click=Callback::new(move |_| {
+                            if edit_locked.get_untracked() {
+                                return;
+                            }
                             preferences.update(|preferences| {
                                 reset_sort(preferences);
                             });
@@ -2254,6 +2316,9 @@ where
                                 })
                         }))
                         on_click=Callback::new(move |_| {
+                            if edit_locked.get_untracked() {
+                                return;
+                            }
                             column_widths.set(
                                 preferences.update_and_rendered_widths(|preferences| {
                                     reset_columns(preferences);
@@ -2289,6 +2354,17 @@ where
                         &focus_scope.get_untracked(),
                     ));
                 }
+                on:keydown=move |event: web_sys::KeyboardEvent| {
+                    if event.key() == "Escape"
+                        && edit_state.with_untracked(|state| {
+                            state.is_editing() && !state.is_committing()
+                        })
+                    {
+                        event.prevent_default();
+                        event.stop_propagation();
+                        cancel_draft.run(());
+                    }
+                }
             >
                 <div style=move || {
                     // Compact mode ignores the desktop colgroup's forced
@@ -2315,7 +2391,11 @@ where
                         (!compact_filter_layout.get())
                             .then(|| view! { <StableTableColGroup tracks=stable_tracks /> })
                     }}
-                    <thead class="hidden lg:table-header-group">
+                    <thead
+                        class="hidden lg:table-header-group"
+                        inert=move || edit_locked.get()
+                        aria-disabled=move || edit_locked.get().then_some("true")
+                    >
                         <tr>
                             {selection_header}
                             <For
@@ -2399,6 +2479,11 @@ where
                                                         {
                                                             return;
                                                         }
+                                                        if edit_locked.get_untracked() {
+                                                            event.prevent_default();
+                                                            event.stop_propagation();
+                                                            return;
+                                                        }
                                                         event.prevent_default();
                                                         event.stop_propagation();
                                                         preferences.update(|preferences| {
@@ -2411,6 +2496,11 @@ where
                                                         current_page.set(0);
                                                     }
                                                     on_click=Callback::new(move |event: web_sys::MouseEvent| {
+                                                        if edit_locked.get_untracked() {
+                                                            event.prevent_default();
+                                                            event.stop_propagation();
+                                                            return;
+                                                        }
                                                         preferences.update(|preferences| {
                                                             preferences.sort = if event.shift_key() {
                                                                 next_sort_additive(
@@ -2502,7 +2592,10 @@ where
                                                     })
                                                 })
                                                 on:click=move |event: web_sys::MouseEvent| event.stop_propagation()
-                                                on:focus=move |event: web_sys::FocusEvent| {
+                                                 on:focus=move |event: web_sys::FocusEvent| {
+                                                    if edit_locked.get_untracked() {
+                                                        return;
+                                                    }
                                                     if let Some(rendered_width) = separator_parent_width(event.target()) {
                                                         let width = rendered_width
                                                             .clamp(minimum_value, MAX_COLUMN_WIDTH)
@@ -2512,7 +2605,14 @@ where
                                                         });
                                                     }
                                                 }
-                                                on:keydown=move |event: web_sys::KeyboardEvent| {
+                                                 on:keydown=move |event: web_sys::KeyboardEvent| {
+                                                    if edit_locked.get_untracked() {
+                                                        if matches!(event.key().as_str(), "ArrowLeft" | "ArrowRight" | "Home" | "End") {
+                                                            event.prevent_default();
+                                                            event.stop_propagation();
+                                                        }
+                                                        return;
+                                                    }
                                                     let current_width = separator_parent_width(
                                                         event.current_target().or_else(|| event.target()),
                                                     )
@@ -2540,8 +2640,12 @@ where
                                                         }),
                                                     );
                                                 }
-                                                on:pointerdown=move |event: web_sys::PointerEvent| {
+                                                 on:pointerdown=move |event: web_sys::PointerEvent| {
                                                     event.stop_propagation();
+                                                    if edit_locked.get_untracked() {
+                                                        event.prevent_default();
+                                                        return;
+                                                    }
                                                     let rendered_width = event
                                                         .target()
                                                         .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
@@ -2565,7 +2669,10 @@ where
                                                         let _ = element.set_pointer_capture(event.pointer_id());
                                                     }
                                                 }
-                                                on:pointermove=move |event: web_sys::PointerEvent| {
+                                                 on:pointermove=move |event: web_sys::PointerEvent| {
+                                                    if edit_locked.get_untracked() {
+                                                        return;
+                                                    }
                                                     if let Some(drag) = resize_drag.get_untracked() {
                                                         let requested = drag.start_width
                                                             + (f64::from(event.client_x()) - drag.start_x);
@@ -2585,7 +2692,10 @@ where
                                                         }
                                                     }
                                                 }
-                                                on:pointerup=move |event: web_sys::PointerEvent| {
+                                                 on:pointerup=move |event: web_sys::PointerEvent| {
+                                                    if edit_locked.get_untracked() {
+                                                        return;
+                                                    }
                                                     finish_resize(
                                                         event.target(),
                                                         event.pointer_id(),
@@ -2594,7 +2704,10 @@ where
                                                         preferences,
                                                     );
                                                 }
-                                                on:pointercancel=move |event: web_sys::PointerEvent| {
+                                                 on:pointercancel=move |event: web_sys::PointerEvent| {
+                                                    if edit_locked.get_untracked() {
+                                                        return;
+                                                    }
                                                     finish_resize(
                                                         event.target(),
                                                         event.pointer_id(),
@@ -2669,11 +2782,7 @@ where
                             // accepted snapshot stays frozen for the whole edit,
                             // so a pending refresh cannot replace either surface.
                             {move || {
-                                let drafting = edit_state.with(|state| {
-                                    state.is_editing()
-                                        && state.target().is_some_and(EntityEditTarget::is_draft)
-                                });
-                                drafting.then(|| {
+                                draft_is_live.get().then(|| {
                                     let preferences_value = preferences.get();
                                     let columns = column_store.with_value(|columns| {
                                         ordered_columns(&preferences_value, columns)
@@ -2683,8 +2792,22 @@ where
                                             })
                                             .collect::<Vec<_>>()
                                     });
+                                    let edit = edit_render.expect("draft rows have edit context");
                                     view! {
-                                        <tr data-entity-draft-row="true">
+                                        <tr
+                                            data-entity-draft-row="true"
+                                            on:keydown=move |event: web_sys::KeyboardEvent| {
+                                                if event.key() == "Escape"
+                                                    && edit.edit_state.with_untracked(|state| {
+                                                        state.target().is_some_and(EntityEditTarget::is_draft)
+                                                    })
+                                                {
+                                                    event.prevent_default();
+                                                    event.stop_propagation();
+                                                    edit.on_cancel.run(());
+                                                }
+                                            }
+                                        >
                                             {render_entity_row_cells(
                                                 None,
                                                 None,
@@ -2813,6 +2936,8 @@ where
             <div
                 class="flex shrink-0 flex-wrap items-center justify-between gap-3"
                 data-entity-table-footer="true"
+                inert=move || edit_locked.get()
+                aria-disabled=move || edit_locked.get().then_some("true")
             >
                 <div class="flex min-w-0 flex-wrap items-center gap-3">
                     // Stable hook for tests and consumers. Positional queries such as
@@ -2833,6 +2958,12 @@ where
                             value=Signal::derive(move || page_size.get().control_value())
                             node_ref=page_size_select
                             on_change=Callback::new(move |value: String| {
+                                if edit_locked.get_untracked() {
+                                    if let Some(select) = page_size_select.get() {
+                                        select.set_value(&page_size.get_untracked().control_value());
+                                    }
+                                    return;
+                                }
                                 apply_page_size_change(
                                     preferences,
                                     current_page,
@@ -2899,6 +3030,9 @@ where
                         attr:data-entity-page="previous"
                         disabled=Signal::derive(move || current_page.get() == 0)
                         on_click=Callback::new(move |_| {
+                            if edit_locked.get_untracked() {
+                                return;
+                            }
                             current_page.update(|page| *page = page.saturating_sub(1));
                         })
                     >
@@ -2913,7 +3047,11 @@ where
                                     attr:data-entity-page=(page + 1).to_string()
                                     active=page == current_page.get()
                                     disabled=page == current_page.get()
-                                    on_click=Callback::new(move |_| current_page.set(page))
+                                    on_click=Callback::new(move |_| {
+                                        if !edit_locked.get_untracked() {
+                                            current_page.set(page);
+                                        }
+                                    })
                                 >
                                     {(page + 1).to_string()}
                                 </Button>
@@ -2930,6 +3068,9 @@ where
                             current_page.get() + 1 >= total_pages.get()
                         })
                         on_click=Callback::new(move |_| {
+                            if edit_locked.get_untracked() {
+                                return;
+                            }
                             current_page.update(|page| {
                                 *page = clamp_page(
                                     page.saturating_add(1),
@@ -3063,6 +3204,8 @@ fn render_group_section<T: Clone + 'static>(
     let body_id = next_entity_group_id();
     let heading_id = format!("{body_id}-heading");
     let labelled_by = heading_id.clone();
+    let edit_locked =
+        Signal::derive_local(move || row.edit_state.with(EntityEditState::is_editing));
 
     let label_key = group_key.clone();
     let label = move || {
@@ -3104,6 +3247,11 @@ fn render_group_section<T: Clone + 'static>(
                 aria-controls=toggle_controls
                 aria-label=toggle_label
                 on:click=move |event| {
+                    if edit_locked.get_untracked() {
+                        event.prevent_default();
+                        event.stop_propagation();
+                        return;
+                    }
                     let Some(on_collapse_change) = on_collapse_change else {
                         return;
                     };
@@ -3169,6 +3317,8 @@ fn render_group_section<T: Clone + 'static>(
                 class="bg-table-filter text-table-filter-content forced-colors:bg-[Canvas] forced-colors:text-[CanvasText]"
                 data-entity-group-header=group_key.clone()
                 data-entity-group-continued=continued.then_some("true")
+                inert=move || edit_locked.get()
+                aria-disabled=move || edit_locked.get().then_some("true")
             >
                 <th
                     id=heading_id
@@ -3385,6 +3535,10 @@ fn render_keyed_row<T: Clone + 'static>(
             <td
                 class="w-12 border border-table-grid p-2 text-center align-middle forced-colors:border-[CanvasText]"
                 data-entity-selection-cell="true"
+                inert=move || edit_state.with(EntityEditState::is_editing)
+                aria-disabled=move || {
+                    edit_state.with(EntityEditState::is_editing).then_some("true")
+                }
                 // The checkbox owns its gesture outright: without this the
                 // same click would also reach the row's activation handler.
                 on:click=move |event: web_sys::MouseEvent| event.stop_propagation()
@@ -3403,6 +3557,9 @@ fn render_keyed_row<T: Clone + 'static>(
                     }
                     prop:checked=checked_accepted
                     on:change=move |_| {
+                        if edit_state.with_untracked(EntityEditState::is_editing) {
+                            return;
+                        }
                         let accepted_now = change_accepted();
                         // Same controlled re-assertion as the header: the
                         // browser already flipped the box, so put accepted
@@ -3428,13 +3585,20 @@ fn render_keyed_row<T: Clone + 'static>(
 
     // Two closures need it (aria-disabled and tabindex), so each gets its own.
     let inert_key = key.clone();
+    let native_inert_key = key.clone();
     let inert_key_tabindex = key.clone();
+    let escape_key = key.clone();
     let render_key = key.clone();
     view! {
         <tr
             data-row-key=key.clone()
             data-entity-row-key=key
             data-entity-visible-position=move || visible_position.get()
+            inert=move || {
+                edit_state.with(|state| {
+                    state.is_editing() && !state.is_row_live(&native_inert_key)
+                })
+            }
             // `ldui-ff2f`: while any row is live, every OTHER row is inert.
             //
             // Deliberately diverges from the `aria-disabled` precedent at the
@@ -3474,6 +3638,11 @@ fn render_keyed_row<T: Clone + 'static>(
                 if event_origin_is_action(event.target()) {
                     return;
                 }
+                if edit_state.with_untracked(EntityEditState::is_editing) {
+                    event.prevent_default();
+                    event.stop_propagation();
+                    return;
+                }
                 let ctrl = event.ctrl_key() || event.meta_key();
                 let shift = event.shift_key();
                 if let Some(selection) = selection {
@@ -3493,9 +3662,28 @@ fn render_keyed_row<T: Clone + 'static>(
                 }
             }
             on:keydown=move |event: web_sys::KeyboardEvent| {
+                if event.key() == "Escape"
+                    && edit.is_some_and(|context| {
+                        context
+                            .edit_state
+                            .with_untracked(|state| state.is_row_live(&escape_key))
+                    })
+                {
+                    event.prevent_default();
+                    event.stop_propagation();
+                    if let Some(context) = edit {
+                        context.on_cancel.run(());
+                    }
+                    return;
+                }
                 if !(event.key() == "Enter" || event.key() == " ")
                     || event_origin_is_action(event.target())
                 {
+                    return;
+                }
+                if edit_state.with_untracked(EntityEditState::is_editing) {
+                    event.prevent_default();
+                    event.stop_propagation();
                     return;
                 }
                 let ctrl = event.ctrl_key() || event.meta_key();
@@ -3848,7 +4036,7 @@ fn render_entity_row_cells<T: Clone + 'static>(
                         }
                     }
                     on:keydown=move |event| {
-                        if is_action {
+                        if is_action && event.key() != "Escape" {
                             event.stop_propagation();
                         }
                     }
@@ -3975,6 +4163,85 @@ fn focus_table_region(region: NodeRef<leptos::html::Div>) {
     if let Some(region) = region.get_untracked() {
         let _ = region.focus();
     }
+}
+
+fn inline_edit_target_root(
+    region: NodeRef<leptos::html::Div>,
+    target: &EntityEditTarget,
+) -> Option<web_sys::Element> {
+    let region = region.get_untracked()?;
+    match target {
+        EntityEditTarget::Draft => region
+            .query_selector("[data-entity-draft-row]")
+            .ok()
+            .flatten(),
+        EntityEditTarget::Existing(key) => {
+            let rows = region.query_selector_all("[data-entity-row-key]").ok()?;
+            for index in 0..rows.length() {
+                let Some(row) = rows
+                    .item(index)
+                    .and_then(|node| node.dyn_into::<web_sys::Element>().ok())
+                else {
+                    continue;
+                };
+                if row.get_attribute("data-entity-row-key").as_deref() == Some(key) {
+                    return Some(row);
+                }
+            }
+            None
+        }
+    }
+}
+
+fn focus_first_visible_edit_input(root: &web_sys::Element) -> bool {
+    let Ok(inputs) = root.query_selector_all("[data-entity-edit-input]:not([disabled])") else {
+        return false;
+    };
+    for index in 0..inputs.length() {
+        let Some(input) = inputs
+            .item(index)
+            .and_then(|node| node.dyn_into::<web_sys::HtmlElement>().ok())
+        else {
+            continue;
+        };
+        let rect = input.get_bounding_client_rect();
+        if rect.width() > 0.0 && rect.height() > 0.0 && input.focus().is_ok() {
+            return true;
+        }
+    }
+    false
+}
+
+fn focus_inline_edit_target(region: NodeRef<leptos::html::Div>, target: EntityEditTarget) {
+    request_animation_frame(move || {
+        let focused = inline_edit_target_root(region, &target)
+            .as_ref()
+            .is_some_and(focus_first_visible_edit_input);
+        if !focused {
+            focus_table_region(region);
+        }
+    });
+}
+
+fn restore_inline_edit_focus(
+    region: NodeRef<leptos::html::Div>,
+    add: NodeRef<leptos::html::Button>,
+    target: EntityEditTarget,
+) {
+    request_animation_frame(move || match target {
+        EntityEditTarget::Draft => {
+            if let Some(add) = add.get_untracked() {
+                let _ = add.focus();
+            } else {
+                focus_table_region(region);
+            }
+        }
+        EntityEditTarget::Existing(key) => {
+            if !focus_row_action(region, &key, "inline-edit") {
+                focus_table_region(region);
+            }
+        }
+    });
 }
 
 /// Focuses one row by stable key, if the table made that row focusable.
