@@ -948,6 +948,8 @@ pub fn EntityTableDraftRowFixture() -> impl IntoView {
     let plain_data = RwSignal::new_local(rows("office-mx"));
     let commits = RwSignal::new(0_u32);
     let last_committed = RwSignal::new(String::from("(none)"));
+    let last_target = RwSignal::new(String::from("(none)"));
+    let retired_rows = RwSignal::new(Vec::<String>::new());
     let pending_resolve = RwSignal::new(Option::<Callback<EntityEditOutcome>>::None);
 
     let apply_refresh = move |generation: u8| {
@@ -964,7 +966,7 @@ pub fn EntityTableDraftRowFixture() -> impl IntoView {
         focus_scope.set(format!("draft-scope-{generation}"));
     };
 
-    let editable_columns = || {
+    let editable_columns = move || {
         vec![
             EntityColumn::text("client", "Client", |row: &FixtureRow| row.client.clone())
                 .required()
@@ -982,18 +984,57 @@ pub fn EntityTableDraftRowFixture() -> impl IntoView {
                     |row: &FixtureRow| row.status.clone(),
                     |row: &mut FixtureRow, value| row.status = value,
                 )),
-            EntityColumn::action("actions", "Actions", |_row: &FixtureRow| String::new())
-                .inline_edit_host(),
+            EntityColumn::action("actions", "Actions", |_row: &FixtureRow| {
+                "Retire".to_owned()
+            })
+            .render_with(move |row: &FixtureRow| {
+                let key = row.id.clone();
+                let retire_key = key.clone();
+                view! {
+                    <EntityRowAction action_id="retire">
+                        <Button
+                            class="btn-xs btn-ghost"
+                            attr:data-fixture-retire=key
+                            on_click=Callback::new(move |_| {
+                                retired_rows.update(|rows| rows.push(retire_key.clone()));
+                            })
+                        >
+                            "Retire"
+                        </Button>
+                    </EntityRowAction>
+                }
+                .into_any()
+            })
+            .inline_edit_host(),
         ]
     };
 
     let on_commit = Callback::new(move |commit: EntityDraftCommit<FixtureRow>| {
         commits.update(|count| *count += 1);
         last_committed.set(format!("{}|{}", commit.row.client, commit.row.status));
+        last_target.set(match &commit.target {
+            leptos_daisyui_rs::components::EntityEditTarget::Draft => "draft".to_owned(),
+            leptos_daisyui_rs::components::EntityEditTarget::Existing(key) => {
+                format!("existing:{key}")
+            }
+        });
         // Held, not resolved: the table stays in flight until a button below
         // answers, which is the whole point of the resolve handle.
         pending_resolve.set(Some(commit.resolve));
     });
+    let draft_filters = vec![EntityColumnFilter::new("status", || {
+        view! {
+            <label class="block w-full">
+                <span class="sr-only">"Filter status"</span>
+                <input
+                    class="input input-xs w-full"
+                    data-testid="draft-status-filter"
+                    type="text"
+                />
+            </label>
+        }
+        .into_any()
+    })];
 
     view! {
         <section id="draft-row-fixture" class="mx-auto max-w-4xl space-y-6 bg-base-100 p-4">
@@ -1044,6 +1085,16 @@ pub fn EntityTableDraftRowFixture() -> impl IntoView {
                     "Last: "
                     <code data-testid="draft-last-committed">{move || last_committed.get()}</code>
                 </span>
+                <span>
+                    "Target: "
+                    <code data-testid="draft-last-target">{move || last_target.get()}</code>
+                </span>
+                <span>
+                    "Retired: "
+                    <code data-testid="draft-retire-count">
+                        {move || retired_rows.with(|rows| rows.len()).to_string()}
+                    </code>
+                </span>
             </div>
 
             <div data-testid="draft-optin-table" id="draft-optin">
@@ -1051,6 +1102,7 @@ pub fn EntityTableDraftRowFixture() -> impl IntoView {
                     data=data
                     source_data=source_data.into()
                     columns=editable_columns()
+                    column_filters=draft_filters
                     row_key=Rc::new(|row: &FixtureRow| row.id.clone())
                     dataset_identity=dataset_identity
                     page_reset_key=page_reset_key
@@ -1063,6 +1115,7 @@ pub fn EntityTableDraftRowFixture() -> impl IntoView {
                         },
                         on_commit,
                     )
+                    .allow_row_edit(true)
                 />
             </div>
 

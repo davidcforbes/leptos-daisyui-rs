@@ -73,6 +73,12 @@ async fn snapshot(harness: &pixelproof_web::Harness) -> Value {
                 lastCommitted: document
                     .querySelector('[data-testid="draft-last-committed"]')
                     ?.textContent?.trim() ?? null,
+                lastTarget: document
+                    .querySelector('[data-testid="draft-last-target"]')
+                    ?.textContent?.trim() ?? null,
+                retireCount: document
+                    .querySelector('[data-testid="draft-retire-count"]')
+                    ?.textContent?.trim() ?? null,
                 // Negative control.
                 plainPhase: plain?.dataset.entityEditPhase ?? null,
                 plainAddPresent: plain?.querySelector('[data-entity-draft-add]') !== null,
@@ -107,10 +113,19 @@ async fn refreshes_wait_for_edit_completion_and_only_the_latest_is_published() {
 }
 
 async fn type_into(harness: &pixelproof_web::Harness, column: &str, value: &str) {
+    type_into_selector(
+        harness,
+        &format!("#draft-optin [data-entity-draft-input={column:?}]"),
+        value,
+    )
+    .await;
+}
+
+async fn type_into_selector(harness: &pixelproof_web::Harness, selector: &str, value: &str) {
     let script = format!(
         r#"(() => {{
             const input = document.querySelector(
-                '#draft-optin [data-entity-draft-input="{column}"]'
+                {selector:?}
             );
             if (!input) {{ return false; }}
             const setter = Object.getOwnPropertyDescriptor(
@@ -124,8 +139,179 @@ async fn type_into(harness: &pixelproof_web::Harness, column: &str, value: &str)
     assert_eq!(
         eval_json(harness, &script).await,
         json!(true),
-        "could not find the {column} editor"
+        "could not find editor {selector}"
     );
+}
+
+async fn wide_structure(harness: &pixelproof_web::Harness, row_selector: &str) -> Value {
+    let script = format!(
+        r#"(() => {{
+            const table = document.querySelector('#draft-optin [data-entity-table-grid]');
+            const row = table?.querySelector({row_selector:?}) ?? null;
+            const host = row?.querySelector('td[data-entity-inline-edit-host]') ?? null;
+            const visibleCells = row
+                ? Array.from(row.children).filter(
+                    cell => getComputedStyle(cell).display === 'table-cell'
+                  ).length
+                : 0;
+            return {{
+                colTracks: table?.querySelectorAll('colgroup col').length ?? 0,
+                headers: table?.querySelectorAll(
+                    'thead > tr:first-child > th[data-entity-column]'
+                ).length ?? 0,
+                filters: table?.querySelectorAll(
+                    '[data-entity-column-filter-row] > th'
+                ).length ?? 0,
+                visibleCells,
+                hostCount: row?.querySelectorAll(
+                    ':scope > td[data-entity-inline-edit-host]'
+                ).length ?? 0,
+                hostActions: host
+                    ? Array.from(host.querySelectorAll('[data-entity-row-action]'))
+                        .map(action => action.dataset.entityRowAction)
+                    : [],
+                hasRetire: host?.querySelector('[data-fixture-retire]') !== null,
+                hasEdit: host?.querySelector('[data-entity-row-edit-state="edit"]') !== null,
+                hasSave: host?.querySelector('[data-entity-row-edit-state="save"], [data-entity-draft-save]') !== null,
+                hasCancel: host?.querySelector('[data-entity-row-cancel], [data-entity-draft-cancel]') !== null,
+            }};
+        }})()"#
+    );
+    eval_json(harness, &script).await
+}
+
+/// Existing-row editing reuses the consumer-declared action column. The
+/// framework must not append a fifth wide cell or replace the keyed row node.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-entity-draft-row)"]
+async fn existing_rows_edit_inside_the_declared_action_host() {
+    let harness = harness_at("/components/entity-table-draft-row").await;
+    wait_for_selector(&harness, "#draft-optin [data-entity-row-key='office-mx-1']").await;
+    begin_browser_error_capture(&harness).await;
+
+    let idle = wide_structure(&harness, "[data-entity-row-key='office-mx-1']").await;
+    assert_eq!(
+        idle["colTracks"],
+        json!(4),
+        "fixture declares four columns: {idle}"
+    );
+    assert_eq!(
+        idle["headers"],
+        json!(4),
+        "header tracks must match: {idle}"
+    );
+    assert_eq!(
+        idle["filters"],
+        json!(4),
+        "filter tracks must match: {idle}"
+    );
+    assert_eq!(
+        idle["visibleCells"],
+        json!(4),
+        "no synthetic cell is allowed: {idle}"
+    );
+    assert_eq!(
+        idle["hostCount"],
+        json!(1),
+        "one declared host cell: {idle}"
+    );
+    assert_eq!(
+        idle["hostActions"],
+        json!(["retire", "inline-edit"]),
+        "consumer and framework actions share the declared host: {idle}"
+    );
+    assert_eq!(idle["hasRetire"], json!(true));
+    assert_eq!(idle["hasEdit"], json!(true));
+
+    click(
+        &harness,
+        "#draft-optin [data-entity-row-key='office-mx-1'] [data-entity-inline-edit-host] [data-fixture-retire='office-mx-1']",
+    )
+    .await;
+    assert_eq!(snapshot(&harness).await["retireCount"], json!("1"));
+
+    assert_eq!(
+        eval_json(
+            &harness,
+            r##"(() => {
+                window.__entityEditedRow = document.querySelector(
+                    "#draft-optin [data-entity-row-key='office-mx-1']"
+                );
+                return window.__entityEditedRow !== null;
+            })()"##,
+        )
+        .await,
+        json!(true)
+    );
+    click(
+        &harness,
+        "#draft-optin [data-entity-row-key='office-mx-1'] [data-entity-row-edit-state='edit']",
+    )
+    .await;
+
+    let editing = wide_structure(&harness, "[data-entity-row-key='office-mx-1']").await;
+    assert_eq!(
+        editing["visibleCells"],
+        json!(4),
+        "edit keeps four cells: {editing}"
+    );
+    assert_eq!(editing["hostActions"], json!(["inline-edit"]));
+    assert_eq!(
+        editing["hasRetire"],
+        json!(false),
+        "consumer actions are inert by absence"
+    );
+    assert_eq!(editing["hasSave"], json!(true));
+    assert_eq!(editing["hasCancel"], json!(true));
+    assert_eq!(
+        eval_json(
+            &harness,
+            r##"window.__entityEditedRow === document.querySelector(
+                "#draft-optin [data-entity-row-key='office-mx-1']"
+            )"##,
+        )
+        .await,
+        json!(true),
+        "editing must preserve the keyed tr node"
+    );
+
+    type_into_selector(
+        &harness,
+        "#draft-optin [data-entity-row-key='office-mx-1'] [data-entity-edit-input='client']",
+        "Edited Client",
+    )
+    .await;
+    type_into_selector(
+        &harness,
+        "#draft-optin [data-entity-row-key='office-mx-1'] [data-entity-edit-input='status']",
+        "Reviewed",
+    )
+    .await;
+    click(
+        &harness,
+        "#draft-optin [data-entity-row-key='office-mx-1'] [data-entity-row-edit-state='save']",
+    )
+    .await;
+    let committing = snapshot(&harness).await;
+    assert_eq!(committing["phase"], json!("committing"));
+    assert_eq!(committing["lastTarget"], json!("existing:office-mx-1"));
+    assert_eq!(committing["lastCommitted"], json!("Edited Client|Reviewed"));
+
+    click(&harness, "[data-testid='draft-reject']").await;
+    assert_eq!(snapshot(&harness).await["phase"], json!("drafting"));
+    assert_eq!(
+        eval_json(
+            &harness,
+            r##"document.querySelector(
+                "#draft-optin [data-entity-row-key='office-mx-1'] [data-entity-edit-input='client']"
+            )?.value"##,
+        )
+        .await,
+        json!("Edited Client"),
+        "a rejected existing-row commit keeps its typed working clone"
+    );
+
+    assert_no_browser_errors(&harness, "EntityTable existing-row inline edit").await;
 }
 
 /// `ldui-ff2f` acceptance: `+` inserts an editable row, only opted-in columns
@@ -162,6 +348,7 @@ async fn draft_row_edits_commit_and_cancel_without_touching_a_plain_table() {
     // --- `+` inserts an editable row ------------------------------------
     click(&harness, "#draft-optin [data-entity-draft-add]").await;
     let drafting = snapshot(&harness).await;
+    let draft_layout = wide_structure(&harness, "[data-entity-draft-row]").await;
     assert_eq!(drafting["phase"], json!("drafting"));
     assert_eq!(drafting["draftPresent"], json!(true));
     assert_eq!(
@@ -175,6 +362,15 @@ async fn draft_row_edits_commit_and_cancel_without_touching_a_plain_table() {
         json!(["client", "status"]),
         "only columns that called .editable() may accept input: {drafting}"
     );
+    assert_eq!(
+        draft_layout["visibleCells"],
+        json!(4),
+        "the draft uses the same four declared tracks: {draft_layout}"
+    );
+    assert_eq!(draft_layout["hostCount"], json!(1));
+    assert_eq!(draft_layout["hostActions"], json!(["inline-edit"]));
+    assert_eq!(draft_layout["hasSave"], json!(true));
+    assert_eq!(draft_layout["hasCancel"], json!(true));
 
     // Every other row is inert and out of the tab order.
     let data_rows = drafting["dataRowCount"].as_u64().expect("row count");
@@ -212,6 +408,7 @@ async fn draft_row_edits_commit_and_cancel_without_touching_a_plain_table() {
         // those values. The assertion cannot pass vacuously.
         "the consumer receives exactly what was typed"
     );
+    assert_eq!(committing["lastTarget"], json!("draft"));
     assert_eq!(
         committing["saveDisabled"],
         json!(true),
