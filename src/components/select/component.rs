@@ -89,14 +89,47 @@ pub fn Select(
     #[prop(optional)]
     on_change: Option<Callback<String>>,
 
+    /// Opaque revision of the option set (`ldui-uxdw`).
+    ///
+    /// Changing it re-asserts `value` against the DOM. Supply it whenever the
+    /// options can arrive or change **after** first render — otherwise the
+    /// browser's own choice (index 0) wins and the bound value is silently
+    /// lost. `children` is a `Children` closure, not a signal, so the
+    /// component cannot detect this by itself; the caller has to say.
+    ///
+    /// Any value that changes with the option set works: a length, a hash, a
+    /// join of the option keys.
+    #[prop(optional, into)]
+    options_revision: Option<Signal<String>>,
+
     /// Child elements (typically SelectOption components)
     children: Children,
 ) -> impl IntoView {
     // Re-assert the DOM property whenever the bound signal changes. Runs after
     // render, so it wins over whatever the browser chose when the options were
     // (re)created.
+    //
+    // `ldui-uxdw`: that promise used to be false for ASYNC options, and the
+    // comment above was the tell. The effect tracked only `value`, so:
+    //   1. first render, options empty -> set_value finds no such <option>,
+    //      the browser keeps index 0
+    //   2. options arrive, children re-render, the browser selects index 0
+    //   3. the effect does NOT re-run, because `value` never changed
+    // The selection was then silently wrong -- a real office name in the
+    // caption, the alphabetically-first one in the control.
+    //
+    // Tracking `options_revision` closes it: the caller names when the option
+    // set changed, and this effect re-asserts after the browser has rebuilt
+    // the list.
     if let Some(v) = value {
         Effect::new(move |_| {
+            // Read FIRST and unconditionally, so it is a tracked dependency
+            // even on the render where the value happens to be unchanged.
+            // A `let _ =` that some future cleanup "simplifies" away silently
+            // restores the bug, which is why it is spelled out here.
+            if let Some(revision) = options_revision {
+                let _options_changed = revision.get();
+            }
             let want = v.get();
             if let Some(el) = node_ref.get() {
                 el.set_value(&want);

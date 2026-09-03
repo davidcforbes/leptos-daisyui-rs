@@ -132,6 +132,15 @@ pub fn DatasetSelector(
                     id=control_id
                     label=Signal::derive(move || Some(label.get()))
                     value=selected
+                    // `ldui-uxdw`: this pattern owns BOTH signals, so it can
+                    // tell `Select` when the option set changed and no caller
+                    // has to know the hazard exists. Without it, options that
+                    // arrive asynchronously leave the browser's index-0 choice
+                    // in place while `selected` still says otherwise -- two
+                    // Office pages showed "Charlotte" beside Raleigh's rows.
+                    options_revision=Signal::derive(move || {
+                        options.with(|options| dataset_options_revision(options))
+                    })
                     disabled=Signal::derive(move || {
                         selector_disabled(disabled.get(), loading.get())
                     })
@@ -184,5 +193,75 @@ pub fn DatasetSelector(
                 </div>
             })}
         </div>
+    }
+}
+
+/// An opaque revision of a dataset selector's option set (`ldui-uxdw`).
+///
+/// Fed to [`Select`]'s `options_revision` so the bound value is re-asserted
+/// after the browser rebuilds the option list. Any value that changes with the
+/// option set would do; this one is derived from the option VALUES because
+/// those are what `<option value=…>` matches on, so it changes exactly when
+/// the set the browser can select from changes.
+///
+/// Uses a unit separator rather than a comma so two option sets cannot collide
+/// by containing a separator inside a value — `["a,b"]` and `["a", "b"]` are
+/// different sets and must produce different revisions.
+fn dataset_options_revision(options: &[DatasetOption]) -> String {
+    let mut revision = String::with_capacity(options.len() * 8);
+    for option in options {
+        revision.push_str(&option.value);
+        revision.push('\u{1f}');
+    }
+    revision
+}
+
+#[cfg(test)]
+mod revision_tests {
+    use super::{DatasetOption, dataset_options_revision};
+
+    fn option(value: &str) -> DatasetOption {
+        DatasetOption {
+            value: value.to_owned(),
+            label: value.to_owned(),
+            disabled: false,
+        }
+    }
+
+    /// The property the whole `ldui-uxdw` fix rests on: the revision must
+    /// change whenever the option set does, or the re-assert effect never
+    /// re-runs and the browser's index-0 choice silently wins.
+    #[test]
+    fn the_revision_changes_whenever_the_option_set_does() {
+        let empty = dataset_options_revision(&[]);
+        let loaded = dataset_options_revision(&[option("raleigh"), option("charlotte")]);
+
+        // The exact transition that failed in production: options arrive after
+        // first render, so empty -> loaded MUST be observable.
+        assert_ne!(
+            empty, loaded,
+            "options arriving asynchronously must change the revision"
+        );
+
+        // Order matters: the browser's index-0 differs, so the same members in
+        // a different order is a different set for this purpose.
+        let reordered = dataset_options_revision(&[option("charlotte"), option("raleigh")]);
+        assert_ne!(loaded, reordered);
+
+        // Stable for an unchanged set, so this does not thrash the effect on
+        // every unrelated render.
+        assert_eq!(
+            loaded,
+            dataset_options_revision(&[option("raleigh"), option("charlotte")])
+        );
+    }
+
+    /// A separator inside a value must not let two different sets collide.
+    #[test]
+    fn values_containing_a_separator_cannot_collide() {
+        assert_ne!(
+            dataset_options_revision(&[option("a,b")]),
+            dataset_options_revision(&[option("a"), option("b")]),
+        );
     }
 }
