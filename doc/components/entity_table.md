@@ -47,6 +47,7 @@ erase the compile-time distinction the snapshot component exists to provide.
 | `dataset_identity: Signal<String>` | Identifies the downloaded dataset; a change resets only the current page. |
 | `page_reset_key` | Optional identity for local view-state changes that should reset only paging. |
 | `viewport_fit` | Optional `EntityTableViewportFit`; adds an explicit `Auto` rows-per-page choice that derives visible row capacity from a definite parent or CSS height, without changing the saved page-size preference. |
+| `draft_row: EntityDraftRow<T>` | Optional inline draft-row and per-row editing (`ldui-ff2f`). Absent, the table renders no `+`, has no edit mode, and emits no extra DOM. |
 | `compact_row: EntityCompactRow<T>` | Default, static, or reactive single-cell renderer used at compact breakpoints without duplicating rows. |
 | `column_filters: EntityColumnFilters` | Controlled one-to-one filter controls aligned beneath stable desktop columns. |
 | `source_data` | Optional authoritative source membership used only for safe post-removal focus recovery. |
@@ -532,6 +533,99 @@ These are generated semantic utilities, not demo-only CSS. Every consuming
 Tailwind build must import `leptos-daisyui-rs/styles/tokens.css` and scan
 `leptos-daisyui-rs/src/**/*.rs`, with paths resolved from its own `input.css`.
 See the [DataTable consumer CSS setup](./data_table.md#consumer-inputcss).
+
+## Inline draft-row editing (ldui-ff2f)
+
+Opt in with `draft_row` and mark the columns that accept input. Omitting the
+prop leaves the table exactly as it was: no `+`, no edit mode, no extra DOM.
+
+```rust,no_run
+let columns = vec![
+    EntityColumn::text("name", "Name", |r: &WorkType| r.name.clone())
+        .editable(EntityCellEditor::text(
+            |r: &WorkType| r.name.clone(),
+            |r: &mut WorkType, value| r.name = value,
+        )),
+    // No `.editable(...)`: stays read-only even inside the live row.
+    EntityColumn::text("created", "Created", |r: &WorkType| r.created.clone()),
+];
+
+view! {
+    <EntityTable
+        data=rows
+        columns=columns
+        row_key=row_key
+        dataset_identity="work-types"
+        draft_row=EntityDraftRow::new(WorkType::blank, on_commit)
+            .with_texts(draft_texts)
+    />
+}
+```
+
+### One mode, exclusive by construction
+
+While a row is live, **every other row is inert** — `aria-disabled="true"` and
+out of the tab order. That is not decoration: it is the invariant the whole
+feature rests on. A second entry point firing while a row is live is *refused*
+(`EntityEditDisposition::IgnoredBusy`), so two simultaneously editable rows are
+unrepresentable rather than merely discouraged.
+
+Inert rows leave the tab order, which deliberately differs from the
+`aria-disabled` treatment of the empty-table header checkbox. That control
+stays tabbable so a keyboard user hears *why* it is inert — right for one
+control, wrong for N rows, since seventeen tabbable disabled rows would make
+Tab-to-Save walk the whole table first.
+
+### The consumer owns persistence
+
+Save hands over the edited row and a `resolve` handle, then **waits**:
+
+```rust,no_run
+let on_commit = Callback::new(move |commit: EntityDraftCommit<WorkType>| {
+    spawn_local(async move {
+        match save_work_type(commit.row).await {
+            Ok(()) => commit.resolve.run(EntityEditOutcome::Accepted),
+            Err(e) => commit.resolve.run(EntityEditOutcome::Rejected(e.to_string())),
+        }
+    });
+});
+```
+
+Until `resolve` runs the table stays in `Committing`: Save is disabled (no
+double submit) and the row cannot change underneath the write. `Rejected`
+returns to editing **with the user's input intact** and the message available;
+typing then clears it, because it described a value the user has since changed.
+
+`Accepted` ends the session and drops the row — the saved row re-enters through
+your normal data flow rather than being injected by the table.
+
+### A refresh cannot evict the draft
+
+The live row is table-local state layered over `data`; it was never in that
+collection. So replacing `data` mid-edit leaves the draft and its typing
+untouched, with no special case.
+
+### Observability
+
+`data-entity-edit-phase` on the table root reports `idle` / `drafting` /
+`committing`, and is absent entirely on a table that did not opt in. Prefer it
+to inferring state from which controls happen to be disabled. The draft row is
+`data-entity-draft-row`, its editors `data-entity-draft-input="<column-id>"`,
+and its controls `data-entity-draft-save` / `-cancel`; the toolbar action is
+`data-entity-draft-add`.
+
+Proof: `cargo xtask test-entity-draft-row`, whose fixture mounts an opted-in
+and a plain table on one document so every claim carries a negative control.
+
+### Not yet supported
+
+- **Editing an existing row** is designed but not built — the Edit⇄Save
+  relabelling needs a decision about who owns the action column's button, since
+  that column is consumer-rendered. See
+  `doc/plans/2026-09-03-entity-table-inline-edit-design.md`.
+- **Grouped tables**: the draft row renders in the ungrouped `<tbody>` only.
+  Which group a new row belongs to is a question the framework should not
+  answer for you.
 
 ## Row-action focus recovery
 

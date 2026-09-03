@@ -58,6 +58,9 @@ cargo xtask test-heatmap-matrix        # Heatmap two-axis grid + hidden matrix (
 cargo xtask test-collapse-naming       # Collapse toggle id/name + title-derived accessible name (ldui-3k00)
 cargo xtask test-data-table-fit        # DataTable undeclared columns fit w-full; declared tracks scroll (ldui-qsqz)
 cargo xtask test-snapshot-table-page-filter-actions  # SnapshotTablePage's opt-in count/Reset/Save row (ldui-nj3q)
+cargo xtask test-entity-draft-row      # EntityTable inline draft-row editing (ldui-ff2f)
+cargo xtask test-app-shell             # AppShell region contract (ldui-a8an)
+cargo xtask test-field-context-scoping # Field id minting / no inheritance (ldui-a8an)
 cargo xtask gen-tokens [--check]     # regenerate styles/tokens.css from ui-tokens
 cargo xtask check-sibling-tokens     # preamble.rs's ui_tokens refs must exist on the sibling's DEFAULT branch
 cargo xtask bump patch|minor|major   # bump the library version (human-chosen level)

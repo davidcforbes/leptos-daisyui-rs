@@ -1,6 +1,18 @@
 # EntityTable inline draft-row editing — design proposal (ldui-ff2f)
 
-**Status:** proposal, awaiting framework-owner review. Nothing implemented.
+> **Implementation status, 2026-09-03.** The **draft-row path is built and on
+> main** (`a7ade64`): the exclusive reducer (§2), per-column editors (§3.2),
+> the commit/resolve payload (§3.3), the toolbar `+`, draft-row rendering, and
+> the inert treatment (§4). Consumer documentation lives in
+> [`doc/components/entity_table.md`](../components/entity_table.md#inline-draft-row-editing-ldui-ff2f);
+> the proof is `cargo xtask test-entity-draft-row`, verified pass **and**
+> break-and-revert.
+>
+> **Not built:** editing an *existing* row (§4b) — it needs the open decision
+> about who owns the action column's Edit⇄Save button, since that column is
+> consumer-rendered. Everything else below is now description rather than
+> proposal.
+
 **Filed from:** 4iiz-Office Setup page (Work Types), owner request 2026-09-03.
 **Related:** `ldui-tmoz` (hiding the rows-per-page control on the same page).
 
