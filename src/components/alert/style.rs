@@ -93,3 +93,51 @@ impl AlertDirection {
         }
     }
 }
+
+/// How assistive technology should treat an [`Alert`](super::Alert)'s content
+/// (`ldui-fmiu`).
+///
+/// `role="alert"` carries an implicit `aria-live="assertive"`, which tells a
+/// screen reader to **interrupt the user** and announce the content at once.
+/// That is right for a transient message and wrong for a permanent panel — and
+/// consumers reach for `Alert` for both, because it is the only component with
+/// that visual treatment.
+///
+/// The live case that prompted this: a static "Why they did not hire" panel,
+/// present on every page load and never updated, interrupting a screen-reader
+/// user every single time. Nothing about it was an alert; it just needed a
+/// soft-warning-coloured box.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AlertLiveness {
+    /// `role="alert"` — interrupts the user. The default, so every existing
+    /// call site keeps today's behaviour exactly.
+    ///
+    /// Correct for a message that appears in response to something the user
+    /// did and that they must hear about now: "Send failed", "Session expired".
+    #[default]
+    Assertive,
+    /// `role="status"` — announced at the next natural pause instead of
+    /// interrupting.
+    ///
+    /// Correct for a message that updates in place and matters, but not
+    /// urgently: "Saved", "3 of 5 uploaded".
+    Polite,
+    /// No ARIA role at all — a plain styled container.
+    ///
+    /// Correct for permanent page furniture that happens to want the alert
+    /// visual: a standing informational panel that is part of the record, not
+    /// an event. A live region that never changes has nothing to announce, and
+    /// announcing it on every load is pure noise.
+    Static,
+}
+
+impl AlertLiveness {
+    /// The ARIA role this liveness emits, or `None` for [`Self::Static`].
+    pub const fn role(self) -> Option<&'static str> {
+        match self {
+            Self::Assertive => Some("alert"),
+            Self::Polite => Some("status"),
+            Self::Static => None,
+        }
+    }
+}

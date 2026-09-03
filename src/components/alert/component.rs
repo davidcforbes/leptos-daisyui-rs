@@ -1,4 +1,4 @@
-use super::style::{AlertColor, AlertDirection, AlertStyle};
+use super::style::{AlertColor, AlertDirection, AlertLiveness, AlertStyle};
 use crate::merge_classes;
 use leptos::{html::Div, prelude::*};
 
@@ -36,12 +36,25 @@ pub fn Alert(
     #[prop(optional, into)]
     class: &'static str,
 
+    /// How assistive technology treats this content (`ldui-fmiu`). Defaults to
+    /// [`AlertLiveness::Assertive`] — `role="alert"` — so existing call sites
+    /// are unchanged. Use [`AlertLiveness::Static`] for a permanent panel that
+    /// only wants the visual treatment.
+    #[prop(optional, into)]
+    liveness: Signal<AlertLiveness>,
+
     /// Alert content (text, icons, buttons, or other elements)
     children: Children,
 ) -> impl IntoView {
     view! {
         <div
-            role="alert"
+            // `ldui-fmiu`: was a hardcoded role="alert", whose implicit
+            // aria-live="assertive" interrupts a screen-reader user. Correct
+            // for a transient message, wrong for a permanent panel -- and this
+            // component is used for both because it owns the visual. `Static`
+            // emits no role at all, because a live region that never changes
+            // has nothing to announce.
+            role=move || liveness.get().role()
             node_ref=node_ref
             class=move || {
                 merge_classes!(

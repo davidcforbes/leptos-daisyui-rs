@@ -156,3 +156,41 @@ fn test_all_alert_directions_return_valid_classes() {
         assert_eq!(direction.as_str(), expected);
     }
 }
+
+/// `ldui-fmiu`: `Alert` used to hardcode `role="alert"`, whose implicit
+/// `aria-live="assertive"` interrupts a screen-reader user. Correct for a
+/// transient message, wrong for a permanent panel — and this component gets
+/// used for both because it owns the visual treatment.
+#[test]
+fn alert_liveness_maps_to_the_right_aria_role() {
+    use super::style::AlertLiveness;
+
+    // The default must be today's behaviour, or this is a breaking change for
+    // every existing call site.
+    assert_eq!(AlertLiveness::default(), AlertLiveness::Assertive);
+    assert_eq!(AlertLiveness::Assertive.role(), Some("alert"));
+
+    // Polite announces at the next pause instead of interrupting.
+    assert_eq!(AlertLiveness::Polite.role(), Some("status"));
+
+    // Static emits NO role. Not `role="none"`, not an empty string — the
+    // attribute is absent, because a live region that never changes has
+    // nothing to announce and announcing it every page load is pure noise.
+    assert_eq!(
+        AlertLiveness::Static.role(),
+        None,
+        "a permanent panel must not be a live region at all"
+    );
+
+    // The three are genuinely distinct, so a caller cannot pick the wrong one
+    // and get the right result by accident.
+    let roles = [
+        AlertLiveness::Assertive.role(),
+        AlertLiveness::Polite.role(),
+        AlertLiveness::Static.role(),
+    ];
+    let mut seen = roles.to_vec();
+    seen.sort_unstable();
+    seen.dedup();
+    assert_eq!(seen.len(), 3, "each liveness must produce a distinct role");
+}
