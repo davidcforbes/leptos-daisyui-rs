@@ -177,22 +177,57 @@ I am flagging this rather than quietly diverging: the two rules look identical
 and are not, and a future reader comparing them deserves to know which case
 they are in.
 
+## 4b. Editing an existing row — answered
+
+Owner, 2026-09-03:
+
+> If the user presses the Edit button on any particular row, **the table goes
+> disabled**, the selected row becomes editable and the Edit button becomes
+> the Save button to commit the updates and invoke the save function, and
+> return the table to readonly mode.
+
+So the two paths are **one mode with two entry points**, exactly as hoped:
+
+| | Entry | Editable row | Commit control | Exit |
+|---|---|---|---|---|
+| Create | toolbar `+` | a new blank row | that row's action button | Save ⇒ Idle, Escape ⇒ Idle, row dropped |
+| Update | a row's Edit button | that existing row | the same button, relabelled | Save ⇒ Idle, Escape ⇒ Idle, edits discarded |
+
+The state machine in §2 is unchanged — `Drafting` simply gains a second way in
+and carries which row is live. Nothing else in this design moves, which is a
+good sign the exclusive-mode constraint was the right backbone.
+
+**"The table goes disabled" resolves two further questions by implication,**
+and I am recording the inference explicitly rather than pretending it was
+stated:
+
+- **Sort / filter / paging are locked** while a row is live (was question 2).
+  They are part of the table, and the alternative re-sorts or pages away the
+  row the user is typing into.
+- **Other rows' action buttons go inert** (was question 5). This is not merely
+  consistent — it is *required*: if a second row's Edit button stayed live,
+  pressing it would open a second editable row and break the single-live-row
+  invariant the whole design rests on. Retire on another row goes inert with
+  it, which the plain reading of "the table goes disabled" also supports.
+
 ## 5. Open questions for review
 
-These are the ones where I do not want to guess:
+Down to one real decision plus one confirmation:
 
-1. **Does the same mode cover editing *existing* rows?** The bead title says
-   "and per-row Edit/Save editing", but your interaction spec describes only
-   the draft-row path. The exclusive-mode design extends to it symmetrically
-   (click Edit ⇒ that row becomes the editable one, all others disabled,
-   button reads Save) at modest extra cost. **Recommend: yes, same mode** —
-   but confirm, because it roughly doubles the test surface.
-2. **Are sort / filter / paging locked during Drafting?** If they are not, a
-   sort can move the draft row out from under the user, or a page change can
-   scroll it away entirely. **Recommend: lock them** (same `aria-disabled`
-   treatment) — the alternative is a genuinely confusing UI.
-3. **Confirm the `Committing` state** (§2) rather than optimistic drop.
-4. **Confirm the `EntityColumn` field addition** is acceptable (§3.2).
+1. ~~Does the same mode cover editing existing rows?~~ **Answered: yes** (§4b).
+2. ~~Are sort / filter / paging locked during Drafting?~~ **Answered: yes**, by
+   implication of "the table goes disabled" (§4b).
+3. **Confirm the `Committing` state** (§2) rather than an optimistic drop.
+   This is the only genuine design question left. Recommend keeping it: the
+   consumer owns persistence and persistence is async, so without it Save must
+   either drop the row before the write is confirmed (losing the user's input
+   if it fails) or freeze the UI. The cost is one extra state and a `resolve`
+   handle on the payload.
+4. **Confirm the `EntityColumn` field addition** (§3.2) — verified
+   source-compatible against all 20 Office surfaces, so this is a
+   confirmation rather than a risk.
+5. ~~Do other rows keep their action buttons live?~~ **Answered: no**, and it
+   is forced by the exclusivity invariant (§4b).
 5. **Do *other* rows keep their action buttons live during Drafting?** The
    clarification says the Retire / Edit-Save column "must be selectable". For
    the row being edited that is settled — its Save button is the commit
@@ -248,6 +283,21 @@ Following this repo's rule that a suite registered in no lane runs nowhere
 
 ## 8. Recommendation
 
-Approve §2–§4 and answer the four questions in §5, and this is a well-bounded
-build. The exclusive-mode constraint from your spec is what makes it
-tractable: it removes the concurrency that would otherwise dominate the design.
+The design is settled apart from question 3 (`Committing`) and the question 4
+confirmation. Three of the five original questions were resolved by the
+owner's two clarifications, and none of them moved the backbone — the
+exclusive-mode constraint absorbed every one, which is the strongest evidence
+available that it is the right shape.
+
+Ready to build on a go-ahead. Implementation order:
+
+1. The state machine as a pure, testable reducer (no rendering) — Idle,
+   Drafting{row}, Committing{row}, with the transitions and the stale-resolve
+   rule. This is where the correctness lives, and it is native-testable.
+2. `EntityCellEditor` + `EntityColumn::editable`, with read-only fallback for
+   derived columns.
+3. Rendering: the `+` toolbar button, the row action cell's Edit⇄Save
+   relabelling, and the table-wide inert treatment.
+4. The demo fixture (opted-in **and** plain table on one document) and the
+   `test-entity-draft-row` browser lane, registered as its own xtask step and
+   in `full_steps()`, verified by the step count changing.
