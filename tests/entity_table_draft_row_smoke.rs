@@ -18,6 +18,7 @@ use chromiumoxide::cdp::browser_protocol::input::{DispatchKeyEventParams, Dispat
 use common::{
     assert_no_browser_errors, begin_browser_error_capture, click, harness_at, wait_for_selector,
 };
+use pixelproof_web::ViewportSize;
 use serde_json::{Value, json};
 
 async fn eval_json(harness: &pixelproof_web::Harness, expression: &str) -> Value {
@@ -108,8 +109,10 @@ async fn snapshot(harness: &pixelproof_web::Harness) -> Value {
             const optin = document.querySelector('#draft-optin [data-entity-table]');
             const plain = document.querySelector('#draft-plain [data-entity-table]');
             const draft = optin?.querySelector('[data-entity-draft-row]') ?? null;
+            const draftHost = draft?.querySelector('[data-entity-inline-edit-host]') ?? null;
             const inputs = draft
                 ? Array.from(draft.querySelectorAll('[data-entity-draft-input]'))
+                    .filter(input => input.getClientRects().length > 0)
                 : [];
             const dataRows = Array.from(
                 optin?.querySelectorAll('[data-entity-row-key]') ?? []
@@ -123,9 +126,9 @@ async fn snapshot(harness: &pixelproof_web::Harness) -> Value {
                 // Only columns that opted in get an editor; the derived `id`
                 // column must stay read-only even inside the live row.
                 editorColumns: inputs.map(i => i.dataset.entityDraftInput),
-                savePresent: draft?.querySelector('[data-entity-draft-save]') !== null,
+                savePresent: draftHost?.querySelector('[data-entity-draft-save]') !== null,
                 saveDisabled:
-                    draft?.querySelector('[data-entity-draft-save]')?.disabled ?? null,
+                    draftHost?.querySelector('[data-entity-draft-save]')?.disabled ?? null,
                 // Inert treatment: every data row while a row is live.
                 dataRowCount: dataRows.length,
                 renderedRows: dataRows.map(row =>
@@ -189,6 +192,8 @@ async fn active_control(harness: &pixelproof_web::Harness) -> Value {
                 editState: active?.dataset.entityRowEditState ?? null,
                 draftAdd: active?.hasAttribute('data-entity-draft-add') ?? false,
                 draftSave: active?.hasAttribute('data-entity-draft-save') ?? false,
+                rowCancel: active?.hasAttribute('data-entity-row-cancel') ?? false,
+                compact: active?.closest('[data-entity-compact-row]') !== null,
                 rowKey: active?.closest('[data-entity-row-key]')
                     ?.dataset.entityRowKey ?? null,
                 action: active?.closest('[data-entity-row-action]')
@@ -249,7 +254,7 @@ async fn edit_mode_owns_focus_and_locks_table_mutations() {
     // table operation, including consumer-owned descendants.
     click(
         &harness,
-        "#draft-optin [data-entity-row-key='office-mx-1'] [data-entity-row-edit-state='edit']",
+        "#draft-optin [data-entity-row-key='office-mx-1'] [data-entity-inline-edit-host] [data-entity-row-edit-state='edit']",
     )
     .await;
     let existing_focus = active_control(&harness).await;
@@ -363,14 +368,14 @@ async fn edit_mode_owns_focus_and_locks_table_mutations() {
     // boundary. A rejection returns to Drafting, where Escape is truthful.
     click(
         &harness,
-        "#draft-optin [data-entity-row-key='office-mx-1'] [data-entity-row-edit-state='edit']",
+        "#draft-optin [data-entity-row-key='office-mx-1'] [data-entity-inline-edit-host] [data-entity-row-edit-state='edit']",
     )
     .await;
     press_tab(&harness).await;
     press_tab(&harness).await;
     click(
         &harness,
-        "#draft-optin [data-entity-row-key='office-mx-1'] [data-entity-row-edit-state='save']",
+        "#draft-optin [data-entity-row-key='office-mx-1'] [data-entity-inline-edit-host] [data-entity-row-edit-state='save']",
     )
     .await;
     assert_eq!(snapshot(&harness).await["phase"], json!("committing"));
@@ -383,7 +388,7 @@ async fn edit_mode_owns_focus_and_locks_table_mutations() {
     click(&harness, "[data-testid='draft-reject']").await;
     click(
         &harness,
-        "#draft-optin [data-entity-row-key='office-mx-1'] [data-entity-edit-input='client']",
+        "#draft-optin [data-entity-row-key='office-mx-1'] td[data-entity-column='client'] [data-entity-edit-input='client']",
     )
     .await;
     press_escape(&harness).await;
@@ -393,13 +398,13 @@ async fn edit_mode_owns_focus_and_locks_table_mutations() {
     // the named table region rather than guessing a neighboring row.
     click(
         &harness,
-        "#draft-optin [data-entity-row-key='office-mx-1'] [data-entity-row-edit-state='edit']",
+        "#draft-optin [data-entity-row-key='office-mx-1'] [data-entity-inline-edit-host] [data-entity-row-edit-state='edit']",
     )
     .await;
     click(&harness, "[data-testid='draft-refresh-2']").await;
     click(
         &harness,
-        "#draft-optin [data-entity-row-key='office-mx-1'] [data-entity-edit-input='client']",
+        "#draft-optin [data-entity-row-key='office-mx-1'] td[data-entity-column='client'] [data-entity-edit-input='client']",
     )
     .await;
     press_escape(&harness).await;
@@ -462,6 +467,173 @@ async fn lock_state(harness: &pixelproof_web::Harness) -> Value {
     .await
 }
 
+/// The compact presentation is a complete editing surface, not a summary
+/// that depends on desktop-only controls to finish or cancel a session.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-entity-draft-row)"]
+async fn compact_editing_is_labeled_ordered_and_geometry_safe() {
+    let harness = harness_at("/components/entity-table-draft-row").await;
+    harness
+        .set_viewport(ViewportSize::new(390, 844))
+        .await
+        .expect("set compact EntityTable edit viewport");
+    wait_for_selector(&harness, "#draft-optin [data-entity-row-key='office-mx-1']").await;
+    begin_browser_error_capture(&harness).await;
+
+    const COMPACT_EDIT: &str = "#draft-optin [data-entity-row-key='office-mx-1'] [data-entity-compact-row] [data-entity-row-edit-state='edit']";
+    const COMPACT_SAVE: &str = "#draft-optin [data-entity-row-key='office-mx-1'] [data-entity-compact-row] [data-entity-row-edit-state='save']";
+
+    click(&harness, COMPACT_EDIT).await;
+    let structure = eval_json(
+        &harness,
+        r#"(() => {
+            const root = document.querySelector('#draft-optin [data-entity-table]');
+            const plainRoot = document.querySelector('#draft-plain [data-entity-table]');
+            const grid = root?.querySelector('[data-entity-table-grid]');
+            const row = root?.querySelector('[data-entity-row-key="office-mx-1"]');
+            const compact = row?.querySelector('[data-entity-compact-row]');
+            const visible = element => {
+                if (!element) return false;
+                const rect = element.getBoundingClientRect();
+                const style = getComputedStyle(element);
+                return style.display !== 'none'
+                    && style.visibility !== 'hidden'
+                    && rect.width > 0
+                    && rect.height > 0;
+            };
+            const compactEditors = Array.from(
+                compact?.querySelectorAll('[data-entity-edit-input]') ?? []
+            );
+            const compactControls = Array.from(
+                compact?.querySelectorAll('input, button, select, textarea, a[href]') ?? []
+            ).filter(visible);
+            const wideControls = Array.from(
+                row?.querySelectorAll('td[data-entity-column] input, td[data-entity-column] button') ?? []
+            );
+            const controlRects = compactControls.map(control => {
+                const rect = control.getBoundingClientRect();
+                return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
+            });
+            const overlaps = [];
+            for (let left = 0; left < controlRects.length; left += 1) {
+                for (let right = left + 1; right < controlRects.length; right += 1) {
+                    const a = controlRects[left];
+                    const b = controlRects[right];
+                    if (Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1
+                        && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1) {
+                        overlaps.push([left, right]);
+                    }
+                }
+            }
+            const gridRect = grid?.getBoundingClientRect();
+            const outsideGrid = controlRects.filter(rect => !gridRect
+                || rect.left < gridRect.left - 1
+                || rect.right > gridRect.right + 1
+                || rect.top < gridRect.top - 1
+                || rect.bottom > gridRect.bottom + 1
+            ).length;
+            const labels = Array.from(compact?.querySelectorAll('label') ?? []);
+            const labelledEditors = compactEditors.filter(input => {
+                const label = labels.find(candidate => candidate.htmlFor === input.id);
+                return input.id.length > 0 && label && visible(label);
+            });
+            const allEditorIds = Array.from(root?.querySelectorAll('[data-entity-edit-input]') ?? [])
+                .map(input => input.id);
+            return {
+                phase: root?.dataset.entityEditPhase ?? null,
+                plainCompactMarkerCount:
+                    plainRoot?.querySelectorAll('[data-entity-compact-row]').length ?? 0,
+                compactCellCount: row?.querySelectorAll('[data-entity-compact-row]').length ?? 0,
+                compactColSpan: compact?.colSpan ?? null,
+                declaredColumns: root?.querySelectorAll(
+                    'thead tr:first-child th[data-entity-column]'
+                ).length ?? 0,
+                compactEditors: compactEditors.map(input => input.dataset.entityEditInput),
+                labelledEditors: labelledEditors.length,
+                uniqueEditorIds: new Set(allEditorIds).size,
+                editorIdCount: allEditorIds.length,
+                compactControlCount: compactControls.length,
+                wideControlCount: wideControls.length,
+                visibleWideControls: wideControls.filter(visible).length,
+                overlaps,
+                outsideGrid,
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(structure["phase"], json!("drafting"), "{structure}");
+    assert_eq!(
+        structure["plainCompactMarkerCount"],
+        json!(0),
+        "{structure}"
+    );
+    assert_eq!(structure["compactCellCount"], json!(1), "{structure}");
+    assert_eq!(
+        structure["compactColSpan"], structure["declaredColumns"],
+        "the compact cell spans the declared visible columns: {structure}"
+    );
+    assert_eq!(structure["compactEditors"], json!(["client", "status"]));
+    assert_eq!(structure["labelledEditors"], json!(2), "{structure}");
+    assert_eq!(
+        structure["uniqueEditorIds"], structure["editorIdCount"],
+        "wide and compact editors must never duplicate ids: {structure}"
+    );
+    assert_eq!(structure["compactControlCount"], json!(4), "{structure}");
+    assert!(
+        structure["wideControlCount"]
+            .as_u64()
+            .is_some_and(|count| count > 0),
+        "the negative presentation must exist in the DOM: {structure}"
+    );
+    assert_eq!(structure["visibleWideControls"], json!(0), "{structure}");
+    assert_eq!(structure["overlaps"], json!([]), "{structure}");
+    assert_eq!(structure["outsideGrid"], json!(0), "{structure}");
+
+    let first = active_control(&harness).await;
+    assert_eq!(first["editInput"], json!("client"), "{first}");
+    assert_eq!(first["compact"], json!(true), "{first}");
+    press_tab(&harness).await;
+    let second = active_control(&harness).await;
+    assert_eq!(second["editInput"], json!("status"), "{second}");
+    assert_eq!(second["compact"], json!(true), "{second}");
+    press_tab(&harness).await;
+    let save = active_control(&harness).await;
+    assert_eq!(save["editState"], json!("save"), "{save}");
+    assert_eq!(save["compact"], json!(true), "{save}");
+    press_tab(&harness).await;
+    let cancel = active_control(&harness).await;
+    assert_eq!(cancel["rowCancel"], json!(true), "{cancel}");
+    assert_eq!(cancel["compact"], json!(true), "{cancel}");
+
+    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
+        .expect("load vendored axe-core");
+    let report = axe.run(harness.page()).await.expect("run axe-core");
+    report
+        .assert_no_blocking("EntityTable compact inline edit")
+        .unwrap_or_else(|error| {
+            panic!(
+                "{error}; {}; blocking details: {:#?}",
+                report.summary(),
+                report.blocking()
+            )
+        });
+
+    press_escape(&harness).await;
+    assert_eq!(snapshot(&harness).await["phase"], json!("idle"));
+
+    click(&harness, COMPACT_EDIT).await;
+    click(&harness, COMPACT_SAVE).await;
+    assert_eq!(snapshot(&harness).await["phase"], json!("committing"));
+    assert_eq!(
+        snapshot(&harness).await["lastTarget"],
+        json!("existing:office-mx-1")
+    );
+    click(&harness, "[data-testid='draft-accept']").await;
+    assert_eq!(snapshot(&harness).await["phase"], json!("idle"));
+
+    assert_no_browser_errors(&harness, "EntityTable compact inline edit").await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires demo dev server (cargo xtask test-entity-draft-row)"]
 async fn refreshes_wait_for_edit_completion_and_only_the_latest_is_published() {
@@ -475,7 +647,11 @@ async fn refreshes_wait_for_edit_completion_and_only_the_latest_is_published() {
     click(&harness, "[data-testid='draft-refresh-2']").await;
     assert_eq!(snapshot(&harness).await["renderedRows"], before);
 
-    click(&harness, "#draft-optin [data-entity-draft-cancel]").await;
+    click(
+        &harness,
+        "#draft-optin [data-entity-draft-row] [data-entity-inline-edit-host] [data-entity-draft-cancel]",
+    )
+    .await;
     assert_eq!(
         snapshot(&harness).await["renderedRows"],
         json!(["refresh-2|Refresh 2|Generation 2"])
@@ -485,7 +661,9 @@ async fn refreshes_wait_for_edit_completion_and_only_the_latest_is_published() {
 async fn type_into(harness: &pixelproof_web::Harness, column: &str, value: &str) {
     type_into_selector(
         harness,
-        &format!("#draft-optin [data-entity-draft-input={column:?}]"),
+        &format!(
+            "#draft-optin [data-entity-draft-row] td[data-entity-column={column:?}] [data-entity-draft-input={column:?}]"
+        ),
         value,
     )
     .await;
@@ -615,7 +793,7 @@ async fn existing_rows_edit_inside_the_declared_action_host() {
     );
     click(
         &harness,
-        "#draft-optin [data-entity-row-key='office-mx-1'] [data-entity-row-edit-state='edit']",
+        "#draft-optin [data-entity-row-key='office-mx-1'] [data-entity-inline-edit-host] [data-entity-row-edit-state='edit']",
     )
     .await;
 
@@ -647,7 +825,7 @@ async fn existing_rows_edit_inside_the_declared_action_host() {
 
     type_into_selector(
         &harness,
-        "#draft-optin [data-entity-row-key='office-mx-1'] [data-entity-edit-input='client']",
+        "#draft-optin [data-entity-row-key='office-mx-1'] td[data-entity-column='client'] [data-entity-edit-input='client']",
         "Edited Client",
     )
     .await;
@@ -659,7 +837,7 @@ async fn existing_rows_edit_inside_the_declared_action_host() {
     .await;
     click(
         &harness,
-        "#draft-optin [data-entity-row-key='office-mx-1'] [data-entity-row-edit-state='save']",
+        "#draft-optin [data-entity-row-key='office-mx-1'] [data-entity-inline-edit-host] [data-entity-row-edit-state='save']",
     )
     .await;
     let committing = snapshot(&harness).await;
@@ -673,7 +851,7 @@ async fn existing_rows_edit_inside_the_declared_action_host() {
         eval_json(
             &harness,
             r##"document.querySelector(
-                "#draft-optin [data-entity-row-key='office-mx-1'] [data-entity-edit-input='client']"
+                "#draft-optin [data-entity-row-key='office-mx-1'] td[data-entity-column='client'] [data-entity-edit-input='client']"
             )?.value"##,
         )
         .await,
@@ -759,7 +937,11 @@ async fn draft_row_edits_commit_and_cancel_without_touching_a_plain_table() {
     type_into(&harness, "client", "New Client").await;
     type_into(&harness, "status", "Urgent").await;
 
-    click(&harness, "#draft-optin [data-entity-draft-save]").await;
+    click(
+        &harness,
+        "#draft-optin [data-entity-draft-row] [data-entity-inline-edit-host] [data-entity-draft-save]",
+    )
+    .await;
     let committing = snapshot(&harness).await;
     assert_eq!(
         committing["phase"],
@@ -795,7 +977,7 @@ async fn draft_row_edits_commit_and_cancel_without_touching_a_plain_table() {
     assert_eq!(
         eval_json(
             &harness,
-            r#"document.querySelector('#draft-optin [data-entity-draft-input="client"]').value"#
+            r#"document.querySelector('#draft-optin [data-entity-draft-row] td[data-entity-column="client"] [data-entity-draft-input="client"]').value"#
         )
         .await,
         json!("New Client"),
@@ -803,7 +985,11 @@ async fn draft_row_edits_commit_and_cancel_without_touching_a_plain_table() {
     );
 
     // --- Accept returns the table to read-only ---------------------------
-    click(&harness, "#draft-optin [data-entity-draft-save]").await;
+    click(
+        &harness,
+        "#draft-optin [data-entity-draft-row] [data-entity-inline-edit-host] [data-entity-draft-save]",
+    )
+    .await;
     click(&harness, "[data-testid='draft-accept']").await;
     let accepted = snapshot(&harness).await;
     assert_eq!(accepted["phase"], json!("idle"));
@@ -815,7 +1001,11 @@ async fn draft_row_edits_commit_and_cancel_without_touching_a_plain_table() {
     // --- Cancel leaves no phantom row -----------------------------------
     click(&harness, "#draft-optin [data-entity-draft-add]").await;
     type_into(&harness, "client", "abandoned").await;
-    click(&harness, "#draft-optin [data-entity-draft-cancel]").await;
+    click(
+        &harness,
+        "#draft-optin [data-entity-draft-row] [data-entity-inline-edit-host] [data-entity-draft-cancel]",
+    )
+    .await;
     let cancelled = snapshot(&harness).await;
     assert_eq!(cancelled["phase"], json!("idle"));
     assert_eq!(

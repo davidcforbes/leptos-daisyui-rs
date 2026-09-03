@@ -3621,12 +3621,14 @@ fn render_keyed_row<T: Clone + 'static>(
             }
             class=move || {
                 let selected = has_selection && is_row_selected(&selected_class_key);
+                let activation_enabled =
+                    interactive && !edit_state.with(EntityEditState::is_editing);
                 merge_classes!(
-                    if interactive { "cursor-pointer ld-focus-ring" } else { "" },
+                    if activation_enabled { "cursor-pointer ld-focus-ring" } else { "" },
                     if selected { "bg-base-200" } else { "" },
                     // See `entity_row_hover_class`'s doc comment for the
                     // hover-vs-selected precedence this encodes (ldui-jdzr).
-                    entity_row_hover_class(interactive, selected),
+                    entity_row_hover_class(activation_enabled, selected),
                     entity_row_emphasis_row_class(cached_emphasis.get())
                 )
             }
@@ -3929,6 +3931,94 @@ fn render_inline_edit_actions<T: Clone + 'static>(
     .into_any()
 }
 
+/// Renders the one compact editing surface from the same ordered columns and
+/// reducer-backed controls as the wide presentation.
+fn render_compact_live_row<T: Clone + 'static>(
+    row_key: Option<String>,
+    columns: Vec<EntityColumn<T>>,
+    context: EditRenderContext<T>,
+    table_control_id: Signal<String>,
+) -> AnyView {
+    let fields = columns
+        .into_iter()
+        .filter(|column| !column.inline_edit_host)
+        .map(|column| {
+            let column_id = column.id;
+            let header = column.header.clone();
+            if column.editor.is_some() {
+                let input = render_live_field(
+                    column,
+                    context.edit_state,
+                    table_control_id,
+                    "compact",
+                );
+                view! {
+                    <div
+                        class="grid min-w-0 gap-1 py-1"
+                        data-entity-compact-edit-field=column_id
+                        data-entity-column=column_id
+                    >
+                        <label
+                            class="text-xs font-medium uppercase tracking-wide text-base-content/75"
+                            for=move || {
+                                entity_edit_input_id(
+                                    &table_control_id.get(),
+                                    "compact",
+                                    column_id,
+                                )
+                            }
+                        >
+                            {header}
+                        </label>
+                        {input}
+                    </div>
+                }
+                .into_any()
+            } else {
+                let alignment = column.alignment;
+                let kind = column.kind;
+                let value = render_live_read_only(column, context.edit_state);
+                view! {
+                    <div
+                        class="flex min-w-0 items-start justify-between gap-3 py-1"
+                        data-entity-compact-edit-field=column_id
+                        data-entity-column=column_id
+                        data-entity-alignment=alignment.as_str()
+                        data-entity-column-kind=kind.as_str()
+                        data-entity-tabular-numbers=(kind == EntityColumnKind::Numeric).then_some("true")
+                    >
+                        <span class="text-xs font-medium uppercase tracking-wide text-base-content/75">
+                            {header}
+                        </span>
+                        <span class=move || merge_classes!(
+                            "min-w-0",
+                            entity_compact_alignment_class(alignment),
+                            kind.default_class().unwrap_or("")
+                        )>
+                            {value}
+                        </span>
+                    </div>
+                }
+                .into_any()
+            }
+        })
+        .collect_view();
+    let actions = render_inline_edit_actions(row_key, context, None);
+
+    view! {
+        <div class="grid min-w-0 gap-2" data-entity-compact-edit-form="true">
+            {fields}
+            <div
+                class="flex flex-wrap items-center justify-end gap-2 pt-2"
+                data-entity-compact-edit-actions="true"
+            >
+                {actions}
+            </div>
+        </div>
+    }
+    .into_any()
+}
+
 /// Renders compact and wide cells from the same declared column vector.
 /// Editing augments the marked host; it never appends a synthetic column.
 fn render_entity_row_cells<T: Clone + 'static>(
@@ -3940,14 +4030,75 @@ fn render_entity_row_cells<T: Clone + 'static>(
     edit: Option<EditRenderContext<T>>,
     table_control_id: Signal<String>,
 ) -> AnyView {
-    let compact_view = accepted_row.as_ref().map_or_else(
-        || ().into_any(),
-        |row| {
-            compact_row
-                .map(|renderer| renderer(row))
-                .unwrap_or_else(|| render_default_compact_row(row, &columns))
-        },
-    );
+    let compact_view = if let Some(context) = edit {
+        let target_key = row_key.clone();
+        let action_key = row_key.clone();
+        let compact_columns = StoredValue::new_local(columns.clone());
+        let compact_accepted_row = StoredValue::new_local(accepted_row.clone());
+        let compact_row_renderer = StoredValue::new_local(compact_row.clone());
+        let is_live = Memo::new(move |_| {
+            context
+                .edit_state
+                .with(|state| match target_key.as_deref() {
+                    Some(key) => state.is_row_live(key),
+                    None => state.target().is_some_and(EntityEditTarget::is_draft),
+                })
+        });
+        view! {
+            {move || {
+                if is_live.get() {
+                    render_compact_live_row(
+                        action_key.clone(),
+                        compact_columns.get_value(),
+                        context,
+                        table_control_id,
+                    )
+                } else {
+                    let summary = compact_accepted_row.with_value(|accepted_row| {
+                        accepted_row.as_ref().map_or_else(
+                            || ().into_any(),
+                            |row| {
+                                compact_row_renderer.with_value(|renderer| {
+                                    renderer.as_ref().map(|renderer| renderer(row)).unwrap_or_else(
+                                        || {
+                                            compact_columns.with_value(|columns| {
+                                                render_default_compact_row(row, columns)
+                                            })
+                                        },
+                                    )
+                                })
+                            },
+                        )
+                    });
+                    let actions = render_inline_edit_actions(
+                        action_key.clone(),
+                        context,
+                        None,
+                    );
+                    view! {
+                        <div data-entity-compact-readonly="true">{summary}</div>
+                        <div
+                            class="flex flex-wrap items-center justify-end gap-2 pt-2"
+                            data-entity-compact-edit-actions="true"
+                        >
+                            {actions}
+                        </div>
+                    }
+                    .into_any()
+                }
+            }}
+        }
+        .into_any()
+    } else {
+        accepted_row.as_ref().map_or_else(
+            || ().into_any(),
+            |row| {
+                compact_row
+                    .map(|renderer| renderer(row))
+                    .unwrap_or_else(|| render_default_compact_row(row, &columns))
+            },
+        )
+    };
     // Applied identically to every wide-layout cell and to the compact
     // single-cell wrapper below, so a totals rule reads the same in both
     // presentations -- they share one `<tr>`; only the cells differ.
@@ -4054,6 +4205,7 @@ fn render_entity_row_cells<T: Clone + 'static>(
                 "border border-table-grid p-0 forced-colors:border-[CanvasText] lg:hidden",
                 emphasis_cell_class
             )
+            data-entity-compact-row=edit.map(|_| "true")
         >
             <div class="p-3">{compact_view}</div>
         </td>
