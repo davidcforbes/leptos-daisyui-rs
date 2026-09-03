@@ -47,6 +47,7 @@ erase the compile-time distinction the snapshot component exists to provide.
 | `dataset_identity: Signal<String>` | Identifies the downloaded dataset; a change resets only the current page. |
 | `page_reset_key` | Optional identity for local view-state changes that should reset only paging. |
 | `viewport_fit` | Optional `EntityTableViewportFit`; adds an explicit `Auto` rows-per-page choice that derives visible row capacity from a definite parent or CSS height, without changing the saved page-size preference. |
+| `pagination: EntityTablePagination` | `Paged` (default) or `ConstrainedScroll`, which renders every row and suppresses the footer for a table bounded by its container (`ldui-tmoz`). |
 | `draft_row: EntityDraftRow<T>` | Optional inline draft-row and per-row editing (`ldui-ff2f`). Absent, the table renders no `+`, has no edit mode, and emits no extra DOM. |
 | `compact_row: EntityCompactRow<T>` | Default, static, or reactive single-cell renderer used at compact breakpoints without duplicating rows. |
 | `column_filters: EntityColumnFilters` | Controlled one-to-one filter controls aligned beneath stable desktop columns. |
@@ -533,6 +534,50 @@ These are generated semantic utilities, not demo-only CSS. Every consuming
 Tailwind build must import `leptos-daisyui-rs/styles/tokens.css` and scan
 `leptos-daisyui-rs/src/**/*.rs`, with paths resolved from its own `input.css`.
 See the [DataTable consumer CSS setup](./data_table.md#consumer-inputcss).
+
+## Constrained-scroll tables (ldui-tmoz)
+
+A small table inside a section card — Work Types, Case Types, a settings list —
+is bounded by the card, not by a page size. It scrolls. In that shape the
+rows-per-page select is furniture the user cannot act on, and a footer reading
+`Showing 1-8 of 17` beside no control is worse than no footer at all.
+
+```rust,no_run
+view! {
+    <EntityTable
+        data=work_types
+        columns=columns
+        row_key=row_key
+        dataset_identity="work-types"
+        viewport_fit=EntityTableViewportFit::fill_parent()
+        pagination=EntityTablePagination::ConstrainedScroll
+    />
+}
+```
+
+`ConstrainedScroll` resolves the page size to the row count, so there is
+exactly **one page holding every row**. The footer is suppressed entirely —
+no rows-per-page control, no pager, no row-range summary — because with one
+page none of it would say anything true.
+
+### One mode, not three flags
+
+No select, no pager, all rows rendered are not independent choices a consumer
+should have to combine correctly; they are one shape, so they are one value.
+Combining them by hand is how you end up with a pager that pages nothing.
+
+### It renders every row
+
+There is no virtualization. `ConstrainedScroll` is for **bounded** collections
+— a settings table, not an unbounded result set. A table that can grow without
+limit should stay `Paged` and let the user page it.
+
+> **Decision record.** The alternative considered was a narrower
+> `show_page_size_control=false` flag that hid only the select and left the
+> pager. It was rejected because the consumer's tables scroll rather than page,
+> so the pager would remain inert furniture. The mode is additive and opt-in,
+> so reversing this costs a deprecation of one enum variant and nothing else —
+> `Paged` is the default and every existing table is unaffected.
 
 ## Inline draft-row editing (ldui-ff2f)
 

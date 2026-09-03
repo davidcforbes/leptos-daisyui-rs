@@ -46,9 +46,9 @@ use super::types::{
     EntityColumnFilters, EntityColumnKind, EntityColumns, EntityCompactRow, EntityDraftCommit,
     EntityDraftRow, EntityDraftTexts, EntityEmptyState, EntityPageSize, EntityPageSizeIntent,
     EntityRowKey, EntityRowRenderer, EntitySort, EntitySortDirection,
-    EntityTableActionColumnPolicy, EntityTableDisplayProjection, EntityTablePreferenceOwnership,
-    EntityTablePreferencePersistence, EntityTablePreferences, EntityTableTexts,
-    EntityTableViewportFit, EntityTextOverflow, entity_alignment_class,
+    EntityTableActionColumnPolicy, EntityTableDisplayProjection, EntityTablePagination,
+    EntityTablePreferenceOwnership, EntityTablePreferencePersistence, EntityTablePreferences,
+    EntityTableTexts, EntityTableViewportFit, EntityTextOverflow, entity_alignment_class,
     entity_compact_alignment_class, entity_header_justify_class, entity_text_overflow_style,
     normalize_entity_secondary_text,
 };
@@ -582,6 +582,11 @@ pub fn EntityTable<T>(
     /// table renders no `+`, has no edit mode, and emits no extra DOM.
     #[prop(optional)]
     draft_row: Option<EntityDraftRow<T>>,
+    /// How rows are divided (`ldui-tmoz`). Defaults to `Paged`, which is what
+    /// every existing table does. `ConstrainedScroll` renders every row and
+    /// suppresses the footer for a table bounded by its container.
+    #[prop(optional)]
+    pagination: EntityTablePagination,
     /// Optional renderer for the single-cell compact row layout.
     #[prop(optional, into)]
     compact_row: EntityCompactRow<T>,
@@ -993,6 +998,19 @@ where
     // than a derived signal so the resolved value settles before any observer
     // (including `on_page_size_resolved`) sees it.
     let page_size: Memo<EntityPageSize> = Memo::new(move |_| {
+        // `ldui-tmoz`: a constrained-scroll table has exactly one page holding
+        // every row, so the existing render path needs no second mode -- the
+        // rows are simply never divided. Resolving it here rather than
+        // branching the renderer keeps the "Showing x-y of z" arithmetic, the
+        // pager's page count, and the body all reading the same single value
+        // that `ldui-5p06` made indivisible.
+        if pagination.is_constrained_scroll() {
+            // `data` is the rows this table is being asked to render, which is
+            // exactly "all of them" for this mode. `.max(1)` because a page
+            // size of zero is not a representable choice and an empty table
+            // still needs one page to host its empty state.
+            return EntityPageSize::fixed(data.with(|rows| rows.len()).max(1));
+        }
         let measured = viewport_fit_enabled
             .then(|| measured_page_size.get())
             .flatten();
@@ -2659,6 +2677,11 @@ where
                 </div>
             </div>
 
+            // `ldui-tmoz`: a constrained-scroll table suppresses the whole
+            // footer rather than hiding the select and leaving a pager and a
+            // "Showing 1-8 of 17" the user cannot act on. There is exactly one
+            // page holding every row, so none of it would say anything true.
+            {(!pagination.is_constrained_scroll()).then(|| view! {
             <div
                 class="flex shrink-0 flex-wrap items-center justify-between gap-3"
                 data-entity-table-footer="true"
@@ -2792,6 +2815,7 @@ where
                     </Button>
                 </Pagination>
             </div>
+            })}
         </section>
     }
 }

@@ -1438,6 +1438,45 @@ pub struct EntityDraftCommit<T> {
     pub resolve: Callback<EntityEditOutcome>,
 }
 
+/// How a table divides its rows (`ldui-tmoz`).
+///
+/// # Why this is one declared mode, not three flags
+///
+/// The consumer case is a small table inside a section card with
+/// `viewport_fit`: the card bounds the height, the table scrolls, and the row
+/// count is decided by the card rather than by a page size. In that shape the
+/// rows-per-page select is furniture the user cannot act on, and a footer
+/// reading `Showing 1-8 of 17` beside no control is worse than no footer.
+///
+/// Those three things — no select, no pager, all rows rendered — are not
+/// independent choices a consumer should have to combine correctly. They are
+/// one shape, so they are one value. The owner's own description was a single
+/// mode ("constrained tables limited by the section card, and with a scroll
+/// bar"), not a set of toggles.
+///
+/// ⚠️ **[`Self::ConstrainedScroll`] renders every row.** There is no
+/// virtualization here, so it is for *bounded* collections — a settings table
+/// of work types, not an unbounded result set. A table that can grow without
+/// limit should stay [`Self::Paged`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum EntityTablePagination {
+    /// Page the rows and render the rows-per-page control and pager. The
+    /// behaviour every existing table has.
+    #[default]
+    Paged,
+    /// Render every row and let the table's scroll region handle overflow.
+    /// Suppresses the whole footer: no rows-per-page control, no pager, no
+    /// row-range summary.
+    ConstrainedScroll,
+}
+
+impl EntityTablePagination {
+    /// Whether the footer and its controls are suppressed.
+    pub const fn is_constrained_scroll(self) -> bool {
+        matches!(self, Self::ConstrainedScroll)
+    }
+}
+
 /// Copy for the inline-edit controls (`ldui-ff2f`).
 ///
 /// Deliberately its OWN type rather than three more fields on

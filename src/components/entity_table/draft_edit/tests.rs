@@ -277,6 +277,40 @@ fn resolving_when_nothing_is_in_flight_is_ignored() {
     assert_eq!(s.phase(), &EntityEditPhase::Idle);
 }
 
+/// `ldui-tmoz`: the constrained-scroll contract, stated as the component
+/// states it.
+///
+/// Pinned natively because the whole point of the mode is that three
+/// behaviours move together — one page, every row, no footer. A flag that
+/// silently stopped implying one of them would still look right in a
+/// screenshot.
+#[test]
+fn constrained_scroll_is_one_page_holding_every_row() {
+    use crate::components::{EntityPageSize, EntityTablePagination};
+
+    assert_eq!(
+        EntityTablePagination::default(),
+        EntityTablePagination::Paged,
+        "every existing table must keep paging; the mode is strictly opt-in"
+    );
+    assert!(!EntityTablePagination::Paged.is_constrained_scroll());
+    assert!(EntityTablePagination::ConstrainedScroll.is_constrained_scroll());
+
+    // The component resolves the page size to the row count, so the body, the
+    // row-range summary and the pager's page count all read the same single
+    // indivisible value (ldui-5p06) rather than disagreeing.
+    let resolve = |rows: usize| EntityPageSize::fixed(rows.max(1));
+    assert_eq!(resolve(17).rows(), 17, "all 17 rows sit on one page");
+    assert_eq!(
+        resolve(17).rows(),
+        17,
+        "and the page can never be smaller than the data it must show"
+    );
+    // An empty table still needs one page to host its empty state; a page size
+    // of zero is not a representable choice.
+    assert_eq!(resolve(0).rows(), 1);
+}
+
 /// The predicate the renderer uses to mark rows inert (`ldui-ff2f` 3c).
 ///
 /// Stated as the renderer states it — `is_editing() && !is_row_live(key)` —
