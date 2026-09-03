@@ -2,6 +2,7 @@
 
 mod component;
 mod date_filter;
+mod draft_edit;
 mod emphasis;
 mod focus_request;
 mod grouping;
@@ -16,6 +17,10 @@ mod types;
 pub use date_filter::{
     EntityDate, EntityDateBound, EntityDateFilter, EntityDateFilterCause, EntityDateFilterProposal,
     EntityDateFilterStatus, EntityDateParseError,
+};
+pub use draft_edit::{
+    EntityEditCommit, EntityEditDisposition, EntityEditOutcome, EntityEditPhase, EntityEditState,
+    EntityEditTarget,
 };
 pub use emphasis::{EntityRowEmphasis, EntityRowEmphasisClassifier};
 pub use focus_request::{
