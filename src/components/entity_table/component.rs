@@ -1,6 +1,6 @@
 //! Reactive renderer for the typed client-side table model.
 
-use super::draft_edit::{EntityEditPhase, EntityEditState};
+use super::draft_edit::{EntityEditCommit, EntityEditPhase, EntityEditState, EntityEditTarget};
 use super::emphasis::{
     EntityRowEmphasis, EntityRowEmphasisClassifier, entity_row_emphasis_cell_class,
     entity_row_emphasis_for, entity_row_emphasis_row_class,
@@ -43,13 +43,14 @@ use super::storage::{load_preferences, save_preferences};
 use super::types::{
     ENTITY_PAGE_SIZE_AUTO_VALUE, EntityCellPresentation, EntityColumn, EntityColumnAlignment,
     EntityColumnChooserTrigger, EntityColumnFilter, EntityColumnFilterPlacement,
-    EntityColumnFilters, EntityColumnKind, EntityColumns, EntityCompactRow, EntityDraftRow,
-    EntityDraftTexts, EntityEmptyState, EntityPageSize, EntityPageSizeIntent, EntityRowKey,
-    EntityRowRenderer, EntitySort, EntitySortDirection, EntityTableActionColumnPolicy,
-    EntityTableDisplayProjection, EntityTablePreferenceOwnership, EntityTablePreferencePersistence,
-    EntityTablePreferences, EntityTableTexts, EntityTableViewportFit, EntityTextOverflow,
-    entity_alignment_class, entity_compact_alignment_class, entity_header_justify_class,
-    entity_text_overflow_style, normalize_entity_secondary_text,
+    EntityColumnFilters, EntityColumnKind, EntityColumns, EntityCompactRow, EntityDraftCommit,
+    EntityDraftRow, EntityDraftTexts, EntityEmptyState, EntityPageSize, EntityPageSizeIntent,
+    EntityRowKey, EntityRowRenderer, EntitySort, EntitySortDirection,
+    EntityTableActionColumnPolicy, EntityTableDisplayProjection, EntityTablePreferenceOwnership,
+    EntityTablePreferencePersistence, EntityTablePreferences, EntityTableTexts,
+    EntityTableViewportFit, EntityTextOverflow, entity_alignment_class,
+    entity_compact_alignment_class, entity_header_justify_class, entity_text_overflow_style,
+    normalize_entity_secondary_text,
 };
 use crate::components::badge::{Badge, BadgeSize};
 use crate::components::button::Button;
@@ -880,6 +881,51 @@ where
     let draft_row = StoredValue::new_local(draft_row);
     let edit_state = RwSignal::new_local(EntityEditState::<T>::new());
     let editing_enabled = draft_row.with_value(Option::is_some);
+    // Save hands the row and a `resolve` handle to the consumer and then
+    // WAITS. The table never writes, and the session stays in flight until
+    // the answer arrives -- which is what stops a failed write from silently
+    // discarding the user's typing.
+    // The in-flight handle lives in a local StoredValue rather than being
+    // captured by the resolve closure: `Callback` requires `Send + Sync`, and
+    // the handle carries `T`, which this table never requires to be either.
+    // A `LocalStorage` handle is itself `Send + Sync` (it is an arena index);
+    // only its contents are thread-bound.
+    let pending_commit = StoredValue::new_local(Option::<EntityEditCommit<T>>::None);
+    let resolve_commit = Callback::new(move |outcome| {
+        let commit = pending_commit.with_value(Clone::clone);
+        if let Some(commit) = commit {
+            edit_state.update(|state| {
+                // A superseded handle is discarded here by the reducer's own
+                // sequence check, so a slow first attempt cannot resolve a
+                // later one.
+                state.resolve(&commit, outcome);
+            });
+            pending_commit.set_value(None);
+        }
+    });
+    let commit_draft = Callback::new(move |()| {
+        let commit = edit_state.try_update(|state| state.commit().ok()).flatten();
+        let Some(commit) = commit else {
+            return;
+        };
+        let row = commit.row().clone();
+        let target = commit.target().clone();
+        pending_commit.set_value(Some(commit));
+        draft_row.with_value(|config| {
+            if let Some(config) = config {
+                config.on_commit.run(EntityDraftCommit {
+                    row: row.clone(),
+                    target: target.clone(),
+                    resolve: resolve_commit,
+                });
+            }
+        });
+    });
+    let cancel_draft = Callback::new(move |()| {
+        edit_state.update(|state| {
+            state.cancel();
+        });
+    });
     let viewport_fit_enabled = viewport_fit.is_some();
     let viewport_fit_height = viewport_fit
         .as_ref()
@@ -2476,6 +2522,38 @@ where
                     // markup at all.
                     {(!has_grouping).then(|| view! {
                         <tbody>
+                            // `ldui-ff2f` step 3b. The live row renders ABOVE the
+                            // data rows and outside the keyed loop, because it is
+                            // not part of `data` -- which is exactly why a refresh
+                            // cannot evict it.
+                            {move || {
+                                let drafting = edit_state.with(|state| {
+                                    state.is_editing()
+                                        && state.target().is_some_and(EntityEditTarget::is_draft)
+                                });
+                                drafting.then(|| {
+                                    let preferences_value = preferences.get();
+                                    let columns = column_store.with_value(|columns| {
+                                        ordered_columns(&preferences_value, columns)
+                                            .into_iter()
+                                            .filter(|column| {
+                                                !preferences_value.hidden_columns.contains(column.id)
+                                            })
+                                            .collect::<Vec<_>>()
+                                    });
+                                    view! {
+                                        <tr data-entity-draft-row="true">
+                                            {render_draft_cells(
+                                                edit_state,
+                                                columns,
+                                                draft_texts,
+                                                commit_draft,
+                                                cancel_draft,
+                                            )}
+                                        </tr>
+                                    }
+                                })
+                            }}
                             {move || page_row_keys.with(|keys| keys.is_empty()).then(|| view! {
                                 <tr>
                                     <td
@@ -3276,6 +3354,133 @@ fn render_keyed_row<T: Clone + 'static>(
             }}
         </tr>
     }
+}
+
+/// Renders the live row's editable cells (`ldui-ff2f`, step 3b).
+///
+/// Reads its values from the REDUCER, not from `data`: the draft row does not
+/// exist in the data at all, and an existing row under edit must show what the
+/// user has typed rather than what the server last said. That is also why a
+/// data refresh cannot evict the draft — it was never in that collection.
+///
+/// A column without an editor renders its normal read-only text here, which is
+/// the whole point of per-column opt-in: a derived column has nothing
+/// meaningful to accept for a blank row.
+fn render_draft_cells<T: Clone + 'static>(
+    edit_state: RwSignal<EntityEditState<T>, LocalStorage>,
+    columns: Vec<EntityColumn<T>>,
+    draft_texts: Signal<EntityDraftTexts>,
+    on_save: Callback<()>,
+    on_cancel: Callback<()>,
+) -> AnyView {
+    let committing = Signal::derive_local(move || edit_state.with(EntityEditState::is_committing));
+    // `EntityColumn`'s accessors are `Rc<dyn Fn…>` and therefore `!Send`, so
+    // a view closure cannot capture one directly. Park the columns in a local
+    // arena and capture the (Send + Sync) handle plus an index instead --
+    // the same shape as `pending_commit` above.
+    let column_count = columns.len();
+    let parked = StoredValue::new_local(columns);
+    let cells = (0..column_count)
+        .map(|index| {
+            let (alignment, column_id, has_editor) = parked.with_value(|columns| {
+                let column = &columns[index];
+                (column.alignment, column.id, column.editor.is_some())
+            });
+            let content = if has_editor {
+                view! {
+                    <input
+                        class="input input-sm w-full"
+                        type="text"
+                        data-entity-draft-input=column_id
+                        disabled=move || committing.get()
+                        prop:value=move || {
+                            edit_state.with(|state| {
+                                state.editing_row().map_or_else(String::new, |row| {
+                                    parked.with_value(|columns| {
+                                        columns[index]
+                                            .editor
+                                            .as_ref()
+                                            .map_or_else(String::new, |e| e.value(row))
+                                    })
+                                })
+                            })
+                        }
+                        on:input=move |event| {
+                            let next = event_target_value(&event);
+                            edit_state.update(|state| {
+                                state.edit_field(|row| {
+                                    parked.with_value(|columns| {
+                                        if let Some(editor) = columns[index].editor.as_ref() {
+                                            editor.apply(row, next);
+                                        }
+                                    });
+                                });
+                            });
+                        }
+                    />
+                }
+                .into_any()
+            } else {
+                view! {
+                    <span>
+                        {move || {
+                            edit_state.with(|state| {
+                                state.editing_row().map_or_else(String::new, |row| {
+                                    parked.with_value(|columns| (columns[index].text)(row))
+                                })
+                            })
+                        }}
+                    </span>
+                }
+                .into_any()
+            };
+            view! {
+                <td
+                    class=move || merge_classes!(
+                        "hidden border border-table-grid forced-colors:border-[CanvasText] lg:table-cell",
+                        entity_alignment_class(alignment)
+                    )
+                    data-entity-column=column_id
+                    data-entity-alignment=alignment.as_str()
+                >
+                    {content}
+                </td>
+            }
+        })
+        .collect_view();
+
+    view! {
+        {cells}
+        // Save lives in the row, per the owner's spec: "the row has a column
+        // of action buttons (retire, edit/save), so those must be selectable."
+        // Tab past the last editor lands here, so the whole flow is reachable
+        // without a pointer.
+        <td
+            class="hidden border border-table-grid forced-colors:border-[CanvasText] lg:table-cell"
+            data-entity-action="true"
+            data-entity-draft-actions="true"
+        >
+            <div class="flex items-center gap-2">
+                <Button
+                    class="btn-xs btn-primary"
+                    attr:data-entity-draft-save="true"
+                    disabled=Signal::derive(move || committing.get())
+                    on_click=Callback::new(move |_| on_save.run(()))
+                >
+                    {move || draft_texts.get().save_row}
+                </Button>
+                <Button
+                    class="btn-xs btn-ghost"
+                    attr:data-entity-draft-cancel="true"
+                    disabled=Signal::derive(move || committing.get())
+                    on_click=Callback::new(move |_| on_cancel.run(()))
+                >
+                    {move || draft_texts.get().cancel_edit}
+                </Button>
+            </div>
+        </td>
+    }
+    .into_any()
 }
 
 fn render_row_cells<T: Clone + 'static>(
