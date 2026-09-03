@@ -217,6 +217,58 @@ pub enum EntityEditDisposition {
     IgnoredStale,
 }
 
+/// Holds the last accepted input snapshot while an edit is exclusive.
+///
+/// Input changes remain pending while `editing` is true. A caller publishes
+/// the newest one immediately before returning the edit reducer to `Idle`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(dead_code)] // Used by EntityTable in the next implementation slice.
+pub(crate) struct EntityEditSnapshotGate<S> {
+    accepted: S,
+    pending: Option<S>,
+}
+
+#[allow(dead_code)] // Used by EntityTable in the next implementation slice.
+impl<S> EntityEditSnapshotGate<S> {
+    /// Starts with the snapshot the table has already accepted for display.
+    pub(crate) const fn new(accepted: S) -> Self {
+        Self {
+            accepted,
+            pending: None,
+        }
+    }
+
+    /// The only snapshot downstream table calculations may read.
+    pub(crate) const fn accepted(&self) -> &S {
+        &self.accepted
+    }
+
+    /// The newest deferred input, exposed only to the native policy tests.
+    #[cfg(test)]
+    pub(crate) const fn pending(&self) -> Option<&S> {
+        self.pending.as_ref()
+    }
+
+    /// Accepts an idle input immediately, or coalesces an editing input.
+    pub(crate) fn observe(&mut self, next: S, editing: bool) {
+        if editing {
+            self.pending = Some(next);
+        } else {
+            self.accepted = next;
+            self.pending = None;
+        }
+    }
+
+    /// Publishes the newest pending input, if one exists.
+    pub(crate) fn release(&mut self) -> bool {
+        let Some(pending) = self.pending.take() else {
+            return false;
+        };
+        self.accepted = pending;
+        true
+    }
+}
+
 /// The exclusive edit-mode reducer.
 ///
 /// Holds no rendering concerns and no persistence: every transition is a pure

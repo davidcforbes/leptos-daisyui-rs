@@ -277,6 +277,121 @@ fn resolving_when_nothing_is_in_flight_is_ignored() {
     assert_eq!(s.phase(), &EntityEditPhase::Idle);
 }
 
+/// `ldui-ff2f` 3c-ii: the row action cell's three states, stated as the
+/// renderer derives them.
+///
+/// The renderer asks the reducer three questions per row — is this row live,
+/// is another row live, is a commit in flight — and those answers decide
+/// whether the button reads Edit or Save and whether the cell is inert. Pinned
+/// here so the mapping is proven without a browser.
+#[test]
+fn the_row_action_cell_reflects_exactly_three_states() {
+    let live = |s: &EntityEditState<Row>, key: &str| s.is_row_live(key);
+    let inert = |s: &EntityEditState<Row>, key: &str| s.is_editing() && !s.is_row_live(key);
+
+    let mut s = state();
+    // Idle: every row offers Edit, nothing is inert.
+    assert!(!live(&s, "row-1") && !inert(&s, "row-1"));
+    assert!(!live(&s, "row-2") && !inert(&s, "row-2"));
+
+    // Editing row-1: that row reads Save, every other row's whole cell goes
+    // inert -- REQUIRED, because a live Edit on row-2 would open a second
+    // editable row and break the single-live-row invariant.
+    s.begin_edit("row-1", existing());
+    assert!(live(&s, "row-1"), "the edited row's button becomes Save");
+    assert!(!inert(&s, "row-1"), "and its own cell stays operable");
+    assert!(inert(&s, "row-2"), "every other row's actions go inert");
+
+    // The reducer itself refuses the second entry point, so the disabled
+    // button is belt-and-braces rather than the only guard.
+    assert_eq!(
+        s.begin_edit("row-2", existing()),
+        EntityEditDisposition::IgnoredBusy
+    );
+
+    // In flight: still live, still inert elsewhere, and Save is disabled so it
+    // cannot fire twice.
+    let commit = s.commit().expect("commit");
+    assert!(s.is_committing());
+    assert!(live(&s, "row-1"));
+    assert!(inert(&s, "row-2"));
+
+    // Resolved: the whole table is operable again.
+    s.resolve(&commit, EntityEditOutcome::Accepted);
+    assert!(!live(&s, "row-1") && !inert(&s, "row-2"));
+}
+
+/// Both entry points drive the SAME mode, so a draft and a row edit are
+/// distinguishable only by their target -- not by any separate state.
+#[test]
+fn the_two_entry_points_share_one_mode() {
+    let mut draft = state();
+    draft.begin_draft(blank());
+    let mut edit = state();
+    edit.begin_edit("row-1", existing());
+
+    // Same phase kind, different target. If these had diverged into two modes
+    // this assertion is where it would show.
+    assert!(draft.is_editing() && edit.is_editing());
+    assert!(draft.target().expect("live").is_draft());
+    assert!(!edit.target().expect("live").is_draft());
+    assert_eq!(
+        edit.target().and_then(EntityEditTarget::row_key),
+        Some("row-1")
+    );
+
+    // And both commit through the same path.
+    assert!(draft.commit().is_ok());
+    assert!(edit.commit().is_ok());
+}
+
+#[test]
+fn edit_snapshot_gate_freezes_accepted_and_coalesces_latest_pending() {
+    let mut gate = EntityEditSnapshotGate::new("accepted-0");
+
+    gate.observe("refresh-1", true);
+    assert_eq!(gate.accepted(), &"accepted-0");
+    assert_eq!(gate.pending(), Some(&"refresh-1"));
+
+    gate.observe("refresh-2", true);
+    assert_eq!(gate.accepted(), &"accepted-0");
+    assert_eq!(gate.pending(), Some(&"refresh-2"));
+}
+
+#[test]
+fn edit_snapshot_gate_releases_once_and_idle_updates_publish_immediately() {
+    let mut gate = EntityEditSnapshotGate::new("accepted-0");
+    gate.observe("refresh-1", true);
+    gate.observe("refresh-2", true);
+
+    assert!(gate.release());
+    assert_eq!(gate.accepted(), &"refresh-2");
+    assert_eq!(gate.pending(), None);
+    assert!(!gate.release());
+
+    gate.observe("idle-refresh", false);
+    assert_eq!(gate.accepted(), &"idle-refresh");
+    assert_eq!(gate.pending(), None);
+}
+
+#[test]
+fn rejected_commit_keeps_the_pending_snapshot_frozen() {
+    let mut state = state();
+    let mut gate = EntityEditSnapshotGate::new("accepted-0");
+    state.begin_edit("row-1", existing());
+    gate.observe("refresh-1", state.is_editing());
+    let commit = state.commit().expect("commit");
+
+    state.resolve(
+        &commit,
+        EntityEditOutcome::Rejected("try again".to_owned()),
+    );
+
+    assert!(state.is_editing());
+    assert_eq!(gate.accepted(), &"accepted-0");
+    assert_eq!(gate.pending(), Some(&"refresh-1"));
+}
+
 /// `ldui-tmoz`: the constrained-scroll contract, stated as the component
 /// states it.
 ///
