@@ -1,17 +1,18 @@
-# EntityTable inline draft-row editing — design proposal (ldui-ff2f)
+# EntityTable inline draft-row editing — design (ldui-ff2f)
 
-> **Implementation status, 2026-09-03.** The **draft-row path is built and on
-> main** (`a7ade64`): the exclusive reducer (§2), per-column editors (§3.2),
-> the commit/resolve payload (§3.3), the toolbar `+`, draft-row rendering, and
-> the inert treatment (§4). Consumer documentation lives in
-> [`doc/components/entity_table.md`](../components/entity_table.md#inline-draft-row-editing-ldui-ff2f);
-> the proof is `cargo xtask test-entity-draft-row`, verified pass **and**
-> break-and-revert.
+> **Implementation status, 2026-09-03.** The **draft-row foundation is built
+> and on main** (`a7ade64`): the exclusive reducer (§2), per-column editors
+> (§3.2), the commit/resolve payload (§3.3), the toolbar `+`, initial draft-row
+> rendering, and row-level inert metadata (§4). Consumer documentation lives
+> in
+> [`doc/components/entity_table.md`](../components/entity_table.md#inline-draft-row-editing-ldui-ff2f).
 >
-> **Not built:** editing an *existing* row (§4b) — it needs the open decision
-> about who owns the action column's Edit⇄Save button, since that column is
-> consumer-rendered. Everything else below is now description rather than
-> proposal.
+> **Approved completion, not yet built:** one existing action column becomes
+> the framework's inline-edit host (§3.4/§4b), existing rows use the same
+> editable-cell renderer as new drafts, every descendant of a non-live row is
+> genuinely inert, table controls lock during a session, and compact rows get
+> the same complete interaction. The browser proof is expanded accordingly;
+> the earlier draft-only proof did not cover all of those claims.
 
 **Filed from:** 4iiz-Office Setup page (Work Types), owner request 2026-09-03.
 **Related:** `ldui-tmoz` (hiding the rows-per-page control on the same page).
@@ -42,7 +43,7 @@ rows' editors. The table has one extra state, not N.
 ## 2. State model
 
 ```
-        +-- '+' pressed ------------------------------------+
+        +-- '+' / row Edit pressed -------------------------+
         |                                                   v
    [ Idle ] <--- Escape / commit resolved --- [ Drafting ] --+
         ^                                          |
@@ -52,19 +53,19 @@ rows' editors. The table has one extra state, not N.
 
 - **Idle** — today's table, byte-identical. No opt-in config ⇒ this is the
   only reachable state.
-- **Drafting** — one blank row is present; all other rows are inert; the
-  draft's first editable cell has focus.
-- **Committing** — Save has fired the consumer's intent; the draft is frozen
-  (not removed) until the consumer resolves it. This state is what prevents
+- **Drafting** — one new or existing working row is live; all other rows are
+  inert; its first editable cell has focus.
+- **Committing** — Save has fired the consumer's intent; the working row is
+  frozen (not removed) until the consumer resolves it. This state prevents
   the classic double-submit and the "row vanished before the server answered"
   bug.
 
-`Committing` is my addition, not in the spec. It exists because the consumer
+`Committing` is an approved addition to the owner's interaction. It exists because the consumer
 owns persistence and persistence is asynchronous: without it, Save must either
 optimistically drop the draft (losing the user's input if the write fails) or
-block the UI. I recommend keeping it and would like that confirmed.
+block the UI.
 
-## 3. Proposed API
+## 3. API
 
 ### 3.1 Opt-in, absent by default
 
@@ -76,8 +77,10 @@ pub struct EntityDraftRow<T> {
     /// Fired on Save with the edited draft. The consumer persists; the
     /// component never writes.
     on_commit: Callback<EntityDraftCommit<T>>,
-    /// Optional: fired on Escape, for a consumer that wants to know.
-    on_cancel: Option<Callback<()>>,
+    /// Reactive copy for framework-owned add/edit/save/cancel controls.
+    texts: Signal<EntityDraftTexts>,
+    /// Adds Edit to existing rows; false retains create-only behavior.
+    allow_row_edit: bool,
 }
 ```
 
@@ -87,6 +90,7 @@ Wired as one optional prop, so every existing table is untouched:
 <EntityTable
     // ...existing props unchanged...
     draft_row=EntityDraftRow::new(|| WorkType::blank(), on_commit)
+        .allow_row_edit(true)
 />
 ```
 
@@ -100,9 +104,10 @@ per column:
 
 ```rust
 EntityColumn::text("name", "Name", |r: &WorkType| r.name.clone())
-    .editable(EntityCellEditor::Text {
-        set: Rc::new(|row: &mut WorkType, v: String| row.name = v),
-    })
+    .editable(EntityCellEditor::text(
+        |row: &WorkType| row.name.clone(),
+        |row: &mut WorkType, v| row.name = v,
+    ))
 ```
 
 Columns without `.editable(...)` render their normal read-only cell **even in
@@ -115,7 +120,7 @@ so adding one breaks any consumer constructing it with a struct literal. I
 grepped the 4iiz-Office surfaces for `EntityColumn {` and found **zero** —
 every call site uses the builders (`EntityColumn::text(...).required()`).
 Adding a field is therefore source-compatible for the consumers that exist
-today. Open question 4 in §5 is now just a confirmation, not a risk.
+today. The same check covers the action-host marker in §3.4.
 
 ### 3.3 The commit payload
 
@@ -123,11 +128,13 @@ today. Open question 4 in §5 is now just a confirmation, not a risk.
 pub struct EntityDraftCommit<T> {
     /// The edited row. Consumer validates and persists.
     pub row: T,
+    /// New draft, or existing row with its stable key.
+    pub target: EntityEditTarget,
     /// Resolve the outcome. Until called, the table stays in Committing.
-    pub resolve: Callback<EntityDraftOutcome>,
+    pub resolve: Callback<EntityEditOutcome>,
 }
 
-pub enum EntityDraftOutcome {
+pub enum EntityEditOutcome {
     /// Persisted. Table returns to Idle and drops the draft; the row
     /// re-enters through the consumer's normal data flow.
     Accepted,
@@ -143,15 +150,43 @@ while still letting the component own the state machine. It mirrors the
 handle-based discipline already in `SnapshotTableState` (a minted handle whose
 completion can be ignored if stale).
 
+### 3.4 One existing action column hosts the framework controls
+
+The action column remains an `EntityColumn<T>` and retains its existing rich
+consumer renderer. The consumer marks exactly one action column as the inline
+edit host:
+
+```rust
+EntityColumn::action("actions", "Actions", |row: &WorkType| {
+    row.available_actions_label()
+})
+.render_with(render_work_type_actions)
+.inline_edit_host()
+```
+
+`inline_edit_host()` also makes the column required. Hiding the only Save
+control through a stored column preference would otherwise create an
+unfinishable edit session. Supplying `draft_row` without exactly one marked
+action column is a construction error with the offending configuration named;
+the table never guesses which of several action columns owns Edit/Save.
+
+This is deliberately a marker on the existing column rather than a second
+row-action API. Existing action renderers can depend on the complete typed row,
+render icons/tooltips, and carry domain-specific disabled states. Re-expressing
+them as label-plus-key declarations would lose that behavior and would still
+need to solve header, colgroup, filtering, compact-row, visibility, and export
+semantics for a parallel synthetic column.
+
 ## 4. Behaviour the spec pins down
 
 | Spec item | Implementation |
 |---|---|
 | `+` inserts a blank row | Rendered in the existing `toolbar_actions` region, beside Export. Framework-owned button, so every table's `+` looks and reads the same. |
 | Cursor jumps to first column | Focus moves to the **first editable** cell's control after mount. Not simply "first column" — a leading derived/action column has no editor to focus. |
-| All other rows disabled | `aria-disabled="true"` **plus removal from the tab order** — see the divergence note below. |
+| All other rows disabled | `aria-disabled="true"`, the native `inert` attribute, and removal of the row itself from the tab order — see the divergence note below. `inert` is what also disables nested consumer-rendered buttons and links. |
 | Tab / click to next field | Native tab order within the draft row. Tab past the last field lands on the row's Save button, so the whole flow is reachable without a pointer. |
 | Save invokes the action | Fires `on_commit`; enters Committing. |
+| Escape exits, no blank row | Returns to Idle, drops the draft, restores focus to the `+` that opened it. No phantom row, and focus never lands on `<body>`. |
 
 ### Where Save lives — settled
 
@@ -160,17 +195,17 @@ Owner clarification, 2026-09-03:
 > The row has a column of action buttons (Retire, Edit/Save), so those must be
 > selectable.
 
-So **Save is the row's own action button, not a toolbar button.** The action
-column already exists (`EntityColumn::action()`, `is_action`), and the bead's
-"while a row is being edited its action button reads 'Save' instead of 'Edit'"
-describes exactly this: the same cell, relabelled by state.
+So **Save is the row's own action button, not a toolbar button.** The marked
+action column already exists (`EntityColumn::action().inline_edit_host()`), and
+the bead's "while a row is being edited its action button reads 'Save' instead
+of 'Edit'" describes exactly this: one framework control in that cell,
+relabeled by state.
 
 That settles a question §3 had left implicit and it simplifies the toolbar —
-`+` is the *only* framework-owned toolbar addition. It also means the action
-column must stay interactive on the row being edited even while the rest of
-that row's siblings are inert, so the "disabled" treatment is per-row and must
-not blanket the action cell of the active row.
-| Escape exits, no blank row | Returns to Idle, drops the draft, restores focus to the `+` that opened it. No phantom row, and focus never lands on `<body>`. |
+`+` is the *only* framework-owned toolbar addition. The active row stays
+interactive; its consumer actions are replaced by Save/Cancel for the duration
+of the session. Every other row is inert as a unit, including arbitrary nested
+controls in its consumer-rendered action cell.
 
 **Divergence from the existing `aria-disabled` precedent — deliberate.**
 `component.rs:1266` uses `aria-disabled` on the empty-table header checkbox
@@ -209,6 +244,20 @@ The state machine in §2 is unchanged — `Drafting` simply gains a second way i
 and carries which row is live. Nothing else in this design moves, which is a
 good sign the exclusive-mode constraint was the right backbone.
 
+The existing row keeps its keyed `<tr>`. While it is live, every editable data
+column renders from the reducer's cloned working row rather than from `data`;
+derived columns remain read-only. Its marked action cell renders Save/Cancel.
+On Escape, the working clone is discarded and focus returns to that row's Edit
+control. On acceptance, the row returns through the consumer's normal data
+flow; on rejection, the working clone and focusable editors remain in place.
+
+The same structure is rendered at compact widths. A live compact row uses one
+cell spanning the declared column count, with visible labels paired to its
+editors and Save/Cancel after the final field. An idle compact row retains the
+consumer's compact rendering and exposes the framework Edit control. The
+desktop-only `hidden lg:table-cell` path is therefore never the sole way to
+finish or cancel a session.
+
 **"The table goes disabled" resolves two further questions by implication,**
 and I am recording the inference explicitly rather than pretending it was
 stated:
@@ -222,94 +271,94 @@ stated:
   invariant the whole design rests on. Retire on another row goes inert with
   it, which the plain reading of "the table goes disabled" also supports.
 
-## 5. Open questions for review
+The same lock covers table-owned controls that can move or reshape the live
+row: sorting, column filters, paging/page size, column visibility/reorder,
+selection, and resize handles. Consumer toolbar actions sit inside the same
+inert toolbar region. Event handlers retain reducer-side busy guards as a
+second line of defense; DOM state is not the only enforcement boundary.
 
-Down to one real decision plus one confirmation:
+## 5. Decisions complete
 
-1. ~~Does the same mode cover editing existing rows?~~ **Answered: yes** (§4b).
-2. ~~Are sort / filter / paging locked during Drafting?~~ **Answered: yes**, by
-   implication of "the table goes disabled" (§4b).
-3. **Confirm the `Committing` state** (§2) rather than an optimistic drop.
-   This is the only genuine design question left. Recommend keeping it: the
-   consumer owns persistence and persistence is async, so without it Save must
-   either drop the row before the write is confirmed (losing the user's input
-   if it fails) or freeze the UI. The cost is one extra state and a `resolve`
-   handle on the payload.
-4. **Confirm the `EntityColumn` field addition** (§3.2) — verified
-   source-compatible against all 20 Office surfaces, so this is a
-   confirmation rather than a risk.
-5. ~~Do other rows keep their action buttons live?~~ **Answered: no**, and it
-   is forced by the exclusivity invariant (§4b).
-5. **Do *other* rows keep their action buttons live during Drafting?** The
-   clarification says the Retire / Edit-Save column "must be selectable". For
-   the row being edited that is settled — its Save button is the commit
-   control. For the *other* rows it is genuinely ambiguous, and the two
-   readings behave differently:
-   - **Actions inert too** (recommended): consistent with "all other table
-     rows are disabled", and it prevents retiring a row while a draft is
-     half-typed — an action whose outcome would be confusing at best.
-   - **Actions stay live:** only the *editors* are disabled; Retire still
-     works on any row mid-draft. Defensible if the owner considers Retire
-     independent of the draft, but it opens the "row retired under an open
-     draft" case that would then need a rule.
-
-   I did not guess this one, because it is a behaviour difference a user
-   would notice immediately.
+| Question | Decision |
+|---|---|
+| New and existing rows? | One exclusive mode with two entry points (§4b). |
+| Async persistence? | Keep `Committing`; only the consumer's resolve handle ends or rejects the write. |
+| Which cell owns Edit/Save? | Exactly one existing action column marked `inline_edit_host()` (§3.4). |
+| Other rows' actions during a session? | Inert with the rest of the row; native `inert` covers nested controls. |
+| Table chrome during a session? | Locked wherever an operation can move, hide, reorder, or mutate the live row. |
+| Column compatibility? | Adding the marker field follows the already-verified `EntityColumn` builder-only usage across the local consumers. |
 
 ## 6. What a refresh does mid-edit
 
 The bead calls this out and it is the subtlest part. Rule:
 
-> **A data refresh landing during Drafting or Committing never removes the
-> draft row and never discards its input.**
+> **A data refresh landing during Drafting or Committing never discards the
+> live working row or its input.**
 
-The draft is not part of `data`; it is table-local state layered over it. So a
-new `data` signal replaces the *backing rows* and the draft survives on top,
-because it was never in that collection to begin with. This falls out of the
-design rather than needing a special case — which is a good sign the state is
-in the right place.
-
-The one real case to handle: a refresh that removes rows can change which page
-the draft sits on. Since paging is locked during Drafting (open question 2),
-this cannot bite while a draft is open.
+The working row is table-local state layered over `data`. A new-row draft was
+never in that collection; an existing-row edit cloned its starting value before
+typing. Therefore a new `data` signal can replace the backing snapshot without
+overwriting the reducer's working copy. If an existing key temporarily drops
+out of the incoming snapshot, the live keyed row remains mounted for the
+session at the displayed position captured when editing began, and leaves only
+on cancel or accepted resolution. The consumer can reject a commit against a
+record that was authoritatively removed. Page controls remain locked for the
+session, so a refresh cannot move the user away from that pinned row.
 
 ## 7. Verification plan
 
 Following this repo's rule that a suite registered in no lane runs nowhere
 (`ldui-a8an`), and that browser coverage which only compiles proves nothing:
 
-- **Native:** the state machine as a pure reducer — Idle→Drafting→Committing→
-  Idle, Escape from each state, Rejected returning to Drafting with input
-  intact, stale resolve ignored.
-- **Browser** (`test-entity-draft-row`, registered as its own xtask step *and*
-  in `full_steps()`): `+` inserts and focuses the first editable cell; other
-  rows carry `aria-disabled` and are out of the tab order; Tab walks the draft
-  and reaches Save; Escape removes the row and restores focus to `+`; a
-  refresh mid-draft leaves the draft intact.
-- **Negative control per assertion**, and a demo fixture mounting both an
-  opted-in and a plain table on one document — the pattern used for
-  `ldui-nj3q`, so the "renders unchanged when absent" claim is proven on the
-  same run rather than asserted.
+- **Native:** reducer transitions plus pure configuration/column-shape helpers:
+  exactly one required edit host, draft and existing targets share the commit
+  path, and an active key is retained across a backing-snapshot replacement.
+- **Browser / Layer B+D1** (`test-entity-draft-row`, registered as its own
+  xtask step *and* in `full_steps()`): use real pointer and keyboard input for
+  `+`, Edit, typing, Tab, Save, Escape, rejection, and acceptance. Assert DOM
+  phase plus the consumer-observed commit target/row, no browser errors, and no
+  prohibited callback or table-control activation while locked.
+- **Structure:** header, colgroup, filter, body, empty row, draft row, and group
+  spans agree on one column count; there is no synthetic unmatched `<td>`.
+  Existing-row editing changes cell content without replacing its keyed `<tr>`.
+- **Accessibility / Layer C:** first-editor focus, sequential Tab to Save,
+  Escape focus restoration, `inert` descendants absent from tab order, named
+  controls, ordered focus in compact mode, and an axe-core run with editing
+  open.
+- **Responsive / Layer A+B:** force wide and compact widths. Run the existing
+  style/layout audits for table hierarchy and zero overlap; inspect the live
+  fixture rather than minting a new screenshot baseline from the same change.
+- **Negative controls:** the fixture keeps an otherwise-identical table without
+  `draft_row`; deliberately break one interaction/model assertion, observe the
+  focused lane fail, revert it, and observe green.
 - Verify registration by the **step count changing**, never by the step
   passing.
 
-## 8. Recommendation
+## 8. Chosen approach and implementation order
 
-The design is settled apart from question 3 (`Committing`) and the question 4
-confirmation. Three of the five original questions were resolved by the
-owner's two clarifications, and none of them moved the backbone — the
-exclusive-mode constraint absorbed every one, which is the strongest evidence
-available that it is the right shape.
+Three action-ownership approaches were considered:
 
-Ready to build on a go-ahead. Implementation order:
+1. **Chosen — mark one existing action column as the host.** It preserves rich
+   consumer renderers and every existing column semantic while giving the
+   framework the stateful cell it needs.
+2. **Rejected — a second declarative `EntityRowActionSpec` API.** It duplicates
+   the existing action-column vocabulary, cannot express current rich actions,
+   and creates a parallel column that must be threaded through every geometry
+   and projection path.
+3. **Rejected — expose the reducer/controller to a consumer renderer.** That
+   leaks table-local state, makes exclusivity depend on each consumer, and
+   prevents the framework from guaranteeing focus and locked descendants.
 
-1. The state machine as a pure, testable reducer (no rendering) — Idle,
-   Drafting{row}, Committing{row}, with the transitions and the stale-resolve
-   rule. This is where the correctness lives, and it is native-testable.
-2. `EntityCellEditor` + `EntityColumn::editable`, with read-only fallback for
-   derived columns.
-3. Rendering: the `+` toolbar button, the row action cell's Edit⇄Save
-   relabelling, and the table-wide inert treatment.
-4. The demo fixture (opted-in **and** plain table on one document) and the
-   `test-entity-draft-row` browser lane, registered as its own xtask step and
-   in `full_steps()`, verified by the step count changing.
+The remaining implementation order is:
+
+1. Write failing native tests for action-host validation and backing-snapshot
+   retention, then add the minimal column/config helpers.
+2. Expand the browser fixture and write failing wide-layout journeys for
+   existing-row Edit⇄Save, real focus/Tab/Escape, locked controls, consumer
+   actions, target-aware commits, and column geometry.
+3. Unify draft/existing live-row rendering inside the marked action column and
+   apply real inertness plus control locks.
+4. Add the compact-width journey and compact live-row form, then run the
+   style/layout/axe assertions and break-and-revert proof.
+5. Update the consumer guide, run the focused lane, then run
+   `cargo xtask verify-full` on the final candidate tree.
