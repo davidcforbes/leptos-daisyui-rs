@@ -138,8 +138,26 @@ completion can be ignored if stale).
 | `+` inserts a blank row | Rendered in the existing `toolbar_actions` region, beside Export. Framework-owned button, so every table's `+` looks and reads the same. |
 | Cursor jumps to first column | Focus moves to the **first editable** cell's control after mount. Not simply "first column" — a leading derived/action column has no editor to focus. |
 | All other rows disabled | `aria-disabled="true"` **plus removal from the tab order** — see the divergence note below. |
-| Tab / click to next field | Native tab order within the draft row. Tab past the last field lands on Save, which makes the whole flow reachable without a pointer. |
+| Tab / click to next field | Native tab order within the draft row. Tab past the last field lands on the row's Save button, so the whole flow is reachable without a pointer. |
 | Save invokes the action | Fires `on_commit`; enters Committing. |
+
+### Where Save lives — settled
+
+Owner clarification, 2026-09-03:
+
+> The row has a column of action buttons (Retire, Edit/Save), so those must be
+> selectable.
+
+So **Save is the row's own action button, not a toolbar button.** The action
+column already exists (`EntityColumn::action()`, `is_action`), and the bead's
+"while a row is being edited its action button reads 'Save' instead of 'Edit'"
+describes exactly this: the same cell, relabelled by state.
+
+That settles a question §3 had left implicit and it simplifies the toolbar —
+`+` is the *only* framework-owned toolbar addition. It also means the action
+column must stay interactive on the row being edited even while the rest of
+that row's siblings are inert, so the "disabled" treatment is per-row and must
+not blanket the action cell of the active row.
 | Escape exits, no blank row | Returns to Idle, drops the draft, restores focus to the `+` that opened it. No phantom row, and focus never lands on `<body>`. |
 
 **Divergence from the existing `aria-disabled` precedent — deliberate.**
@@ -175,6 +193,21 @@ These are the ones where I do not want to guess:
    treatment) — the alternative is a genuinely confusing UI.
 3. **Confirm the `Committing` state** (§2) rather than optimistic drop.
 4. **Confirm the `EntityColumn` field addition** is acceptable (§3.2).
+5. **Do *other* rows keep their action buttons live during Drafting?** The
+   clarification says the Retire / Edit-Save column "must be selectable". For
+   the row being edited that is settled — its Save button is the commit
+   control. For the *other* rows it is genuinely ambiguous, and the two
+   readings behave differently:
+   - **Actions inert too** (recommended): consistent with "all other table
+     rows are disabled", and it prevents retiring a row while a draft is
+     half-typed — an action whose outcome would be confusing at best.
+   - **Actions stay live:** only the *editors* are disabled; Retire still
+     works on any row mid-draft. Defensible if the owner considers Retire
+     independent of the draft, but it opens the "row retired under an open
+     draft" case that would then need a rule.
+
+   I did not guess this one, because it is a behaviour difference a user
+   would notice immediately.
 
 ## 6. What a refresh does mid-edit
 
