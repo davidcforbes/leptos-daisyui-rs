@@ -85,7 +85,17 @@ fn AppInner() -> impl IntoView {
         <UiAnimationsPreamble />
 
         <Router>
-            <Routes fallback=|| "Page not found">
+            // ldui-mxyb: the fallback must be DETECTABLE, not just visible.
+            // As a bare string it rendered no `<main>`, so a harness pointed
+            // at a mistyped route waited out its whole 60s mount-selector
+            // budget and then reported "did the app mount?" -- which reads as
+            // a dead or wrong-port server rather than a bad URL. Emitting a
+            // real `<main>` lets the mount wait succeed immediately, and the
+            // `data-demo-route-missing` hook lets `tests/common::harness_at`
+            // fail instantly with the offending path (see its assertion).
+            <Routes fallback=|| view! {
+                <main data-demo-route-missing="true">"Page not found"</main>
+            }>
                 <Route path=path!("/") view=Landing />
                 <ParentRoute path=path!("/components") view=Layout>
                     <Route path=path!("/") view=AccordionDemo />

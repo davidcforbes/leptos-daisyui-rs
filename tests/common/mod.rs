@@ -105,7 +105,16 @@ pub async fn harness_at(path: &str) -> Harness {
     cfg.harness.baseline_root = ssim.baseline_root;
     cfg.harness.render_root = ssim.render_root;
     cfg.harness.diff_root = ssim.diff_root;
-    let base = cfg.harness.base_url.clone();
+    // ldui-mxyb: report the base URL the engine will ACTUALLY navigate to.
+    // `pixelproof_style_audit::web::harness_at` applies `base_url_env`
+    // (VISUAL_TEST_BASE_URL, which xtask sets to its randomly-chosen port) to
+    // a *clone* of the harness config, leaving `cfg.harness.base_url` at the
+    // compiled-in fallback. Reading that field for the message therefore
+    // always printed `DEFAULT_BASE_URL` no matter which port was serving, and
+    // sent at least one debugging session hunting a port mismatch that did
+    // not exist. Mirror the engine's precedence exactly.
+    let base =
+        std::env::var("VISUAL_TEST_BASE_URL").unwrap_or_else(|_| cfg.harness.base_url.clone());
     let settle_ms = cfg.harness.settle_ms;
 
     let h = ldui_audit::web::harness_at(&cfg, path)
@@ -118,6 +127,7 @@ pub async fn harness_at(path: &str) -> Harness {
                  `trunk serve` from demo/ (manual)."
             )
         });
+    assert_route_exists(&h, path).await;
     assert_stylesheet_is_current(&h, path).await;
     h.set_viewport(VIEWPORT).await.expect("set viewport");
     tokio::time::sleep(std::time::Duration::from_millis(settle_ms)).await;
@@ -253,6 +263,39 @@ const COLLECT_STAMPS_JS: &str = r#"(() => {
 /// `reactivity_smoke`), and called per navigation rather than once per process
 /// so a rebuild *during* a suite is caught too.
 ///
+/// Fails immediately when navigation landed on the demo Router's
+/// not-found fallback rather than a real route (`ldui-mxyb`).
+///
+/// A mistyped path used to be the most expensive failure in these suites.
+/// The fallback rendered a bare string with no `<main>`, so the engine's
+/// mount wait burned its full 60 s budget and then reported
+/// `did the app mount?` — pointing at the server, not the URL. That cost a
+/// full diagnostic detour on `app_shell_smoke`, whose route was `/app-shell`
+/// instead of `/components/app-shell`; it had been wrong since the file was
+/// written, because no xtask lane ever ran it (`ldui-a8an`).
+///
+/// The fallback now emits `<main data-demo-route-missing="true">`, so the
+/// mount wait succeeds and this turns the 60 s ambiguity into an instant
+/// message naming the bad path. Hosts that route by pathname instead of a
+/// `Router` (`client-snapshot-test-host.html`) never render the marker, so
+/// this is a no-op there.
+pub async fn assert_route_exists(h: &Harness, path: &str) {
+    let missing = h
+        .page()
+        .evaluate("document.querySelector('[data-demo-route-missing]') !== null")
+        .await
+        .ok()
+        .and_then(|v| v.into_value::<bool>().ok())
+        .unwrap_or(false);
+    assert!(
+        !missing,
+        "navigated to {path}, but the demo Router rendered its not-found \
+         fallback — that route does not exist.\n\
+         Demo pages live under /components (e.g. `/components/app-shell`, \
+         not `/app-shell`); only `/` is top-level."
+    );
+}
+
 /// The marker is an unmatchable id rule (`#ldui-css-stamp-<token>`), so it
 /// cannot perturb a computed style — nothing in the demo carries that id.
 pub async fn assert_stylesheet_is_current(h: &Harness, path: &str) {

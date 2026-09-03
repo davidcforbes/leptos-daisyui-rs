@@ -1150,7 +1150,27 @@ impl DemoServer {
         // A first full-catalog release build can take several minutes. Do not
         // accept a mere HTTP 200: Trunk may temporarily serve the previous
         // `dist/` while its new asset pipeline is still finishing.
-        let deadline = Instant::now() + Duration::from_secs(900);
+        //
+        // ldui-6epa: this deadline bounds a BUILD, not a liveness check, so it
+        // has to be generous. On a cold target dir the `index.html` target
+        // compiles the full showcase in RELEASE profile and then runs
+        // wasm-opt over the optimized binary; one measured run took 12m19s of
+        // rustc plus ~3min of wasm-opt. The previous 15-minute budget expired
+        // mid-optimize and reported "demo server did not come up", which reads
+        // as a dead server -- so the suite never ran and the message pointed
+        // away from the cause.
+        //
+        // Do NOT try to be clever by timing out sooner when the port is not
+        // yet bound: Trunk binds only AFTER its first build completes (log
+        // order is `🚀 Starting trunk` ... build ... `applying new
+        // distribution` ... `📡 server listening`, ~3 min apart even on a warm
+        // cache). An earlier revision of this code assumed the opposite and
+        // failed in 2 min what the old code survived for 15 -- verified wrong
+        // by the break-test that introduced it.
+        //
+        // A Trunk that dies is already caught by `try_wait` below, which is
+        // the real liveness signal; the timeout only has to catch a wedge.
+        let deadline = Instant::now() + Duration::from_secs(3600);
         loop {
             match browser_server_ready(port, html_target) {
                 Ok(true) => break,
@@ -1164,7 +1184,8 @@ impl DemoServer {
             }
             if Instant::now() > deadline {
                 return Err(format!(
-                    "demo server did not come up on port {port} in 15 min"
+                    "demo server did not come up on port {port} in 60 min \
+                     (trunk is still alive -- its build or wasm-opt appears wedged)"
                 ));
             }
             std::thread::sleep(Duration::from_secs(3));
