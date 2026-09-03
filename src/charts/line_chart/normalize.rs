@@ -1,4 +1,7 @@
-use super::types::{LineAxes, LineAxisOptions, LineCategory, LinePoint, LineSeries, LineValueAxis};
+use super::types::{
+    LineAxes, LineAxisOptions, LineCategory, LineLabelPlacement, LinePoint, LineSeries,
+    LineValueAxis,
+};
 
 /// The finite y-range used by categorical line-chart geometry.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -34,6 +37,8 @@ pub(super) struct NormalizedSeries {
     pub pattern: super::types::LinePattern,
     pub marker: super::types::MarkerStyle,
     pub show_data_labels: bool,
+    /// Where point labels sit relative to their markers (ldui-raa7).
+    pub label_placement: LineLabelPlacement,
     pub dom_id: String,
     pub axis: LineValueAxis,
     /// The axis' formatting options, copied here so every surface that states
@@ -107,6 +112,7 @@ pub(super) fn normalize_categorical(
             pattern: series.pattern.clone(),
             marker: series.marker.clone(),
             show_data_labels: series.show_data_labels,
+            label_placement: series.label_placement,
             dom_id: format!("{}-{series_index}", series.id),
             axis: series.axis,
             format: LineAxisOptions::default(),

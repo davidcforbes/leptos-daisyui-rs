@@ -9,8 +9,8 @@ use leptos_daisyui_rs::charts::{
     BarChartLayout, BarChartTexts, BarStatus, BarValueFormat, ChartSeries, HeatScale, Heatmap,
     HeatmapActivation, HeatmapActivationSource, HeatmapCategory, HeatmapCell, HeatmapMatrix,
     HeatmapSense, HeatmapTexts, HeatmapValue, LineAxisOptions, LineCategory, LineChart,
-    LineChartActivation, LineChartActivationSource, LineChartData, LinePattern, LinePoint,
-    LineSeries, LineValueAxis, MarkerShape, MarkerStyle, PieChart, PieSlice, Sparkline,
+    LineChartActivation, LineChartActivationSource, LineChartData, LineLabelPlacement, LinePattern,
+    LinePoint, LineSeries, LineValueAxis, MarkerShape, MarkerStyle, PieChart, PieSlice, Sparkline,
     StackedAreaChart, StackedBarChart,
 };
 
@@ -672,6 +672,7 @@ fn actual_series() -> LineSeries {
             stroke_width: 1.0,
         },
         show_data_labels: true,
+        label_placement: LineLabelPlacement::default(),
         axis: LineValueAxis::Primary,
     }
 }
@@ -696,6 +697,7 @@ fn rolling_average_series() -> LineSeries {
             stroke_width: 1.0,
         },
         show_data_labels: false,
+        label_placement: LineLabelPlacement::default(),
         axis: LineValueAxis::Primary,
     }
 }
@@ -726,6 +728,7 @@ fn target_series() -> LineSeries {
             stroke_width: 1.0,
         },
         show_data_labels: true,
+        label_placement: LineLabelPlacement::default(),
         axis: LineValueAxis::Primary,
     }
 }

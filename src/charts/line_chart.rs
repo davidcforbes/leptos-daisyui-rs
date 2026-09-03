@@ -12,8 +12,8 @@ use types::LineAxes;
 pub use types::{
     LineAxisOptions, LineCategory, LineChartActivation, LineChartActivationSource,
     LineChartActivationValue, LineChartData, LineChartDataSource, LineChartModifiers,
-    LineChartTexts, LineInteractionMode, LineLegendMode, LinePattern, LinePoint, LineSeries,
-    LineValueAxis, MarkerShape, MarkerStyle,
+    LineChartTexts, LineInteractionMode, LineLabelPlacement, LineLegendMode, LinePattern,
+    LinePoint, LineSeries, LineValueAxis, MarkerShape, MarkerStyle,
 };
 
 /// Per-instance sequence for categorical SVG title, description, tooltip, and
@@ -773,14 +773,36 @@ fn render_categorical(
                 series,
                 point.marker_color.as_deref(),
             ));
+            // `ldui-raa7`. Two changes to what used to be here:
+            //
+            // 1. `display_value` is accepted as the label when no explicit
+            //    `data_label` was given. A caller who turned labels on and
+            //    supplied only the server's formatted string obviously meant
+            //    that string -- and this can never FABRICATE one, which is the
+            //    consumer's no-math contract: absent stays absent.
+            // 2. The offset honours `label_placement`. It used to be
+            //    unconditionally above, so two close series drew their labels
+            //    on top of each other.
             if series.show_data_labels
-                && let Some(label) = point.data_label.clone()
+                && let Some(label) = point
+                    .data_label
+                    .clone()
+                    .or_else(|| point.display_value.clone())
             {
                 let anchor = tick_anchor(index, chart.categories.len());
                 let (fill, style) = paint_attrs(series.color.clone());
+                let clearance = marker_size(&series.marker) + 5.0;
+                let (label_y, placement) = match series.label_placement {
+                    LineLabelPlacement::Above => (value_y - clearance, "above"),
+                    // `+ 12.0` rather than `+ clearance`: text hangs DOWN from
+                    // its baseline, so a below-marker label needs the glyph
+                    // height cleared too or it overlaps the node it labels.
+                    LineLabelPlacement::Below => (value_y + clearance + 7.0, "below"),
+                };
                 data_label_views.push(view! {
-                    <text x=svg_number(projections.category_x(index)) y=svg_number(value_y - marker_size(&series.marker) - 5.0)
-                        text-anchor=anchor fill=fill style=style font-size="12" font-weight="600">
+                    <text x=svg_number(projections.category_x(index)) y=svg_number(label_y)
+                        text-anchor=anchor fill=fill style=style font-size="12" font-weight="600"
+                        data-line-label-placement=placement>
                         {label}
                     </text>
                 });
@@ -1773,6 +1795,7 @@ mod tests {
                 ..MarkerStyle::default()
             },
             show_data_labels: false,
+            label_placement: LineLabelPlacement::default(),
             axis: LineValueAxis::Primary,
         }];
 

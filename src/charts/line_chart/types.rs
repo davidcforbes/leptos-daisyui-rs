@@ -40,8 +40,30 @@ pub struct LineSeries {
     pub marker: MarkerStyle,
     /// Whether individual point labels are rendered.
     pub show_data_labels: bool,
+    /// Where those labels sit relative to their markers (`ldui-raa7`).
+    /// Defaults to [`LineLabelPlacement::Above`], so a chart that already
+    /// draws labels is unchanged.
+    pub label_placement: LineLabelPlacement,
     /// Which value axis this series is measured against; primary by default.
     pub axis: LineValueAxis,
+}
+
+/// Where a series' point labels sit relative to their markers (`ldui-raa7`).
+///
+/// Exists because label collision between two close series is real, not
+/// hypothetical: the production chart this replaced put the value series'
+/// labels ABOVE their nodes and the 12-week baseline's BELOW, with a source
+/// comment saying exactly why. One series drawing both is unreadable the
+/// moment the lines converge.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LineLabelPlacement {
+    /// Above the marker. The default, and what every existing labelled chart
+    /// already draws.
+    #[default]
+    Above,
+    /// Below the marker, so a second series can be labelled without colliding
+    /// with the first.
+    Below,
 }
 
 /// Which value axis a categorical series is measured against.
@@ -386,6 +408,7 @@ impl LineSeries {
             pattern: LinePattern::Solid,
             marker: MarkerStyle::default(),
             show_data_labels: false,
+            label_placement: LineLabelPlacement::default(),
             axis: LineValueAxis::Primary,
         }
     }
@@ -552,5 +575,54 @@ mod tests {
             LineChartActivationSource::default(),
             LineChartActivationSource::Pointer
         );
+    }
+}
+
+#[cfg(test)]
+mod label_placement_tests {
+    use super::{LineLabelPlacement, LinePoint, LineSeries};
+
+    /// `ldui-raa7`: a labelled chart that never names a placement must keep
+    /// drawing exactly where it always did.
+    #[test]
+    fn placement_defaults_to_above() {
+        assert_eq!(LineLabelPlacement::default(), LineLabelPlacement::Above);
+        let series = LineSeries::new("s", "S", "var(--color-primary)", Vec::new());
+        assert_eq!(series.label_placement, LineLabelPlacement::Above);
+        assert!(
+            !series.show_data_labels,
+            "labels stay opt-in; this bead adds placement, not labels-by-default"
+        );
+    }
+
+    /// The two placements must be distinguishable, since the whole reason the
+    /// enum exists is that one series draws above and another below so their
+    /// labels cannot collide.
+    #[test]
+    fn above_and_below_are_distinct() {
+        assert_ne!(LineLabelPlacement::Above, LineLabelPlacement::Below);
+    }
+
+    /// The no-math contract: the renderer falls back to `display_value` when
+    /// no explicit `data_label` was given, but it can never invent one.
+    /// A point with neither stays unlabelled rather than showing a number the
+    /// server did not send.
+    #[test]
+    fn a_point_without_either_string_has_nothing_to_draw() {
+        let bare = LinePoint::new(42.0);
+        assert!(bare.data_label.is_none());
+        assert!(bare.display_value.is_none());
+
+        // display_value alone is enough -- that is the discoverability fix.
+        let from_display = LinePoint::new(42.0).with_display_value("42 resolved");
+        assert!(from_display.data_label.is_none());
+        assert_eq!(from_display.display_value.as_deref(), Some("42 resolved"));
+
+        // An explicit data_label still wins over display_value.
+        let explicit = LinePoint::new(42.0)
+            .with_display_value("42 resolved")
+            .with_data_label("42");
+        assert_eq!(explicit.data_label.as_deref(), Some("42"));
+        assert_eq!(explicit.display_value.as_deref(), Some("42 resolved"));
     }
 }
