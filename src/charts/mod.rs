@@ -31,7 +31,7 @@ pub use line_chart::{
     LineAxisOptions, LineCategory, LineChart, LineChartActivation, LineChartActivationSource,
     LineChartActivationValue, LineChartData, LineChartDataSource, LineChartModifiers,
     LineChartTexts, LineInteractionMode, LineLabelPlacement, LineLegendMode, LinePattern,
-    LinePoint, LineSeries, LineValueAxis, MarkerShape, MarkerStyle,
+    LinePoint, LineSeries, LineValueAxis, LineValueDomain, MarkerShape, MarkerStyle,
 };
 pub use pie_chart::{PieChart, PieSlice};
 pub use sparkline::Sparkline;

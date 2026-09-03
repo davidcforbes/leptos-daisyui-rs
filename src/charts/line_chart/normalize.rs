@@ -1,6 +1,6 @@
 use super::types::{
     LineAxes, LineAxisOptions, LineCategory, LineLabelPlacement, LinePoint, LineSeries,
-    LineValueAxis,
+    LineValueAxis, LineValueDomain,
 };
 
 /// The finite y-range used by categorical line-chart geometry.
@@ -68,6 +68,20 @@ impl NormalizedChart {
         for series in &mut self.series {
             series.format = axes.options(series.axis).clone();
         }
+        // `ldui-6ctp`: the domains are recomputed here rather than in
+        // `normalize`, because the caller's policy arrives with the axes and
+        // normalization runs before them. Each axis gets only its OWN policy,
+        // so padding a count scale cannot move a duration one.
+        self.domain = domain_for(
+            &self.series,
+            LineValueAxis::Primary,
+            axes.options(LineValueAxis::Primary).domain,
+        );
+        self.secondary_domain = domain_for(
+            &self.series,
+            LineValueAxis::Secondary,
+            axes.options(LineValueAxis::Secondary).domain,
+        );
         self.axes = axes;
         self
     }
@@ -121,8 +135,8 @@ pub(super) fn normalize_categorical(
 
     // Each axis sees only its own series, so a duration series can never widen
     // a count scale and a count series can never flatten a duration one.
-    let domain = domain_for(&series, LineValueAxis::Primary);
-    let secondary_domain = domain_for(&series, LineValueAxis::Secondary);
+    let domain = domain_for(&series, LineValueAxis::Primary, LineValueDomain::Fit);
+    let secondary_domain = domain_for(&series, LineValueAxis::Secondary, LineValueDomain::Fit);
     NormalizedChart {
         categories,
         series,
@@ -158,7 +172,11 @@ fn normalize_point(point: Option<&LinePoint>) -> NormalizedPoint {
 /// symmetrically here — explicitly, rather than being absorbed downstream by
 /// the projection's `unwrap_or(0.5)` fallback, which would silently flatten
 /// every point of that axis onto the plot's mid-line.
-fn domain_for(series: &[NormalizedSeries], axis: LineValueAxis) -> Option<Domain> {
+fn domain_for(
+    series: &[NormalizedSeries],
+    axis: LineValueAxis,
+    policy: LineValueDomain,
+) -> Option<Domain> {
     let mut values = series
         .iter()
         .filter(|series| series.axis == axis)
@@ -167,6 +185,12 @@ fn domain_for(series: &[NormalizedSeries], axis: LineValueAxis) -> Option<Domain
     let (min, max) = values.fold((first, first), |(min, max), value| {
         (min.min(value), max.max(value))
     });
+
+    // `ldui-6ctp`: the caller's declared policy is applied to the FITTED
+    // range, before the flat-series expansion below. Order matters -- padding
+    // a degenerate min==max range would scale zero, so the flat case still
+    // needs its own expansion afterwards.
+    let (min, max) = policy.apply(min, max);
 
     if min == max {
         let expansion = (min.abs() * 0.05).max(1.0);

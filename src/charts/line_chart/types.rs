@@ -83,6 +83,93 @@ pub enum LineValueAxis {
     Secondary,
 }
 
+/// How a value axis chooses its numeric domain (`ldui-6ctp`).
+///
+/// One declared policy rather than three independent knobs (a min, a max, a
+/// pad fraction, a zero flag), because the real ask is a single
+/// well-understood behaviour, and combining four numbers correctly is only the
+/// caller's problem if we make it one.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum LineValueDomain {
+    /// Fit the axis exactly to the finite data. Today's behaviour, and the
+    /// default, so no existing chart moves.
+    #[default]
+    Fit,
+    /// Pad the data range by `fraction` of its span at each end, optionally
+    /// refusing to go below zero.
+    ///
+    /// The headroom is not decoration. The production chart this replaced
+    /// recorded in its own comment that without it "the dot and its
+    /// centre-anchored value label hung half off the viewBox" — so a chart
+    /// adopting point labels (`ldui-raa7`) wants this in the same breath. The
+    /// zero floor matters because counts and revenue have no meaning below it.
+    Padded {
+        /// Fraction of the data span added at each end.
+        fraction: f64,
+        /// Clamp the padded minimum up to zero.
+        floor_at_zero: bool,
+    },
+    /// Exact bounds, so two charts can be made to share one scale.
+    Explicit {
+        /// Lower bound.
+        min: f64,
+        /// Upper bound.
+        max: f64,
+    },
+}
+
+impl LineValueDomain {
+    /// The policy this bead was filed for: 15% headroom, never below zero.
+    pub const PADDED_15_FLOORED: Self = Self::Padded {
+        fraction: 0.15,
+        floor_at_zero: true,
+    };
+
+    /// Applies this policy to a fitted `(min, max)`.
+    ///
+    /// Returns the pair unchanged for [`Self::Fit`] and for any input the
+    /// policy cannot improve — a non-finite bound, a non-positive or
+    /// non-finite fraction, or an `Explicit` range that is empty or not
+    /// finite. Refusing silently is deliberate: the alternative is a chart
+    /// whose axis spans nothing and whose every point sits on one line.
+    #[must_use]
+    pub fn apply(self, min: f64, max: f64) -> (f64, f64) {
+        if !min.is_finite() || !max.is_finite() {
+            return (min, max);
+        }
+        match self {
+            Self::Fit => (min, max),
+            Self::Padded {
+                fraction,
+                floor_at_zero,
+            } => {
+                if !fraction.is_finite() || fraction <= 0.0 {
+                    return (min, max);
+                }
+                let padding = (max - min).abs() * fraction;
+                let padded_min = min - padding;
+                let floored_min = if floor_at_zero && padded_min < 0.0 {
+                    // Raises the floor to zero only when the DATA is
+                    // non-negative. Data that genuinely goes negative keeps its
+                    // own minimum, because clamping a real negative value out
+                    // of view would be a lie about the data.
+                    min.min(0.0)
+                } else {
+                    padded_min
+                };
+                (floored_min, max + padding)
+            }
+            Self::Explicit { min: lo, max: hi } => {
+                if lo.is_finite() && hi.is_finite() && hi > lo {
+                    (lo, hi)
+                } else {
+                    (min, max)
+                }
+            }
+        }
+    }
+}
+
 /// Localized naming and value formatting for one value axis.
 ///
 /// This is the single source for a unit: ticks, the hover card, the accessible
@@ -103,9 +190,27 @@ pub struct LineAxisOptions {
     /// pre-existing rendering: shortest round-trip text for a value, one
     /// decimal for a tick.
     pub decimals: Option<usize>,
+    /// How this axis chooses its numeric domain (`ldui-6ctp`). Defaults to
+    /// [`LineValueDomain::Fit`] — today's behaviour, so no existing chart
+    /// moves.
+    pub domain: LineValueDomain,
 }
 
 impl LineAxisOptions {
+    /// Sets the domain policy for this axis (`ldui-6ctp`).
+    ///
+    /// ```rust,ignore
+    /// // 15% headroom, never below zero -- the policy the prior production
+    /// // chart used, and what a chart with point labels needs so they are
+    /// // not clipped at the viewBox edge.
+    /// LineAxisOptions::default().with_domain(LineValueDomain::PADDED_15_FLOORED)
+    /// ```
+    #[must_use]
+    pub const fn with_domain(mut self, domain: LineValueDomain) -> Self {
+        self.domain = domain;
+        self
+    }
+
     /// Sets the axis title used by ticks, the legend and the hidden table.
     pub fn with_label(mut self, label: impl Into<String>) -> Self {
         self.label = Some(label.into());
@@ -575,6 +680,99 @@ mod tests {
             LineChartActivationSource::default(),
             LineChartActivationSource::Pointer
         );
+    }
+}
+
+#[cfg(test)]
+mod value_domain_tests {
+    use super::{LineAxisOptions, LineValueDomain};
+
+    /// A chart that never names a policy must keep exactly today's scale.
+    #[test]
+    fn fit_is_the_default_and_changes_nothing() {
+        assert_eq!(LineValueDomain::default(), LineValueDomain::Fit);
+        assert_eq!(LineAxisOptions::default().domain, LineValueDomain::Fit);
+        assert_eq!(LineValueDomain::Fit.apply(4.0, 8.0), (4.0, 8.0));
+    }
+
+    /// The consumer's policy, reproduced from the prior production chart:
+    /// 15% of the span at each end, floored at zero.
+    #[test]
+    fn padded_15_floored_matches_the_prior_production_scale() {
+        // span 80, so 12 at each end; the low end would go negative and is
+        // floored instead.
+        let (min, max) = LineValueDomain::PADDED_15_FLOORED.apply(10.0, 90.0);
+        assert!((min - 0.0).abs() < 1e-9, "counts must not start below zero");
+        assert!((max - 102.0).abs() < 1e-9, "headroom must clear the label");
+
+        // Away from zero the floor does not engage and both ends pad.
+        let (min, max) = LineValueDomain::PADDED_15_FLOORED.apply(100.0, 200.0);
+        assert!((min - 85.0).abs() < 1e-9);
+        assert!((max - 215.0).abs() < 1e-9);
+    }
+
+    /// The floor raises to zero only for non-negative DATA. Clamping a real
+    /// negative value out of view would misrepresent the data.
+    #[test]
+    fn the_zero_floor_never_hides_genuinely_negative_data() {
+        let (min, _) = LineValueDomain::PADDED_15_FLOORED.apply(-40.0, 60.0);
+        assert!(
+            min <= -40.0,
+            "a series that really goes negative must stay visible, got {min}"
+        );
+    }
+
+    /// Explicit bounds let two charts share one scale, and a nonsense range is
+    /// refused rather than collapsing the axis.
+    #[test]
+    fn explicit_bounds_are_used_but_only_when_they_are_a_real_range() {
+        assert_eq!(
+            LineValueDomain::Explicit {
+                min: 0.0,
+                max: 500.0
+            }
+            .apply(10.0, 90.0),
+            (0.0, 500.0)
+        );
+        // Inverted, empty, and non-finite ranges fall back to the fitted data.
+        for bad in [
+            LineValueDomain::Explicit {
+                min: 90.0,
+                max: 10.0,
+            },
+            LineValueDomain::Explicit { min: 5.0, max: 5.0 },
+            LineValueDomain::Explicit {
+                min: f64::NAN,
+                max: 10.0,
+            },
+        ] {
+            assert_eq!(
+                bad.apply(10.0, 90.0),
+                (10.0, 90.0),
+                "an unusable explicit range must fall back, not flatten the axis"
+            );
+        }
+    }
+
+    /// A nonsense padding fraction is ignored rather than inverting the axis.
+    #[test]
+    fn a_bad_padding_fraction_is_refused() {
+        for bad in [-0.5, 0.0, f64::NAN, f64::INFINITY] {
+            let policy = LineValueDomain::Padded {
+                fraction: bad,
+                floor_at_zero: false,
+            };
+            assert_eq!(policy.apply(10.0, 90.0), (10.0, 90.0));
+        }
+    }
+
+    /// Non-finite input is passed through untouched, so the caller's own
+    /// degenerate-range handling downstream still sees what it expects.
+    #[test]
+    fn non_finite_input_is_left_alone() {
+        let policy = LineValueDomain::PADDED_15_FLOORED;
+        assert!(policy.apply(f64::NAN, 10.0).0.is_nan());
+        assert_eq!(policy.apply(f64::INFINITY, 10.0), (f64::INFINITY, 10.0));
     }
 }
 

@@ -13,7 +13,7 @@ pub use types::{
     LineAxisOptions, LineCategory, LineChartActivation, LineChartActivationSource,
     LineChartActivationValue, LineChartData, LineChartDataSource, LineChartModifiers,
     LineChartTexts, LineInteractionMode, LineLabelPlacement, LineLegendMode, LinePattern,
-    LinePoint, LineSeries, LineValueAxis, MarkerShape, MarkerStyle,
+    LinePoint, LineSeries, LineValueAxis, LineValueDomain, MarkerShape, MarkerStyle,
 };
 
 /// Per-instance sequence for categorical SVG title, description, tooltip, and
