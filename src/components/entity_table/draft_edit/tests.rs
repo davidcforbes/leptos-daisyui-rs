@@ -277,6 +277,44 @@ fn resolving_when_nothing_is_in_flight_is_ignored() {
     assert_eq!(s.phase(), &EntityEditPhase::Idle);
 }
 
+/// The predicate the renderer uses to mark rows inert (`ldui-ff2f` 3c).
+///
+/// Stated as the renderer states it — `is_editing() && !is_row_live(key)` —
+/// so the rule is pinned natively rather than only in a browser suite. An
+/// opted-out table never satisfies the first half, which is what keeps the
+/// inert treatment unreachable for every existing consumer.
+#[test]
+fn rows_are_inert_only_while_another_row_is_live() {
+    let inert = |s: &EntityEditState<Row>, key: &str| s.is_editing() && !s.is_row_live(key);
+
+    let mut s = state();
+    // Idle: nothing is inert, which is the entire behaviour of a table that
+    // never opted in.
+    assert!(!inert(&s, "row-1"));
+    assert!(!inert(&s, "row-2"));
+
+    s.begin_edit("row-2", existing());
+    assert!(!inert(&s, "row-2"), "the live row stays interactive");
+    assert!(inert(&s, "row-1"), "every other row goes inert");
+    assert!(inert(&s, "row-3"));
+
+    // A draft has no key, so EVERY existing row is inert -- there is no real
+    // row to keep interactive.
+    let mut s = state();
+    s.begin_draft(blank());
+    assert!(inert(&s, "row-1"));
+    assert!(inert(&s, "row-2"));
+
+    // The rule holds while a commit is in flight, so the table cannot be
+    // clicked out from under a pending write.
+    let commit = s.commit().expect("commit");
+    assert!(inert(&s, "row-1"));
+
+    // ...and lifts the moment the session ends.
+    s.resolve(&commit, EntityEditOutcome::Accepted);
+    assert!(!inert(&s, "row-1"));
+}
+
 /// Editability is opt-in per column, and the default must be read-only —
 /// otherwise a derived column would start accepting input for a blank row.
 #[test]

@@ -2584,6 +2584,7 @@ where
                                         selection_scope,
                                         row_emphasis,
                                         table_control_id,
+                                        edit_state,
                                     },
                                 ),
                             )}
@@ -2619,6 +2620,7 @@ where
                                 selection_scope,
                                 row_emphasis,
                                 table_control_id,
+                                edit_state,
                             },
                         };
                         view! {
@@ -3064,6 +3066,9 @@ struct KeyedRowContext<T: 'static> {
     selection_scope: Signal<String>,
     row_emphasis: StoredValue<Option<EntityRowEmphasisClassifier<T>>, LocalStorage>,
     table_control_id: Signal<String>,
+    /// `ldui-ff2f`. Idle on every table that did not opt in, so the inert
+    /// treatment below is unreachable there.
+    edit_state: RwSignal<EntityEditState<T>, LocalStorage>,
 }
 
 impl<T: 'static> Clone for KeyedRowContext<T> {
@@ -3092,6 +3097,7 @@ fn render_keyed_row<T: Clone + 'static>(
         selection_scope,
         row_emphasis,
         table_control_id,
+        edit_state,
     } = context;
     // A table with only `selection` (no `on_row_activate`) is still
     // keyboard-operable, mirroring `data_table::row_is_interactive`.
@@ -3264,12 +3270,34 @@ fn render_keyed_row<T: Clone + 'static>(
         }
     });
 
+    // Two closures need it (aria-disabled and tabindex), so each gets its own.
+    let inert_key = key.clone();
+    let inert_key_tabindex = key.clone();
     view! {
         <tr
             data-row-key=key.clone()
             data-entity-row-key=key
             data-entity-visible-position=move || visible_position.get()
-            tabindex=interactive.then_some(0)
+            // `ldui-ff2f`: while any row is live, every OTHER row is inert.
+            //
+            // Deliberately diverges from the `aria-disabled` precedent at the
+            // empty-table header checkbox, which keeps itself tabbable so a
+            // keyboard user hears *why* it is inert. Right for one control,
+            // wrong for N rows: leaving them all tabbable would make the
+            // spec's "Tab to the next field, then Save" flow require tabbing
+            // the whole table first. The "tell the user why" obligation is met
+            // once at the region level -- the table announces it is in edit
+            // mode -- instead of every row announcing that it is not.
+            aria-disabled=move || {
+                edit_state.with(|state| {
+                    (state.is_editing() && !state.is_row_live(&inert_key)).then_some("true")
+                })
+            }
+            tabindex=move || {
+                let inert = edit_state
+                    .with(|state| state.is_editing() && !state.is_row_live(&inert_key_tabindex));
+                (interactive && !inert).then_some(0)
+            }
             class=move || {
                 let selected = has_selection && is_row_selected(&selected_class_key);
                 merge_classes!(
