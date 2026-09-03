@@ -11,8 +11,10 @@
 > the framework's inline-edit host (§3.4/§4b), existing rows use the same
 > editable-cell renderer as new drafts, every descendant of a non-live row is
 > genuinely inert, table controls lock during a session, and compact rows get
-> the same complete interaction. The browser proof is expanded accordingly;
-> the earlier draft-only proof did not cover all of those claims.
+> the same complete interaction. The accepted table snapshot also freezes for
+> the whole session and coalesces incoming refreshes until editing finishes
+> (§6). The browser proof is expanded accordingly; the earlier draft-only proof
+> did not cover all of those claims.
 
 **Filed from:** 4iiz-Office Setup page (Work Types), owner request 2026-09-03.
 **Related:** `ldui-tmoz` (hiding the rows-per-page control on the same page).
@@ -59,6 +61,11 @@ rows' editors. The table has one extra state, not N.
   frozen (not removed) until the consumer resolves it. This state prevents
   the classic double-submit and the "row vanished before the server answered"
   bug.
+
+`Drafting` and `Committing` both hold the table's accepted backing snapshot
+fixed. Returning to `Idle` first publishes the newest pending refresh, if one
+arrived, then re-enables the table. A rejection returns to `Drafting`, so it
+does not release the pending refresh or replace the user's input.
 
 `Committing` is an approved addition to the owner's interaction. It exists because the consumer
 owns persistence and persistence is asynchronous: without it, Save must either
@@ -187,6 +194,7 @@ semantics for a parallel synthetic column.
 | Tab / click to next field | Native tab order within the draft row. Tab past the last field lands on the row's Save button, so the whole flow is reachable without a pointer. |
 | Save invokes the action | Fires `on_commit`; enters Committing. |
 | Escape exits, no blank row | Returns to Idle, drops the draft, restores focus to the `+` that opened it. No phantom row, and focus never lands on `<body>`. |
+| Refresh while editing | Captures the newest incoming snapshot as pending without changing the frozen table. The pending snapshot becomes visible only after Save is accepted or the edit is discarded. |
 
 ### Where Save lives — settled
 
@@ -244,12 +252,14 @@ The state machine in §2 is unchanged — `Drafting` simply gains a second way i
 and carries which row is live. Nothing else in this design moves, which is a
 good sign the exclusive-mode constraint was the right backbone.
 
-The existing row keeps its keyed `<tr>`. While it is live, every editable data
-column renders from the reducer's cloned working row rather than from `data`;
-derived columns remain read-only. Its marked action cell renders Save/Cancel.
-On Escape, the working clone is discarded and focus returns to that row's Edit
-control. On acceptance, the row returns through the consumer's normal data
-flow; on rejection, the working clone and focusable editors remain in place.
+The existing row keeps its keyed `<tr>` in the frozen accepted snapshot. While
+it is live, every editable data column renders from the reducer's cloned
+working row rather than from `data`; derived columns remain read-only. Its
+marked action cell renders Save/Cancel. On Escape, the working clone is
+discarded and the pending snapshot is published; focus returns to that row's
+Edit control if its key still exists, otherwise to the named table region. On
+acceptance, the row returns through the consumer's normal data flow; on
+rejection, the working clone and focusable editors remain in place.
 
 The same structure is rendered at compact widths. A live compact row uses one
 cell spanning the declared column count, with visible labels paired to its
@@ -286,24 +296,40 @@ second line of defense; DOM state is not the only enforcement boundary.
 | Which cell owns Edit/Save? | Exactly one existing action column marked `inline_edit_host()` (§3.4). |
 | Other rows' actions during a session? | Inert with the rest of the row; native `inert` covers nested controls. |
 | Table chrome during a session? | Locked wherever an operation can move, hide, reorder, or mutate the live row. |
+| Data refresh during a session? | Queue only the newest coherent snapshot; publish it when the session returns to `Idle`. |
 | Column compatibility? | Adding the marker field follows the already-verified `EntityColumn` builder-only usage across the local consumers. |
 
 ## 6. What a refresh does mid-edit
 
-The bead calls this out and it is the subtlest part. Rule:
+The table does not admit a refreshed dataset while an edit is active. The
+accepted snapshot is frozen and inert; the single local working-row overlay is
+the only active part of the table.
 
-> **A data refresh landing during Drafting or Committing never discards the
-> live working row or its input.**
+A producer may still complete a request and update the input signals. The
+component captures those inputs as a **pending coherent snapshot** — rendered
+`data`, authoritative `source_data`, dataset identity, page-reset identity, and
+focus scope together — but does not publish it into the displayed table during
+`Drafting` or `Committing`. More arrivals replace the pending value, so the
+queue is latest-wins rather than a backlog of obsolete intermediate snapshots.
 
-The working row is table-local state layered over `data`. A new-row draft was
-never in that collection; an existing-row edit cloned its starting value before
-typing. Therefore a new `data` signal can replace the backing snapshot without
-overwriting the reducer's working copy. If an existing key temporarily drops
-out of the incoming snapshot, the live keyed row remains mounted for the
-session at the displayed position captured when editing began, and leaves only
-on cancel or accepted resolution. The consumer can reject a commit against a
-record that was authoritatively removed. Page controls remain locked for the
-session, so a refresh cannot move the user away from that pinned row.
+The release rules are explicit:
+
+- **Cancel / Escape:** discard the working row, publish the newest pending
+  snapshot atomically, then re-enable the table and restore focus against that
+  refreshed result (`+` for a new draft; the row's Edit control when it still
+  exists; otherwise the named table region).
+- **Accepted commit:** end the working session, publish the newest pending
+  snapshot atomically, then re-enable. If the consumer's saved result arrives
+  later, it is an ordinary idle refresh.
+- **Rejected commit:** return to `Drafting` with the working row and accepted
+  backing snapshot unchanged. The pending refresh stays pending because the
+  edit is not complete.
+- **No pending refresh:** return to the same accepted snapshot and re-enable.
+
+This removes the earlier "pin a row that disappeared underneath the editor"
+case entirely: the backing table cannot change underneath the overlay. If the
+newest pending snapshot removed the edited row, that removal becomes visible
+only after the user has saved or discarded the overlay.
 
 ## 7. Verification plan
 
@@ -312,12 +338,16 @@ Following this repo's rule that a suite registered in no lane runs nowhere
 
 - **Native:** reducer transitions plus pure configuration/column-shape helpers:
   exactly one required edit host, draft and existing targets share the commit
-  path, and an active key is retained across a backing-snapshot replacement.
+  path, a session freezes the accepted input envelope, pending refreshes
+  coalesce latest-wins, rejection keeps them pending, and cancel/accept releases
+  exactly one coherent snapshot.
 - **Browser / Layer B+D1** (`test-entity-draft-row`, registered as its own
   xtask step *and* in `full_steps()`): use real pointer and keyboard input for
   `+`, Edit, typing, Tab, Save, Escape, rejection, and acceptance. Assert DOM
   phase plus the consumer-observed commit target/row, no browser errors, and no
-  prohibited callback or table-control activation while locked.
+  prohibited callback or table-control activation while locked. Drive two data
+  refreshes during a session: neither may change the rendered backing rows, and
+  only the second may appear after cancel or accepted resolution.
 - **Structure:** header, colgroup, filter, body, empty row, draft row, and group
   spans agree on one column count; there is no synthetic unmatched `<td>`.
   Existing-row editing changes cell content without replacing its keyed `<tr>`.
@@ -351,8 +381,8 @@ Three action-ownership approaches were considered:
 
 The remaining implementation order is:
 
-1. Write failing native tests for action-host validation and backing-snapshot
-   retention, then add the minimal column/config helpers.
+1. Write failing native tests for action-host validation and the accepted /
+   pending snapshot gate, then add the minimal column/config helpers.
 2. Expand the browser fixture and write failing wide-layout journeys for
    existing-row Edit⇄Save, real focus/Tab/Escape, locked controls, consumer
    actions, target-aware commits, and column geometry.
