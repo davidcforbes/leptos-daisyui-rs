@@ -1,20 +1,13 @@
 # EntityTable inline draft-row editing — design (ldui-ff2f)
 
-> **Implementation status, 2026-09-03.** The **draft-row foundation is built
-> and on main** (`a7ade64`): the exclusive reducer (§2), per-column editors
-> (§3.2), the commit/resolve payload (§3.3), the toolbar `+`, initial draft-row
-> rendering, and row-level inert metadata (§4). Consumer documentation lives
-> in
-> [`doc/components/entity_table.md`](../components/entity_table.md#inline-draft-row-editing-ldui-ff2f).
->
-> **Approved completion, not yet built:** one existing action column becomes
-> the framework's inline-edit host (§3.4/§4b), existing rows use the same
-> editable-cell renderer as new drafts, every descendant of a non-live row is
-> genuinely inert, table controls lock during a session, and compact rows get
-> the same complete interaction. The accepted table snapshot also freezes for
-> the whole session and coalesces incoming refreshes until editing finishes
-> (§6). The browser proof is expanded accordingly; the earlier draft-only proof
-> did not cover all of those claims.
+> **Implementation status, 2026-09-03. Built on main through `17694b2`.** The
+> exclusive reducer, per-column editors, consumer-resolved commits, marked
+> action host, draft and existing-row entry points, inert/locked accepted table,
+> accepted/pending snapshot gate, and complete wide/compact interaction are all
+> implemented. `cargo xtask test-entity-draft-row` passes 5/5, including
+> focus/Tab/Escape, latest-wins refresh deferral, axe, geometry, and the plain
+> table negative control. Consumer documentation lives in
+> [`doc/components/entity_table.md`](../components/entity_table.md#inline-row-creation-and-editing-ldui-ff2f).
 
 **Filed from:** 4iiz-Office Setup page (Work Types), owner request 2026-09-03.
 **Related:** `ldui-tmoz` (hiding the rows-per-page control on the same page).
@@ -379,16 +372,13 @@ Three action-ownership approaches were considered:
    leaks table-local state, makes exclusivity depend on each consumer, and
    prevents the framework from guaranteeing focus and locked descendants.
 
-The remaining implementation order is:
+Implementation landed in this order:
 
-1. Write failing native tests for action-host validation and the accepted /
-   pending snapshot gate, then add the minimal column/config helpers.
-2. Expand the browser fixture and write failing wide-layout journeys for
-   existing-row Edit⇄Save, real focus/Tab/Escape, locked controls, consumer
-   actions, target-aware commits, and column geometry.
-3. Unify draft/existing live-row rendering inside the marked action column and
-   apply real inertness plus control locks.
-4. Add the compact-width journey and compact live-row form, then run the
-   style/layout/axe assertions and break-and-revert proof.
-5. Update the consumer guide, run the focused lane, then run
-   `cargo xtask verify-full` on the final candidate tree.
+1. Native action-host validation and the accepted/pending snapshot gate.
+2. Wide-layout browser journeys for existing-row Edit⇄Save, focus/Tab/Escape,
+   locked controls, consumer actions, target-aware commits, and geometry.
+3. Shared draft/existing live-row rendering in the marked action column, with
+   real inertness and control locks.
+4. The labeled compact live-row form, responsive geometry/axe coverage, and a
+   break-and-revert proof.
+5. Consumer documentation and final release verification.

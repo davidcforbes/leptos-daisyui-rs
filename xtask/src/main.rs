@@ -352,12 +352,12 @@ fn snapshot_table_page_controls_step() -> Step {
     }
 }
 
-/// Browser proof for `EntityTable` inline draft-row editing (ldui-ff2f):
-/// `+` inserts an editable row, only opted-in columns get editors, every
-/// other row goes inert, Save waits for the consumer's resolve, a rejection
-/// keeps the typing, and Escape leaves no phantom row. The fixture also
-/// mounts a table that did NOT opt in, so every claim has its negative
-/// control on the same run.
+/// Browser proof for `EntityTable` inline editing (ldui-ff2f): draft `+` and
+/// existing-row Edit entry points, visible first-editor focus, Tab/Save/Cancel
+/// order, Escape, locked rows and table chrome, consumer-resolved commits,
+/// latest-wins deferred refreshes, complete labeled compact behavior, axe, and
+/// geometry. The fixture also mounts a table that did NOT opt in, so every
+/// claim has its plain-table negative control on the same run.
 fn entity_draft_row_step() -> Step {
     Step {
         name: "test-entity-draft-row",

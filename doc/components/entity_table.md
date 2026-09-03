@@ -579,10 +579,13 @@ limit should stay `Paged` and let the user page it.
 > so reversing this costs a deprecation of one enum variant and nothing else —
 > `Paged` is the default and every existing table is unaffected.
 
-## Inline draft-row editing (ldui-ff2f)
+## Inline row creation and editing (ldui-ff2f)
 
-Opt in with `draft_row` and mark the columns that accept input. Omitting the
-prop leaves the table exactly as it was: no `+`, no edit mode, no extra DOM.
+Opt in with `draft_row`, mark the columns that accept input, and designate
+exactly one existing action column with `.inline_edit_host()`. Omitting the prop
+leaves the table exactly as it was: no `+`, no Edit action, no edit mode, and no
+extra DOM. `.allow_row_edit(true)` adds the existing-row entry point; leave it
+false when the table should create rows but never update them.
 
 ```rust,no_run
 let columns = vec![
@@ -593,6 +596,9 @@ let columns = vec![
         )),
     // No `.editable(...)`: stays read-only even inside the live row.
     EntityColumn::text("created", "Created", |r: &WorkType| r.created.clone()),
+    EntityColumn::action("actions", "Actions", |_r: &WorkType| String::new())
+        .render_with(render_work_type_actions)
+        .inline_edit_host(),
 ];
 
 view! {
@@ -603,15 +609,25 @@ view! {
         dataset_identity="work-types"
         draft_row=EntityDraftRow::new(WorkType::blank, on_commit)
             .with_texts(draft_texts)
+            .allow_row_edit(true)
     />
 }
 ```
 
+While the table is idle, the marked host keeps the consumer-rendered actions
+and appends the framework Edit control. For the one live row, the host becomes
+the framework-owned Save/Cancel surface; other consumer actions in that cell
+are unavailable until the session ends. The draft row uses that same host for
+Save/Cancel, so the table never appends a synthetic action column.
+
 ### One mode, exclusive by construction
 
-While a row is live, **every other row is inert** — `aria-disabled="true"` and
-out of the tab order. That is not decoration: it is the invariant the whole
-feature rests on. A second entry point firing while a row is live is *refused*
+While a row is live, **the accepted table is frozen and inert**: every other row
+has `aria-disabled="true"`, all non-live descendants leave the tab order, and
+sort/filter/page/column controls that could move or hide the live row are
+locked. Only the local working-row overlay remains active. That is not
+decoration: it is the invariant the whole feature rests on. A second entry
+point firing while a row is live is *refused*
 (`EntityEditDisposition::IgnoredBusy`), so two simultaneously editable rows are
 unrepresentable rather than merely discouraged.
 
@@ -641,33 +657,53 @@ double submit) and the row cannot change underneath the write. `Rejected`
 returns to editing **with the user's input intact** and the message available;
 typing then clears it, because it described a value the user has since changed.
 
-`Accepted` ends the session and drops the row — the saved row re-enters through
-your normal data flow rather than being injected by the table.
+`Accepted` ends the session and discards the working overlay. The saved draft or
+updated row re-enters through your normal data flow rather than being injected
+by the table.
 
-### A refresh cannot evict the draft
+### Refreshes wait until editing is complete
 
-The live row is table-local state layered over `data`; it was never in that
-collection. So replacing `data` mid-edit leaves the draft and its typing
-untouched, with no special case.
+The component never publishes refreshed input while `Drafting` or `Committing`.
+It keeps the accepted rows, columns, dataset identity, and revision frozen as
+one coherent snapshot and stores only the latest arriving input envelope as
+pending. The table therefore cannot change underneath either a draft or an
+existing-row edit; repeated refreshes coalesce instead of replaying a backlog.
+
+Cancel or Escape discards the working row, publishes the latest pending
+snapshot atomically (if present), and only then re-enables the table. An
+`Accepted` commit follows the same release order. A `Rejected` commit returns to
+editing with the user's input intact and leaves the pending refresh queued,
+because the edit is not complete. With no pending refresh, cancel or acceptance
+simply returns to the frozen accepted snapshot.
+
+### Keyboard and responsive behavior
+
+The toolbar `+` and a row's Edit control both focus the first visible enabled
+editor. At either wide or compact width, Tab follows declared column order and
+then reaches Save and Cancel; the desktop controls hidden at compact width are
+never focus targets. During `Drafting`, Escape discards the overlay and restores
+focus to `+`, the surviving row Edit control, or the named table region. During
+`Committing`, the controls stay locked until the consumer resolves the write.
+
+The compact live row is a single cell spanning the visible column count. It
+uses the same reducer-backed editors and actions as the wide row, adds a visible
+label for every editor, and keeps the consumer's compact summary while idle.
 
 ### Observability
 
 `data-entity-edit-phase` on the table root reports `idle` / `drafting` /
 `committing`, and is absent entirely on a table that did not opt in. Prefer it
 to inferring state from which controls happen to be disabled. The draft row is
-`data-entity-draft-row`, its editors `data-entity-draft-input="<column-id>"`,
-and its controls `data-entity-draft-save` / `-cancel`; the toolbar action is
-`data-entity-draft-add`.
+`data-entity-draft-row`; all live editors carry
+`data-entity-edit-input="<column-id>"`, with the draft-only compatibility marker
+`data-entity-draft-input`. Row actions expose `data-entity-row-edit-state`, and
+the toolbar entry point remains `data-entity-draft-add`.
 
 Proof: `cargo xtask test-entity-draft-row`, whose fixture mounts an opted-in
 and a plain table on one document so every claim carries a negative control.
 
 ### Not yet supported
 
-- **Editing an existing row** is designed but not built — the Edit⇄Save
-  relabelling needs a decision about who owns the action column's button, since
-  that column is consumer-rendered. See
-  `doc/plans/2026-09-03-entity-table-inline-edit-design.md`.
 - **Grouped tables**: the draft row renders in the ungrouped `<tbody>` only.
   Which group a new row belongs to is a question the framework should not
   answer for you.
