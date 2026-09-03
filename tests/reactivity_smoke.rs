@@ -1207,6 +1207,7 @@ async fn dual_axis_line_chart_states_each_series_against_its_own_axis() {
 }
 
 /// Pointer overlay of the interactive (first) categorical chart.
+const CHART_ROOT: &str = "[data-testid=\"interactive-line-chart\"]";
 const CHART_OVERLAY: &str =
     "[data-testid=\"interactive-line-chart\"] [data-line-chart-pointer-overlay]";
 /// The interactive chart's roving tab stop (whichever target holds it).
@@ -1231,8 +1232,18 @@ async fn line_chart_state(h: &pixelproof_web::Harness) -> serde_json::Value {
             const root = document.querySelector('[data-testid="interactive-line-chart"]');
             const stage = root.querySelector('[data-line-chart-stage]');
             const tip = root.querySelector('[data-testid="line-chart-tooltip"]');
+            const overlay = root.querySelector('[data-line-chart-pointer-overlay]');
+            const guide = root.querySelector('[data-line-chart-category-guide]');
+            const attrNumber = (element, name) => {
+                const value = element?.getAttribute(name);
+                return value === null || value === undefined ? null : Number(value);
+            };
             const tipStyle = tip ? getComputedStyle(tip) : null;
             const tipVisible = !!tipStyle && tipStyle.display !== 'none' && tipStyle.visibility !== 'hidden';
+            const guideStyle = guide ? getComputedStyle(guide) : null;
+            const guideVisible = !!guideStyle
+                && guideStyle.display !== 'none'
+                && guideStyle.visibility !== 'hidden';
             const tipRect = tip ? tip.getBoundingClientRect() : null;
             const stageRect = stage.getBoundingClientRect();
             const rows = tip ? [...tip.querySelectorAll('[data-series-id]')].map(row => ({
@@ -1251,6 +1262,16 @@ async fn line_chart_state(h: &pixelproof_web::Harness) -> serde_json::Value {
                     && tipRect.right <= stageRect.right + 1
                     && tipRect.top >= stageRect.top - 1
                     && tipRect.bottom <= stageRect.bottom + 1),
+                guideVisible,
+                guideX1: attrNumber(guide, 'x1'),
+                guideX2: attrNumber(guide, 'x2'),
+                guideTop: attrNumber(guide, 'y1'),
+                guideBottom: attrNumber(guide, 'y2'),
+                guidePointerEvents: guideStyle?.pointerEvents ?? null,
+                plotLeft: attrNumber(overlay, 'x'),
+                plotTop: attrNumber(overlay, 'y'),
+                plotWidth: attrNumber(overlay, 'width'),
+                plotHeight: attrNumber(overlay, 'height'),
                 tabStops: root.querySelectorAll('[data-line-chart-focus][tabindex="0"]').length,
                 focusedCategoryKey: active?.dataset?.categoryKey ?? null,
                 focusedIsChartTarget: !!active && active.hasAttribute('data-line-chart-focus'),
@@ -1269,6 +1290,13 @@ async fn line_chart_hover_shows_category_card() {
     let h = harness_at("/components/charts").await;
     common::wait_for_selector(&h, CHART_OVERLAY).await;
     begin_browser_error_capture(&h).await;
+
+    let resting = line_chart_state(&h).await;
+    assert_eq!(
+        resting["guideVisible"],
+        json!(false),
+        "the guide is paint-hidden until a category is active: {resting}"
+    );
 
     move_pointer_to_svg_fraction(&h, CHART_OVERLAY, WEEK_08_X, 0.5).await;
     let s = line_chart_state(&h).await;
@@ -1303,6 +1331,71 @@ async fn line_chart_hover_shows_category_card() {
         s["preferredSeries"].as_str().unwrap(),
         preferred[0],
         "root preferred-series matches the highlighted row: {s}"
+    );
+    assert_eq!(s["guideVisible"], json!(true), "guide visible: {s}");
+    assert_eq!(
+        s["guidePointerEvents"],
+        json!("none"),
+        "the visual guide must not intercept the overlay: {s}"
+    );
+    let plot_left = s["plotLeft"].as_f64().expect("plot left");
+    let plot_top = s["plotTop"].as_f64().expect("plot top");
+    let plot_width = s["plotWidth"].as_f64().expect("plot width");
+    let plot_height = s["plotHeight"].as_f64().expect("plot height");
+    let guide_x = s["guideX1"].as_f64().expect("guide x1");
+    let expected_week_08_x = plot_left + plot_width * 7.0 / 13.0;
+    assert!(
+        (guide_x - expected_week_08_x).abs() <= 0.01,
+        "guide must use week 08's projected category coordinate: {s}"
+    );
+    assert!(
+        (s["guideX2"].as_f64().expect("guide x2") - guide_x).abs() <= 0.01,
+        "guide must be vertical: {s}"
+    );
+    assert!(
+        (s["guideTop"].as_f64().expect("guide top") - plot_top).abs() <= 0.01,
+        "guide must begin at the plot top: {s}"
+    );
+    assert!(
+        (s["guideBottom"].as_f64().expect("guide bottom") - (plot_top + plot_height)).abs() <= 0.01,
+        "guide must end at the plot bottom: {s}"
+    );
+
+    // Moving within week 08's half-step keeps the guide fixed. Crossing the
+    // category midpoint advances it directly to week 09; there is no
+    // continuously variable crosshair position between data increments.
+    move_pointer_to_svg_fraction(&h, CHART_OVERLAY, WEEK_08_X + 0.02, 0.2).await;
+    let same_category = line_chart_state(&h).await;
+    assert_eq!(
+        same_category["activeCategory"],
+        json!("week-08"),
+        "within-category pointer movement must stay snapped: {same_category}"
+    );
+    assert!(
+        (same_category["guideX1"].as_f64().expect("same guide x") - guide_x).abs() <= 0.01,
+        "guide must not follow the pointer within a category: {same_category}"
+    );
+
+    move_pointer_to_svg_fraction(&h, CHART_OVERLAY, WEEK_08_X + 0.045, 0.8).await;
+    let next_category = line_chart_state(&h).await;
+    assert_eq!(
+        next_category["activeCategory"],
+        json!("week-09"),
+        "crossing the midpoint must select week 09: {next_category}"
+    );
+    let expected_week_09_x = plot_left + plot_width * 8.0 / 13.0;
+    assert!(
+        (next_category["guideX1"].as_f64().expect("next guide x") - expected_week_09_x).abs()
+            <= 0.01,
+        "guide must jump to week 09's projected coordinate: {next_category}"
+    );
+
+    move_pointer_to_svg_fraction(&h, CHART_ROOT, 0.5, 0.01).await;
+    let left_plot = line_chart_state(&h).await;
+    assert_eq!(
+        left_plot["guideVisible"],
+        json!(false),
+        "leaving the plot hides the guide with the card: {left_plot}"
     );
 
     assert_no_browser_errors(&h, "hover journey").await;
@@ -1368,6 +1461,11 @@ async fn line_chart_keyboard_roving_navigation() {
         json!(true),
         "focus shows the card: {s}"
     );
+    assert_eq!(
+        s["guideVisible"],
+        json!(true),
+        "keyboard focus shows the same category guide: {s}"
+    );
 
     h.press_key_sequence(&[Key::ArrowRight])
         .await
@@ -1391,6 +1489,11 @@ async fn line_chart_keyboard_roving_navigation() {
     settle(&h).await;
     let s = line_chart_state(&h).await;
     assert_eq!(s["tooltipVisible"], json!(false), "Escape dismisses: {s}");
+    assert_eq!(
+        s["guideVisible"],
+        json!(false),
+        "Escape dismisses the guide with the card: {s}"
+    );
     assert_eq!(
         s["focusedCategoryKey"],
         json!("week-01"),

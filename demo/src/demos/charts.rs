@@ -163,7 +163,7 @@ pub fn ChartsDemo() -> impl IntoView {
         >
             <Section title="LineChart" col=true>
                 <p class="text-sm opacity-70">
-                    "Categorical data keeps each named series aligned to the same weeks, renders gaps without joining them, and pairs solid, dashed, and dotted lines with circle, square, and diamond markers. The responsive legend and screen-reader table carry the same labels and values."
+                    "Categorical data keeps each named series aligned to the same weeks, renders gaps without joining them, and pairs solid, dashed, and dotted lines with circle, square, and diamond markers. Hover or keyboard focus snaps a vertical guide to the active week, while the responsive legend and screen-reader table carry the same labels and values."
                 </p>
                 <div class="w-full max-w-2xl">
                     <LineChart

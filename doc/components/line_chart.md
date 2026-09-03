@@ -3,10 +3,27 @@
 `leptos_daisyui_rs::charts::LineChart` renders three surfaces from one prop
 set: the legacy numeric XY chart (`Vec<(f64, f64)>`), and the categorical
 multi-series chart with its legend, hover/focus card, keyboard activation and
-hidden accessible table.
+hidden accessible table. An active categorical card also paints a vertical
+guide through the plot so points from every series line up visually.
 
-This page documents the **secondary value axis** (`ldui-j0mt`). Everything else
-is documented on the component itself.
+This page documents the **secondary value axis** (`ldui-j0mt`) and the shared
+active-category guide (`ldui-ukac`). Everything else is documented on the
+component itself.
+
+## Active-category guide
+
+Every interactive categorical chart gets the guide without another prop. It
+uses the same active category as the hover/focus card and the same
+`category_x` projection as the series markers, so the two surfaces cannot
+disagree. Pointer movement selects the nearest category and the guide jumps to
+that coordinate; it never tracks a continuously variable pointer position.
+
+Responsive tick thinning affects only which category labels are printed. It
+does not remove data increments, so a category whose label is hidden at a
+narrow width can still own the card and guide. Pointer leave, blur, Escape,
+data reconciliation, or `LineInteractionMode::Disabled` hide the guide under
+the existing card-state rules. Keyboard focus shows it as the same visual aid.
+The SVG line is decorative (`aria-hidden`) and cannot intercept pointer input.
 
 ## Why a second axis
 
@@ -126,10 +143,11 @@ Locate axis elements by identity, never by document position:
 | `[data-line-chart-legend] [data-axis]` | a legend entry's axis |
 | `[data-line-chart-table] th[data-axis]` | a table column's axis |
 | `[data-testid="line-chart-tooltip"] [data-axis]` | a card row's axis |
+| `[data-line-chart-category-guide]` | the active category's plot-height vertical guide |
 
 ## Paint routing
 
-Every new tick label, axis title and axis line routes its colour through
+Every new tick label, axis title, axis line and category guide routes its colour through
 `charts::paint` (`paint_attrs` / `stroke_attrs`), like every other SVG paint in
 the crate. For the `currentColor` these elements use, the routers return the
 presentation attribute unchanged, so the DOM is identical — the routing is

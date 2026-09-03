@@ -113,7 +113,10 @@ fn resolve_data_label_y(initial_y: f64, placement: LineLabelPlacement, occupied:
 /// labels. Legacy `Vec<(f64, f64)>` callers keep the numeric XY surface
 /// unchanged; categorical data ([`LineChartData::categorical`]) adds multiple
 /// patterned series, markers, gaps, a legend, a hidden data table, and an
-/// interactive hover/focus card with typed activation.
+/// interactive hover/focus card with typed activation. The card's active
+/// category also paints a plot-height vertical guide snapped to that exact
+/// category coordinate, so values across every series can be compared without
+/// a continuously moving crosshair.
 ///
 /// Legacy XY (source-compatible — a plain vector still just works):
 ///
@@ -791,6 +794,23 @@ fn render_categorical(
             })
         })
         .collect_view();
+    let category_guide = interaction_enabled.then(|| {
+        let (stroke, stroke_style) = stroke_attrs("currentColor".to_string());
+        let active_x = move || {
+            displayed_index()
+                .map(|index| projections.category_x(index))
+                .unwrap_or(bounds.left)
+        };
+        view! {
+            <line data-line-chart-category-guide="" aria-hidden="true"
+                x1=move || svg_number(active_x()) x2=move || svg_number(active_x())
+                y1=svg_number(bounds.top) y2=svg_number(bounds.bottom)
+                stroke=stroke style=stroke_style stroke-width="1" stroke-opacity="0.45"
+                stroke-dasharray="4 4" stroke-linecap="round"
+                vector-effect="non-scaling-stroke" pointer-events="none"
+                visibility=move || if displayed_index().is_some() { "visible" } else { "hidden" } />
+        }
+    });
     let mut marker_views = Vec::new();
     let mut data_label_views = Vec::new();
     let mut data_label_ys = vec![Vec::new(); chart.categories.len()];
@@ -1049,6 +1069,7 @@ fn render_categorical(
                     {secondary_axis_title}
                     {x_ticks}
                     {line_paths}
+                    {category_guide}
                     {markers}
                     {data_labels}
                     {focus_targets}
