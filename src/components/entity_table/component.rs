@@ -44,12 +44,12 @@ use super::types::{
     ENTITY_PAGE_SIZE_AUTO_VALUE, EntityCellPresentation, EntityColumn, EntityColumnAlignment,
     EntityColumnChooserTrigger, EntityColumnFilter, EntityColumnFilterPlacement,
     EntityColumnFilters, EntityColumnKind, EntityColumns, EntityCompactRow, EntityDraftRow,
-    EntityEmptyState, EntityPageSize, EntityPageSizeIntent, EntityRowKey, EntityRowRenderer,
-    EntitySort, EntitySortDirection, EntityTableActionColumnPolicy, EntityTableDisplayProjection,
-    EntityTablePreferenceOwnership, EntityTablePreferencePersistence, EntityTablePreferences,
-    EntityTableTexts, EntityTableViewportFit, EntityTextOverflow, entity_alignment_class,
-    entity_compact_alignment_class, entity_header_justify_class, entity_text_overflow_style,
-    normalize_entity_secondary_text,
+    EntityDraftTexts, EntityEmptyState, EntityPageSize, EntityPageSizeIntent, EntityRowKey,
+    EntityRowRenderer, EntitySort, EntitySortDirection, EntityTableActionColumnPolicy,
+    EntityTableDisplayProjection, EntityTablePreferenceOwnership, EntityTablePreferencePersistence,
+    EntityTablePreferences, EntityTableTexts, EntityTableViewportFit, EntityTextOverflow,
+    entity_alignment_class, entity_compact_alignment_class, entity_header_justify_class,
+    entity_text_overflow_style, normalize_entity_secondary_text,
 };
 use crate::components::badge::{Badge, BadgeSize};
 use crate::components::button::Button;
@@ -874,6 +874,9 @@ where
     // `draft_row` is absent this signal exists but never leaves `Idle`, and
     // every render path below is gated on `draft_row.is_some()`, so an
     // opted-out table emits exactly the DOM it did before.
+    let draft_texts = draft_row
+        .as_ref()
+        .map_or_else(|| Signal::stored(EntityDraftTexts::default()), |c| c.texts);
     let draft_row = StoredValue::new_local(draft_row);
     let edit_state = RwSignal::new_local(EntityEditState::<T>::new());
     let editing_enabled = draft_row.with_value(Option::is_some);
@@ -1739,7 +1742,7 @@ where
                     <Button
                         class="btn-sm btn-primary"
                         attr:data-entity-draft-add="true"
-                        attr:aria-label=move || texts.with(|texts| texts.add_row.clone())
+                        attr:aria-label=move || draft_texts.get().add_row
                         disabled=Signal::derive(move || edit_state.with(EntityEditState::is_editing))
                         on_click=Callback::new(move |_| {
                             let blank = draft_row
@@ -1751,7 +1754,7 @@ where
                             }
                         })
                     >
-                        {move || texts.with(|texts| texts.add_row.clone())}
+                        {move || draft_texts.get().add_row}
                     </Button>
                 })}
 

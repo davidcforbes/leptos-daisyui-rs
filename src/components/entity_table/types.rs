@@ -1438,6 +1438,37 @@ pub struct EntityDraftCommit<T> {
     pub resolve: Callback<EntityEditOutcome>,
 }
 
+/// Copy for the inline-edit controls (`ldui-ff2f`).
+///
+/// Deliberately its OWN type rather than three more fields on
+/// [`EntityTableTexts`]. That struct has public fields and consumers build it
+/// with struct literals — 21 4iiz-Office surfaces do, none of them with
+/// `..Default::default()` — so adding a field to it is a breaking change for
+/// every one. Copy for an opt-in feature belongs with the opt-in config,
+/// where only a consumer who asked for the feature ever has to supply it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EntityDraftTexts {
+    /// Label and accessible name for the `+` action.
+    pub add_row: String,
+    /// Label the row action shows while that row is live.
+    pub save_row: String,
+    /// Label the row action shows when the row can be edited.
+    pub edit_row: String,
+    /// Accessible name for the cancel affordance (Escape also cancels).
+    pub cancel_edit: String,
+}
+
+impl Default for EntityDraftTexts {
+    fn default() -> Self {
+        Self {
+            add_row: "Add row".to_owned(),
+            save_row: "Save".to_owned(),
+            edit_row: "Edit".to_owned(),
+            cancel_edit: "Cancel".to_owned(),
+        }
+    }
+}
+
 /// Opt-in inline draft-row and per-row editing (`ldui-ff2f`).
 ///
 /// Absent — the default — the table has no `+`, no edit mode and no extra
@@ -1448,6 +1479,8 @@ pub struct EntityDraftRow<T: 'static> {
     pub new_row: Rc<dyn Fn() -> T>,
     /// Fired on Save.
     pub on_commit: Callback<EntityDraftCommit<T>, ()>,
+    /// Reactive copy for the edit controls.
+    pub texts: Signal<EntityDraftTexts>,
 }
 
 impl<T: 'static> EntityDraftRow<T> {
@@ -1459,7 +1492,15 @@ impl<T: 'static> EntityDraftRow<T> {
         Self {
             new_row: Rc::new(new_row),
             on_commit,
+            texts: Signal::stored(EntityDraftTexts::default()),
         }
+    }
+
+    /// Supplies localized copy for the edit controls.
+    #[must_use]
+    pub fn with_texts(mut self, texts: impl Into<Signal<EntityDraftTexts>>) -> Self {
+        self.texts = texts.into();
+        self
     }
 }
 
@@ -1468,6 +1509,7 @@ impl<T: 'static> Clone for EntityDraftRow<T> {
         Self {
             new_row: Rc::clone(&self.new_row),
             on_commit: self.on_commit,
+            texts: self.texts,
         }
     }
 }
@@ -2125,12 +2167,6 @@ pub struct EntityTableTexts {
     pub choose_columns: String,
     /// Label for the responsive controlled-filter panel.
     pub filters: String,
-    /// Label and accessible name for the inline-edit `+` action (`ldui-ff2f`).
-    pub add_row: String,
-    /// Label the row action shows while that row is being edited.
-    pub save_row: String,
-    /// Label the row action shows when the row can be edited.
-    pub edit_row: String,
     /// Active-filter status shown beside a chooser item that cannot be hidden.
     pub filter_active: String,
     /// Clear-filter template with a `{column}` placeholder.
@@ -2253,9 +2289,6 @@ impl Default for EntityTableTexts {
             rows_per_page_auto: "Auto ({rows})".to_owned(),
             choose_columns: "Choose columns".to_owned(),
             filters: "Filters".to_owned(),
-            add_row: "Add row".to_owned(),
-            save_row: "Save".to_owned(),
-            edit_row: "Edit".to_owned(),
             filter_active: "Filter active".to_owned(),
             clear_filter: "Clear {column} filter".to_owned(),
             column_order: "Column order".to_owned(),
