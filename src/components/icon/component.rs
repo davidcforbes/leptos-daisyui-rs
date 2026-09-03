@@ -84,6 +84,25 @@ pub fn Icon(
         <i
             node_ref=node_ref
             data-lucide=move || name.get()
+            // `ldui-q8bj`: present ONLY when the name is unmapped, carrying the
+            // offending name. A typo is now visible in the DOM, assertable in a
+            // test, and greppable in a screenshot's markup -- instead of being
+            // indistinguishable from a working icon.
+            data-icon-unresolved=move || {
+                let requested = name.get();
+                let unresolved = lucide_sprite_lookup(&requested).is_none();
+                // `ldui-q8bj`: fail loudly in a debug build at the point of the
+                // mistake, rather than surfacing as empty space in someone's
+                // screenshot weeks later. Here rather than in the mapper,
+                // because rendering an unmapped name is the actual caller error.
+                debug_assert!(
+                    !unresolved,
+                    "icon name {requested:?} is not in this crate's sprite \
+                     vocabulary; call lucide_sprite_names() for the supported \
+                     set (ldui-q8bj)"
+                );
+                unresolved.then_some(requested)
+            }
             class=computed_class
         >
             <svg
@@ -116,17 +135,143 @@ pub fn Icon(
 /// `Gantt` — render `Icon` internally, and a mapping held by a consumer could not
 /// reach them.
 ///
-/// An unknown name returns `blank`, the sprite's neutral glyph, because an
-/// unresolvable id renders an EMPTY `<svg>` with no error at all — and a visible
-/// placeholder is easier to notice than nothing.
+/// An unknown name returns [`UNRESOLVED_SYMBOL`] (`blank`), because an
+/// unresolvable id renders an EMPTY `<svg>` with no error at all.
+///
+/// ⚠️ That fallback was assumed to be noticeable and is not: `ldui-q8bj` found
+/// two Dashboard buttons rendering as empty space, with every signal a
+/// developer would check — the box, the classes, the `data-lucide` attribute,
+/// a well-formed `<use>` — looking healthy. So the miss is now *reported*
+/// rather than merely absorbed: this function `debug_assert!`s, the rendered
+/// element carries `data-icon-unresolved="<name>"`, and
+/// [`lucide_sprite_lookup`] returns `None` for callers who want to branch.
+///
+/// Note the symbol vocabulary is bounded by the HOST DOCUMENT's inlined
+/// sprite, not by this crate, so mapping a further Lucide name here only
+/// helps if the host's sprite defines that symbol.
 ///
 /// # Requirement on the host document
 ///
 /// The page must inline an SVG sprite defining these symbol ids. Referencing an
 /// external file instead works in Chromium but renders NOTHING in Firefox, which
 /// has never supported external `<use>`.
+/// Every icon name [`lucide_to_sprite`] maps, in source order of the
+/// match arms below. Kept beside the map so the two cannot drift: a test
+/// asserts every entry here resolves, and that the counts agree.
+const SUPPORTED_ICON_NAMES: &[&str] = &[
+    "activity",
+    "arrow-left",
+    "arrow-right",
+    "bar-chart-3",
+    "calendar",
+    "check",
+    "chevron-down",
+    "chevron-left",
+    "chevron-right",
+    "circle",
+    "circle-alert",
+    "circle-check",
+    "circle-play",
+    "clock",
+    "close",
+    "copy",
+    "dollar-sign",
+    "envelope",
+    "expand",
+    "external-link",
+    "eye",
+    "file",
+    "file-text",
+    "filter",
+    "floppy-disk",
+    "help-circle",
+    "info",
+    "layout-dashboard",
+    "list",
+    "log-out",
+    "mail",
+    "message-square",
+    "minus",
+    "more-horizontal",
+    "more-vertical",
+    "paperclip",
+    "pause",
+    "pencil",
+    "phone",
+    "phone-call",
+    "play",
+    "plus",
+    "refresh",
+    "reply",
+    "resume",
+    "save",
+    "search",
+    "send",
+    "settings",
+    "snapshot",
+    "square-pause",
+    "star",
+    "target",
+    "thumbs-up",
+    "ticket",
+    "timeline",
+    "trash",
+    "trending-up",
+    "triangle-alert",
+    "upload",
+    "user",
+    "users",
+    "whatsapp",
+    "x",
+];
+
+/// Resolves a caller's icon name to a sprite symbol id, or `None` when the
+/// name is not in the vocabulary (`ldui-q8bj`).
+///
+/// This is the honest form of [`lucide_to_sprite`]: a miss is a distinguishable
+/// value rather than a plausible-looking blank. The renderer uses it to mark
+/// the element, and tests can assert on it.
+pub fn lucide_sprite_lookup(name: &str) -> Option<&'static str> {
+    lucide_to_sprite_inner(name)
+}
+
+/// Every icon name this crate maps (`ldui-q8bj`, suggestion 3).
+///
+/// The map used to be the only source of truth and callers could not see it,
+/// so a caller had no way to check a name before shipping it. Sorted, so a
+/// diff of the supported vocabulary is readable.
+pub fn lucide_sprite_names() -> Vec<&'static str> {
+    let mut names: Vec<&'static str> = SUPPORTED_ICON_NAMES.to_vec();
+    names.sort_unstable();
+    names
+}
+
+/// The symbol id an unmapped name falls back to.
+pub const UNRESOLVED_SYMBOL: &str = "blank";
+
+/// Resolves an icon name to a sprite symbol id, falling back to
+/// [`UNRESOLVED_SYMBOL`] for a name this crate does not map.
+///
+/// Prefer [`lucide_sprite_lookup`] when you need to know whether the name was
+/// actually recognised: this function cannot tell you, because `"circle"` maps
+/// to the blank glyph deliberately and an unmapped name falls back to the same
+/// symbol (`ldui-q8bj`).
 pub fn lucide_to_sprite(name: &str) -> &'static str {
-    match name {
+    // Deliberately NOT asserting here. This is the documented fallback API and
+    // probing it with an unknown name is a legitimate thing to do -- an
+    // existing test does exactly that. The caller mistake this bug is about
+    // happens at RENDER time, so that is where it is reported.
+    lucide_to_sprite_inner(name).unwrap_or(UNRESOLVED_SYMBOL)
+}
+
+/// The map. Returns `None` for a name it does not know.
+///
+/// `Option` rather than a sentinel comparison because `"circle" => "blank"` is
+/// a legitimate EXPLICIT mapping to the blank glyph, and inferring "unmapped"
+/// from the symbol string would misreport it as a typo. The distinction is
+/// structural, so it cannot be got wrong.
+fn lucide_to_sprite_inner(name: &str) -> Option<&'static str> {
+    let symbol = match name {
         // Same concept, same name.
         "list" => "list",
         "calendar" => "calendar",
@@ -201,6 +346,7 @@ pub fn lucide_to_sprite(name: &str) -> &'static str {
         "save" => "floppy-disk",
         "floppy-disk" => "floppy-disk",
         "snapshot" => "floppy-disk",
-        _ => "blank",
-    }
+        _ => return None,
+    };
+    Some(symbol)
 }

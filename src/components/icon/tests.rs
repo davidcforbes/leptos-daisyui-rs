@@ -276,3 +276,72 @@ fn page_quick_actions_run_control_row_has_no_blank_icon() {
         );
     }
 }
+
+/// `ldui-q8bj`: an unmapped name must be REPORTED, not absorbed.
+///
+/// The old behaviour returned `blank` and nothing else changed — real box,
+/// correct classes, well-formed `<use>` — so a typo was indistinguishable
+/// from a working icon. These pin the three signals that now exist.
+#[test]
+fn an_unmapped_icon_name_is_distinguishable_from_a_mapped_one() {
+    use super::component::{UNRESOLVED_SYMBOL, lucide_sprite_lookup, lucide_sprite_names};
+
+    // A mapped name resolves to Some(symbol).
+    assert_eq!(lucide_sprite_lookup("clock"), Some("clock"));
+
+    // The two names that actually failed in 4iiz-Office. Both are real Lucide
+    // names, which is why they were written; neither is in this crate's map.
+    // The point is not that they are absent -- the host document's sprite
+    // bounds the vocabulary -- but that their absence is now VISIBLE.
+    for typo in ["clipboard-list", "user-check", "definitely-not-an-icon"] {
+        assert_eq!(
+            lucide_sprite_lookup(typo),
+            None,
+            "{typo:?} is unmapped, and the lookup must say so rather than \
+             returning a plausible symbol"
+        );
+    }
+
+    // The published vocabulary is non-empty and every entry actually resolves,
+    // so a caller checking against it cannot be misled.
+    let names = lucide_sprite_names();
+    assert!(
+        names.len() >= 50,
+        "the vocabulary should be published in full"
+    );
+    for name in &names {
+        assert!(
+            lucide_sprite_lookup(name).is_some(),
+            "published name {name:?} does not resolve -- the list has drifted \
+             from the match arms"
+        );
+    }
+    // Sorted, so a diff of the supported set is readable.
+    let mut sorted = names.clone();
+    sorted.sort_unstable();
+    assert_eq!(names, sorted);
+
+    assert_eq!(UNRESOLVED_SYMBOL, "blank");
+}
+
+/// Regression guard for the bug my first `ldui-q8bj` fix introduced.
+///
+/// `"circle" => "blank"` is a legitimate EXPLICIT mapping to the blank glyph.
+/// A first attempt inferred "unmapped" by comparing the resolved symbol to
+/// `"blank"`, which misreported `circle` as a typo. The distinction is now
+/// structural (`Option`), so it cannot be got wrong by inspection.
+#[test]
+fn an_explicit_mapping_to_blank_is_not_an_unmapped_name() {
+    use super::component::lucide_sprite_lookup;
+
+    assert_eq!(
+        lucide_sprite_lookup("circle"),
+        Some("blank"),
+        "circle maps to the blank glyph ON PURPOSE and must resolve"
+    );
+    assert_eq!(lucide_sprite_lookup("not-a-real-icon-name"), None);
+    // Both produce the same SYMBOL, which is exactly why comparing symbols
+    // cannot distinguish them.
+    assert_eq!(lucide_to_sprite("circle"), "blank");
+    assert_eq!(lucide_to_sprite("not-a-real-icon-name"), "blank");
+}
