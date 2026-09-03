@@ -1,6 +1,7 @@
 //! Public types used to configure a typed entity table.
 
 use super::date_filter::{EntityDateBound, EntityDateFilterCause, EntityDateFilterProposal};
+use super::draft_edit::EntityCellEditor;
 use crate::components::badge::{BadgeColor, BadgeStyle};
 use crate::components::input::{Input, InputSize, InputType};
 use crate::components::select::{Select, SelectSize};
@@ -1415,6 +1416,10 @@ pub struct EntityColumn<T> {
     pub comparator: Option<EntityComparator<T>>,
     /// Normalized text key extracted once per row by the default sorter.
     pub sort_key: Option<EntitySortKey<T>>,
+    /// Optional inline editor (`ldui-ff2f`). `None` — the default — means the
+    /// column stays read-only even in a live row, which is the right answer
+    /// for a derived or action column.
+    pub editor: Option<EntityCellEditor<T>>,
 }
 
 impl<T> Clone for EntityColumn<T> {
@@ -1436,6 +1441,7 @@ impl<T> Clone for EntityColumn<T> {
             presentation: self.presentation.clone(),
             comparator: self.comparator.as_ref().map(Rc::clone),
             sort_key: self.sort_key.as_ref().map(Rc::clone),
+            editor: self.editor.clone(),
         }
     }
 }
@@ -1488,7 +1494,32 @@ impl<T: 'static> EntityColumn<T> {
             sort_key: Some(typed_entity_sort_key(move |row| {
                 comparator_text(row).to_lowercase()
             })),
+            editor: None,
         }
+    }
+
+    /// Makes this column editable while its row is live (`ldui-ff2f`).
+    ///
+    /// Opt-in per column, because most columns are derived and must stay
+    /// read-only. A column that never calls this renders its normal
+    /// read-only cell even inside the row being edited.
+    ///
+    /// ```rust,ignore
+    /// EntityColumn::text("name", "Name", |r: &WorkType| r.name.clone())
+    ///     .editable(EntityCellEditor::text(
+    ///         |r: &WorkType| r.name.clone(),
+    ///         |r: &mut WorkType, v| r.name = v,
+    ///     ))
+    /// ```
+    #[must_use]
+    pub fn editable(mut self, editor: EntityCellEditor<T>) -> Self {
+        self.editor = Some(editor);
+        self
+    }
+
+    /// Whether this column accepts input while its row is live.
+    pub const fn is_editable(&self) -> bool {
+        self.editor.is_some()
     }
 
     /// Creates a sortable text column; an explicit alias for [`Self::new`].

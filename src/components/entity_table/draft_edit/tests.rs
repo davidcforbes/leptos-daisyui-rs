@@ -277,6 +277,52 @@ fn resolving_when_nothing_is_in_flight_is_ignored() {
     assert_eq!(s.phase(), &EntityEditPhase::Idle);
 }
 
+/// Editability is opt-in per column, and the default must be read-only —
+/// otherwise a derived column would start accepting input for a blank row.
+#[test]
+fn columns_are_read_only_until_a_column_opts_in() {
+    use crate::components::EntityColumn;
+
+    let derived = EntityColumn::text("total", "Total", |r: &Row| r.code.clone());
+    assert!(
+        !derived.is_editable(),
+        "a plain column must stay read-only even inside a live row"
+    );
+    assert!(derived.editor.is_none());
+
+    let editable = EntityColumn::text("name", "Name", |r: &Row| r.name.clone()).editable(
+        EntityCellEditor::text(|r: &Row| r.name.clone(), |r: &mut Row, v| r.name = v),
+    );
+    assert!(editable.is_editable());
+
+    // The editor round-trips through the row the reducer holds.
+    let editor = editable.editor.as_ref().expect("editor was set");
+    let mut row = existing();
+    assert_eq!(editor.value(&row), "Consultation");
+    editor.apply(&mut row, "Intake".to_owned());
+    assert_eq!(row.name, "Intake");
+    // Editing one field must not disturb the rest of the row.
+    assert_eq!(row.code, "CONS");
+}
+
+/// The editable value may legitimately differ from the displayed text: a
+/// column can render a formatted string and still edit the raw one.
+#[test]
+fn the_edited_value_is_independent_of_the_displayed_text() {
+    use crate::components::EntityColumn;
+
+    let column = EntityColumn::text("code", "Code", |r: &Row| format!("[{}]", r.code)).editable(
+        EntityCellEditor::text(|r: &Row| r.code.clone(), |r: &mut Row, v| r.code = v),
+    );
+    let row = existing();
+    assert_eq!((column.text)(&row), "[CONS]", "display is formatted");
+    assert_eq!(
+        column.editor.as_ref().expect("editor").value(&row),
+        "CONS",
+        "the editor exposes the raw value, not the formatting"
+    );
+}
+
 /// Both entry points must be reusable: finishing one session leaves the table
 /// able to start another, from either direction.
 #[test]

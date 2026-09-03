@@ -40,6 +40,82 @@
 //! tests, so the correctness lives somewhere a browser is not required to
 //! observe it.
 
+use std::rc::Rc;
+
+/// Reads a column's editable value out of a row.
+///
+/// Aliased for the same reason `EntityCellRenderer` and `EntitySortKey` are:
+/// the bare `Rc<dyn Fn…>` trips `clippy::type_complexity`, and the name says
+/// what the closure is for at every use site.
+pub type EntityCellEditorGet<T> = Rc<dyn Fn(&T) -> String>;
+
+/// Writes a user's input back into a row.
+pub type EntityCellEditorSet<T> = Rc<dyn Fn(&mut T, String)>;
+
+/// How one column's cell is edited while its row is live.
+///
+/// An enum rather than a closure pair so later editor kinds (select, number,
+/// date) can be added without changing any existing call site. A column
+/// without one renders its normal read-only cell **even in the draft row** —
+/// a derived column has nothing meaningful to accept for a blank row, and
+/// inventing an editor for it would be wrong.
+pub enum EntityCellEditor<T> {
+    /// A single-line text control.
+    Text {
+        /// The editable value, which may differ from the displayed text: a
+        /// column can render a formatted string and still edit the raw one.
+        get: EntityCellEditorGet<T>,
+        /// Writes the user's input back into the row the reducer holds.
+        set: EntityCellEditorSet<T>,
+    },
+}
+
+impl<T> EntityCellEditor<T> {
+    /// A text editor over one field.
+    pub fn text(
+        get: impl Fn(&T) -> String + 'static,
+        set: impl Fn(&mut T, String) + 'static,
+    ) -> Self {
+        Self::Text {
+            get: Rc::new(get),
+            set: Rc::new(set),
+        }
+    }
+
+    /// Reads the current editable value out of `row`.
+    pub fn value(&self, row: &T) -> String {
+        match self {
+            Self::Text { get, .. } => get(row),
+        }
+    }
+
+    /// Applies `value` to `row`.
+    pub fn apply(&self, row: &mut T, value: String) {
+        match self {
+            Self::Text { set, .. } => set(row, value),
+        }
+    }
+}
+
+impl<T> Clone for EntityCellEditor<T> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Text { get, set } => Self::Text {
+                get: Rc::clone(get),
+                set: Rc::clone(set),
+            },
+        }
+    }
+}
+
+impl<T> std::fmt::Debug for EntityCellEditor<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Text { .. } => f.write_str("EntityCellEditor::Text"),
+        }
+    }
+}
+
 /// Which row an edit session is acting on.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EntityEditTarget {

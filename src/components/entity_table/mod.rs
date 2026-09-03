@@ -19,8 +19,8 @@ pub use date_filter::{
     EntityDateFilterStatus, EntityDateParseError,
 };
 pub use draft_edit::{
-    EntityEditCommit, EntityEditDisposition, EntityEditOutcome, EntityEditPhase, EntityEditState,
-    EntityEditTarget,
+    EntityCellEditor, EntityCellEditorGet, EntityCellEditorSet, EntityEditCommit,
+    EntityEditDisposition, EntityEditOutcome, EntityEditPhase, EntityEditState, EntityEditTarget,
 };
 pub use emphasis::{EntityRowEmphasis, EntityRowEmphasisClassifier};
 pub use focus_request::{
