@@ -49,8 +49,8 @@ use super::types::{
     EntityTableActionColumnPolicy, EntityTableDisplayProjection, EntityTablePagination,
     EntityTablePreferenceOwnership, EntityTablePreferencePersistence, EntityTablePreferences,
     EntityTableTexts, EntityTableViewportFit, EntityTextOverflow, entity_alignment_class,
-    entity_compact_alignment_class, entity_header_justify_class, entity_text_overflow_style,
-    normalize_entity_secondary_text,
+    entity_compact_alignment_class, entity_header_justify_class, entity_inline_edit_host_id,
+    entity_text_overflow_style, normalize_entity_secondary_text,
 };
 use crate::components::badge::{Badge, BadgeSize};
 use crate::components::button::Button;
@@ -930,6 +930,34 @@ where
         edit_state.update(|state| {
             state.cancel();
         });
+    });
+    // `ldui-ff2f` 3c-ii: the second entry point into the SAME mode. The
+    // reducer refuses it while a row is already live, so the two entry points
+    // cannot produce two editable rows.
+    let begin_row_edit = Callback::new(move |key: String| {
+        let existing = data.with(|rows| {
+            rows.iter()
+                .find(|row| row_key.with_value(|f| f(row)) == key)
+                .cloned()
+        });
+        if let Some(existing) = existing {
+            edit_state.update(|state| {
+                state.begin_edit(key, existing);
+            });
+        }
+    });
+    let allow_row_edit =
+        draft_row.with_value(|config| config.as_ref().is_some_and(|config| config.allow_row_edit));
+    column_store.with_value(|columns| {
+        entity_inline_edit_host_id(columns, editing_enabled);
+    });
+    let edit_actions = editing_enabled.then_some(EditActionsContext {
+        edit_state,
+        draft_texts,
+        allow_row_edit,
+        on_begin_edit: begin_row_edit,
+        on_save: commit_draft,
+        on_cancel: cancel_draft,
     });
     let viewport_fit_enabled = viewport_fit.is_some();
     let viewport_fit_height = viewport_fit
@@ -2603,6 +2631,7 @@ where
                                         row_emphasis,
                                         table_control_id,
                                         edit_state,
+                                        edit_actions,
                                     },
                                 ),
                             )}
@@ -2639,6 +2668,7 @@ where
                                 row_emphasis,
                                 table_control_id,
                                 edit_state,
+                                edit_actions,
                             },
                         };
                         view! {
@@ -3093,6 +3123,9 @@ struct KeyedRowContext<T: 'static> {
     /// `ldui-ff2f`. Idle on every table that did not opt in, so the inert
     /// treatment below is unreachable there.
     edit_state: RwSignal<EntityEditState<T>, LocalStorage>,
+    /// `ldui-ff2f` 3c-ii. `None` on a table that did not opt into editing, in
+    /// which case no action cell is appended at all.
+    edit_actions: Option<EditActionsContext<T>>,
 }
 
 impl<T: 'static> Clone for KeyedRowContext<T> {
@@ -3122,6 +3155,7 @@ fn render_keyed_row<T: Clone + 'static>(
         row_emphasis,
         table_control_id,
         edit_state,
+        edit_actions,
     } = context;
     // A table with only `selection` (no `on_row_activate`) is still
     // keyboard-operable, mirroring `data_table::row_is_interactive`.
@@ -3297,6 +3331,7 @@ fn render_keyed_row<T: Clone + 'static>(
     // Two closures need it (aria-disabled and tabindex), so each gets its own.
     let inert_key = key.clone();
     let inert_key_tabindex = key.clone();
+    let actions_key = key.clone();
     view! {
         <tr
             data-row-key=key.clone()
@@ -3402,11 +3437,50 @@ fn render_keyed_row<T: Clone + 'static>(
                         })
                         .collect::<Vec<_>>()
                 });
-                render_row_cells(row, columns, compact_row.get_value(), emphasis)
+                let cells = render_row_cells(row, columns, compact_row.get_value(), emphasis);
+                // `ldui-ff2f` 3c-ii: the framework's action cell is appended
+                // only when the table opted into editing, so a plain table's
+                // row markup is untouched.
+                let actions = edit_actions.map(|context| {
+                    render_row_edit_actions(
+                        actions_key.clone(),
+                        context.edit_state,
+                        context.draft_texts,
+                        context.allow_row_edit,
+                        context.on_begin_edit,
+                        context.on_save,
+                        context.on_cancel,
+                    )
+                });
+                view! { {cells}{actions} }.into_any()
             }}
         </tr>
     }
 }
+
+/// Everything `render_keyed_row` needs to draw the edit-aware action cell.
+///
+/// Bundled because it is `Copy` (every field is a handle or a `Callback`), so
+/// threading it costs the row path one field rather than eight.
+struct EditActionsContext<T: 'static> {
+    edit_state: RwSignal<EntityEditState<T>, LocalStorage>,
+    draft_texts: Signal<EntityDraftTexts>,
+    allow_row_edit: bool,
+    on_begin_edit: Callback<String>,
+    on_save: Callback<()>,
+    on_cancel: Callback<()>,
+}
+
+// Manual, for the same reason `KeyedRowContext` has manual impls: `derive`
+// would add a `T: Copy` bound, but every field here is a handle or a
+// `Callback` and is `Copy` regardless of what `T` is.
+impl<T: 'static> Clone for EditActionsContext<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<T: 'static> Copy for EditActionsContext<T> {}
 
 /// Renders the live row's editable cells (`ldui-ff2f`, step 3b).
 ///
@@ -3529,6 +3603,93 @@ fn render_draft_cells<T: Clone + 'static>(
                 >
                     {move || draft_texts.get().cancel_edit}
                 </Button>
+            </div>
+        </td>
+    }
+    .into_any()
+}
+
+/// Renders the framework-owned action cell for one existing row
+/// (`ldui-ff2f` 3c-ii).
+///
+/// Holds the consumer's declared actions AND the framework's Edit/Save in one
+/// cell, which is the whole point: Edit and Save are the same control
+/// relabelled by state, and that state lives here, so a consumer-rendered
+/// column could not do it and a second framework column would leave two action
+/// cells side by side.
+///
+/// The whole cell goes inert while a DIFFERENT row is live. That is not just
+/// consistency with the row treatment — it is required: a live Edit button on
+/// a second row would open a second editable row and break the single-live-row
+/// invariant the reducer enforces.
+fn render_row_edit_actions<T: Clone + 'static>(
+    row_key: String,
+    edit_state: RwSignal<EntityEditState<T>, LocalStorage>,
+    draft_texts: Signal<EntityDraftTexts>,
+    allow_row_edit: bool,
+    on_begin_edit: Callback<String>,
+    on_save: Callback<()>,
+    on_cancel: Callback<()>,
+) -> AnyView {
+    let live_key = row_key.clone();
+    let is_live = Signal::derive_local(move || edit_state.with(|s| s.is_row_live(&live_key)));
+    let other_key = row_key.clone();
+    let is_inert = Signal::derive_local(move || {
+        edit_state.with(|s| s.is_editing() && !s.is_row_live(&other_key))
+    });
+    let committing = Signal::derive_local(move || edit_state.with(EntityEditState::is_committing));
+
+    let edit_key = row_key.clone();
+    let edit_control = allow_row_edit.then(|| {
+        view! {
+            // ONE button, relabelled by state -- exactly the owner's
+            // "its action button reads Save instead of Edit".
+            <Button
+                class="btn-xs btn-primary"
+                attr:data-entity-row-edit="true"
+                attr:data-entity-row-edit-state=move || if is_live.get() { "save" } else { "edit" }
+                disabled=Signal::derive(move || is_inert.get() || committing.get())
+                on_click=Callback::new(move |_| {
+                    if is_live.get_untracked() {
+                        on_save.run(());
+                    } else {
+                        on_begin_edit.run(edit_key.clone());
+                    }
+                })
+            >
+                {move || {
+                    let texts = draft_texts.get();
+                    if is_live.get() { texts.save_row } else { texts.edit_row }
+                }}
+            </Button>
+        }
+    });
+
+    let cancel_control = move || {
+        is_live.get().then(|| {
+            view! {
+                <Button
+                    class="btn-xs btn-ghost"
+                    attr:data-entity-row-cancel="true"
+                    disabled=Signal::derive(move || committing.get())
+                    on_click=Callback::new(move |_| on_cancel.run(()))
+                >
+                    {move || draft_texts.get().cancel_edit}
+                </Button>
+            }
+        })
+    };
+
+    view! {
+        <td
+            class="hidden border border-table-grid forced-colors:border-[CanvasText] lg:table-cell"
+            data-entity-action="true"
+            data-entity-row-actions="true"
+            aria-disabled=move || is_inert.get().then_some("true")
+        >
+            <div class="flex items-center gap-2">
+                {edit_control}
+                {cancel_control}
             </div>
         </td>
     }

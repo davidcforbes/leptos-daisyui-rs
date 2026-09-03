@@ -963,6 +963,8 @@ pub fn EntityTableDraftRowFixture() -> impl IntoView {
                     |row: &FixtureRow| row.status.clone(),
                     |row: &mut FixtureRow, value| row.status = value,
                 )),
+            EntityColumn::action("actions", "Actions", |_row: &FixtureRow| String::new())
+                .inline_edit_host(),
         ]
     };
 

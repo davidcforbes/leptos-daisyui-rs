@@ -1391,6 +1391,8 @@ pub struct EntityColumn<T> {
     pub required: bool,
     /// Whether this cell contains actions and therefore suppresses row activation.
     pub is_action: bool,
+    /// Whether this existing action column owns inline Edit/Save/Cancel.
+    pub inline_edit_host: bool,
     /// Whether users may resize this column.
     pub resizable: bool,
     /// Optional column-specific minimum width in pixels.
@@ -1420,6 +1422,28 @@ pub struct EntityColumn<T> {
     /// column stays read-only even in a live row, which is the right answer
     /// for a derived or action column.
     pub editor: Option<EntityCellEditor<T>>,
+}
+
+pub(crate) fn entity_inline_edit_host_id<T>(
+    columns: &[EntityColumn<T>],
+    editing_enabled: bool,
+) -> Option<&'static str> {
+    if !editing_enabled {
+        return None;
+    }
+    let hosts = columns
+        .iter()
+        .filter(|column| column.inline_edit_host)
+        .map(|column| column.id)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        hosts.len(),
+        1,
+        "EntityTable draft_row requires exactly one inline edit host; found {} ({})",
+        hosts.len(),
+        hosts.join(", ")
+    );
+    hosts.first().copied()
 }
 
 /// What the table hands the consumer when Save is pressed (`ldui-ff2f`).
@@ -1520,6 +1544,9 @@ pub struct EntityDraftRow<T: 'static> {
     pub on_commit: Callback<EntityDraftCommit<T>, ()>,
     /// Reactive copy for the edit controls.
     pub texts: Signal<EntityDraftTexts>,
+    /// Whether existing rows offer an Edit action at all. `false` keeps the
+    /// draft-row-only behaviour: `+` creates, but no row can be edited.
+    pub allow_row_edit: bool,
 }
 
 impl<T: 'static> EntityDraftRow<T> {
@@ -1532,6 +1559,7 @@ impl<T: 'static> EntityDraftRow<T> {
             new_row: Rc::new(new_row),
             on_commit,
             texts: Signal::stored(EntityDraftTexts::default()),
+            allow_row_edit: false,
         }
     }
 
@@ -1539,6 +1567,17 @@ impl<T: 'static> EntityDraftRow<T> {
     #[must_use]
     pub fn with_texts(mut self, texts: impl Into<Signal<EntityDraftTexts>>) -> Self {
         self.texts = texts.into();
+        self
+    }
+
+    /// Lets an existing row be edited in place (`ldui-ff2f` 3c-ii).
+    ///
+    /// Adds an Edit action to every row. Pressing it puts that row into the
+    /// same exclusive mode `+` uses: the table goes inert, that row becomes
+    /// editable, and its Edit button reads Save until the commit resolves.
+    #[must_use]
+    pub const fn allow_row_edit(mut self, allow: bool) -> Self {
+        self.allow_row_edit = allow;
         self
     }
 }
@@ -1549,6 +1588,7 @@ impl<T: 'static> Clone for EntityDraftRow<T> {
             new_row: Rc::clone(&self.new_row),
             on_commit: self.on_commit,
             texts: self.texts,
+            allow_row_edit: self.allow_row_edit,
         }
     }
 }
@@ -1561,6 +1601,7 @@ impl<T> Clone for EntityColumn<T> {
             sortable: self.sortable,
             required: self.required,
             is_action: self.is_action,
+            inline_edit_host: self.inline_edit_host,
             resizable: self.resizable,
             min_width: self.min_width,
             initial_width: self.initial_width,
@@ -1586,6 +1627,7 @@ impl<T> fmt::Debug for EntityColumn<T> {
             .field("sortable", &self.sortable)
             .field("required", &self.required)
             .field("is_action", &self.is_action)
+            .field("inline_edit_host", &self.inline_edit_host)
             .field("resizable", &self.resizable)
             .field("min_width", &self.min_width)
             .field("initial_width", &self.initial_width)
@@ -1612,6 +1654,7 @@ impl<T: 'static> EntityColumn<T> {
             sortable: true,
             required: false,
             is_action: false,
+            inline_edit_host: false,
             resizable: true,
             min_width: None,
             initial_width: None,
@@ -1674,6 +1717,18 @@ impl<T: 'static> EntityColumn<T> {
         column.comparator = None;
         column.sort_key = None;
         column
+    }
+
+    /// Makes this action column the required host for inline edit controls.
+    #[must_use]
+    pub fn inline_edit_host(mut self) -> Self {
+        assert!(
+            self.is_action,
+            "EntityColumn::inline_edit_host requires EntityColumn::action"
+        );
+        self.inline_edit_host = true;
+        self.required = true;
+        self
     }
 
     /// Makes this column mandatory in the visible-column set.

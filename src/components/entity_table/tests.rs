@@ -46,6 +46,48 @@ fn columns() -> Vec<EntityColumn<Row>> {
 }
 
 #[test]
+fn inline_edit_host_is_an_action_column_and_cannot_be_hidden() {
+    let column =
+        EntityColumn::action("actions", "Actions", |_: &Row| String::new()).inline_edit_host();
+
+    assert!(column.is_action);
+    assert!(column.required);
+    assert!(column.inline_edit_host);
+}
+
+#[test]
+fn one_marked_action_column_is_required_when_editing_is_enabled() {
+    let columns = vec![
+        EntityColumn::text("name", "Name", |row: &Row| row.name.to_owned()),
+        EntityColumn::action("actions", "Actions", |_: &Row| String::new()).inline_edit_host(),
+    ];
+
+    assert_eq!(entity_inline_edit_host_id(&columns, true), Some("actions"));
+    assert_eq!(entity_inline_edit_host_id(&columns, false), None);
+}
+
+#[test]
+#[should_panic(expected = "EntityTable draft_row requires exactly one inline edit host; found 0")]
+fn editing_without_a_marked_action_column_is_rejected() {
+    let columns = vec![EntityColumn::text("name", "Name", |row: &Row| {
+        row.name.to_owned()
+    })];
+    let _ = entity_inline_edit_host_id(&columns, true);
+}
+
+#[test]
+#[should_panic(expected = "EntityTable draft_row requires exactly one inline edit host; found 2")]
+fn editing_with_two_marked_action_columns_is_rejected() {
+    let columns = vec![
+        EntityColumn::action("primary-actions", "Primary", |_: &Row| String::new())
+            .inline_edit_host(),
+        EntityColumn::action("secondary-actions", "Secondary", |_: &Row| String::new())
+            .inline_edit_host(),
+    ];
+    let _ = entity_inline_edit_host_id(&columns, true);
+}
+
+#[test]
 fn system_order_and_stable_ties_are_preserved() {
     let rows = rows();
     let columns = columns();

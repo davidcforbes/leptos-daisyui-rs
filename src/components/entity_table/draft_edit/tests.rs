@@ -382,10 +382,7 @@ fn rejected_commit_keeps_the_pending_snapshot_frozen() {
     gate.observe("refresh-1", state.is_editing());
     let commit = state.commit().expect("commit");
 
-    state.resolve(
-        &commit,
-        EntityEditOutcome::Rejected("try again".to_owned()),
-    );
+    state.resolve(&commit, EntityEditOutcome::Rejected("try again".to_owned()));
 
     assert!(state.is_editing());
     assert_eq!(gate.accepted(), &"accepted-0");
