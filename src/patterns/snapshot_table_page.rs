@@ -97,10 +97,11 @@ impl<V: Send + Sync + 'static> SnapshotDatasetSelectorConfig<V> {
 /// Everything else the internally owned `EntityTable` can express as pure
 /// behavior -- local-filter page reset, viewport-fit paging, a caller
 /// toolbar, the display-projection callback/action-column policy, and
-/// chooser presentation -- is a typed passthrough here (`ldui-myhh`,
-/// `ldui-5ano`). None of these can carry rows, dataset identity, revision,
-/// count, or generation: their types simply have no such field, so a caller
-/// cannot smuggle identity through them even by accident.
+/// chooser and empty-range presentation -- is a typed passthrough here
+/// (`ldui-myhh`, `ldui-5ano`, `ldui-r50n`). None of these can carry rows,
+/// dataset identity, revision, count, or generation: their types simply have
+/// no such field, so a caller cannot smuggle identity through them even by
+/// accident.
 pub struct SnapshotEntityTableConfig<R: 'static> {
     columns: EntityColumns<R>,
     row_key: EntityRowKey<R>,
@@ -110,6 +111,7 @@ pub struct SnapshotEntityTableConfig<R: 'static> {
     column_filters: EntityColumnFilters,
     on_row_activate: Option<Callback<String>>,
     texts: Signal<EntityTableTexts>,
+    empty_row_range: MaybeProp<String>,
     show_reset_actions: bool,
     page_reset_key: Option<Signal<String>>,
     viewport_fit: Option<EntityTableViewportFit>,
@@ -137,6 +139,7 @@ impl<R: 'static> SnapshotEntityTableConfig<R> {
             column_filters: EntityColumnFilters::None,
             on_row_activate: None,
             texts: Signal::stored(EntityTableTexts::default()),
+            empty_row_range: MaybeProp::default(),
             show_reset_actions: false,
             page_reset_key: None,
             viewport_fit: None,
@@ -176,6 +179,14 @@ impl<R: 'static> SnapshotEntityTableConfig<R> {
     /// Supplies reactive EntityTable-owned copy.
     pub fn with_texts(mut self, texts: impl Into<Signal<EntityTableTexts>>) -> Self {
         self.texts = texts.into();
+        self
+    }
+
+    /// Supplies the reactive localized template used when the internally
+    /// owned `EntityTable` mounts with no displayed rows. The table still owns
+    /// the empty-range decision and placeholder values.
+    pub fn with_empty_row_range(mut self, template: impl Into<MaybeProp<String>>) -> Self {
+        self.empty_row_range = template.into();
         self
     }
 
@@ -722,6 +733,7 @@ where
                                 preference_ownership=config.preference_ownership.clone()
                                 preference_version=config.preference_version
                                 texts=config.texts
+                                empty_row_range=config.empty_row_range
                                 page_size_control_id=format!("{contract_id}-rows-per-page")
                                 show_reset_actions=config.show_reset_actions
                                 nostrip:toolbar_actions=toolbar_actions
@@ -771,6 +783,7 @@ mod tests {
         );
         assert_eq!(table.preference_version, 1);
         assert!(!table.show_reset_actions);
+        assert!(table.empty_row_range.get_untracked().is_none());
         assert!(table.page_reset_key.is_none());
         assert!(table.viewport_fit.is_none());
         assert!(table.toolbar_actions.is_none());
@@ -795,6 +808,23 @@ mod tests {
                 Callback::new(move |next| preferences.set(next)),
             ),
         )
+    }
+
+    #[test]
+    fn empty_row_range_builder_keeps_the_callers_reactive_localized_copy() {
+        let template = RwSignal::new("Activity rows 0 of {total}".to_owned());
+        let table = base_table_config().with_empty_row_range(template);
+
+        assert_eq!(
+            table.empty_row_range.get_untracked().as_deref(),
+            Some("Activity rows 0 of {total}")
+        );
+
+        template.set("Filas de actividad: 0 de {total}".to_owned());
+        assert_eq!(
+            table.empty_row_range.get_untracked().as_deref(),
+            Some("Filas de actividad: 0 de {total}")
+        );
     }
 
     /// `ldui-nj3q`: the utility-row config defaults to the count alone, and

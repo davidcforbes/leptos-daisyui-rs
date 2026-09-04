@@ -226,7 +226,7 @@ identity-critical bindings (rows, `dataset_identity`, `focus_scope`) itself,
 sourced from the same private state view as the dataset selector -- a caller
 cannot supply those through the config. Everything the underlying table can
 express as pure behavior is a typed builder instead (`ldui-myhh` /
-`ldui-5ano`), so a consumer that previously had to drop to a page-local raw
+`ldui-5ano` / `ldui-r50n`), so a consumer that previously had to drop to a page-local raw
 `EntityTable` for these can now stay on the canonical page:
 
 | Builder | Forwards to | Purpose |
@@ -236,6 +236,7 @@ express as pure behavior is a typed builder instead (`ldui-myhh` /
 | `with_toolbar_actions` | `EntityTable::toolbar_actions` | Caller-rendered table utilities (Export, Refresh) placed in the top toolbar before the column chooser. (Page size moved to the footer in ldui-z0n1, so the toolbar now holds only these actions and the chooser.) |
 | `on_display_projection` / `with_projection_action_columns` | `EntityTable::on_display_projection` / `projection_action_columns` | Atomic read-only display projection for caller-owned export encoding, plus its action-column policy. |
 | `with_column_chooser_trigger` | `EntityTable::column_chooser_trigger` | Text (default) or compact icon presentation of the framework-owned chooser; both keep identical accessible semantics. |
+| `with_empty_row_range` | `EntityTable::empty_row_range` | Reactive localized copy for the supported no-local-projection path where an authoritative empty table remains mounted. |
 
 ```rust,no_run
 let table = SnapshotEntityTableConfig::new(columns(), row_key, preference_ownership)
@@ -245,7 +246,8 @@ let table = SnapshotEntityTableConfig::new(columns(), row_key, preference_owners
         <Button on_click=export_csv>"Export CSV"</Button>
     }.into_any())
     .on_display_projection(Callback::new(move |projection| export_projection.set(projection)))
-    .with_column_chooser_trigger(EntityColumnChooserTrigger::Icon);
+    .with_column_chooser_trigger(EntityColumnChooserTrigger::Icon)
+    .with_empty_row_range(Signal::derive(move || empty_range_copy.get()));
 ```
 
 None of these can carry rows, dataset identity, revision, count, or

@@ -5355,8 +5355,9 @@ async fn grouped_pages_keep_a_fitting_group_whole_and_stay_truthful() {
 }
 
 /// ldui-g4nw: a table with source rows and no matches must not claim the
-/// provider is empty. The fixture overrides ONLY `no_rows`, exactly as a caller
-/// that predates `no_matching_rows` does.
+/// provider is empty. The fixture overrides ONLY `no_rows` within
+/// `EntityTableTexts`, exactly as a caller that predates `no_matching_rows`
+/// does; its separate empty-range prop cannot change empty-state meaning.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
 async fn an_empty_projection_never_claims_the_provider_is_empty() {
@@ -5371,6 +5372,7 @@ async fn an_empty_projection_never_claims_the_provider_is_empty() {
     let empty_state = r#"(() => {
         const root = document.querySelector('#entity-group-paging-table');
         const cell = root.querySelector('[data-entity-empty-state]');
+        const rowRange = root.querySelector('[data-entity-row-range]');
         const source = document
             .querySelector('[data-testid="entity-group-paging-source-count"]')
             .textContent.trim();
@@ -5380,6 +5382,11 @@ async fn an_empty_projection_never_claims_the_provider_is_empty() {
             text: cell ? cell.textContent.trim() : null,
             source,
             rows: root.querySelectorAll('tbody tr[data-entity-row-key]').length,
+            row_range: rowRange ? rowRange.textContent.trim() : null,
+            row_range_in_footer:
+                rowRange?.closest('[data-entity-table-footer]') !== null,
+            row_range_visible: rowRange ? rowRange.getClientRects().length > 0 : false,
+            row_range_probe: rowRange?.dataset.emptyRangeProbe ?? null,
         };
     })()"#;
 
@@ -5405,9 +5412,48 @@ async fn an_empty_projection_never_claims_the_provider_is_empty() {
         json!("No rows match the current filters"),
         "an overridden `no_rows` must not be reused for the filtered case: {filtered}"
     );
+    assert_eq!(
+        filtered["row_range"],
+        json!("Activity rows 0 of 0"),
+        "a filtered-empty projection must keep a truthful localized row range: {filtered}"
+    );
+    assert_eq!(filtered["row_range_in_footer"], json!(true), "{filtered}");
+    assert_eq!(filtered["row_range_visible"], json!(true), "{filtered}");
+
+    // Changing the caller's locale signal while the table remains empty must
+    // update the existing footer node. A remount could make the text look
+    // correct while quietly discarding state, so retain an explicit DOM probe.
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => {
+                const range = document.querySelector(
+                    '#entity-group-paging-table [data-entity-row-range]'
+                );
+                range.dataset.emptyRangeProbe = 'retained';
+                return range.textContent.trim();
+            })()"#,
+        )
+        .await,
+        json!("Activity rows 0 of 0")
+    );
+    click(
+        &harness,
+        "[data-testid=\"entity-group-paging-empty-range-spanish\"]",
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    let translated = eval_json(&harness, empty_state).await;
+    assert_eq!(
+        translated["row_range"],
+        json!("Filas de actividad: 0 de 0"),
+        "the empty footer did not react to the caller's locale signal: {translated}"
+    );
+    assert_eq!(translated["row_range_probe"], json!("retained"));
 
     // Now the provider itself is empty, and the caller's own sentence -- the
-    // only string this fixture overrides -- is the one that appears.
+    // only provider-empty sentence this fixture overrides -- is the one that
+    // appears.
     choose_group_paging_status(&harness, "").await;
     click(
         &harness,
@@ -5423,6 +5469,13 @@ async fn an_empty_projection_never_claims_the_provider_is_empty() {
         json!("No activity is present in this snapshot."),
         "the caller's single overridden string still owns the provider-empty case: {drained}"
     );
+    assert_eq!(
+        drained["row_range"],
+        json!("Filas de actividad: 0 de 0"),
+        "a provider-empty table must keep a truthful localized row range: {drained}"
+    );
+    assert_eq!(drained["row_range_in_footer"], json!(true), "{drained}");
+    assert_eq!(drained["row_range_visible"], json!(true), "{drained}");
 
     click(
         &harness,

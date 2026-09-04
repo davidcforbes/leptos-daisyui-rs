@@ -715,7 +715,9 @@ fn spanish_filter_bar_texts() -> FilterBarTexts {
 /// opts in; `#snapshot-plain` does not and must keep rendering exactly as it
 /// does today -- no filter bar, no count, no Reset, no Save as Default. The
 /// absent case is the negative control for every assertion about the
-/// opted-in case.
+/// opted-in case. Only after those same-state assertions does the fixture
+/// transition `#snapshot-plain` to an authoritative empty snapshot, proving
+/// the reachable no-local-projection footer path for `ldui-r50n`.
 #[component]
 pub fn SnapshotTablePageFilterActionsFixture() -> impl IntoView {
     type State = SnapshotTableState<FixtureRow, String, String, (), String>;
@@ -727,6 +729,26 @@ pub fn SnapshotTablePageFilterActionsFixture() -> impl IntoView {
             .expect("initial filter-actions request");
         assert_eq!(
             initial.complete(request, snapshot("office-mx", "mx-r1")),
+            SnapshotTransitionDisposition::Applied
+        );
+        initial
+    }
+
+    fn empty_state() -> State {
+        let mut initial = State::new();
+        let request = initial
+            .start_request("office-mx".to_owned())
+            .expect("initial empty filter-actions request");
+        let empty = SnapshotData::new(
+            "office-mx".to_owned(),
+            Rc::new(Vec::<FixtureRow>::new()),
+            "mx-empty",
+            0,
+            Some(()),
+        )
+        .expect("empty fixture snapshot is complete");
+        assert_eq!(
+            initial.complete(request, empty),
             SnapshotTransitionDisposition::Applied
         );
         initial
@@ -784,6 +806,13 @@ pub fn SnapshotTablePageFilterActionsFixture() -> impl IntoView {
             spanish_filter_bar_texts()
         } else {
             FilterBarTexts::default()
+        }
+    });
+    let empty_row_range = Signal::derive(move || {
+        if spanish.get() {
+            "Filas de actividad: 0 de {total}".to_owned()
+        } else {
+            "Activity rows 0 of {total}".to_owned()
         }
     });
 
@@ -866,6 +895,12 @@ pub fn SnapshotTablePageFilterActionsFixture() -> impl IntoView {
                     "English"
                 </Button>
                 <Button
+                    attr:data-testid="plain-empty-snapshot"
+                    on_click=Callback::new(move |_| plain_state.set(empty_state()))
+                >
+                    "Empty plain snapshot"
+                </Button>
+                <Button
                     attr:data-testid="actions-save-dirty"
                     on_click=Callback::new(move |_| {
                         save_state.set(SnapshotDefaultSaveState::Dirty);
@@ -929,7 +964,7 @@ pub fn SnapshotTablePageFilterActionsFixture() -> impl IntoView {
                         <Button attr:data-testid="plain-filter-all">"All rows"</Button>
                     </div>
                 }.into_any())
-                entity_table=table_config()
+                entity_table=table_config().with_empty_row_range(empty_row_range)
                 action_key_label=Rc::new(|key: &String| key.clone())
             />
         </section>
@@ -2465,8 +2500,8 @@ struct NeighborRow {
     label: String,
 }
 
-/// Group-aware pagination, empty-state semantics and control identity
-/// (`ldui-5in5`, `ldui-g4nw`, `ldui-izkq`).
+/// Group-aware pagination, empty-state semantics, localized empty ranges, and
+/// control identity (`ldui-5in5`, `ldui-g4nw`, `ldui-r50n`, `ldui-izkq`).
 ///
 /// At a 25-row page the three 17-row offices each own a page: filling the
 /// remainder of page 1 with eight Durham rows is exactly the defect. Statewide
@@ -2474,7 +2509,7 @@ struct NeighborRow {
 /// previous fill-first behavior under the existing continuation heading -- both
 /// branches of the rule are reachable on one page.
 ///
-/// The same fixture carries the other two beads because they need the same
+/// The same fixture carries the other three beads because they need the same
 /// shape: a status filter that can select nothing (filtered-empty) beside a
 /// control that empties the provider (provider-empty), and a second mounted
 /// table proving two `EntityTable`s never mint the same control id.
@@ -2482,6 +2517,7 @@ struct NeighborRow {
 pub fn EntityTableGroupPagingFixture() -> impl IntoView {
     let source = RwSignal::new_local(group_paging_rows());
     let status_filter = RwSignal::new(String::new());
+    let empty_range_spanish = RwSignal::new(false);
     let accepted = RwSignal::new(BTreeSet::<String>::new());
     let neighbor_accepted = RwSignal::new(BTreeSet::<String>::new());
 
@@ -2515,6 +2551,13 @@ pub fn EntityTableGroupPagingFixture() -> impl IntoView {
     let texts = Signal::stored(EntityTableTexts {
         no_rows: "No activity is present in this snapshot.".to_owned(),
         ..EntityTableTexts::default()
+    });
+    let empty_row_range = Signal::derive(move || {
+        if empty_range_spanish.get() {
+            "Filas de actividad: 0 de {total}".to_owned()
+        } else {
+            "Activity rows 0 of {total}".to_owned()
+        }
     });
 
     let filters = vec![EntityColumnFilter::select(
@@ -2578,6 +2621,12 @@ pub fn EntityTableGroupPagingFixture() -> impl IntoView {
                 >
                     "Restore the provider"
                 </Button>
+                <Button
+                    on:click=move |_| empty_range_spanish.set(true)
+                    attr:data-testid="entity-group-paging-empty-range-spanish"
+                >
+                    "Use Spanish empty range"
+                </Button>
             </div>
             <EntityTable
                 data=filtered
@@ -2589,6 +2638,7 @@ pub fn EntityTableGroupPagingFixture() -> impl IntoView {
                 viewport_fit=EntityTableViewportFit::max_height("22rem").with_min_rows(3)
                 column_filters=filters
                 texts=texts
+                empty_row_range=empty_row_range
                 control_id="group-paging-table"
                 row_grouping=EntityRowGrouping::controlled(
                     Rc::new(|row: &GroupPagingRow| row.office.clone()),

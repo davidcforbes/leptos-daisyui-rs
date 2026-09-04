@@ -55,6 +55,7 @@ erase the compile-time distinction the snapshot component exists to provide.
 | `focus_scope` | Optional opaque dataset/access generation; recovery never crosses a change. |
 | `preference_ownership` | Controlled or uncontrolled preference policy. |
 | `storage_key` | Legacy local-storage compatibility prop; mutually exclusive with `preference_ownership`. |
+| `empty_row_range` | Optional reactive localized template for a page with no displayed rows; supports `{start}`, `{end}`, and `{total}` and falls back to `EntityTableTexts::row_range` with zero values. |
 | `page_size_control_id` | Optional stable caller-owned DOM ID for the rows-per-page select, which renders in the footer row (see below). |
 | `toolbar_actions` | Optional caller-rendered table utilities placed before the framework-owned column chooser, in the top toolbar. |
 | `on_page_size_resolved` | Optional callback receiving the resolved `EntityPageSize` whenever it changes, including after a `viewport_fit` resize. |
@@ -149,6 +150,32 @@ page-size control. This is purely a placement move: the page-size select's
 default from `next_entity_page_size_id` when omitted, ldui-kl55), the
 `label[for]` association, the controlled/uncontrolled preference callback,
 and localized `EntityTableTexts::rows_per_page` copy are all unchanged.
+
+An empty page keeps that same visible row-range position (`ldui-r50n`). When
+`empty_row_range` is omitted, the existing localized
+`EntityTableTexts::row_range` template receives `start = 0`, `end = 0`, and
+the actual total instead of disappearing. Supply `empty_row_range` when the
+language or domain needs different empty grammar, such as `Notes 0 of 0`
+rather than `Notes 0-0 of 0`:
+
+```rust,no_run
+view! {
+    <EntityTable
+        // ...
+        texts=note_table_texts
+        empty_row_range=Signal::derive(move || match locale.get() {
+            Locale::Es => "Notas 0 de {total}".to_owned(),
+            Locale::En => "Notes 0 of {total}".to_owned(),
+        })
+    />
+}
+```
+
+The empty template supports `{start}`, `{end}`, and `{total}` for consistency,
+and positive ranges always use `EntityTableTexts::row_range`. This opt-in prop
+is deliberately separate from `EntityTableTexts`: copy that only exists when
+a consumer needs distinct empty grammar must not widen that always-required
+struct and break exhaustive literals in existing applications.
 
 `toolbar_actions` is presentation-only composition. The table owns the
 wrapping toolbar and chooser placement; the caller owns action labels and
@@ -1474,10 +1501,10 @@ through either client table.
 
 A page-local raw `EntityTable` kept only to reach `page_reset_key`,
 `viewport_fit`, `toolbar_actions`, `on_display_projection`/
-`projection_action_columns`, or `column_chooser_trigger` -- because
+`projection_action_columns`, `column_chooser_trigger`, or `empty_row_range` -- because
 `SnapshotTablePage` did not yet expose them -- should migrate back onto
 `SnapshotTablePage` and `SnapshotEntityTableConfig`'s typed builders for the
-same names (`ldui-myhh` / `ldui-5ano`). See
+same names (`ldui-myhh` / `ldui-5ano` / `ldui-r50n`). See
 [`doc/patterns/client-snapshot-list.md`](../patterns/client-snapshot-list.md#behavior-only-entitytable-passthroughs)
 for the full builder table and a worked example.
 

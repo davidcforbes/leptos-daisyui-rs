@@ -134,6 +134,30 @@ pub(super) fn resolved_page_size(
     )
 }
 
+/// Formats the visible footer summary from the page plan's truthful bounds.
+///
+/// A zero total and a zero start are both empty-range signals. Callers may
+/// localize that state separately; otherwise their ordinary localized range
+/// template remains the source of every word and receives zero values.
+pub(super) fn entity_row_range_text(
+    texts: &EntityTableTexts,
+    empty_row_range: Option<&str>,
+    start: usize,
+    end: usize,
+    total: usize,
+) -> String {
+    let template = if total == 0 || start == 0 {
+        empty_row_range.unwrap_or(&texts.row_range)
+    } else {
+        &texts.row_range
+    };
+
+    template
+        .replace("{start}", &start.to_string())
+        .replace("{end}", &end.to_string())
+        .replace("{total}", &total.to_string())
+}
+
 /// Prepends the leading selection control track to the data-column tracks.
 ///
 /// The control track is declared here rather than derived from `columns`
@@ -758,6 +782,15 @@ pub fn EntityTable<T>(
     /// Localizable labels for table controls.
     #[prop(into, default = Signal::stored(EntityTableTexts::default()))]
     texts: Signal<EntityTableTexts>,
+    /// Optional localized template for an empty page range (`ldui-r50n`).
+    ///
+    /// Supports the same `{start}`, `{end}`, and `{total}` placeholders as
+    /// [`EntityTableTexts::row_range`]. When omitted, that existing template
+    /// is filled with zero values, preserving source and localization
+    /// compatibility for consumers with exhaustive `EntityTableTexts`
+    /// literals. Positive ranges always use `EntityTableTexts::row_range`.
+    #[prop(optional, into)]
+    empty_row_range: MaybeProp<String>,
     /// Stable DOM identity for the rows-per-page select's `id` and `name`
     /// attributes. When omitted, a process-unique default is generated so
     /// every mounted `EntityTable` still gets a non-empty, mutually unique
@@ -3003,9 +3036,6 @@ where
                     <span data-entity-row-range="true" class="text-sm text-base-content/75">
                         {move || {
                             let total = total_rows.get();
-                            if total == 0 {
-                                return String::new();
-                            }
                             // Read off the plan, never multiplied out of the
                             // page index: a grouped page can hold fewer rows
                             // than the capacity, and reciting `page * capacity`
@@ -3013,14 +3043,16 @@ where
                             let (start, end) = page_plan.with(|plan| {
                                 plan.row_range(current_page.get())
                             });
-                            if start == 0 {
-                                return String::new();
-                            }
-                            texts
-                                .with(|texts| texts.row_range.clone())
-                                .replace("{start}", &start.to_string())
-                                .replace("{end}", &end.to_string())
-                                .replace("{total}", &total.to_string())
+                            let empty_template = empty_row_range.get();
+                            texts.with(|texts| {
+                                entity_row_range_text(
+                                    texts,
+                                    empty_template.as_deref(),
+                                    start,
+                                    end,
+                                    total,
+                                )
+                            })
                         }}
                     </span>
                 </div>

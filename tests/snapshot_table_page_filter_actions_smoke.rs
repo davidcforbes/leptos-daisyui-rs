@@ -10,7 +10,9 @@
 //! negative control: it must keep rendering exactly as it does today, with
 //! no filter bar, no count, and neither action -- so a passing assertion
 //! about the count or the buttons cannot be satisfied by something the
-//! composite renders unconditionally.
+//! composite renders unconditionally. After that same-state comparison, the
+//! test transitions the plain page to a no-local-projection, authoritative
+//! empty state to prove the wrapper's reachable empty-range passthrough.
 
 mod common;
 
@@ -46,6 +48,8 @@ async fn actions_snapshot(harness: &pixelproof_web::Harness) -> Value {
             const opted = document.getElementById('snapshot-actions-filters');
             const bar = opted?.querySelector('[data-filter-bar="local"]') ?? null;
             const plain = document.getElementById('snapshot-plain-filters');
+            const plainTable = document.getElementById('snapshot-plain-table');
+            const plainRowRange = plainTable?.querySelector('[data-entity-row-range]');
             const feedback = bar?.querySelector('[data-filter-save-feedback]') ?? null;
             return {
                 barPresent: bar !== null,
@@ -84,6 +88,13 @@ async fn actions_snapshot(harness: &pixelproof_web::Harness) -> Value {
                 plainConsumerFilterPresent:
                     plain?.querySelector('[data-testid="plain-filter-all"]') !== null
                     && plain?.querySelector('[data-testid="plain-filter-all"]') !== undefined,
+                plainRows: plainTable
+                    ?.querySelectorAll('[data-entity-table-grid] tbody tr[data-entity-row-key]')
+                    .length ?? null,
+                plainRowRange: plainRowRange?.textContent?.trim() ?? null,
+                plainRowRangeVisible:
+                    plainRowRange ? plainRowRange.getClientRects().length > 0 : false,
+                plainRowRangeProbe: plainRowRange?.dataset.emptyRangeProbe ?? null,
             };
         })()"#,
     )
@@ -149,6 +160,42 @@ async fn filter_actions_supply_count_reset_and_save_without_a_consumer_filter_ba
         initial["plainConsumerFilterPresent"],
         json!(true),
         "the un-opted page must still render its own filters slot content"
+    );
+    assert_eq!(initial["plainRows"], json!(3), "{initial}");
+    assert_eq!(
+        initial["plainRowRange"],
+        json!("Showing 1-3 of 3"),
+        "positive ranges must ignore the configured empty copy: {initial}"
+    );
+
+    // Only after the established same-data negative control is complete do
+    // we move this page to the supported no-local-projection empty path.
+    click(&harness, "[data-testid='plain-empty-snapshot']").await;
+    let plain_empty = actions_snapshot(&harness).await;
+    assert_eq!(plain_empty["plainRows"], json!(0), "{plain_empty}");
+    assert_eq!(
+        plain_empty["plainRowRange"],
+        json!("Activity rows 0 of 0"),
+        "the no-local-projection wrapper must forward its empty-range copy: {plain_empty}"
+    );
+    assert_eq!(
+        plain_empty["plainRowRangeVisible"],
+        json!(true),
+        "{plain_empty}"
+    );
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => {
+                const range = document.querySelector(
+                    '#snapshot-plain-table [data-entity-row-range]'
+                );
+                range.dataset.emptyRangeProbe = 'retained';
+                return range.textContent.trim();
+            })()"#,
+        )
+        .await,
+        json!("Activity rows 0 of 0")
     );
 
     // --- The count tracks the identity-bound local projection -----------
@@ -234,6 +281,12 @@ async fn filter_actions_supply_count_reset_and_save_without_a_consumer_filter_ba
         spanish["feedbackText"],
         json!("Conflicto de vista predeterminada: A newer default exists.")
     );
+    assert_eq!(
+        spanish["plainRowRange"],
+        json!("Filas de actividad: 0 de 0"),
+        "the mounted wrapper footer did not react to the caller's locale signal: {spanish}"
+    );
+    assert_eq!(spanish["plainRowRangeProbe"], json!("retained"));
 
     // A clean Spanish view carries the localized disabled reason too.
     click(&harness, "[data-filter-save-default]").await;

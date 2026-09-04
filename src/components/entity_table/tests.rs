@@ -2003,6 +2003,52 @@ fn body_summary_control_and_pager_all_read_the_same_resolution() {
 }
 
 #[test]
+fn zero_total_uses_the_caller_localized_empty_row_range() {
+    let texts = EntityTableTexts::default();
+
+    assert_eq!(
+        super::component::entity_row_range_text(&texts, Some("Notes 0 of {total}"), 0, 0, 0,),
+        "Notes 0 of 0"
+    );
+}
+
+#[test]
+fn zero_start_uses_the_empty_row_range_when_total_is_known() {
+    let texts = EntityTableTexts::default();
+
+    assert_eq!(
+        super::component::entity_row_range_text(&texts, Some("Notes 0 of {total}"), 0, 0, 25,),
+        "Notes 0 of 25"
+    );
+}
+
+#[test]
+fn an_omitted_empty_row_range_falls_back_to_the_localized_standard_template() {
+    let texts = EntityTableTexts {
+        row_range: "Mostrando {start}-{end} de {total}".to_owned(),
+        ..EntityTableTexts::default()
+    };
+
+    assert_eq!(
+        super::component::entity_row_range_text(&texts, None, 0, 0, 0),
+        "Mostrando 0-0 de 0"
+    );
+}
+
+#[test]
+fn a_positive_range_ignores_the_empty_row_range_template() {
+    let texts = EntityTableTexts {
+        row_range: "Mostrando {start}-{end} de {total}".to_owned(),
+        ..EntityTableTexts::default()
+    };
+
+    assert_eq!(
+        super::component::entity_row_range_text(&texts, Some("Notas 0 de {total}"), 1, 17, 81,),
+        "Mostrando 1-17 de 81"
+    );
+}
+
+#[test]
 fn the_control_label_is_localizable_rather_than_hardcoded_english() {
     let texts = EntityTableTexts {
         rows_per_page_auto: "Automatique ({rows} lignes)".to_owned(),
