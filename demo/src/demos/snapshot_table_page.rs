@@ -1709,6 +1709,8 @@ pub fn EntityTablePageSizeIdentityFixture() -> impl IntoView {
 /// `entity-selection-remove-selected` exercises the fail-safe when the
 /// accepted key stops matching any row in `data`: no crash, and no row
 /// renders selected until the caller supplies a key that matches again.
+/// The empty/restore controls exercise the scroll-region keyboard stop when
+/// an interactive table temporarily has no displayed rows (`ldui-qsia`).
 #[component]
 pub fn EntityTableSelectionFixture() -> impl IntoView {
     let data = RwSignal::new_local(rows("office-mx"));
@@ -1829,6 +1831,21 @@ pub fn EntityTableSelectionFixture() -> impl IntoView {
                     attr:data-testid="entity-selection-remove-selected"
                 >
                     "Remove selected row"
+                </Button>
+                <Button
+                    on:click=move |_| {
+                        selected_key.set(None);
+                        data.set(Rc::new(Vec::new()));
+                    }
+                    attr:data-testid="entity-selection-empty"
+                >
+                    "Empty table"
+                </Button>
+                <Button
+                    on:click=move |_| data.set(rows("office-mx"))
+                    attr:data-testid="entity-selection-restore"
+                >
+                    "Restore rows"
                 </Button>
             </div>
             <EntityTable

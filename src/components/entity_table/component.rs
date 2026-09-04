@@ -1855,14 +1855,20 @@ where
         Some(height) => format!("height: {height}; max-height: {height}"),
         None => "height: 100%".to_owned(),
     });
-    // Keyboard reachability of the scroll container (ldui-0bwg). Interactive
-    // rows carry the table's single roving tab stop, so the region itself
-    // stays out of the tab order (`-1`: focusable by script for focus
-    // recovery, never a second stop). Non-interactive rows have no stop at
-    // all, and a region that scrolls (`viewport_fit`, or the compact layout
-    // on a narrow viewport) would then be unreachable from the keyboard --
-    // axe `scrollable-region-focusable` -- so the region is the stop instead.
-    let region_tabindex = entity_region_tabindex(on_row_activate.is_some() || selection.is_some());
+    // Keyboard reachability of the scroll container (ldui-0bwg, ldui-qsia).
+    // Interactive rows carry the table's row-level keyboard stops, so the
+    // region itself stays out of the tab order (`-1`: focusable by script for
+    // focus recovery, never an extra stop). When no row is displayed there is
+    // no row stop even if row interaction is configured. That empty case,
+    // like every non-interactive table, makes the region the stop instead so a
+    // scrolling region remains keyboard reachable.
+    let rows_interactive = on_row_activate.is_some() || selection.is_some();
+    let region_tabindex = move || {
+        entity_region_tabindex(
+            rows_interactive,
+            page_row_keys.with(|keys| !keys.is_empty()),
+        )
+    };
 
     let region_class = if viewport_fit_enabled {
         "min-h-0 w-full flex-1 overflow-auto rounded-box border border-table-grid bg-base-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
@@ -3464,7 +3470,7 @@ fn render_keyed_row<T: Clone + 'static>(
     let selected_class_key = key.clone();
     let selected_aria_key = key.clone();
 
-    // Focus and selection are deliberately distinct: Tab/roving focus never
+    // Focus and selection are deliberately distinct: Tab/focus movement never
     // proposes or paints selection by itself -- only a click or Enter/Space
     // does, via the handlers below.
     // Both models resolve to the same pure per-row key comparison, so neither
@@ -4246,12 +4252,18 @@ fn render_entity_row_cells<T: Clone + 'static>(
     .into_any()
 }
 
-/// `tabindex` of the table's scroll region (ldui-0bwg). With interactive rows
-/// the rows are the roving tab stop and the region must not add a second one;
-/// without them the region is the only thing a keyboard user can land on to
-/// scroll the table, so it joins the tab order.
-pub(crate) fn entity_region_tabindex(rows_interactive: bool) -> &'static str {
-    if rows_interactive { "-1" } else { "0" }
+/// `tabindex` of the table's scroll region (ldui-0bwg, ldui-qsia). Displayed
+/// interactive rows supply row-level keyboard stops; every other state needs
+/// the region itself as the keyboard-reachable scroll stop.
+pub(crate) fn entity_region_tabindex(
+    rows_interactive: bool,
+    has_displayed_rows: bool,
+) -> &'static str {
+    if rows_interactive && has_displayed_rows {
+        "-1"
+    } else {
+        "0"
+    }
 }
 
 fn focus_record_from_event(event: &web_sys::FocusEvent, scope: &str) -> Option<EntityFocusRecord> {

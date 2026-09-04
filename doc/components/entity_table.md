@@ -810,6 +810,19 @@ The contract:
 Internal row-action recovery is untouched by all of this: the two paths read
 none of each other's state.
 
+## Scroll-region keyboard reachability
+
+The element marked `data-entity-focus-region` is always programmatically
+focusable. It joins the ordinary tab order with `tabindex="0"` when rows are
+not interactive **or when the displayed page is empty**. In a populated table
+with row activation or controlled single selection, each enabled displayed row
+is keyboard-focusable, so the region stays at `tabindex="-1"` rather than add
+another stop. Filtering, paging, or replacing data updates this choice
+reactively: a transition to zero displayed rows moves the tab stop to the
+region, and the next populated page restores row-owned navigation. This keeps
+an empty horizontally scrolling table reachable by keyboard and satisfies
+axe's `scrollable-region-focusable` rule (`ldui-0bwg`, `ldui-qsia`).
+
 ## Controlled single-row selection
 
 `selection` wires one proposal-first, single-row selection to `EntityTable`,

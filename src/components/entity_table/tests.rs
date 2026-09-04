@@ -3523,12 +3523,19 @@ fn a_declared_group_carries_optional_compact_metadata() {
 /// region must be the stop (axe `scrollable-region-focusable`).
 #[test]
 fn region_joins_the_tab_order_when_rows_are_not_interactive() {
-    assert_eq!(entity_region_tabindex(false), "0");
+    assert_eq!(entity_region_tabindex(false, true), "0");
 }
 
-/// Interactive rows already carry the single roving tab stop; the region
-/// must not add a second one.
+/// Interactive rows already carry their own keyboard stops; the region must
+/// not add another one.
 #[test]
 fn region_stays_out_of_the_tab_order_when_rows_are_interactive() {
-    assert_eq!(entity_region_tabindex(true), "-1");
+    assert_eq!(entity_region_tabindex(true, true), "-1");
+}
+
+/// An interactive table has no row stop while its displayed page is
+/// empty, so the region must temporarily become the keyboard stop itself.
+#[test]
+fn empty_interactive_table_keeps_its_scroll_region_keyboard_reachable() {
+    assert_eq!(entity_region_tabindex(true, false), "0");
 }

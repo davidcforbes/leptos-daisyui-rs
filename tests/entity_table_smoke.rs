@@ -5816,8 +5816,8 @@ async fn empty_state_cell_clears_aa_contrast() {
 /// 17 rows in a 180px budget the region scrolls and nothing inside it can
 /// take focus: the region itself must be the tab stop (`tabindex="0"`,
 /// focusable, axe `scrollable-region-focusable` clean). The interactive
-/// client-snapshot list keeps `tabindex="-1"` so its roving row stop stays
-/// the only one.
+/// client-snapshot list keeps `tabindex="-1"` because its rows already own
+/// keyboard stops.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
 async fn scrolling_region_with_non_interactive_rows_is_keyboard_reachable() {
@@ -5901,7 +5901,7 @@ async fn scrolling_region_with_non_interactive_rows_is_keyboard_reachable() {
     // Interactive rows: the region stays out of the tab order.
     let interactive = harness_at("/components/client-snapshot-list").await;
     wait_for_selector(&interactive, "[data-entity-table-grid] tbody tr").await;
-    let roving = eval_json(
+    let interactive_stops = eval_json(
         &interactive,
         r#"(() => {
             const region = document.querySelector('[data-entity-focus-region]');
@@ -5910,8 +5910,134 @@ async fn scrolling_region_with_non_interactive_rows_is_keyboard_reachable() {
         })()"#,
     )
     .await;
-    assert_eq!(roving["tabindex"], json!("-1"), "{roving}");
-    assert!(roving["rowStops"].as_i64().unwrap_or(0) >= 1, "{roving}");
+    assert_eq!(
+        interactive_stops["tabindex"],
+        json!("-1"),
+        "{interactive_stops}"
+    );
+    assert!(
+        interactive_stops["rowStops"].as_i64().unwrap_or(0) >= 1,
+        "{interactive_stops}"
+    );
+}
+
+/// Empty interactive pages have no row-owned keyboard stop (`ldui-qsia`).
+/// The same mounted region must therefore move into the tab order while the
+/// rows are absent, accept focus, pass axe's scroll-region rule, and return to
+/// `tabindex="-1"` when interactive rows reappear.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
+async fn empty_interactive_table_moves_the_keyboard_stop_to_its_region_and_back() {
+    let harness = harness_at("/components/entity-table-selection").await;
+    harness
+        .set_viewport(ViewportSize::new(390, 844))
+        .await
+        .expect("narrow viewport");
+    begin_browser_error_capture(&harness).await;
+    wait_for_selector(
+        &harness,
+        "#entity-selection-table tbody tr[data-entity-row-key]",
+    )
+    .await;
+
+    let state = r#"(() => {
+        const root = document.querySelector('#entity-selection-table');
+        const region = root.querySelector('[data-entity-focus-region]');
+        const rows = [...root.querySelectorAll('tbody tr[data-entity-row-key]')];
+        return {
+            tabindex: region.getAttribute('tabindex'),
+            rows: rows.length,
+            rowStops: rows.filter(row => row.getAttribute('tabindex') === '0').length,
+            sameRegion: window.__lduiQsiaRegion === region,
+            focused: document.activeElement === region,
+        };
+    })()"#;
+
+    let initial = eval_json(
+        &harness,
+        r#"(() => {
+            const root = document.querySelector('#entity-selection-table');
+            const region = root.querySelector('[data-entity-focus-region]');
+            window.__lduiQsiaRegion = region;
+            const rows = [...root.querySelectorAll('tbody tr[data-entity-row-key]')];
+            return {
+                tabindex: region.getAttribute('tabindex'),
+                rows: rows.length,
+                rowStops: rows.filter(row => row.getAttribute('tabindex') === '0').length,
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(initial["rows"], json!(3), "{initial}");
+    assert_eq!(initial["rowStops"], json!(3), "{initial}");
+    assert_eq!(initial["tabindex"], json!("-1"), "{initial}");
+
+    click(&harness, "[data-testid='entity-selection-empty']").await;
+    wait_for_selector(
+        &harness,
+        "#entity-selection-table [data-entity-empty-state]",
+    )
+    .await;
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => {
+                const region = document.querySelector(
+                    '#entity-selection-table [data-entity-focus-region]'
+                );
+                region.focus();
+                return document.activeElement === region;
+            })()"#,
+        )
+        .await,
+        json!(true),
+        "the empty table region must accept focus"
+    );
+    let empty = eval_json(&harness, state).await;
+    assert_eq!(empty["rows"], json!(0), "{empty}");
+    assert_eq!(empty["rowStops"], json!(0), "{empty}");
+    assert_eq!(empty["tabindex"], json!("0"), "{empty}");
+    assert_eq!(empty["sameRegion"], json!(true), "{empty}");
+    assert_eq!(empty["focused"], json!(true), "{empty}");
+
+    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
+        .expect("load vendored axe-core");
+    let _page_report = axe
+        .run(harness.page())
+        .await
+        .expect("inject and run axe-core");
+    let scrollable = eval_json(
+        &harness,
+        r#"(async () => {
+            const report = await axe.run(document.querySelector('#entity-selection-table'), {
+                runOnly: { type: 'rule', values: ['scrollable-region-focusable'] },
+                resultTypes: ['violations'],
+            });
+            return report.violations.map(v => ({
+                id: v.id,
+                nodes: v.nodes.map(node => ({ target: node.target, summary: node.failureSummary })),
+            }));
+        })()"#,
+    )
+    .await;
+    assert_eq!(
+        scrollable,
+        json!([]),
+        "the empty interactive table must pass scrollable-region-focusable: {scrollable}"
+    );
+
+    click(&harness, "[data-testid='entity-selection-restore']").await;
+    wait_for_selector(
+        &harness,
+        "#entity-selection-table tbody tr[data-entity-row-key]",
+    )
+    .await;
+    let restored = eval_json(&harness, state).await;
+    assert_eq!(restored["rows"], json!(3), "{restored}");
+    assert_eq!(restored["rowStops"], json!(3), "{restored}");
+    assert_eq!(restored["tabindex"], json!("-1"), "{restored}");
+    assert_eq!(restored["sameRegion"], json!(true), "{restored}");
+    assert_no_browser_errors(&harness, "empty interactive EntityTable focus recovery").await;
 }
 
 /// Compact-row field labels clear AA on a narrow viewport (ldui-usqz, second
