@@ -71,8 +71,9 @@ Each component documentation follows a consistent structure:
 - [Checkbox](./components/checkbox.md) - Boolean selection with indeterminate support
 
 ### Data Components
-- [EntityTable](./components/entity_table.md) - Typed complete-client-snapshot table with governed preference ownership
+- [EntityTable](./components/entity_table.md) - Typed complete-client-snapshot table with governed preference ownership, localized empty row ranges, and keyboard-reachable empty interactive pages
 - [DataTable](./components/data_table.md) - Sorting, pagination, filtering, search, selection, row activation, and column resizing (plus `ServerDataTable` for server-side paging)
+- [LineChart](./components/line_chart.md) - Accessible multi-series categorical and numeric charts with keyboard interaction, hover cards, and a snapped plot-height category guide
 - [AppShell](./components/app_shell.md) - Full-height application frame with optional pinned top/status regions and responsive start/center/end top-bar composition
 - [ResultList / KeyedResultList](./components/result_list.md) - Flat, ranked, keyboard-navigable results picker; `KeyedResultList<T>` tracks selection/activation by stable key and typed payload instead of index or display text
 

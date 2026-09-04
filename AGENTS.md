@@ -14,12 +14,12 @@ Integration tests are in `tests/`, PixelProof baselines in
 
 ## Build, Test, and Development Commands
 
-- `cargo xtask verify` runs the 14-step local gate: generated-token checks,
+- `cargo xtask verify` runs the 16-step local gate: generated-token checks,
   scoped formatting/clippy, builds, and native tests.
 - `cargo xtask verify-full` adds the browser suites and release Trunk build;
   it requires npm, Trunk, and Chrome. Run `npm install` in `demo/` once.
 - `cargo xtask test-style`, `test-layout`, or `test-reactivity` runs one
-  self-hosted browser suite. The 32-check reactivity lane is explicitly
+  self-hosted browser suite. The 69-check reactivity lane is explicitly
   requested, not part of ordinary `verify` rebuilds. `cargo make test-visual`
   runs screenshot checks.
 - `cargo make dev` serves the showcase at `http://127.0.0.1:3010`.

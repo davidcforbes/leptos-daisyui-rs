@@ -1,9 +1,9 @@
 # Component Testing Plan
 
 > **Historical checklist:** Use [`../ci-cd.md`](../ci-cd.md) for the current
-> executable test plan. The 32-check browser reactivity lane is opt-in via
+> executable test plan. The 69-check browser reactivity lane is opt-in via
 > `cargo xtask test-reactivity` or `verify-full`; default `verify` is the
-> 14-step native-only gate.
+> 16-step native-only gate.
 
 This document outlines the comprehensive testing strategy for all leptos-daisyui-rs components, including visual testing using Chrome DevTools MCP and Claude for Chrome.
 
