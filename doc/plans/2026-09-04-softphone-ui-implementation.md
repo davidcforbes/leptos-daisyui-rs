@@ -1,5 +1,9 @@
 # Softphone UI implementation plan
 
+Delivered in `f730e66`; Bead `ldui-xmhn` is closed. This plan records the original
+implementation approach. The maintained API, host contract and verification
+record are in [Softphone usage and testing](../components/softphone.md).
+
 Goal: provide the controlled Softphone composition described in
 [the design](./2026-09-04-softphone-ui-design.md). Implementation progress is
 tracked only by ldui-xmhn in Beads.

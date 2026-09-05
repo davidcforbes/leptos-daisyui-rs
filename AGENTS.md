@@ -52,6 +52,9 @@ Co-locate unit tests in each component and name behavior-focused tests in
 authorization and persistence in consuming applications. Its host acknowledgment
 and clock contracts are documented in `doc/components/softphone.md`; use
 `cargo xtask test-softphone` for its release browser proof.
+When refactoring it, preserve unconditional effect dependency reads for keypad
+cleanup and stable mounting of the number selector. Its maintenance notes cover
+these contracts and computed typography/text-bound checks.
 Visual audit ceilings are zero-slack and ratchet down; new rules require an
 inject/catch/revert negative control. Never hand-edit `styles/tokens.css`;
 regenerate it with `cargo xtask gen-tokens`.

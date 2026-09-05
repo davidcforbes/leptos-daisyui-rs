@@ -61,6 +61,7 @@ Every file in this directory follows the same shape:
 |---|---|---|---|
 | [`fallback-font.md`](./fallback-font.md) | automated | typography | Text renders in the platform default font instead of the declared one — looks "slightly off", nobody files it. Both failure modes caught since 2026-08-09 — but only if the profile pins a **real family name**, never a CSS generic |
 | [`off-ramp-font-size.md`](./off-ramp-font-size.md) | automated | typography | An ad-hoc pixel size (e.g. `text-[13px]`) sits off the six-step type ramp |
+| [`unapplied-typography-class.md`](./unapplied-typography-class.md) | rulebook-only generally; Softphone browser assertion | typography / design intent | A plausible class supplies no effective typography and silently inherits an allowed but unintended body size |
 | [`ad-hoc-shadow.md`](./ad-hoc-shadow.md) | automated | depth | A stock Tailwind `shadow-md` instead of a declared elevation level — cards stop reading as one product |
 | [`undeclared-radius.md`](./undeclared-radius.md) | automated | shape | 8px vs 15px card corners — a small number mismatch that makes two apps look unrelated |
 | [`hand-rolled-button.md`](./hand-rolled-button.md) | automated | component-drift | A raw `<button>` styled to look like `Button`, missing its focus ring, states, and theme awareness |

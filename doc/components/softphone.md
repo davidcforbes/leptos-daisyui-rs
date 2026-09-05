@@ -108,3 +108,23 @@ Run `cargo test -p leptos-daisyui-rs --lib softphone` for pure state/eligibility
 The [browser tests](../../tests/softphone_smoke.rs) interact with the real dropdown and buttons and read separate simulated host receipts. They exercise pending and rejected requests, duplicate guards, confirmed toggles, hold/resume, voicemail, elapsed/frozen duration, no-number and single-number states, capability omissions, label updates, keypad isolation, long text and compact layout. Scoped axe checks cover the console. Screenshots are written to `target/softphone-active.png` and `target/softphone-compact.png` for visual inspection.
 
 In consuming applications, test the host's context and operation correlation, response rejection, end-call supersession and state projection independently. Then test the component with deterministic acknowledgments and clock updates. Actual audio, provider routing, microphone permissions and call reliability belong to the consuming application's integration tests; this library's simulation does not verify those behaviors.
+
+## Maintenance guidance
+
+Keep the number selector mounted while the call projection changes; updating a confirmed toggle should not recreate the selector and discard focus. Selection handlers re-read the current state and restore the accepted value when a request is declined. Native disabled markup and command eligibility are separate protections, and the browser suite exercises both.
+
+Keypad cleanup depends on context identity, phase and capability. Read those reactive dependencies on every effect run before combining conditions. A short-circuit expression whose context-change branch returns true can skip the phase/capability reads, leaving the effect unsubscribed from later changes within that same context. Preserve the open-keypad → Hold and open-keypad → capability-removal checks when refactoring.
+
+Verify typography on the rendered element. A plausible class name can supply no CSS rule while its inherited font size still passes a generic style audit. Softphone's timer uses `text-2xl`; its browser test checks a computed size of 24px in the default showcase environment. See [unapplied typography class](../visual-quality/unapplied-typography-class.md). Check actual text bounds for long client names as well as the panel's scroll width, because clipping can conceal overflow.
+
+Finish source changes before starting the combined release gate. The Trunk watcher can queue further builds while the current compile/optimization is still running; those intermediate artifacts are not final evidence. Use focused checks during implementation, then one final `cargo xtask verify-full` and review its refreshed screenshots.
+
+## Verified implementation snapshot
+
+The approved implementation is commit `f730e66` (Bead `ldui-xmhn`, 4 September 2026, America/Los_Angeles). Its verification record is:
+
+- `cargo test -p leptos-daisyui-rs --lib softphone`: 9 tests passed. A copied-source negative control made the pending guard accept competing actions; the intended test failed, then all 9 passed after restoration.
+- `cargo xtask verify-full`: 40/40 steps passed, including 3,251 library tests and both Softphone browser tests. The pre-push native gate also passed 16/16.
+- Refreshed 1280px and 375px screenshots were inspected after the timer typography correction. The browser suite verified computed timer size, long-text bounds, keyboard selection, confirmed actions and scoped accessibility.
+
+These are historical results for that commit. Re-run the relevant commands after changes; use the runner's current summary for counts. Screenshot files under `target/` are regenerated local artifacts, not committed baselines.
