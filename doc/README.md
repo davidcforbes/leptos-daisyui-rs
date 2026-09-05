@@ -19,6 +19,13 @@ Welcome to the comprehensive documentation for leptos-daisyui-rs - a type-safe, 
   reactive-column, stable-control-identity, and focus-recovery path used by
   `SnapshotTablePage`
 
+## Research and proposals
+
+- **[Browser softphones and a client calling workspace](./research/2026-09-04-client-call-workspace.md)** -
+  primary-source research comparing embedded softphones, programmable voice SDKs
+  and SIP integration, with a proposed opinionated LDUI calling workflow and
+  verification contract. Component APIs are proposed, not implemented.
+
 ## Component Documentation
 
 This directory contains comprehensive markdown documentation for all leptos-daisyui-rs components. Each component has its own markdown file with examples, props documentation, and best practices.
