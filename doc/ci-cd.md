@@ -90,12 +90,13 @@ Each step is scoped per-crate; that scoping **is** the xtask's logic.
 | `clippy-xtask` | `cargo clippy -p xtask --all-targets -- -D warnings` | The gate must lint the crate that **is** the gate. Its absence let a `needless_borrows_for_generic_args` sit in `xtask/src/main.rs` from 2026-07-26 to 2026-08-10 while `verify` reported a clean 13/13 — `test-xtask` was running its tests all along, so only the lint was missing (ldui-mpm). |
 | `build` | `cargo build -p leptos-daisyui-rs` | **Library only.** The CSR demo is not natively built here — a native `cargo build` of a wasm/CSR binary can link-fail on `web-sys` host stubs; the demo is *checked* instead (next row) and *really* built by `trunk` (see `verify-full`). |
 | `check-demo` | `cargo check -p leptos-daisyui-showcase` | Fast native check of the demo — catches ~all compile breakage without npm/trunk. |
-| `test-lib` | `cargo test -p leptos-daisyui-rs --lib --features test-mode` | The library's 2,382-test suite. Non-`#[ignore]`d tests only. `--features test-mode` for the same reason as `clippy-lib`: without it the 7 `test_mode` tests silently do not run, and that module is what the browser suites' freeze/oracle bridge is built on. |
+| `test-lib` | `cargo test -p leptos-daisyui-rs --lib --features test-mode` | The library unit suite. Non-`#[ignore]`d tests only. `--features test-mode` for the same reason as `clippy-lib`: without it the `test_mode` tests silently do not run, and that module is what the browser suites' freeze/oracle bridge is built on. |
 | `test-xtask` | `cargo test -p xtask` | The xtask's own pure-function tests (SemVer bump, the sibling-token parser, the gate's own argument vectors). |
 | `test-audit` | `cargo test -p ldui-audit --lib` | The audit crate's browser-free tests: the generated sweep JS (rule ids, the per-family cap, the percentage-radius conversion) and the drift/engine report merge. |
 | `test-daisyui5` | `cargo test -p leptos-daisyui-rs --test no_dead_daisyui4_classes` | Source scan (no browser) guarding against `.form-control` / `.label-text` / `.label-text-alt` coming back — removed in daisyUI 5, so they are silently inert. |
 | `test-svg-paint` | `cargo test -p leptos-daisyui-rs --test svg_paint_routing` | Source scan (no browser) over **all of `src/`**: no `fill=`/`stroke=`/`stop-color=`/`flood-color=`/`lighting-color=` may carry a custom property, and any non-literal value must be a `charts::paint` binding. `var()` substitution is not specified to run in a presentation attribute, so a token there degrades to `fill: black` or `stroke: none` **silently, with no console error**. It has to be its own step because `test-lib` runs unit tests only — an integration test not named here never runs in the gate at all. Scoped to `src/charts` originally, which is exactly how it read green over four live defects in `src/components/gantt/` (ldui-1g5, widened in ldui-xxc). |
 | `test-ld-class-coverage` | `cargo test -p leptos-daisyui-rs --test ld_class_stylesheet_coverage` | Source scan (no browser): every literal `ld-*` class a component or demo page emits must be defined by a stylesheet this crate ships (`styles/tokens.css`, `ui_tokens_css()` or `ui_animations_css()`), and the type ramp must work from `styles/tokens.css` alone -- ldui-h7tw's defect class. Registered as its own step in ldui-n1iv: it had been referenced by comments as "the test that asserts it" while running in no lane at all, and failed locally on a stray literal the same day both gates read green. |
+| `test-bare-buttons` | `cargo test -p leptos-daisyui-rs --test no_bare_library_buttons` | Source guard requiring library buttons to carry a framework interaction/style marker or an explicit allowance. |
 
 ### Pattern-scoped verification
 
@@ -219,7 +220,7 @@ client-snapshot host. Debug Wasm builds are not required for verification.
 
 `verify-full` runs `verify`, then the client-snapshot and SnapshotTable
 page-scoped browser lanes in release mode, then builds the full catalog once and
-reuses that same verified server for the 51-check reactivity/DOM-oracle suite
+reuses that same verified server for the 69-check reactivity/DOM-oracle suite
 (`test-reactivity`), layout audit (`test-layout`, below), style audit
 (`test-style`, below), the focused `KeyedResultList` browser proof
 (`test-keyed-result-list`, ldui-r1z), the focused `SectionHeading`
@@ -244,15 +245,15 @@ The page-scoped host and catalog are two distinct HTML/Wasm targets and therefor
 require two server builds. Consecutive suites for the same target share one
 server. In measured warm runs, Cargo's catalog compile was under one second but
 Trunk's Wasm optimization took roughly two minutes per invocation; sharing the
-catalog server across its six suites (reactivity, layout, style, the
-focused `KeyedResultList` proof, the focused `SectionHeading` proof, and the
-focused `SearchPickerDialog` proof) removes five redundant optimization passes
-from `verify-full`.
+catalog server across consecutive catalog suites avoids repeating that
+optimization for each test executable. The current full gate groups six
+page-scoped suites and seventeen catalog suites; `full_steps()` is the source
+of truth for membership.
 
 ### Gate cadence during a live Beads drain
 
-`cargo xtask verify` is the 15-step native gate listed in the table above.
-`cargo xtask verify-full` adds nineteen browser/Wasm checks and reports 34 steps
+`cargo xtask verify` is the 16-step native gate listed in the table above.
+`cargo xtask verify-full` adds 23 browser checks and reports 39 steps
 (re-count `full_steps()` in `xtask/src/main.rs` whenever a lane is added; this
 figure has drifted before).
 Say which command is running before starting it; "the verification gate" is
@@ -283,7 +284,7 @@ non-screenshot lane runs by default is a separate tooling-cost decision:
   - The library's `cargo test --lib` suite is pure logic (enum/`as_str`
     mappings, layout/date math, pagination windowing, class building, queue
     behavior) and runs headlessly in `verify`.
-  - The **51-check reactivity/DOM-oracle** suite
+  - The **69-check reactivity/DOM-oracle** suite
     (`tests/reactivity_smoke.rs`) drives real
     CDP input at the demo app and asserts internal Leptos state through the
     `window.__APP_DEBUG__` oracle — no pixels, so it is deterministic across
@@ -331,7 +332,7 @@ means something, where a quarterly run just means "lots changed".
 
 ### `cargo xtask test-reactivity` — the self-spawning subset
 
-This is the independently selectable 51-check lane. Run it when reactivity,
+This is the independently selectable 69-check lane. Run it when reactivity,
 browser interaction, or localized state behavior needs proof; an ordinary
 native rebuild does not invoke it implicitly.
 
@@ -341,14 +342,15 @@ PowerShell script stays the manual/screenshot path):
 1. `npm install` in `demo/` if `demo/node_modules` is missing (Trunk's Tailwind
    pre-build hook needs it).
 2. Reserve a **free port from the OS** (bind `127.0.0.1:0`, read it back, release
-   it) and `trunk serve` on it. Each invocation gets its own port rather than
+   it) and `trunk serve --release=true` on it. Each invocation gets its own port rather than
    contending on the shared `:3010` — the shared-port flake documented in
    Rust-DeskApp's `doc/ci-cd.md`.
 3. Poll the served HTML and its hashed `output-*.css` until the HTML references
    the requested Wasm binary and the CSS carries the current build's unique
    stamp. A plain `200` is insufficient: Trunk can bind its port and serve a
    previous target from `dist/` while the new pipeline is still running.
-   15-minute budget; aborts early if the `trunk` child exits.
+   60-minute build/readiness budget; aborts early if the `trunk` child exits.
+   This bounds compilation and Wasm optimization, not an ordinary health probe.
 4. Run `cargo test -p leptos-daisyui-rs --test reactivity_smoke -- --ignored
    --test-threads=1` with `VISUAL_TEST_BASE_URL` pointed at that port.
    `--test-threads=1` because each test drives its own headless Chrome loading
@@ -365,12 +367,10 @@ may still use that variable for interactive diagnosis; it is not a verification
 gate.
 
 When these catalog suites are adjacent inside `verify-full`, steps 1-3 and 5
-wrap the group once: reactivity, layout, style, the focused
-`KeyedResultList` proof (`test-keyed-result-list`), the focused
-`SectionHeading` proof (`test-section-heading`), and the focused
-`SearchPickerDialog` proof (`test-search-picker-dialog`) all use the same
-current release server. Their standalone subcommands continue to own an
-isolated server so they remain independently reproducible.
+wrap the entire catalog group once. Reactivity, layout, style, and the focused
+component suites in `full_steps()` all use the same current release server.
+Their standalone subcommands continue to own an isolated server so they remain
+independently reproducible.
 
 The suite keeps its `#[ignore]` attributes (the gate passes `--ignored`
 explicitly) so that a bare `cargo test` with no server running still passes.

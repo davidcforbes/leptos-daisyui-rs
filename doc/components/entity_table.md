@@ -683,6 +683,14 @@ are valid only when declared as an option. Seed new rows with a declared value
 and retain authoritative validation when saving; this editor does not repair
 invalid source data or replace server validation.
 
+Browser evidence lives in `tests/entity_table_draft_row_smoke.rs`. The Windows
+Chromium journey focuses the visible select, opens its native menu with Space,
+chooses with Home/Arrow keys, and confirms with Enter before reading the value
+and commit payload. Arrow Down alone did not commit a new selection in this
+fixture. Selectors for Save/Edit must target the visible wide or compact action
+host; both layouts can exist in the DOM. Unknown-value injection and in-flight
+change attempts are negative controls, separate from real keyboard operation.
+
 ### One mode, exclusive by construction
 
 While a row is live, **the accepted table is frozen and inert**: every other row

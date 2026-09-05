@@ -489,11 +489,11 @@ See [`demo/custom-components.css`](demo/custom-components.css#L376-L400) for the
 
 ## Testing
 
-- **Default gate**: `cargo xtask verify` runs 14 native-only checks, including the 2,382-test library suite with `test-mode`; it does not build Wasm or invoke Chrome.
-- **Selective reactivity**: `cargo xtask test-reactivity` runs exactly 32 real-browser DOM/interaction checks. It is opt-in and is not required for an ordinary rebuild.
-- **Full release evidence**: `cargo xtask verify-full` runs the 14 native checks plus five browser/Wasm lanes and reports 19 steps. Use it when browser, CSS, Wasm, or release behavior needs proof.
+- **Default gate**: `cargo xtask verify` runs 16 native-only checks, including the library suite with `test-mode`; it does not build Wasm or invoke Chrome.
+- **Selective reactivity**: `cargo xtask test-reactivity` runs 69 real-browser DOM/interaction checks. It is opt-in and is not required for an ordinary rebuild.
+- **Full release evidence**: `cargo xtask verify-full` runs 16 native checks plus 23 browser lanes and reports 39 steps. Both the page-scoped host and full catalog use release Wasm builds. Use it when browser, CSS, Wasm, or release behavior needs proof. Counts reflect the 2026-09-04 verified tree; the current xtask summary is authoritative.
 - **Visual regression**: `cargo make test-visual` runs the manual PixelProof visual/reactivity smoke workflow — headless Chrome drives the demo app, screenshots are SSIM-compared against committed baselines in `tests/visual/baselines/`, and interaction state is asserted through the demo's `window.__APP_DEBUG__` oracle (enabled by `?pp-freeze=1`).
-- **Refresh baselines** after an intentional visual change: `VISUAL_TEST_MODE=capture cargo make test-visual`, then review and commit the changed PNGs.
+- **Refresh baselines** only after comparing existing captures, fixing regressions, and reviewing every intended difference. In PowerShell, run `$env:VISUAL_TEST_MODE = 'capture'; cargo make test-visual`, then `Remove-Item Env:VISUAL_TEST_MODE` and rerun in compare mode before committing the PNGs.
 
 ## Future work
 

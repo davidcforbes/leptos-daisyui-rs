@@ -42,3 +42,9 @@ framework-owned table slot. `tests/snapshot_table_page_controls_smoke.rs` mounts
 a fixed-height `fill_parent` fixture, asserts the slot's computed flex growth
 and geometry, and verifies that filtering to one row and restoring all rows
 does not latch Auto rows-per-page onto the transient subset.
+
+The same browser test removes the slot's sizing classes while one row is
+painted, requires the bottom-edge geometry check to detect the break, then
+restores the classes and verifies the original height and Auto capacity return.
+Run `cargo xtask test-snapshot-table-page-controls` for the focused release
+browser proof, or `cargo xtask verify-full` for the final combined gate.

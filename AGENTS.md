@@ -18,6 +18,9 @@ Integration tests are in `tests/`, PixelProof baselines in
   scoped formatting/clippy, builds, and native tests.
 - `cargo xtask verify-full` adds the browser suites and release Trunk build;
   it requires npm, Trunk, and Chrome. Run `npm install` in `demo/` once.
+  All browser hosts, including the page-scoped snapshot host, use release
+  builds. Debug Wasm is not required. Current gate: 16 native + 23 browser
+  steps; use the actual xtask summary as the authority when counts change.
 - `cargo xtask test-style`, `test-layout`, or `test-reactivity` runs one
   self-hosted browser suite. The 69-check reactivity lane is explicitly
   requested, not part of ordinary `verify` rebuilds. `cargo make test-visual`
@@ -48,6 +51,13 @@ Co-locate unit tests in each component and name behavior-focused tests in
 Visual audit ceilings are zero-slack and ratchet down; new rules require an
 inject/catch/revert negative control. Never hand-edit `styles/tokens.css`;
 regenerate it with `cargo xtask gen-tokens`.
+
+For native Select keyboard tests, focus the visible control, open it with Space,
+choose with Home/Arrow keys, and confirm with Enter before asserting its value
+and commit payload. Scope action selectors to the active wide/compact layout;
+both variants can exist in the DOM, and a broad selector can hit a hidden Save.
+For fill-parent tables, assert the slot reaches the page bottom and keeps its
+height and Auto capacity through filtering to one row and restoring all rows.
 
 ## Commits & Pull Requests
 
