@@ -529,6 +529,15 @@ filter band) and first body row, then derives a presentation-only row capacity.
 The rows-per-page select continues to show and persist the caller's configured
 fallback; measurement never writes a synthetic preference.
 
+For a table inside `SnapshotTablePage`, give the page a definite-height flex
+budget (typically `h-full` beneath a `min-h-0 flex-1` shell surface). The pattern
+owns the intermediate table-slot boundary and carries the remaining budget with
+`min-h-0 flex-1`; consumers must not recreate or compensate for that wrapper.
+If any intermediate wrapper becomes content-sized, `height: 100%` resolves
+against painted rows and Auto capacity can feed back from a transient filtered
+subset. See the [broken table height chain](../visual-quality/broken-table-height-chain.md)
+rulebook entry.
+
 Resize observation and reactive table inputs trigger a coalesced remeasurement,
 so browser-height, localized header/filter copy, column visibility, and row-height
 changes settle without a reload. If fewer than the policy's minimum usable rows
@@ -646,6 +655,33 @@ and appends the framework Edit control. For the one live row, the host becomes
 the framework-owned Save/Cancel surface; other consumer actions in that cell
 are unavailable until the session ends. The draft row uses that same host for
 Save/Cancel, so the table never appends a synthetic action column.
+
+### Closed-vocabulary editors
+
+Use `EntityCellEditor::select` for a column whose stored values come from a fixed
+set. Each `EntityCellSelectOption::new(value, label)` separates the stored value
+from its displayed caption:
+
+```rust,ignore
+EntityColumn::text("scope", "Scope", |r: &Rate| r.scope.clone())
+    .editable(EntityCellEditor::select(
+        vec![
+            EntityCellSelectOption::new("office", "Office"),
+            EntityCellSelectOption::new("global", "All offices"),
+        ],
+        |r: &Rate| r.scope.clone(),
+        |r: &mut Rate, value| r.scope = value,
+    ))
+```
+
+The native select uses the column header as its accessible name and shares the
+draft/existing-row reducer, keyboard focus order, and Save/Cancel boundary with
+text editors. It is disabled during commit. Unknown values are rejected before
+the setter runs; `try_apply` returns whether the value was accepted while
+`apply` retains its original unit return type. Empty strings
+are valid only when declared as an option. Seed new rows with a declared value
+and retain authoritative validation when saving; this editor does not repair
+invalid source data or replace server validation.
 
 ### One mode, exclusive by construction
 

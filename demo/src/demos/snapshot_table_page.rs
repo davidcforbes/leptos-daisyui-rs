@@ -610,19 +610,10 @@ pub fn SnapshotTablePageControlsFixture() -> impl IntoView {
         EntityTablePreferenceOwnership::uncontrolled(EntityTablePreferencePersistence::Disabled),
     )
     .with_page_reset_key(page_reset_key)
-    // 300px, not the original 160px: at the 1280x800 smoke viewport the
-    // rows-per-page row, the sr-only live region, and the pagination footer
-    // already consume ~95px of any budget before the scrollable region gets
-    // a share, and a real measured row here is ~35px with a ~44px header.
-    // 160px left the region only ~64px tall -- less than one row -- so
-    // `auto_page_size_for_height` legitimately took its documented
-    // below-`min_rows` branch and retained the full configured page size
-    // (25) instead of a fitted count. That is the library behaving exactly
-    // as designed (see `auto_page_size_for_height`'s doc comment); the fix
-    // is a fixture budget that actually clears `min_rows` while still
-    // paging before all 8 rows. 300px measures to 4 rows here, comfortably
-    // between `min_rows(2)` and 8.
-    .with_viewport_fit(EntityTableViewportFit::max_height("300px").with_min_rows(2))
+    // The containing block below supplies the definite height required by
+    // `fill_parent`. The table slot must carry that remaining-height budget
+    // through to EntityTable instead of sizing itself from the painted rows.
+    .with_viewport_fit(EntityTableViewportFit::fill_parent().with_min_rows(2))
     .with_toolbar_actions(move || {
         view! {
             <Button attr:data-testid="controls-export" on_click=export_rows>
@@ -640,38 +631,41 @@ pub fn SnapshotTablePageControlsFixture() -> impl IntoView {
 
     view! {
         <section id="snapshot-controls-fixture" class="space-y-3">
-            <SnapshotTablePage
-                contract_id="snapshot-controls"
-                state=state.into()
-                local_rows=local_rows.into()
-                header=Box::new(|| view! {
-                    <PageHeader
-                        title="Snapshot table controls fixture"
-                        subtitle="Behavior-only EntityTable passthroughs: page reset, viewport fit, toolbar export, icon chooser."
-                    />
-                }.into_any())
-                dataset_selector=selector
-                filters=Box::new(move || view! {
-                    <div class="flex flex-wrap gap-2" aria-label="Controls fixture filters">
-                        <Button
-                            attr:data-testid="controls-filter-all"
-                            attr:aria-pressed=move || (filter_mode.get() == "all").to_string()
-                            on_click=Callback::new(move |_| filter_mode.set("all"))
-                        >
-                            "All rows"
-                        </Button>
-                        <Button
-                            attr:data-testid="controls-filter-urgent"
-                            attr:aria-pressed=move || (filter_mode.get() == "urgent").to_string()
-                            on_click=Callback::new(move |_| filter_mode.set("urgent"))
-                        >
-                            "Urgent only"
-                        </Button>
-                    </div>
-                }.into_any())
-                entity_table=table
-                action_key_label=Rc::new(|key: &String| key.clone())
-            />
+            <div class="h-[520px] min-h-0" data-testid="controls-height-budget">
+                <SnapshotTablePage
+                    contract_id="snapshot-controls"
+                    state=state.into()
+                    local_rows=local_rows.into()
+                    header=Box::new(|| view! {
+                        <PageHeader
+                            title="Snapshot table controls fixture"
+                            subtitle="Behavior-only EntityTable passthroughs: page reset, viewport fit, toolbar export, icon chooser."
+                        />
+                    }.into_any())
+                    dataset_selector=selector
+                    filters=Box::new(move || view! {
+                        <div class="flex flex-wrap gap-2" aria-label="Controls fixture filters">
+                            <Button
+                                attr:data-testid="controls-filter-all"
+                                attr:aria-pressed=move || (filter_mode.get() == "all").to_string()
+                                on_click=Callback::new(move |_| filter_mode.set("all"))
+                            >
+                                "All rows"
+                            </Button>
+                            <Button
+                                attr:data-testid="controls-filter-urgent"
+                                attr:aria-pressed=move || (filter_mode.get() == "urgent").to_string()
+                                on_click=Callback::new(move |_| filter_mode.set("urgent"))
+                            >
+                                "Urgent only"
+                            </Button>
+                        </div>
+                    }.into_any())
+                    entity_table=table
+                    action_key_label=Rc::new(|key: &String| key.clone())
+                    class="h-full"
+                />
+            </div>
             <div class="flex flex-wrap items-center gap-3 text-sm">
                 <span>
                     "Export clicks: "
@@ -1033,7 +1027,19 @@ pub fn EntityTableDraftRowFixture() -> impl IntoView {
             EntityColumn::text("id", "Id", |row: &FixtureRow| row.id.clone()).with_min_width(140),
             EntityColumn::text("status", "Status", |row: &FixtureRow| row.status.clone())
                 .with_min_width(120)
-                .editable(EntityCellEditor::text(
+                .editable(EntityCellEditor::select(
+                    [
+                        "Ready",
+                        "Urgent",
+                        "Reviewed",
+                        "Generation 1",
+                        "Generation 2",
+                    ]
+                    .into_iter()
+                    .map(|value| {
+                        leptos_daisyui_rs::components::EntityCellSelectOption::new(value, value)
+                    })
+                    .collect(),
                     |row: &FixtureRow| row.status.clone(),
                     |row: &mut FixtureRow, value| row.status = value,
                 )),
@@ -1205,7 +1211,7 @@ pub fn EntityTableDraftRowFixture() -> impl IntoView {
                         || FixtureRow {
                             id: "draft-new".to_owned(),
                             client: String::new(),
-                            status: String::new(),
+                            status: "Ready".to_owned(),
                         },
                         on_commit,
                     )

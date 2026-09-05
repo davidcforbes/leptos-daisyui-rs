@@ -75,6 +75,114 @@ async fn press_tab(harness: &pixelproof_web::Harness) {
     press_key(harness, "Tab", "Tab", 9, None).await;
 }
 
+/// Select keyboard input reaches the commit model in both editing modes;
+/// unknown DOM values and in-flight changes cannot alter that model.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-entity-draft-row)"]
+async fn select_editor_preserves_vocabulary_and_commit_boundary() {
+    let harness = harness_at("/components/entity-table-draft-row").await;
+    wait_for_selector(&harness, "#draft-optin [data-entity-row-key]").await;
+    begin_browser_error_capture(&harness).await;
+    for (entry, save, target) in [
+        (
+            "#draft-optin [data-entity-draft-add]",
+            "#draft-optin [data-entity-draft-row] td[data-entity-inline-edit-host] [data-entity-draft-save]",
+            "draft",
+        ),
+        (
+            "#draft-optin [data-entity-row-key='office-mx-1'] td[data-entity-inline-edit-host] [data-entity-row-edit-state='edit']",
+            "#draft-optin [data-entity-row-key='office-mx-1'] td[data-entity-inline-edit-host] [data-entity-row-edit-state='save']",
+            "existing:office-mx-1",
+        ),
+    ] {
+        let before = snapshot(&harness).await;
+        click(&harness, entry).await;
+        press_tab(&harness).await;
+        let control = active_control(&harness).await;
+        assert_eq!(control["tag"], json!("SELECT"));
+        assert_eq!(control["editInput"], json!("status"));
+        assert_eq!(
+            eval_json(
+                &harness,
+                "document.activeElement.getAttribute('aria-label')"
+            )
+            .await,
+            json!("Status")
+        );
+        press_key(&harness, " ", "Space", 32, Some(" ")).await;
+        press_key(&harness, "Home", "Home", 36, None).await;
+        press_key(&harness, "ArrowDown", "ArrowDown", 40, None).await;
+        let selected = if target.starts_with("existing:") {
+            press_key(&harness, "ArrowDown", "ArrowDown", 40, None).await;
+            "Reviewed"
+        } else {
+            "Urgent"
+        };
+        press_key(&harness, "Enter", "Enter", 13, None).await;
+        assert_eq!(active_control(&harness).await["value"], json!(selected));
+        assert_eq!(
+            eval_json(
+                &harness,
+                r#"(() => {
+            const select = document.activeElement;
+            const bad = new Option('Unknown', 'Unknown');
+            select.add(bad);
+            select.value = 'Unknown';
+            select.dispatchEvent(new Event('change', {bubbles: true}));
+            bad.remove();
+            return select.value;
+        })()"#
+            )
+            .await,
+            json!(selected)
+        );
+        click(&harness, save).await;
+        let committed = snapshot(&harness).await;
+        assert_eq!(committed["lastTarget"], json!(target));
+        assert!(
+            committed["lastCommitted"]
+                .as_str()
+                .unwrap()
+                .ends_with(&format!("|{selected}"))
+        );
+        let skip_live_row = usize::from(target.starts_with("existing:"));
+        assert_eq!(
+            &committed["renderedRows"].as_array().unwrap()[skip_live_row..],
+            &before["renderedRows"].as_array().unwrap()[skip_live_row..]
+        );
+        for key in [
+            "retireCount",
+            "filterProposals",
+            "toolbarClicks",
+            "rowActivations",
+            "selectionProposals",
+        ] {
+            assert_eq!(committed[key], before[key], "unexpected side effect: {key}");
+        }
+        assert_eq!(eval_json(&harness, r#"(() => {
+            const select = Array.from(document.querySelectorAll('#draft-optin select[data-entity-edit-input="status"]')).find(s => s.getClientRects().length);
+            const disabled = select.disabled;
+            select.value = 'Ready';
+            select.dispatchEvent(new Event('change', {bubbles: true}));
+            return {disabled, value: select.value};
+        })()"#).await, json!({"disabled": true, "value": selected}));
+        click(&harness, "[data-testid='draft-reject']").await;
+        click(&harness, save).await;
+        assert_eq!(
+            snapshot(&harness).await["lastCommitted"],
+            committed["lastCommitted"]
+        );
+        click(&harness, "[data-testid='draft-accept']").await;
+        assert_eq!(snapshot(&harness).await["phase"], json!("idle"));
+        assert_eq!(
+            snapshot(&harness).await["renderedRows"],
+            before["renderedRows"],
+            "the fixture does not adopt commits, so accepted source rows must remain unchanged"
+        );
+    }
+    assert_no_browser_errors(&harness, "select editor").await;
+}
+
 async fn press_escape(harness: &pixelproof_web::Harness) {
     press_key(harness, "Escape", "Escape", 27, None).await;
 }
@@ -676,6 +784,11 @@ async fn type_into_selector(harness: &pixelproof_web::Harness, selector: &str, v
                 {selector:?}
             );
             if (!input) {{ return false; }}
+            if (input.tagName === 'SELECT') {{
+                input.value = {value:?};
+                input.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                return true;
+            }}
             const setter = Object.getOwnPropertyDescriptor(
                 window.HTMLInputElement.prototype, 'value'
             ).set;

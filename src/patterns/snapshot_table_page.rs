@@ -685,6 +685,7 @@ where
             </div>
             <div
                 id=table_id
+                class="min-h-0 flex-1"
                 data-snapshot-page-slot="table"
                 data-snapshot-generation=move || generation_marker.get()
             >
@@ -984,6 +985,29 @@ mod tests {
         assert_eq!(
             table.column_chooser_trigger.get_untracked(),
             EntityColumnChooserTrigger::Icon
+        );
+    }
+
+    /// The utility classes on a Leptos element are erased into macro output,
+    /// so this bounded source-topology check complements the real-browser
+    /// geometry and Auto-page-size assertions. The anchor is assembled to
+    /// prevent this test from satisfying its own search.
+    #[test]
+    fn table_slot_carries_the_remaining_height_budget() {
+        let source = include_str!("snapshot_table_page.rs").replace("\r\n", "\n");
+        let production = source.split("#[cfg(test)]").next().unwrap_or(&source);
+        let anchor = ["<div\n", "                id=table_id"].concat();
+        let opening_tag = production
+            .split_once(&anchor)
+            .expect("SnapshotTablePage table-slot opening tag")
+            .1
+            .split_once('>')
+            .expect("SnapshotTablePage table-slot tag closes")
+            .0;
+
+        assert!(
+            opening_tag.contains("class=\"min-h-0 flex-1\""),
+            "the table slot must carry the flex column's remaining definite height: {opening_tag}"
         );
     }
 }

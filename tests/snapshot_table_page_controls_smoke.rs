@@ -7,15 +7,10 @@
 //! Run live and GREEN. The typed builder/forwarding evidence in
 //! `src/patterns/snapshot_table_page.rs`'s own test module
 //! (`behavior_only_builders_forward_to_typed_fields`) is the primary native
-//! evidence; this file is the DOM-level companion proof. Its first live run
-//! caught a fixture defect, not a library one: the original 160px
-//! `viewport_fit` budget left the scrollable region shorter than one real
-//! measured row at the 1280x800 smoke viewport, so
-//! `auto_page_size_for_height` legitimately took its documented
-//! below-`min_rows` branch and retained the full configured page size (25)
-//! instead of a fitted count -- the library forwarded and applied
-//! `viewport_fit` correctly throughout. The fixture now budgets 300px,
-//! which measures to a genuine below-8 fitted page size.
+//! evidence; this file is the DOM-level companion proof. The fixture gives the
+//! composite a definite 520px containing block and uses
+//! `fill_parent`; this catches a broken height chain at the framework-owned
+//! table-slot boundary as both a geometry failure and an Auto-page-size latch.
 
 mod common;
 
@@ -49,6 +44,12 @@ async fn controls_snapshot(harness: &pixelproof_web::Harness) -> Value {
                 rows: table?.querySelectorAll('[data-entity-table-grid] tbody tr').length ?? 0,
                 viewportFitEnabled: entity?.dataset.entityViewportFit ?? null,
                 effectivePageSize: entity?.dataset.entityEffectivePageSize ?? null,
+                pageHeight: root?.clientHeight ?? 0,
+                remainingHeightError: root && table
+                    ? Math.abs(root.getBoundingClientRect().bottom - table.getBoundingClientRect().bottom)
+                    : null,
+                tableSlotHeight: table?.clientHeight ?? 0,
+                tableSlotFlexGrow: table ? getComputedStyle(table).flexGrow : null,
                 onFirstPage: previousPageButton ? previousPageButton.disabled : null,
                 chooserPresentation: chooserButton?.dataset.entityColumnChooserPresentation ?? null,
                 chooserOpen: chooserButton
@@ -82,9 +83,19 @@ async fn behavior_only_passthroughs_forward_without_identity_drift() {
     begin_browser_error_capture(&harness).await;
 
     let initial = controls_snapshot(&harness).await;
-    // `with_viewport_fit(EntityTableViewportFit::max_height("300px"))`
-    // forwarded onto the internally owned `EntityTable`.
+    // `fill_parent` is forwarded onto the internally owned `EntityTable`, and
+    // the framework-owned slot carries the definite remaining-height budget.
     assert_eq!(initial["viewportFitEnabled"], json!("true"));
+    assert_eq!(initial["pageHeight"], json!(520));
+    assert_eq!(initial["tableSlotFlexGrow"], json!("1"));
+    assert!(
+        initial["remainingHeightError"].as_f64().unwrap() <= 1.0,
+        "table slot must reach the bottom of its allocated page: {initial}"
+    );
+    assert!(
+        initial["tableSlotHeight"].as_u64().unwrap_or_default() > 0,
+        "table slot did not receive a remaining-height budget: {initial}"
+    );
     // 8 rows and a short height budget: the table starts short of showing
     // every row on one page, so the filter-reset proof below starts from a
     // genuine later page rather than an already-page-one table.
@@ -119,12 +130,20 @@ async fn behavior_only_passthroughs_forward_without_identity_drift() {
     );
     assert_eq!(after_filter["rows"], json!(1));
     assert_eq!(
+        after_filter["tableSlotHeight"], initial["tableSlotHeight"],
+        "filtering must not resize the table's available budget"
+    );
+    assert_eq!(
         after_filter["generation"], initial["generation"],
         "page reset must not disturb dataset/access generation"
     );
 
     click(&harness, "[data-testid='controls-filter-all']").await;
     let restored = controls_snapshot(&harness).await;
+    assert_eq!(
+        restored["effectivePageSize"], initial["effectivePageSize"],
+        "Auto rows-per-page latched onto the one filtered row: {restored}"
+    );
     assert_eq!(restored["rows"], json!(effective_page_size.min(8)));
     assert_eq!(restored["generation"], initial["generation"]);
 
@@ -188,6 +207,38 @@ async fn behavior_only_passthroughs_forward_without_identity_drift() {
     );
     assert_eq!(exported["generation"], initial["generation"]);
     assert_eq!(exported["phase"], json!("Displaying"));
+
+    // Break-and-revert: remove exactly the production sizing contract while
+    // one row is painted. The geometry oracle must detect the content-sized
+    // slot; restoring the contract must restore the original height budget.
+    click(&harness, "[data-testid='controls-filter-urgent']").await;
+    eval_json(
+        &harness,
+        r#"(() => {
+        document.getElementById('snapshot-controls-table').classList.remove('min-h-0', 'flex-1');
+        return true;
+    })()"#,
+    )
+    .await;
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    let broken = controls_snapshot(&harness).await;
+    assert!(
+        broken["remainingHeightError"].as_f64().unwrap() > 1.0,
+        "negative control did not catch the removed height chain: {broken}"
+    );
+    eval_json(
+        &harness,
+        r#"(() => {
+        document.getElementById('snapshot-controls-table').classList.add('min-h-0', 'flex-1');
+        return true;
+    })()"#,
+    )
+    .await;
+    click(&harness, "[data-testid='controls-filter-all']").await;
+    let repaired = controls_snapshot(&harness).await;
+    assert_eq!(repaired["tableSlotHeight"], initial["tableSlotHeight"]);
+    assert_eq!(repaired["effectivePageSize"], initial["effectivePageSize"]);
+    assert!(repaired["remainingHeightError"].as_f64().unwrap() <= 1.0);
 
     assert_no_browser_errors(
         &harness,

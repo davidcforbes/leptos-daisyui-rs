@@ -52,9 +52,28 @@ pub type EntityCellEditorGet<T> = Rc<dyn Fn(&T) -> String>;
 /// Writes a user's input back into a row.
 pub type EntityCellEditorSet<T> = Rc<dyn Fn(&mut T, String)>;
 
+/// One allowed stored value and its user-facing label in a cell select.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EntityCellSelectOption {
+    /// Exact value passed to the row setter.
+    pub value: String,
+    /// Caption displayed in the native select.
+    pub label: String,
+}
+
+impl EntityCellSelectOption {
+    /// Declares one member of the editor's closed vocabulary.
+    pub fn new(value: impl Into<String>, label: impl Into<String>) -> Self {
+        Self {
+            value: value.into(),
+            label: label.into(),
+        }
+    }
+}
+
 /// How one column's cell is edited while its row is live.
 ///
-/// An enum rather than a closure pair so later editor kinds (select, number,
+/// An enum rather than a closure pair so later editor kinds (number,
 /// date) can be added without changing any existing call site. A column
 /// without one renders its normal read-only cell **even in the draft row** —
 /// a derived column has nothing meaningful to accept for a blank row, and
@@ -66,6 +85,15 @@ pub enum EntityCellEditor<T> {
         /// column can render a formatted string and still edit the raw one.
         get: EntityCellEditorGet<T>,
         /// Writes the user's input back into the row the reducer holds.
+        set: EntityCellEditorSet<T>,
+    },
+    /// A native select restricted to the declared stored values.
+    Select {
+        /// Closed vocabulary, in display order. Labels need not equal values.
+        options: Vec<EntityCellSelectOption>,
+        /// Reads the current stored value.
+        get: EntityCellEditorGet<T>,
+        /// Writes a value only after vocabulary validation succeeds.
         set: EntityCellEditorSet<T>,
     },
 }
@@ -82,18 +110,51 @@ impl<T> EntityCellEditor<T> {
         }
     }
 
-    /// Reads the current editable value out of `row`.
-    pub fn value(&self, row: &T) -> String {
-        match self {
-            Self::Text { get, .. } => get(row),
+    /// A select editor over a closed vocabulary. An empty value is accepted
+    /// only if explicitly declared as an option. Consumers must seed new
+    /// rows with a valid value and validate authoritative rows before saving.
+    pub fn select(
+        options: Vec<EntityCellSelectOption>,
+        get: impl Fn(&T) -> String + 'static,
+        set: impl Fn(&mut T, String) + 'static,
+    ) -> Self {
+        Self::Select {
+            options,
+            get: Rc::new(get),
+            set: Rc::new(set),
         }
     }
 
-    /// Applies `value` to `row`.
-    pub fn apply(&self, row: &mut T, value: String) {
+    /// Reads the current editable value out of `row`.
+    pub fn value(&self, row: &T) -> String {
         match self {
-            Self::Text { set, .. } => set(row, value),
+            Self::Text { get, .. } | Self::Select { get, .. } => get(row),
         }
+    }
+
+    /// Whether the editor accepts this exact stored value.
+    pub fn accepts(&self, value: &str) -> bool {
+        match self {
+            Self::Text { .. } => true,
+            Self::Select { options, .. } => options.iter().any(|option| option.value == value),
+        }
+    }
+
+    /// Applies `value` to `row`. Unknown select values leave the row unchanged.
+    pub fn apply(&self, row: &mut T, value: String) {
+        self.try_apply(row, value);
+    }
+
+    /// Applies `value` to `row`, returning false without calling the setter
+    /// if a select value is outside its declared vocabulary.
+    pub fn try_apply(&self, row: &mut T, value: String) -> bool {
+        if !self.accepts(&value) {
+            return false;
+        }
+        match self {
+            Self::Text { set, .. } | Self::Select { set, .. } => set(row, value),
+        }
+        true
     }
 }
 
@@ -101,6 +162,11 @@ impl<T> Clone for EntityCellEditor<T> {
     fn clone(&self) -> Self {
         match self {
             Self::Text { get, set } => Self::Text {
+                get: Rc::clone(get),
+                set: Rc::clone(set),
+            },
+            Self::Select { options, get, set } => Self::Select {
+                options: options.clone(),
                 get: Rc::clone(get),
                 set: Rc::clone(set),
             },
@@ -112,6 +178,10 @@ impl<T> std::fmt::Debug for EntityCellEditor<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Text { .. } => f.write_str("EntityCellEditor::Text"),
+            Self::Select { options, .. } => f
+                .debug_struct("EntityCellEditor::Select")
+                .field("options", options)
+                .finish(),
         }
     }
 }

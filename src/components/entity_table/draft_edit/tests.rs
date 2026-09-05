@@ -29,6 +29,69 @@ fn state() -> EntityEditState<Row> {
     EntityEditState::new()
 }
 
+fn code_select() -> EntityCellEditor<Row> {
+    EntityCellEditor::select(
+        vec![
+            EntityCellSelectOption::new("CONS", "Consultation"),
+            EntityCellSelectOption::new("INT", "Intake"),
+        ],
+        |row: &Row| row.code.clone(),
+        |row: &mut Row, value| row.code = value,
+    )
+}
+
+#[test]
+fn select_rejects_unknown_values_without_calling_the_setter() {
+    let editor = code_select();
+    let mut row = existing();
+    for value in ["", "Unknown", "Consultation", "cons", " CONS "] {
+        assert!(!editor.try_apply(&mut row, value.to_owned()));
+        assert_eq!(row, existing());
+    }
+    assert!(editor.clone().try_apply(&mut row, "INT".to_owned()));
+    assert_eq!(row.code, "INT");
+    assert_eq!(row.name, "Consultation");
+}
+
+#[test]
+fn select_value_reaches_draft_and_existing_commit_without_mutating_source() {
+    let editor = code_select();
+    for target in [
+        EntityEditTarget::Draft,
+        EntityEditTarget::Existing("row-1".into()),
+    ] {
+        let source = existing();
+        let mut state = state();
+        match &target {
+            EntityEditTarget::Draft => {
+                state.begin_draft(source.clone());
+            }
+            EntityEditTarget::Existing(key) => {
+                state.begin_edit(key.clone(), source.clone());
+            }
+        }
+        state.edit_field(|row| {
+            assert!(editor.try_apply(row, "INT".into()));
+        });
+        let commit = state.commit().expect("selected row commits");
+        assert_eq!(commit.row().code, "INT");
+        assert_eq!(commit.target(), &target);
+        assert_eq!(source.code, "CONS");
+        assert_eq!(
+            state.edit_field(|row| editor.apply(row, "CONS".into())),
+            EntityEditDisposition::IgnoredIdle
+        );
+        assert_eq!(state.editing_row().expect("held commit").code, "INT");
+        state.resolve(&commit, EntityEditOutcome::Rejected("retry".into()));
+        assert_eq!(
+            editor.value(state.editing_row().expect("retained draft")),
+            "INT"
+        );
+        state.cancel();
+        assert!(!state.is_editing());
+    }
+}
+
 #[test]
 fn a_new_table_is_idle_and_nothing_is_live() {
     let s = state();

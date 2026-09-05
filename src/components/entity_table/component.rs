@@ -1,7 +1,7 @@
 //! Reactive renderer for the typed client-side table model.
 
 use super::draft_edit::{
-    EntityEditCommit, EntityEditDisposition, EntityEditOutcome, EntityEditPhase,
+    EntityCellEditor, EntityEditCommit, EntityEditDisposition, EntityEditOutcome, EntityEditPhase,
     EntityEditSnapshotGate, EntityEditState, EntityEditTarget,
 };
 use super::emphasis::{
@@ -66,7 +66,7 @@ use crate::components::data_table::{
 use crate::components::icon::{Icon, IconSize};
 use crate::components::menu::{Menu, MenuCheckItem};
 use crate::components::pagination::Pagination;
-use crate::components::select::Select;
+use crate::components::select::{Select, SelectSize};
 use crate::merge_classes;
 use leptos::prelude::*;
 use leptos::tachys::reactive_graph::OwnedView;
@@ -3814,8 +3814,68 @@ fn render_live_field<T: Clone + 'static>(
     layout: &'static str,
 ) -> AnyView {
     let column_id = column.id;
+    let select_options = match column.editor.as_ref() {
+        Some(EntityCellEditor::Select { options, .. }) => Some(options.clone()),
+        _ => None,
+    };
+    let label = column.header.clone();
     let parked = StoredValue::new_local(column);
     let committing = Signal::derive_local(move || edit_state.with(EntityEditState::is_committing));
+    if let Some(options) = select_options {
+        let node_ref = NodeRef::<leptos::html::Select>::new();
+        let value = Signal::derive_local(move || {
+            edit_state.with(|state| {
+                state.editing_row().map_or_else(String::new, |row| {
+                    parked.with_value(|column| {
+                        column
+                            .editor
+                            .as_ref()
+                            .map_or_else(String::new, |editor| editor.value(row))
+                    })
+                })
+            })
+        });
+        return view! {
+            <Select
+                id=Signal::derive(move || entity_edit_input_id(&table_control_id.get(), layout, column_id))
+                size=SelectSize::Sm
+                class="w-full"
+                label=label
+                node_ref=node_ref
+                disabled=Signal::derive(move || committing.get())
+                value=Signal::derive(move || value.get())
+                attr:data-entity-edit-input=column_id
+                attr:data-entity-draft-input=move || {
+                    edit_state.with(|state| state.target().is_some_and(EntityEditTarget::is_draft)).then_some(column_id)
+                }
+                on_change=Callback::new(move |next: String| {
+                    let accepted = parked.with_value(|column| {
+                        column.editor.as_ref().is_some_and(|editor| editor.accepts(&next))
+                    });
+                    if accepted {
+                        edit_state.update(|state| {
+                            state.edit_field(|row| {
+                                parked.with_value(|column| {
+                                    if let Some(editor) = column.editor.as_ref() {
+                                        editor.apply(row, next);
+                                    }
+                                });
+                            });
+                        });
+                    }
+                    // Restore the reducer's value even for rejected synthetic
+                    // events or events delivered while a commit is in flight.
+                    if let Some(node) = node_ref.get_untracked() {
+                        node.set_value(&value.get_untracked());
+                    }
+                })
+            >
+                {options.into_iter().map(|option| view! {
+                    <option value=option.value>{option.label}</option>
+                }).collect_view()}
+            </Select>
+        }.into_any();
+    }
     view! {
         <input
             id=move || entity_edit_input_id(&table_control_id.get(), layout, column_id)
