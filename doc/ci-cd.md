@@ -214,8 +214,11 @@ different theme values.
 
 ### `cargo xtask verify-full` — with the browser suites and the real wasm build
 
+All browser-suite servers use release builds, including the page-scoped
+client-snapshot host. Debug Wasm builds are not required for verification.
+
 `verify-full` runs `verify`, then the client-snapshot and SnapshotTable
-page-scoped browser lanes, then builds the full catalog once in release mode and
+page-scoped browser lanes in release mode, then builds the full catalog once and
 reuses that same verified server for the 51-check reactivity/DOM-oracle suite
 (`test-reactivity`), layout audit (`test-layout`, below), style audit
 (`test-style`, below), the focused `KeyedResultList` browser proof

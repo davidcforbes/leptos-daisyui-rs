@@ -1015,13 +1015,11 @@ fn trunk_serve_args(port: u16, html_target: Option<&str>) -> Vec<String> {
         port.to_string(),
         "--no-autoreload=true".to_owned(),
         "--open=false".to_owned(),
+        "--release=true".to_owned(),
         "--color".to_owned(),
         "never".to_owned(),
     ]
     .into();
-    if html_target.is_none() {
-        args.push("--release=true".to_owned());
-    }
     if let Some(target) = html_target {
         args.push(target.to_owned());
     }
@@ -2958,12 +2956,12 @@ pub fn r() -> f32 { radius::CARD }
     }
 
     #[test]
-    fn catalog_browser_suites_use_the_reliable_release_bundle() {
+    fn all_browser_suites_use_the_reliable_release_bundle() {
         let catalog = trunk_serve_args(4321, None);
         assert!(catalog.iter().any(|arg| arg == "--release=true"));
 
         let page_scoped = trunk_serve_args(4321, Some("client-snapshot-test-host.html"));
-        assert!(!page_scoped.iter().any(|arg| arg.starts_with("--release")));
+        assert!(page_scoped.iter().any(|arg| arg == "--release=true"));
     }
 
     #[test]
