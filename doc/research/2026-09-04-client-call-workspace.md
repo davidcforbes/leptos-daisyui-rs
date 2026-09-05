@@ -1,5 +1,7 @@
 # Browser softphones and an opinionated client calling workspace
 
+**Scope update:** The user subsequently limited LDUI to the UI component and its usage/testing documentation. The implemented contract is [Softphone](../components/softphone.md). Provider adapters, session services and durable workflows discussed below are research for consuming applications, not LDUI implementation commitments. Proposed names in this report are historical recommendations, not exported APIs.
+
 **Research date:** 4 September 2026 (America/Los_Angeles). **Audience:** LDUI maintainers and consuming application owners. **Bead:** ldui-y4fz. **Status:** researched recommendation; proposed component names and contracts are not implemented APIs.
 
 **Recommendation:** build `ClientCallWorkspace<T>`: a complete, native LDUI workflow for calling a known client, maintaining context during the conversation, and saving its outcome. Mount one persistent `CallSession` above the application's router. Use one provider adapter for the first deployment, provisionally Twilio when there is no existing telephony commitment. Keep Telnyx as the principal alternative; assess an existing WebRTC-capable SIP PBX before replacing it.

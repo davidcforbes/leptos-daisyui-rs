@@ -233,6 +233,8 @@ checkbox carries id/name and is named by its visible title, axe-clean), and
 the focused `DataTable` column-track fit proof (`test-data-table-fit`,
 ldui-qsqz: ten undeclared columns fit a 1280px container with auto tracks;
 declared tracks that cannot fit scroll the wrapper instead of spilling).
+The controlled Softphone lane (`test-softphone`, ldui-xmhn) verifies simulated
+command acknowledgment, number selection, elapsed time and responsive controls.
 That catalog server is the real `wasm32-unknown-unknown` release build, so a
 second standalone `trunk build --release` would only repeat the same pipeline
 and is intentionally absent. It is a **separate task**, not part of the
@@ -247,13 +249,13 @@ server. In measured warm runs, Cargo's catalog compile was under one second but
 Trunk's Wasm optimization took roughly two minutes per invocation; sharing the
 catalog server across consecutive catalog suites avoids repeating that
 optimization for each test executable. The current full gate groups six
-page-scoped suites and seventeen catalog suites; `full_steps()` is the source
+page-scoped suites and eighteen catalog suites; `full_steps()` is the source
 of truth for membership.
 
 ### Gate cadence during a live Beads drain
 
 `cargo xtask verify` is the 16-step native gate listed in the table above.
-`cargo xtask verify-full` adds 23 browser checks and reports 39 steps
+`cargo xtask verify-full` adds 24 browser checks and reports 40 steps
 (re-count `full_steps()` in `xtask/src/main.rs` whenever a lane is added; this
 figure has drifted before).
 Say which command is running before starting it; "the verification gate" is

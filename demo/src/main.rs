@@ -102,6 +102,7 @@ fn AppInner() -> impl IntoView {
                     <Route path=path!("/accordion") view=AccordionDemo />
                     <Route path=path!("/admin_workbench") view=AdminWorkbenchDemo />
                     <Route path=path!("/app-shell") view=AppShellDemo />
+                    <Route path=path!("/softphone") view=SoftphoneDemo />
                     <Route path=path!("/alert") view=AlertDemo />
                     <Route path=path!("/auto-complete") view=AutoCompleteDemo />
                     <Route path=path!("/avatar") view=AvatarDemo />

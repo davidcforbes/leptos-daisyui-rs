@@ -19,7 +19,7 @@ Integration tests are in `tests/`, PixelProof baselines in
 - `cargo xtask verify-full` adds the browser suites and release Trunk build;
   it requires npm, Trunk, and Chrome. Run `npm install` in `demo/` once.
   All browser hosts, including the page-scoped snapshot host, use release
-  builds. Debug Wasm is not required. Current gate: 16 native + 23 browser
+  builds. Debug Wasm is not required. Current gate: 16 native + 24 browser
   steps; use the actual xtask summary as the authority when counts change.
 - `cargo xtask test-style`, `test-layout`, or `test-reactivity` runs one
   self-hosted browser suite. The 69-check reactivity lane is explicitly
@@ -48,6 +48,10 @@ and caller classes merge through `merge_classes!`. Target daisyUI 5 only.
 
 Co-locate unit tests in each component and name behavior-focused tests in
 `snake_case`. Browser tests are intentionally ignored and run through xtask.
+`Softphone` is a controlled UI composition: keep telephony SDKs, media sessions,
+authorization and persistence in consuming applications. Its host acknowledgment
+and clock contracts are documented in `doc/components/softphone.md`; use
+`cargo xtask test-softphone` for its release browser proof.
 Visual audit ceilings are zero-slack and ratchet down; new rules require an
 inject/catch/revert negative control. Never hand-edit `styles/tokens.css`;
 regenerate it with `cargo xtask gen-tokens`.

@@ -3,6 +3,8 @@ pub mod admin_workbench;
 pub mod ai_chat;
 pub mod alert;
 pub mod app_shell;
+pub mod softphone;
+pub use softphone::*;
 pub mod auto_complete;
 pub mod avatar;
 pub mod badge;

@@ -79,6 +79,7 @@ Each component documentation follows a consistent structure:
 
 ### Data Components
 - [EntityTable](./components/entity_table.md) - Typed complete-client-snapshot table with governed preference ownership, localized empty row ranges, and keyboard-reachable empty interactive pages
+- [Softphone](./components/softphone.md) - Controlled client calling console with number selection, duration, quick actions, acknowledgment model and browser testing
 - [DataTable](./components/data_table.md) - Sorting, pagination, filtering, search, selection, row activation, and column resizing (plus `ServerDataTable` for server-side paging)
 - [LineChart](./components/line_chart.md) - Accessible multi-series categorical and numeric charts with keyboard interaction, hover cards, and a snapped plot-height category guide
 - [AppShell](./components/app_shell.md) - Full-height application frame with optional pinned top/status regions and responsive start/center/end top-bar composition

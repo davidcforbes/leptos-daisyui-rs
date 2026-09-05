@@ -689,6 +689,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     value: "admin_workbench",
                 },
                 ComponentItem {
+                    name: "Softphone",
+                    href: "/components/softphone",
+                    value: "softphone",
+                },
+                ComponentItem {
                     name: "AppShell",
                     href: "/components/app-shell",
                     value: "app-shell",
