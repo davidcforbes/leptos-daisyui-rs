@@ -67,6 +67,7 @@ mod resize;
 mod selection;
 mod server_column_tools;
 mod server_component;
+mod server_entity_table;
 mod server_selection;
 
 pub(super) use identity::{
@@ -114,6 +115,9 @@ pub use server_column_tools::{
     ServerTableDisplayRow, ServerTableDisplayedSlice,
 };
 pub use server_component::*;
+pub use server_entity_table::{
+    ServerEntityTable, ServerEntityTableConfigurationError, validate_server_entity_columns,
+};
 mod server_page_size;
 pub use server_page_size::ServerTablePageSizePreference;
 pub use server_selection::{
