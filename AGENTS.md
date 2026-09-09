@@ -52,7 +52,16 @@ Co-locate unit tests in each component and name behavior-focused tests in
 authorization and persistence in consuming applications. Its host acknowledgment
 and clock contracts are documented in `doc/components/softphone.md`; use
 `cargo xtask test-softphone` for its release browser proof.
-When refactoring it, preserve unconditional effect dependency reads for keypad
+`ClientCallWorkspace` adds destination editing, explicit contact writes and call
+records around that console. Its complete host contract is in
+`doc/components/client_call_workspace.md`; the same browser lane covers it.
+Preserve bridge uncertainty locks, explicit outcomes, host-confirmed writes,
+and container-width layout when changing the composition.
+Preserve typed refusal evidence, per-number blocks, controlled contact targets,
+and independent script regeneration acknowledgments. Provider talk seconds are
+separate from the elapsed session timer and manual wrap-up minutes. Public call
+enums are non-exhaustive; consumer wildcard arms must not trigger side effects.
+When refactoring `Softphone`, preserve unconditional effect dependency reads for keypad
 cleanup and stable mounting of the number selector. Its maintenance notes cover
 these contracts and computed typography/text-bound checks.
 Visual audit ceilings are zero-slack and ratchet down; new rules require an

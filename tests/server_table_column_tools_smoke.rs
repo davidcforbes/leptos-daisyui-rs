@@ -39,6 +39,343 @@ async fn eval_json(harness: &pixelproof_web::Harness, expression: &str) -> Value
         .expect("server-table column-tools expression returns JSON")
 }
 
+/// The opinionated server footer keeps the named size control below the body.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-server-table-column-tools)"]
+async fn server_page_size_control_is_in_a_stable_footer() {
+    let h = harness_at("/components/data-table").await;
+    wait_for_selector(&h, "#viewport-fit-offset-server-table tbody tr").await;
+    let state = eval_json(&h, r#"(() => {
+        const root = document.querySelector('#viewport-fit-offset-server-table');
+        const select = root.querySelector('[data-table-page-size-control]');
+        const table = root.querySelector('table');
+        return { below: select.getBoundingClientRect().top >= table.getBoundingClientRect().bottom,
+            footer: !!select.closest('[data-server-table-footer]'),
+            named: !!select.id && select.name === select.id && !!select.getAttribute('aria-label') };
+    })()"#).await;
+    assert_eq!(
+        state["footer"],
+        json!(true),
+        "page-size selector belongs in the footer: {state}"
+    );
+    assert_eq!(
+        state["below"],
+        json!(true),
+        "page-size selector follows the body: {state}"
+    );
+    assert_eq!(
+        state["named"],
+        json!(true),
+        "stable accessible identity: {state}"
+    );
+}
+
+const FIT_ROOT: &str = "#viewport-fit-offset-server-table";
+
+async fn size_state(h: &pixelproof_web::Harness) -> Value {
+    eval_json(h, r#"(() => {
+        const root = document.querySelector('#viewport-fit-offset-server-table');
+        const select = root.querySelector('[data-table-page-size-control]');
+        const wrapper = root.querySelector(':scope > .overflow-x-auto');
+        const footer = root.querySelector('[data-server-table-footer]');
+        return { value: select.value, label: select.selectedOptions[0]?.textContent,
+            id: select.id, name: select.name, mode: root.dataset.serverPageSizeIntent,
+            size: Number(root.dataset.serverAcceptedPageSize),
+            rows: root.querySelectorAll('tbody tr[data-table-row]').length || root.querySelectorAll('tbody tr').length,
+            height: root.getBoundingClientRect().height, viewport: wrapper.clientHeight,
+            range: footer?.textContent,
+            query: document.querySelector('[data-testid="viewport-fit-last-query"]').textContent,
+            proposals: Number(document.querySelector('[data-testid="viewport-fit-proposals"]').textContent),
+            preference: document.querySelector('[data-testid="viewport-fit-preference"]')?.textContent,
+            navigationDisabled: !!footer && [...footer.querySelectorAll('button')].every(b => b.disabled),
+            footerInside: !!footer && footer.scrollWidth <= footer.clientWidth + 1 &&
+                footer.getBoundingClientRect().bottom <= root.getBoundingClientRect().bottom + 1 &&
+                [...footer.querySelectorAll('select,button,[data-server-row-range]')].every(el => {
+                    const r = el.getBoundingClientRect(), f = footer.getBoundingClientRect();
+                    return r.left >= f.left - 1 && r.right <= f.right + 1 &&
+                        r.top >= f.top - 1 && r.bottom <= f.bottom + 1;
+                }) };
+    })()"#).await
+}
+
+async fn settle_size(h: &pixelproof_web::Harness) -> Value {
+    // Bounded quiet observation catches refetch/measurement loops as well as
+    // allowing the intentionally delayed host acknowledgment to finish.
+    tokio::time::sleep(std::time::Duration::from_millis(750)).await;
+    size_state(h).await
+}
+
+async fn choose_size(h: &pixelproof_web::Harness, value: &str, pointer_open: bool) {
+    let selector = format!("{FIT_ROOT} [data-table-page-size-control]");
+    let index = eval_json(
+        h,
+        &format!(
+            r#"(() => {{
+        const select = document.querySelector({selector:?});
+        select.scrollIntoView({{block:'center'}}); select.focus();
+        return [...select.options].findIndex(o => o.value === {value:?});
+    }})()"#
+        ),
+    )
+    .await
+    .as_i64()
+    .expect("option index");
+    assert!(index >= 0, "missing page-size option {value}");
+    if pointer_open {
+        click(h, &selector).await;
+    } else {
+        h.press_key_sequence(&[pixelproof_web::Key::Space])
+            .await
+            .unwrap();
+    }
+    let mut keys = vec![pixelproof_web::Key::Home];
+    keys.extend((0..index).map(|_| pixelproof_web::Key::ArrowDown));
+    keys.push(pixelproof_web::Key::Enter);
+    h.press_key_sequence(&keys)
+        .await
+        .expect("commit native size selection");
+}
+
+async fn resize_size_slot(h: &pixelproof_web::Harness, height: u32) {
+    eval_json(
+        h,
+        &format!(
+            r#"(() => {{
+        document.querySelector('{FIT_ROOT}').parentElement.style.height = '{height}px';
+        return true;
+    }})()"#
+        ),
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-server-table-column-tools)"]
+async fn server_manual_page_size_survives_resize_until_auto_is_selected() {
+    let h = harness_at("/components/data-table").await;
+    wait_for_selector(&h, "#viewport-fit-offset-server-table tbody tr").await;
+    begin_browser_error_capture(&h).await;
+    settle_size(&h).await;
+    choose_size(&h, "10", true).await;
+    let fixed = settle_size(&h).await;
+    assert_eq!(
+        fixed["value"],
+        json!("10"),
+        "a manual size must stay selected: {fixed}"
+    );
+    resize_size_slot(&h, 900).await;
+    let tall = settle_size(&h).await;
+    assert_eq!(
+        tall["value"],
+        json!("10"),
+        "resize cannot overwrite fixed intent: {tall}"
+    );
+    assert_eq!(
+        tall["rows"],
+        json!(10),
+        "server must retain ten supplied rows: {tall}"
+    );
+    assert_eq!(
+        tall["proposals"], fixed["proposals"],
+        "resize must not request another fixed page: {tall}"
+    );
+    click(&h, "[data-testid='viewport-fit-filter-one']").await;
+    assert_eq!(settle_size(&h).await["rows"], json!(1));
+    click(&h, "[data-testid='viewport-fit-filter-one']").await;
+    let refetched = settle_size(&h).await;
+    assert_eq!(refetched["value"], json!("10"));
+    assert_eq!(
+        refetched["rows"],
+        json!(10),
+        "fixed size survives refetch: {refetched}"
+    );
+    choose_size(&h, "auto", false).await;
+    let auto = settle_size(&h).await;
+    assert_eq!(auto["value"], json!("auto"), "Auto resumes fitting: {auto}");
+    assert_ne!(
+        auto["rows"],
+        json!(10),
+        "Auto must measure the actual slot: {auto}"
+    );
+    assert_eq!(
+        auto["id"], fixed["id"],
+        "control identity survives intent changes"
+    );
+    assert_eq!(auto["name"], auto["id"]);
+    let quiet = settle_size(&h).await;
+    assert_eq!(
+        quiet["proposals"], auto["proposals"],
+        "measurement/refetch converges: {quiet}"
+    );
+    assert_no_browser_errors(&h, "server page-size intent").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-server-table-column-tools)"]
+async fn server_size_delayed_and_rejected_proposals_keep_accepted_truth() {
+    let h = harness_at("/components/data-table").await;
+    wait_for_selector(&h, "#viewport-fit-offset-server-table tbody tr").await;
+    begin_browser_error_capture(&h).await;
+    let initial = settle_size(&h).await;
+    click(&h, "[data-testid='viewport-fit-delay']").await;
+    choose_size(&h, "25", false).await;
+    let pending = settle_size(&h).await;
+    assert_eq!(
+        pending["size"], initial["size"],
+        "a request is not accepted data: {pending}"
+    );
+    assert_eq!(pending["rows"], initial["rows"]);
+    assert_eq!(
+        pending["value"].as_str().unwrap(),
+        initial["size"].to_string()
+    );
+    assert!(pending["preference"].as_str().unwrap().contains("Fixed:25"));
+    let quiet = settle_size(&h).await;
+    assert_eq!(
+        quiet["proposals"], pending["proposals"],
+        "pending request is not retried: {quiet}"
+    );
+    click(&h, "[data-testid='viewport-fit-apply']").await;
+    let applied = settle_size(&h).await;
+    assert_eq!(applied["size"], json!(25));
+    assert_eq!(applied["value"], json!("25"));
+    assert_eq!(applied["rows"], json!(25));
+    click(&h, "[data-testid='viewport-fit-delay']").await;
+    click(&h, "[data-testid='viewport-fit-accept']").await;
+    choose_size(&h, "10", false).await;
+    let declined = settle_size(&h).await;
+    assert_eq!(
+        declined["value"],
+        json!("25"),
+        "declined native selection is restored: {declined}"
+    );
+    assert_eq!(declined["size"], json!(25));
+    assert_eq!(declined["rows"], json!(25));
+    click(&h, "[data-testid='viewport-fit-callback-probe']").await;
+    let host_changed = settle_size(&h).await;
+    assert_eq!(
+        host_changed["proposals"], declined["proposals"],
+        "host callback reads must not subscribe the proposal effect: {host_changed}"
+    );
+    choose_size(&h, "auto", false).await;
+    resize_size_slot(&h, 900).await;
+    let auto_declined = settle_size(&h).await;
+    assert_eq!(auto_declined["value"], json!("auto"));
+    assert_eq!(
+        auto_declined["label"],
+        json!("Auto (25)"),
+        "Auto labels accepted capacity: {auto_declined}"
+    );
+    for height in [899, 900, 899, 900] {
+        resize_size_slot(&h, height).await;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    let settled = settle_size(&h).await;
+    assert_eq!(
+        settled["proposals"], auto_declined["proposals"],
+        "same derived capacity cannot refetch-loop: {settled}"
+    );
+    click(&h, "[data-testid='viewport-fit-apply']").await;
+    let intermediate = settle_size(&h).await;
+    assert_ne!(
+        intermediate["size"],
+        json!(25),
+        "host accepted measured capacity: {intermediate}"
+    );
+    click(&h, "[data-testid='viewport-fit-supply-25']").await;
+    let returned = settle_size(&h).await;
+    assert!(
+        returned["proposals"].as_u64() > intermediate["proposals"].as_u64(),
+        "returning to an earlier accepted query must permit a fresh proposal: {returned}"
+    );
+    assert_no_browser_errors(&h, "server accepted page-size truth").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-server-table-column-tools)"]
+async fn server_footer_survives_empty_loading_filter_restore_and_compact_layout() {
+    let h = harness_at("/components/data-table").await;
+    wait_for_selector(&h, "#viewport-fit-offset-server-table tbody tr").await;
+    begin_browser_error_capture(&h).await;
+    let initial = settle_size(&h).await;
+    click(&h, "[data-testid='viewport-fit-filter-one']").await;
+    let one = settle_size(&h).await;
+    assert_eq!(one["rows"], json!(1));
+    assert_eq!(
+        one["height"], initial["height"],
+        "one row cannot collapse the slot: {one}"
+    );
+    click(&h, "[data-testid='viewport-fit-filter-one']").await;
+    let restored = settle_size(&h).await;
+    assert_eq!(restored["height"], initial["height"]);
+    assert_eq!(
+        restored["size"], initial["size"],
+        "Auto capacity recovers: {restored}"
+    );
+    click(&h, "[data-testid='viewport-fit-empty']").await;
+    let empty = settle_size(&h).await;
+    assert_eq!(empty["id"], initial["id"]);
+    assert_eq!(empty["height"], initial["height"]);
+    assert!(
+        empty["range"]
+            .as_str()
+            .unwrap()
+            .contains("Showing 0–0 of 0"),
+        "truthful empty range: {empty}"
+    );
+    click(&h, "[data-testid='viewport-fit-loading']").await;
+    let loading = settle_size(&h).await;
+    assert_eq!(loading["id"], initial["id"]);
+    assert_eq!(loading["height"], initial["height"]);
+    assert!(loading["range"].as_str().unwrap().contains("Loading"));
+    assert_eq!(
+        loading["navigationDisabled"],
+        json!(true),
+        "loading cannot navigate stale pages: {loading}"
+    );
+    click(&h, "[data-testid='viewport-fit-loading']").await;
+    click(&h, "[data-testid='viewport-fit-empty']").await;
+    click(&h, "[data-testid='viewport-fit-ready']").await;
+    let paused = settle_size(&h).await;
+    resize_size_slot(&h, 600).await;
+    let resized = settle_size(&h).await;
+    assert_eq!(resized["proposals"], paused["proposals"]);
+    assert_eq!(resized["value"], json!("auto"));
+    click(&h, "[data-testid='viewport-fit-ready']").await;
+    settle_size(&h).await;
+    click(&h, "[data-testid='viewport-fit-localize']").await;
+    let localized = settle_size(&h).await;
+    assert!(
+        localized["label"]
+            .as_str()
+            .unwrap()
+            .starts_with("Ajustar (")
+    );
+    for width in [1280, 375] {
+        h.set_viewport(pixelproof_web::ViewportSize::new(width, 900))
+            .await
+            .unwrap();
+        let state = settle_size(&h).await;
+        assert_eq!(
+            state["footerInside"],
+            json!(true),
+            "footer must wrap at {width}px: {state}"
+        );
+        assert_eq!(state["id"], initial["id"]);
+        eval_json(
+            &h,
+            &format!(
+                "document.querySelector('{FIT_ROOT}').scrollIntoView({{block:'center'}}); true"
+            ),
+        )
+        .await;
+        let png = h.screenshot_bytes().await.expect("capture server footer");
+        std::fs::create_dir_all(".review/gfk7").unwrap();
+        std::fs::write(format!(".review/gfk7/footer-{width}.png"), png).unwrap();
+    }
+    assert_no_browser_errors(&h, "server footer lifecycle and geometry").await;
+}
+
 async fn snapshot(harness: &pixelproof_web::Harness) -> Value {
     eval_json(
         harness,

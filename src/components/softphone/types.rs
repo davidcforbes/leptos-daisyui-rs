@@ -9,6 +9,8 @@ pub struct SoftphoneNumber {
     pub label: String,
     /// Displayed telephone number; formatting is owned by the host.
     pub number: String,
+    /// Present when selection or calling is forbidden; retain the reason for display.
+    pub blocked_reason: Option<String>,
 }
 
 /// Identity displayed above the call controls.
@@ -23,6 +25,7 @@ pub struct SoftphoneClient {
 }
 
 /// Call lifecycle confirmed by the host.
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SoftphonePhase {
     /// No call is in progress.
@@ -63,6 +66,7 @@ impl SoftphonePhase {
 }
 
 /// Clock specification owned by the host, independent of the call phase.
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SoftphoneTimer {
     /// No connected duration is available.
@@ -138,6 +142,7 @@ impl Default for SoftphoneCapabilities {
 }
 
 /// Stable action identity used to indicate a pending host acknowledgment.
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SoftphoneActionKind {
     /// Choose a number.
@@ -178,6 +183,7 @@ impl SoftphoneActionKind {
 }
 
 /// A request only: emitting an action never confirms its success.
+#[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SoftphoneAction {
     /// Select the number with this stable identity.
@@ -293,13 +299,16 @@ impl SoftphoneState {
         let connected = matches!(self.phase, SoftphonePhase::Active | SoftphonePhase::Held);
         match action {
             SoftphoneAction::SelectNumber(id) => {
-                !self.phase.is_live() && self.valid_number(id).is_some()
+                !self.phase.is_live()
+                    && self
+                        .valid_number(id)
+                        .is_some_and(|phone| phone.blocked_reason.is_none())
             }
             SoftphoneAction::Call { phone_id } => {
                 !self.phase.is_live()
-                    && self
-                        .selected_number()
-                        .is_some_and(|phone| phone.id == *phone_id)
+                    && self.selected_number().is_some_and(|phone| {
+                        phone.id == *phone_id && phone.blocked_reason.is_none()
+                    })
             }
             SoftphoneAction::EndCall => {
                 unreachable!("end requests are handled before pending guards")
@@ -341,6 +350,7 @@ mod tests {
             id: id.into(),
             label: "Mobile".into(),
             number: "+1 555 0100".into(),
+            ..Default::default()
         }
     }
 
@@ -406,6 +416,20 @@ mod tests {
         state.client.phones.push(number("work"));
         assert!(state.selected_number().is_none());
         assert!(!state.can_dispatch(&SoftphoneAction::SelectNumber("work".into())));
+    }
+
+    #[test]
+    fn blocked_number_remains_visible_but_cannot_be_selected_or_called() {
+        let mut state = ready();
+        state.client.phones[0].blocked_reason = Some("Permission revoked".into());
+        assert_eq!(state.selected_number().unwrap().id, "mobile");
+        assert!(!state.can_dispatch(&SoftphoneAction::SelectNumber("mobile".into())));
+        assert!(!state.can_dispatch(&SoftphoneAction::Call {
+            phone_id: "mobile".into()
+        }));
+        state.phase = SoftphonePhase::Active;
+        assert_eq!(state.selected_number().unwrap().id, "mobile");
+        assert!(state.can_dispatch(&SoftphoneAction::EndCall));
     }
 
     #[test]

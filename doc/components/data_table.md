@@ -440,6 +440,81 @@ query and fetches each slice. `ServerDataTable` renders only what it is given;
 it does no client-side sorting, filtering, or paging. Its root identifies this
 contract as `data-table-data-mode="server-query"` for runtime audits.
 
+### Footer and Auto/fixed rows per page
+
+The footer follows EntityTable's standard layout: Rows per page and the range
+on the left, navigation on the right, wrapping on compact screens. The shared
+Select retains its ID/name through query changes, empty results and loading.
+Search stays above the table. Cursor mode retains its slice-status caption and
+opaque navigation contract; it never invents a population total.
+
+Keep preference and accepted data separate:
+
+```rust,ignore
+let row_preference = RwSignal::new(ServerTablePageSizePreference::auto(25));
+
+view! {
+    <ServerDataTable
+        // Existing rows, columns and pagination props go here.
+        query_ownership=ServerTableQueryOwnership::controlled(
+            accepted_query.into(),
+            Callback::new(request_server_page),
+        )
+        page_size_preference=row_preference
+        viewport_fit=Signal::derive(move || snapshot_ready.get() && !failed.get())
+        viewport_fit_min_rows=1_usize
+        max_height="100%"
+        control_id="history"
+    />
+}
+```
+
+`ServerTablePageSizePreference::auto(25)` remembers 25 as the explicit numeric
+choice while following the viewport. `fixed(25)` requests a fixed size that
+survives resize and refetch. A host may retain or persist this signal; viewport
+measurements never replace its numeric preference. Omitting the signal uses
+component-owned preference with the same behavior. A supplied preference makes
+Auto available before readiness; a legacy `viewport_fit=true` call also enables
+Auto. Once enabled, temporarily gating measurement off preserves the option,
+preference and definite-height slot. A supplied fixed preference still requires
+a definite parent height when using `max_height="100%"`.
+
+Selecting a size changes preference and proposes a server query. Until the host
+accepts that query, the numeric Select value, range, and pager continue to use
+the accepted query. Auto's localized label substitutes that accepted capacity,
+not an unaccepted measurement. The accepted numeric size is always included in
+the options, so sizes such as 7 and 11 cannot leave a blank control. Hosts remain
+responsible for correlating asynchronous responses and supplying a coherent
+accepted query and page; this UI neither cancels requests nor fetches data.
+
+Auto pauses while loading. Repeated measurements of the same accepted query
+and proposed size do not repeatedly request it; an explicit selection permits
+a retry. Size changes retain the existing offset page-one / cursor First reset
+semantics. Unsupported page-size capabilities continue to fail closed.
+
+For consumers migrating from a numeric-only selector:
+
+- Keep the existing server-query ownership and fetch path. Supply one retained
+  `RwSignal<ServerTablePageSizePreference>` through `page_size_preference`;
+  use `auto(25)` for viewport fitting or `fixed(25)` for an explicit initial size.
+- Keep readiness/error gating on `viewport_fit` and supply a definite-height
+  parent when using `max_height="100%"`. The gate controls measurement, while
+  the preference preserves user intent.
+- Remove any workaround that appends the accepted size to `page_size_options`;
+  the component now includes that size automatically. Keep the options prop
+  when the product needs a particular set of numeric choices.
+- Use `page_size_auto_label` to localize `Auto ({rows})`. Footer placement is
+  provided by the component; consumers need no DOM relocation or CSS override.
+
+Focused release evidence lives in `tests/server_table_column_tools_smoke.rs`:
+run `cargo xtask test-server-table-column-tools`. The existing viewport-fit
+convergence and cursor guards remain in `tests/reactivity_smoke.rs` and run in
+the final `cargo xtask verify-full` gate.
+
+The [2026-09-09 verification record](../verification/server-table-footer-2026-09-09.md)
+records the recovery run, audit correction, reviewed captures, and verification
+limits for this implementation.
+
 | Prop | Type | Description |
 |------|------|-------------|
 | `rows` | `Signal<Vec<TableRow>>` | The current page's rows only |
@@ -454,7 +529,11 @@ contract as `data-table-data-mode="server-query"` for runtime audits.
 | `on_query_change` | `Option<Callback<TableQuery>>` | Reports the complete server query after paging, search, sort, or filter changes |
 | `query_ownership` | `Option<ServerTableQueryOwnership>` | Preferred explicit controlled/uncontrolled ownership; controlled mode supplies displayed-query truth and receives full replacements |
 | `query_reset_key` | `Option<Signal<String>>` | Combined dataset/access identity; a change proposes a clean first-page query while preserving page size |
-| `page_size_options` | `Signal<Vec<i64>>` | Positive choices for the controlled server-query page-size selector |
+| `page_size_options` | `Signal<Vec<i64>>` | Positive numeric choices; the accepted size and saved fixed choice are included automatically |
+| `page_size_preference` | `Option<RwSignal<ServerTablePageSizePreference>>` | Retain Auto/fixed intent and the explicit numeric choice independently of the accepted query |
+| `page_size_auto_label` | `Signal<String>` | Localized Auto caption; defaults to `Auto ({rows})`, with `{rows}` replaced by accepted capacity |
+| `viewport_fit` | `Signal<bool>` | Enable measurement while Auto is selected; may be gated by host readiness without erasing preference |
+| `viewport_fit_min_rows` | `Signal<usize>` | Usability floor for measurement; retain the accepted size below this floor |
 | `filter_options` | `Option<Signal<HashMap<&'static str, Vec<String>>>>` | Population-wide choices for exact filterable columns |
 | `filter_option_entries` | `Option<Signal<DataTableFilterOptions>>` | Population-wide typed choices with separate stable values and reactive display labels; mutually exclusive with `filter_options` |
 | `filter_vocabulary` | `Option<ServerFilterVocabulary>` | Optional explicit vocabulary truth; required as `CurrentSlice` when authoritative `filter_options` are absent |

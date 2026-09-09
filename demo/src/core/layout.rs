@@ -694,6 +694,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     value: "softphone",
                 },
                 ComponentItem {
+                    name: "Client Call Workspace",
+                    href: "/components/client-call-workspace",
+                    value: "client-call-workspace",
+                },
+                ComponentItem {
                     name: "AppShell",
                     href: "/components/app-shell",
                     value: "app-shell",

@@ -13,11 +13,13 @@ fn initial_state() -> SoftphoneState {
                     id: "mobile".into(),
                     label: "Mobile".into(),
                     number: "+1 (415) 555-0142".into(),
+                    ..Default::default()
                 },
                 SoftphoneNumber {
                     id: "office".into(),
                     label: "Office".into(),
                     number: "+1 (415) 555-0186".into(),
+                    ..Default::default()
                 },
             ],
         },
@@ -71,12 +73,32 @@ pub fn SoftphoneDemo() -> impl IntoView {
         if command.context_id != state.get_untracked().context_id {
             return;
         }
+        if !matches!(
+            command.action,
+            SoftphoneAction::SelectNumber(_)
+                | SoftphoneAction::Call { .. }
+                | SoftphoneAction::EndCall
+                | SoftphoneAction::SetMuted(_)
+                | SoftphoneAction::SetHeld(_)
+                | SoftphoneAction::RouteToVoicemail
+                | SoftphoneAction::SetRecording(_)
+                | SoftphoneAction::SetTranscribing(_)
+                | SoftphoneAction::SendDigit(_)
+        ) {
+            return;
+        }
         count.update(|n| *n += 1);
         last.set(format!("{:?}", command.action));
         match command.action {
             SoftphoneAction::SelectNumber(id) => state.update(|s| s.selected_phone_id = Some(id)),
             SoftphoneAction::SendDigit(_) => {}
-            action => {
+            action @ (SoftphoneAction::Call { .. }
+            | SoftphoneAction::EndCall
+            | SoftphoneAction::SetMuted(_)
+            | SoftphoneAction::SetHeld(_)
+            | SoftphoneAction::RouteToVoicemail
+            | SoftphoneAction::SetRecording(_)
+            | SoftphoneAction::SetTranscribing(_)) => {
                 state.update(|s| {
                     s.pending = Some(action.kind());
                     s.error = None;
@@ -86,6 +108,7 @@ pub fn SoftphoneDemo() -> impl IntoView {
                 });
                 pending.set(Some(action));
             }
+            _ => {}
         }
     });
     let accept = move |_| {

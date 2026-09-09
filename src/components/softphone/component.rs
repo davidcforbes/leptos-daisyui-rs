@@ -175,10 +175,11 @@ pub fn Softphone(
                                 })>
                                 <option value="">{move || texts.get().choose_number}</option>
                                 {move || state.get().client.phones.into_iter().map(|p| view! {
-                                    <option value=p.id>{format!("{}: {}", p.label, p.number)}</option>
+                                    <option value=p.id disabled=p.blocked_reason.is_some()>{match p.blocked_reason { Some(ref reason) => format!("{}: {} ({})", p.label, p.number, reason), None => format!("{}: {}", p.label, p.number) }}</option>
                                 }).collect_view()}
                             </Select>
                     </Show>
+                    <p class="text-sm text-base-content/70 [overflow-wrap:anywhere]" data-softphone-number-blocked="true">{move || state.with(|s| s.selected_number().and_then(|p| p.blocked_reason.clone()))}</p>
                 </div>
             </div>
             <div class="flex flex-col gap-2 border-y border-base-300 bg-base-200 p-5">

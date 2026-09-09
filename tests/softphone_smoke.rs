@@ -1,5 +1,7 @@
 //! Controlled UI evidence only: commands and acknowledgments are simulated.
 mod common;
+#[path = "softphone/workspace.rs"]
+mod workspace;
 
 use common::{
     assert_no_browser_errors, begin_browser_error_capture, click, harness_at, wait_for_selector,

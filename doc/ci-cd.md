@@ -234,7 +234,14 @@ the focused `DataTable` column-track fit proof (`test-data-table-fit`,
 ldui-qsqz: ten undeclared columns fit a 1280px container with auto tracks;
 declared tracks that cannot fit scroll the wrapper instead of spilling).
 The controlled Softphone lane (`test-softphone`, ldui-xmhn) verifies simulated
+ClientCallWorkspace destination/contact-write guards, ambiguous dispatch,
+stale acknowledgment, call-record keyboard interaction, required semantics,
+save rejection and compact geometry (`ldui-i1ui`), as well as the existing
 command acknowledgment, number selection, elapsed time and responsive controls.
+Its Office adoption cases (`ldui-26tv`) cover contact target selection, blocked
+mobile choices after writes, typed refusals, independent regeneration acceptance
+and completion, stale context, structured guidance, measured talk time and
+wide/mobile zero-ceiling visual audits. These remain in the same lane.
 That catalog server is the real `wasm32-unknown-unknown` release build, so a
 second standalone `trunk build --release` would only repeat the same pipeline
 and is intentionally absent. It is a **separate task**, not part of the
@@ -452,6 +459,16 @@ inline boxes, and anything inside an open dialog/dropdown/modal. Full
 containment is skipped rather than reported — that is nesting, not collision.
 
 `cargo xtask test-layout` runs it, and it is a step of `verify-full`.
+
+Its profile must declare the showcase's intentional button shadows, just as
+`tests/style_audit_smoke.rs` does. The engine collects all enabled families
+even when this suite asserts only layout. Omitting those declarations can
+fill the 200-entry DEPTH cap on a page with many controls and make the report
+truncated before layout counts can be trusted. Keep the two exact shadow
+layers aligned with `demo/input.css`; preserve `assert_not_truncated`, the
+overlap hard failure, and all grid/internal ceilings. The
+[2026-09-09 recovery record](verification/server-table-footer-2026-09-09.md)
+documents this failure and its verified correction (`ldui-y80u`).
 
 `sweep_detects_injected_violations` is a **negative control**: it injects a
 deliberate 20px overlap and a 7px off-grid gap, asserts both are caught, then

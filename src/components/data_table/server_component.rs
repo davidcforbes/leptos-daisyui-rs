@@ -1,3 +1,4 @@
+use super::server_page_size::{ServerTablePageSizePreference, server_page_size_choices};
 use crate::components::button::Button;
 use crate::components::checkbox::{Checkbox, CheckboxSize};
 use crate::components::data_table::auto_page::{
@@ -37,6 +38,7 @@ use crate::components::data_table::{
 };
 use crate::components::entity_table::{EntityColumnChooserTrigger, EntityColumnMove};
 use crate::components::menu::{Menu, MenuCheckItem};
+use crate::components::select::Select;
 use crate::components::table::{Table, TableSize};
 use crate::merge_classes;
 use leptos::{html::Div, prelude::*};
@@ -1412,6 +1414,19 @@ pub fn ServerDataTable(
     #[prop(into, default = Signal::derive(|| DEFAULT_AUTO_MIN_ROWS))]
     viewport_fit_min_rows: Signal<usize>,
 
+    /// Host-retainable Auto/fixed intent and explicit numeric preference.
+    /// Supplying this signal offers Auto even while `viewport_fit` is gated
+    /// off. Measurements never write it. Fixed choices propose once and
+    /// survive resize/refetch; accepted queries remain displayed-count truth.
+    /// Omit it for equivalent component-owned preference. Hosts own response
+    /// correlation and may persist this signal separately from server data.
+    #[prop(optional)]
+    page_size_preference: Option<RwSignal<ServerTablePageSizePreference>>,
+
+    /// Localized Auto caption; `{rows}` is the accepted server capacity.
+    #[prop(into, default = Signal::stored("Auto ({rows})".to_owned()))]
+    page_size_auto_label: Signal<String>,
+
     /// Callback for server-side search (fires after 300ms debounce)
     #[prop(optional, into)]
     on_search: Option<Callback<String>>,
@@ -1920,6 +1935,59 @@ pub fn ServerDataTable(
     let has_search =
         query_capabilities.search_enabled() && (on_search.is_some() || has_query_callback);
     let has_page_size = query_capabilities.page_size_enabled() && has_query_callback;
+    let auto_available =
+        RwSignal::new(page_size_preference.is_some() || viewport_fit.get_untracked());
+    let size_preference = page_size_preference.unwrap_or_else(|| {
+        RwSignal::new(ServerTablePageSizePreference::auto(
+            query_state.get_untracked().page_size(),
+        ))
+    });
+    let size_retry = RwSignal::new(0_u64);
+    // Suppress even alternating repeated measurements while a host declines
+    // or delays a request. A new accepted query or explicit selection retries.
+    let size_proposals: StoredValue<Option<(ServerQuerySnapshot, BTreeSet<i64>)>> =
+        StoredValue::new(None);
+    Effect::new(move |_| {
+        // Include accepted transitions already matching the measured fit,
+        // where there is no new proposal to update this history.
+        let accepted = query_state.get();
+        size_proposals.update_value(|history| {
+            if history.as_ref().is_none_or(|(query, _)| *query != accepted) {
+                *history = Some((accepted, BTreeSet::new()));
+            }
+        });
+    });
+    let size_choices = Signal::derive(move || {
+        server_page_size_choices(
+            page_size_options.get(),
+            query_state.get().page_size(),
+            size_preference.get().fixed_rows(),
+        )
+    });
+    let size_control_value = Signal::derive(move || {
+        size_preference
+            .get()
+            .control_value(query_state.get().page_size(), auto_available.get())
+    });
+    let size_auto_label = Signal::derive(move || {
+        page_size_auto_label
+            .get()
+            .replace("{rows}", &query_state.get().page_size().max(1).to_string())
+    });
+    let size_options_revision = Signal::derive(move || {
+        format!(
+            "{:?}:{}:{}:{}",
+            size_choices.get(),
+            auto_available.get(),
+            query_state.get().page_size(),
+            size_auto_label.get(),
+        )
+    });
+    Effect::new(move |_| {
+        if viewport_fit.get() {
+            auto_available.set(true);
+        }
+    });
     let sorting_enabled = query_capabilities.sorting_enabled() && has_query_callback;
     let filtering_enabled = query_capabilities.filtering_enabled();
     let column_filters = RwSignal::new(query_state.get_untracked().filters().clone());
@@ -2065,6 +2133,7 @@ pub fn ServerDataTable(
         Effect::new(move |_| {
             let next_key = query_reset_key.get();
             if previous_reset_key.get_value() != next_key {
+                size_proposals.set_value(None);
                 query_state.propose(query_state.get_untracked().reset(), on_query_change);
                 previous_reset_key.set_value(next_key);
             }
@@ -2135,10 +2204,19 @@ pub fn ServerDataTable(
     // `ServerCursorQuery::with_page_size` resets to `First` by construction,
     // so cursor mode never replays a previous/next token minted for another
     // size.
-    let viewport_fit_resolution: Memo<Result<bool, &'static str>> =
-        Memo::new(move |_| resolve_viewport_fit(viewport_fit.get(), has_page_size));
-    let viewport_fit_active =
-        Signal::derive(move || matches!(viewport_fit_resolution.get(), Ok(true)));
+    let viewport_fit_resolution: Memo<Result<bool, &'static str>> = Memo::new(move |_| {
+        resolve_viewport_fit(
+            viewport_fit.get() || (auto_available.get() && size_preference.get().is_auto()),
+            has_page_size,
+        )
+    });
+    let viewport_fit_active = Signal::derive(move || {
+        let valid = matches!(viewport_fit_resolution.get(), Ok(true));
+        let ready = viewport_fit.get();
+        let auto = size_preference.get().is_auto();
+        let busy = loading.get();
+        valid && ready && auto && !busy
+    });
 
     let table_wrapper_ref = NodeRef::<Div>::new();
 
@@ -2154,6 +2232,23 @@ pub fn ServerDataTable(
     // sent, until the resulting `rows` change (or an unrelated one) is
     // observed and classified -- see `viewport_fit_rows_change_is_own_induced`.
     let viewport_fit_pending_proposal: StoredValue<Option<i64>> = StoredValue::new(None);
+    Effect::new(move |_| {
+        let preference = size_preference.get();
+        let _ = size_retry.get();
+        size_proposals.set_value(None);
+        viewport_fit_pending_proposal.set_value(None);
+        if has_page_size && !preference.is_auto() {
+            let accepted = query_state.get_untracked();
+            if accepted.page_size() != preference.fixed_rows() {
+                untrack(move || {
+                    query_state.propose(
+                        accepted.with_page_size(preference.fixed_rows()),
+                        on_query_change,
+                    )
+                });
+            }
+        }
+    });
     let viewport_fit_data_revision: StoredValue<u64> = StoredValue::new(0);
     Effect::new(move |ran_before: Option<()>| {
         let _ = rows.get();
@@ -2187,7 +2282,7 @@ pub fn ServerDataTable(
         // measurement closure: this runs from a zero-delay macrotask, so a
         // navigation that disposes this table's reactive owner before the
         // timer fires must degrade to a no-op, not panic the whole wasm app.
-        if !matches!(viewport_fit_resolution.try_get_untracked(), Some(Ok(true))) {
+        if viewport_fit_active.try_get_untracked() != Some(true) {
             return;
         }
         // Stale-measurement guard (ldui-2bt3): a newer pass may already have
@@ -2220,17 +2315,21 @@ pub fn ServerDataTable(
         // rationale; the two must stay in sync.
         let viewport = wrapper.offset_height() as f64;
         let header_height = measure("thead", FALLBACK_HEADER_HEIGHT);
-        let measured_max = wrapper
-            .query_selector_all("tbody tr")
-            .map(|found| {
-                let heights: Vec<f64> = (0..found.length())
-                    .filter_map(|i| found.item(i))
-                    .filter_map(|node| node.dyn_into::<web_sys::HtmlElement>().ok())
-                    .map(|el| el.offset_height() as f64)
-                    .collect();
-                max_row_height(&heights, 0.0)
-            })
-            .unwrap_or(0.0);
+        let measured_max = if rows.with_untracked(Vec::is_empty) {
+            0.0
+        } else {
+            wrapper
+                .query_selector_all("tbody tr")
+                .map(|found| {
+                    let heights: Vec<f64> = (0..found.length())
+                        .filter_map(|i| found.item(i))
+                        .filter_map(|node| node.dyn_into::<web_sys::HtmlElement>().ok())
+                        .map(|el| el.offset_height() as f64)
+                        .collect();
+                    max_row_height(&heights, 0.0)
+                })
+                .unwrap_or(0.0)
+        };
 
         // `table_size` is part of the key too (ldui-wgc3), same rationale as
         // `DataTable`'s own `measure_rows`: a density change moves the
@@ -2261,6 +2360,22 @@ pub fn ServerDataTable(
             min_rows,
             accepted_page_size,
         ) {
+            let accepted = query_state.get_untracked();
+            let fresh = size_proposals
+                .try_update_value(|history| {
+                    if history.as_ref().is_none_or(|(query, _)| *query != accepted) {
+                        *history = Some((accepted.clone(), BTreeSet::new()));
+                    }
+                    history
+                        .as_mut()
+                        .expect("initialized proposal history")
+                        .1
+                        .insert(next_size)
+                })
+                .unwrap_or(false);
+            if !fresh {
+                return;
+            }
             // Recorded BEFORE proposing: an uncontrolled offset table
             // applies the new size to its own internal query state
             // synchronously inside `propose`, so the pending value must
@@ -2328,6 +2443,7 @@ pub fn ServerDataTable(
     // an unsettled layout).
     Effect::new(move |_| {
         let _ = viewport_fit_active.get();
+        let _ = size_retry.get();
         let _ = viewport_fit_min_rows.get();
         let _ = table_size.get();
         let _ = rows.get();
@@ -2376,7 +2492,7 @@ pub fn ServerDataTable(
     // real `height` breaks the circularity where the wrapper's measured
     // height would be a function of the row count derived from it.
     let has_max_height = max_height.is_some();
-    let container_style = move || match (viewport_fit_active.get(), max_height.as_deref()) {
+    let container_style = move || match (auto_available.get(), max_height.as_deref()) {
         (true, Some(h)) => Some(format!(
             "display: flex; flex-direction: column; height: {h}; max-height: {h}"
         )),
@@ -2386,10 +2502,9 @@ pub fn ServerDataTable(
         )),
         (false, None) => None,
     };
-    let is_flex_column = move || has_max_height || viewport_fit_active.get();
+    let is_flex_column = move || has_max_height || auto_available.get();
     let table_wrapper_style =
         move || is_flex_column().then_some("flex: 1; overflow-y: auto; min-height: 0");
-    let controls_style = move || is_flex_column().then_some("flex-shrink: 0; padding: 12px 0");
     let stable_tracks = Signal::derive(move || {
         server_stable_tracks(
             multi.is_some(),
@@ -2605,6 +2720,7 @@ pub fn ServerDataTable(
     } else {
         "offset"
     };
+    let pagination_classes = classes.clone();
 
     view! {
         <div
@@ -2614,6 +2730,8 @@ pub fn ServerDataTable(
             data-table-data-mode="server-query"
             data-server-query-ownership=query_ownership_marker
             data-server-pagination-strategy=pagination_marker
+            data-server-page-size-intent=move || if size_preference.get().is_auto() && auto_available.get() { "auto" } else { "fixed" }
+            data-server-accepted-page-size=move || query_state.get().page_size().max(1).to_string()
             data-server-query-search=if query_capabilities.search_enabled() { "enabled" } else { "disabled" }
             data-server-query-page-size=if query_capabilities.page_size_enabled() { "enabled" } else { "disabled" }
             data-server-query-sorting=if query_capabilities.sorting_enabled() { "enabled" } else { "disabled" }
@@ -2625,7 +2743,8 @@ pub fn ServerDataTable(
                 Err(_) => "invalid",
             }
             data-server-viewport-fit=move || match viewport_fit_resolution.get() {
-                Ok(true) => "active",
+                Ok(true) if viewport_fit_active.get() => "active",
+                Ok(true) => "disabled",
                 Ok(false) => "disabled",
                 Err(_) => "rejected",
             }
@@ -2660,7 +2779,7 @@ pub fn ServerDataTable(
                 </div>
             </Show>
             {move || {
-                if has_search || has_page_size {
+                if has_search {
                     Some(view! {
                         <div class="mb-3 flex min-w-0 flex-wrap items-end justify-between gap-3">
                             {has_search.then(|| view! {
@@ -2684,48 +2803,6 @@ pub fn ServerDataTable(
                                         on:input=on_search_input
                                     />
                                 </div>
-                            })}
-                            {has_page_size.then(|| view! {
-                                <label
-                                    class="flex shrink-0 items-center gap-2 text-sm"
-                                    r#for=move || page_size_input_id.get()
-                                >
-                                    <span>{move || texts.with(|t| t.page_size_label.clone())}</span>
-                                    <select
-                                        node_ref=page_size_select
-                                        id=move || page_size_input_id.get()
-                                        name=move || page_size_input_id.get()
-                                        data-table-page-size-control="true"
-                                        class="select select-bordered select-sm w-24"
-                                        autocomplete="off"
-                                        aria-label=move || texts.with(|t| t.page_size_label.clone())
-                                        prop:value=move || query_state.get().page_size().to_string()
-                                        on:change=move |event| {
-                                            let Ok(next_size) = event_target_value(&event).parse::<i64>() else {
-                                                return;
-                                            };
-                                            query_state.propose(
-                                                query_state.get_untracked().with_page_size(next_size),
-                                                on_query_change,
-                                            );
-                                            let supplied = query_state
-                                                .get_untracked()
-                                                .page_size()
-                                                .to_string();
-                                            if let Some(select) = page_size_select.get() {
-                                                select.set_value(&supplied);
-                                            }
-                                        }
-                                    >
-                                        {move || page_size_options.get()
-                                            .into_iter()
-                                            .filter(|size| *size > 0)
-                                            .map(|size| view! {
-                                                <option value=size.to_string()>{size}</option>
-                                            })
-                                            .collect_view()}
-                                    </select>
-                                </label>
                             })}
                         </div>
                     })
@@ -3067,55 +3144,115 @@ pub fn ServerDataTable(
                 </div>
             </div>
 
-            {move || match pagination {
-                ServerTablePagination::Offset(offset) => {
-                    let total = offset.total_count.get();
-                    let query = query_state.get();
-                    let size = query.page_size().max(1);
-                    let page = query.offset_page().unwrap_or(1).max(1);
-                    let total_pages = if total == 0 {
-                        1
-                    } else {
-                        ((total as f64) / (size as f64)).ceil() as i64
-                    };
-
-                    if total > 0 && !loading.get() {
-                        let start = ((page - 1) * size) + 1;
-                        let end = (page * size).min(total);
-                        view! {
-                            <div style=controls_style>
-                                <ServerPaginationControls
-                                    current_page=page
-                                    total_pages=total_pages
-                                    total_count=total
-                                    start=start
-                                    end=end
-                                    on_page_change=page_change
-                                    texts=texts.get()
-                                    classes=classes.clone()
-                                />
-                            </div>
-                        }
-                        .into_any()
-                    } else {
-                        ().into_any()
-                    }
+            <div
+                class=merge_classes!(classes.pagination, "flex shrink-0 flex-wrap items-center justify-between gap-3")
+                data-server-table-footer="true"
+                data-server-cursor-state=move || match pagination {
+                    ServerTablePagination::Cursor(cursor) => Some(match cursor.page.get().state {
+                        ServerCursorSliceState::Current => "current",
+                        ServerCursorSliceState::RetainedWhileLoading => "retained-loading",
+                        ServerCursorSliceState::RetainedAfterFailure => "retained-failure",
+                    }),
+                    ServerTablePagination::Offset(_) => None,
                 }
-                ServerTablePagination::Cursor(cursor) => view! {
-                    <div style=controls_style>
+            >
+                <div class="flex min-w-0 max-w-full flex-wrap items-center gap-3">
+                    {has_page_size.then(|| view! {
+                        <label
+                            class="flex min-w-0 max-w-full flex-wrap items-center gap-2 text-sm text-base-content/75"
+                            r#for=move || page_size_input_id.get()
+                        >
+                            <span class="min-w-0 break-words">{move || texts.with(|t| t.page_size_label.clone())}</span>
+                            <Select
+                                node_ref=page_size_select
+                                id=page_size_input_id
+                                name=Signal::derive(move || Some(page_size_input_id.get()))
+                                label=Signal::derive(move || texts.with(|t| t.page_size_label.clone()))
+                                class="select-sm w-28 shrink-0"
+                                attr:data-table-page-size-control="true"
+                                attr:autocomplete="off"
+                                value=size_control_value
+                                options_revision=size_options_revision
+                                on_change=Callback::new(move |value: String| {
+                                    if let Some(next) = size_preference.get_untracked().choose(
+                                        &value, auto_available.get_untracked(), &size_choices.get_untracked(),
+                                    ) {
+                                        batch(move || {
+                                            size_preference.set(next);
+                                            size_retry.update(|revision| *revision = revision.wrapping_add(1));
+                                        });
+                                    }
+                                    // A native change is not accepted server data. Restore
+                                    // immediately even if the preference/query did not change.
+                                    if let Some(select) = page_size_select.get() {
+                                        select.set_value(&size_control_value.get_untracked());
+                                    }
+                                })
+                            >
+                                {move || auto_available.get().then(|| view! {
+                                    <option value="auto">{move || size_auto_label.get()}</option>
+                                })}
+                                {move || size_choices.get().into_iter().map(|size| view! {
+                                    <option value=size.to_string()>{size}</option>
+                                }).collect_view()}
+                            </Select>
+                        </label>
+                    })}
+                    <span class=classes.page_indicator data-server-row-range="true" role="status" aria-live="polite">
+                        {move || match pagination {
+                            ServerTablePagination::Offset(offset) => {
+                                if loading.get() { return texts.with(|t| t.loading.clone()); }
+                                let query = query_state.get();
+                                let total = offset.total_count.get().max(0);
+                                let count = rows.with(Vec::len) as i64;
+                                let start = if total == 0 || count == 0 { 0 } else {
+                                    query.offset_page().unwrap_or(1).max(1).saturating_sub(1)
+                                        .saturating_mul(query.page_size().max(1)).saturating_add(1)
+                                };
+                                let end = if start == 0 { 0 } else { start.saturating_add(count - 1).min(total) };
+                                texts.with(|t| t.row_range.replace("{start}", &start.to_string())
+                                    .replace("{end}", &end.to_string()).replace("{total}", &total.to_string()))
+                            }
+                            ServerTablePagination::Cursor(cursor) => {
+                                let state = cursor.page.get().state;
+                                cursor.texts.with(|t| match state {
+                                    ServerCursorSliceState::Current => &t.current,
+                                    ServerCursorSliceState::RetainedWhileLoading => &t.retained_loading,
+                                    ServerCursorSliceState::RetainedAfterFailure => &t.retained_failure,
+                                }.replace("{count}", &rows.with(Vec::len).to_string()))
+                            }
+                        }}
+                    </span>
+                </div>
+                {move || match pagination {
+                    ServerTablePagination::Offset(offset) => {
+                        let total = offset.total_count.get().max(0);
+                        let query = query_state.get();
+                        let size = query.page_size().max(1);
+                        let page = query.offset_page().unwrap_or(1).max(1);
+                        let total_pages = (total / size + i64::from(total % size != 0)).max(1);
+                        view! {
+                            <ServerPaginationControls
+                                current_page=page
+                                total_pages=total_pages
+                                loading=loading.get()
+                                on_page_change=page_change
+                                texts=texts.get()
+                                classes=pagination_classes.clone()
+                            />
+                        }.into_any()
+                    }
+                    ServerTablePagination::Cursor(cursor) => view! {
                         <ServerCursorPaginationControls
                             page=cursor.page.get()
-                            row_count=rows.with(Vec::len)
                             loading=loading.get()
                             on_navigate=cursor_change
                             texts=texts.get()
-                            cursor_texts=cursor.texts.get()
-                            classes=classes.clone()
+                            classes=pagination_classes.clone()
                         />
-                    </div>
-                }
-                .into_any(),
-            }}
+                    }.into_any(),
+                }}
+            </div>
         </div>
     }
     .into_any()
@@ -3194,20 +3331,11 @@ fn restore_server_column_move_focus(
 #[component]
 fn ServerCursorPaginationControls(
     page: ServerCursorPage,
-    row_count: usize,
     loading: bool,
     on_navigate: Callback<ServerCursorRequest>,
     texts: DataTableTexts,
-    cursor_texts: ServerCursorTexts,
     classes: DataTableClasses,
 ) -> impl IntoView {
-    let state = page.state;
-    let status_template = match state {
-        ServerCursorSliceState::Current => cursor_texts.current,
-        ServerCursorSliceState::RetainedWhileLoading => cursor_texts.retained_loading,
-        ServerCursorSliceState::RetainedAfterFailure => cursor_texts.retained_failure,
-    };
-    let status = status_template.replace("{count}", &row_count.to_string());
     let previous = page.previous;
     let next = page.next;
     let previous_disabled = loading || previous.is_none();
@@ -3215,17 +3343,9 @@ fn ServerCursorPaginationControls(
 
     view! {
         <div
-            class=classes.pagination
-            data-server-cursor-state=match state {
-                ServerCursorSliceState::Current => "current",
-                ServerCursorSliceState::RetainedWhileLoading => "retained-loading",
-                ServerCursorSliceState::RetainedAfterFailure => "retained-failure",
-            }
+            class="max-w-full flex flex-wrap items-center justify-end gap-1"
         >
-            <span class=classes.page_indicator role="status" aria-live="polite">
-                {status}
-            </span>
-            <div class="join">
+            <div class="join max-w-full flex flex-wrap items-center justify-end gap-1">
                 <button
                     type="button"
                     class=merge_classes!(classes.pagination_button, "join-item")
@@ -3262,9 +3382,7 @@ fn ServerCursorPaginationControls(
 fn ServerPaginationControls(
     current_page: i64,
     total_pages: i64,
-    total_count: i64,
-    start: i64,
-    end: i64,
+    loading: bool,
     on_page_change: Callback<i64>,
     texts: DataTableTexts,
     classes: DataTableClasses,
@@ -3279,26 +3397,18 @@ fn ServerPaginationControls(
     // into a *render-time child expression* — every render "clicked Next"
     // until the last page, silently walking a freshly mounted table to page
     // N. Unexercised until the typed-query demo made the walk visible.
-    let prev_disabled = current_page <= 1;
-    let next_disabled = current_page >= total_pages;
+    let prev_disabled = loading || current_page <= 1;
+    let next_disabled = loading || current_page >= total_pages;
 
     view! {
-        <div class=classes.pagination>
-            <span class=classes.page_indicator>
-                {texts
-                    .row_range
-                    .replace("{start}", &start.to_string())
-                    .replace("{end}", &end.to_string())
-                    .replace("{total}", &total_count.to_string())}
-            </span>
-
-            <div class="join">
+        <div class="max-w-full flex flex-wrap items-center justify-end gap-1">
+            <div class="join max-w-full flex flex-wrap items-center justify-end gap-1">
                 // Previous button
                 <button
                     class=merge_classes!(classes.pagination_button, "join-item")
                     disabled=prev_disabled
                     on:click=move |_| {
-                        if current_page > 1 {
+                        if !loading && current_page > 1 {
                             on_page_change.run(current_page - 1);
                         }
                     }
@@ -3315,9 +3425,9 @@ fn ServerPaginationControls(
                             view! {
                                 <button
                                     class=merge_classes!(classes.pagination_button, "join-item", active_class)
-                                    disabled=is_active
+                                    disabled=is_active || loading
                                     on:click=move |_| {
-                                        on_page_change.run(num);
+                                        if !loading { on_page_change.run(num); }
                                     }
                                 >
                                     {num.to_string()}
@@ -3342,7 +3452,7 @@ fn ServerPaginationControls(
                     class=merge_classes!(classes.pagination_button, "join-item")
                     disabled=next_disabled
                     on:click=move |_| {
-                        if current_page < total_pages {
+                        if !loading && current_page < total_pages {
                             on_page_change.run(current_page + 1);
                         }
                     }

@@ -48,6 +48,13 @@ leptos-daisyui-rs = { path = "../leptos-daisyui-rs" }
 - 🎯 **Type-Safe Props** with Rust enums
 - ⚡ **Reactive Signals** for dynamic updates
 
+The [ClientCallWorkspace](doc/components/client_call_workspace.md) composition
+combines client context, destination editing, explicit contact-number updates,
+bridge or managed call state, guidance and a structured call record. Its
+[Office research report](doc/research/2026-09-09-office-softphone-workspace.md)
+documents the design evidence and host integration boundary. Try it in the
+showcase at `/components/client-call-workspace`.
+
 ## How to use
 
 ### Install
@@ -491,6 +498,7 @@ See [`demo/custom-components.css`](demo/custom-components.css#L376-L400) for the
 
 - **Default gate**: `cargo xtask verify` runs 16 native-only checks, including the library suite with `test-mode`; it does not build Wasm or invoke Chrome.
 - **Selective reactivity**: `cargo xtask test-reactivity` runs 69 real-browser DOM/interaction checks. It is opt-in and is not required for an ordinary rebuild.
+- **Server-table footer and row sizing**: `cargo xtask test-server-table-column-tools` checks footer placement, stable control identity, Auto/fixed intent, accepted server state, and compact layouts. See the [API and migration guidance](doc/components/data_table.md#footer-and-autofixed-rows-per-page).
 - **Full release evidence**: `cargo xtask verify-full` runs 16 native checks plus 24 browser lanes and reports 40 steps. Both the page-scoped host and full catalog use release Wasm builds. Use it when browser, CSS, Wasm, or release behavior needs proof. The current xtask summary is authoritative when counts change.
 - **Visual regression**: `cargo make test-visual` runs the manual PixelProof visual/reactivity smoke workflow — headless Chrome drives the demo app, screenshots are SSIM-compared against committed baselines in `tests/visual/baselines/`, and interaction state is asserted through the demo's `window.__APP_DEBUG__` oracle (enabled by `?pp-freeze=1`).
 - **Refresh baselines** only after comparing existing captures, fixing regressions, and reviewing every intended difference. In PowerShell, run `$env:VISUAL_TEST_MODE = 'capture'; cargo make test-visual`, then `Remove-Item Env:VISUAL_TEST_MODE` and rerun in compare mode before committing the PNGs.

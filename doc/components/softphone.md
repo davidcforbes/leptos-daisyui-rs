@@ -1,5 +1,17 @@
 # Softphone
 
+Office adoption extension (`ldui-26tv`): `SoftphoneNumber.blocked_reason` keeps an
+unavailable saved number visible while disabling selection and dialing. Hosts
+still authorize every request. Set the field to `None` or use
+`..Default::default()` in existing literals. Calling enums are now
+`#[non_exhaustive]`; external matches must handle unknown variants without
+performing an operation. The broader
+[workspace guide](client_call_workspace.md#api-migration) documents migration,
+typed refusal evidence, structured guidance and contact target selection.
+
+For destination editing, contact-number writes, guidance and structured call
+records around this live console, use [ClientCallWorkspace](client_call_workspace.md).
+
 `Softphone` is LDUI's opinionated client calling component: identity, number selection, elapsed time, call controls and feedback on one bounded surface. It is a controlled UI composition, like EntityTable. The application supplies state and receives typed requests. It does not load a telephony SDK, request microphone access, place calls, capture audio, persist notes or choose a provider.
 
 The interactive showcase is `/components/softphone`. Its [complete simulated host](../../demo/src/demos/softphone.rs) accepts or rejects commands without making calls. [Research](../research/2026-09-04-client-call-workspace.md) provides product context; this document defines the implemented library contract.
@@ -21,6 +33,7 @@ fn ClientPhone() -> impl IntoView {
                 id: "mobile".into(),
                 label: "Mobile".into(),
                 number: "+1 (415) 555-0142".into(),
+                ..Default::default()
             }],
         },
         capabilities: SoftphoneCapabilities {

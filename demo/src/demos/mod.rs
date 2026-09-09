@@ -5,6 +5,8 @@ pub mod alert;
 pub mod app_shell;
 pub mod softphone;
 pub use softphone::*;
+pub mod client_call_workspace;
+pub use client_call_workspace::*;
 pub mod auto_complete;
 pub mod avatar;
 pub mod badge;

@@ -653,6 +653,15 @@ pub fn DataTableDemo() -> impl IntoView {
     let viewport_fit_total = RwSignal::new(0_i64);
     let viewport_fit_query = RwSignal::new(TableQuery::first_page(5));
     let viewport_fit_accept = RwSignal::new(true);
+    let viewport_fit_preference = RwSignal::new(ServerTablePageSizePreference::auto(25));
+    let viewport_fit_delay = RwSignal::new(false);
+    let viewport_fit_pending = RwSignal::new(None::<TableQuery>);
+    let viewport_fit_loading = RwSignal::new(false);
+    let viewport_fit_ready = RwSignal::new(true);
+    let viewport_fit_one = RwSignal::new(false);
+    let viewport_fit_empty = RwSignal::new(false);
+    let viewport_fit_localized = RwSignal::new(false);
+    let viewport_fit_callback_probe = RwSignal::new(0_u32);
     let viewport_fit_proposals = RwSignal::new(0_u32);
     let viewport_fit_last_query = RwSignal::new(String::new());
     let viewport_fit_columns = RwSignal::new(vec![
@@ -668,7 +677,7 @@ pub fn DataTableDemo() -> impl IntoView {
     // the shrunk (short-only) page must not propose growing again forever.
     let viewport_fit_offset_columns = RwSignal::new(vec![
         Column::new("name", "Name"),
-        Column::new("email", "Email"),
+        Column::new("email", "Email").with_min_width(180),
         Column::new_non_sortable("role", "Role").with_renderer(0),
     ]);
     let viewport_fit_tall_row_renderer: CellRenderer =
@@ -689,7 +698,12 @@ pub fn DataTableDemo() -> impl IntoView {
             }
         });
     let run_viewport_fit_query = move |q: TableQuery| {
-        let items = viewport_fit_fixture.get_value();
+        let mut items = viewport_fit_fixture.get_value();
+        if viewport_fit_empty.get_untracked() {
+            items.clear();
+        } else if viewport_fit_one.get_untracked() {
+            items.truncate(1);
+        }
         viewport_fit_total.set(items.len() as i64);
         let start = ((q.page - 1) * q.page_size).max(0) as usize;
         viewport_fit_rows.set(
@@ -703,12 +717,24 @@ pub fn DataTableDemo() -> impl IntoView {
         viewport_fit_last_query.set(format!("page={} size={}", q.page, q.page_size));
     };
     let propose_viewport_fit_query = move |query: TableQuery| {
+        // A host may use normal tracked reads inside a callback. They must
+        // never become dependencies of the library's proposal effect.
+        let _ = viewport_fit_callback_probe.get();
+        viewport_fit_pending.set(Some(query.clone()));
         viewport_fit_proposals.update(|count| *count += 1);
         if !viewport_fit_accept.get_untracked() {
             viewport_fit_last_query.set(format!(
                 "declined: page={} size={}",
                 query.page, query.page_size
             ));
+            return;
+        }
+        if viewport_fit_delay.get_untracked() {
+            viewport_fit_last_query.set(format!(
+                "pending: page={} size={}",
+                query.page, query.page_size
+            ));
+            viewport_fit_pending.set(Some(query));
             return;
         }
         viewport_fit_query.set(query.clone());
@@ -2285,6 +2311,10 @@ pub fn DataTableDemo() -> impl IntoView {
                     <code class="font-sans" data-testid="viewport-fit-proposals">
                         {move || viewport_fit_proposals.get().to_string()}
                     </code>
+                    " · Preference: "
+                    <code class="font-sans" data-testid="viewport-fit-preference">
+                        {move || format!("{:?}:{}", viewport_fit_preference.get().intent(), viewport_fit_preference.get().fixed_rows())}
+                    </code>
                 </p>
                 <div class="mb-3 flex flex-wrap gap-2">
                     <Button
@@ -2297,6 +2327,50 @@ pub fn DataTableDemo() -> impl IntoView {
                             "Accept proposals"
                         }}
                     </Button>
+                    <Button attr:data-testid="viewport-fit-delay"
+                        on:click=move |_| viewport_fit_delay.update(|value| *value = !*value)>
+                        {move || if viewport_fit_delay.get() { "Respond immediately" } else { "Delay response" }}
+                    </Button>
+                    <Button attr:data-testid="viewport-fit-apply"
+                        on:click=move |_| {
+                            if let Some(query) = viewport_fit_pending.get_untracked() {
+                                viewport_fit_pending.set(None);
+                                viewport_fit_query.set(query.clone());
+                                run_viewport_fit_query(query);
+                            }
+                        }>"Accept pending"</Button>
+                    <Button attr:data-testid="viewport-fit-filter-one"
+                        on:click=move |_| {
+                            viewport_fit_one.update(|value| *value = !*value);
+                            run_viewport_fit_query(viewport_fit_query.get_untracked());
+                        }>"Toggle one row"</Button>
+                    <Button attr:data-testid="viewport-fit-empty"
+                        on:click=move |_| {
+                            viewport_fit_empty.update(|value| *value = !*value);
+                            run_viewport_fit_query(viewport_fit_query.get_untracked());
+                        }>"Toggle empty"</Button>
+                    <Button attr:data-testid="viewport-fit-loading"
+                        on:click=move |_| viewport_fit_loading.update(|value| *value = !*value)>
+                        "Toggle loading"
+                    </Button>
+                    <Button attr:data-testid="viewport-fit-ready"
+                        on:click=move |_| viewport_fit_ready.update(|value| *value = !*value)>
+                        "Toggle measurement"
+                    </Button>
+                    <Button attr:data-testid="viewport-fit-localize"
+                        on:click=move |_| viewport_fit_localized.update(|value| *value = !*value)>
+                        "Toggle language"
+                    </Button>
+                    <Button attr:data-testid="viewport-fit-callback-probe"
+                        on:click=move |_| viewport_fit_callback_probe.update(|value| *value += 1)>
+                        "Update host state"
+                    </Button>
+                    <Button attr:data-testid="viewport-fit-supply-25"
+                        on:click=move |_| {
+                            let query = viewport_fit_query.get_untracked().with_page_size(25);
+                            viewport_fit_query.set(query.clone());
+                            run_viewport_fit_query(query);
+                        }>"Supply 25 rows"</Button>
                 </div>
                 // `resize-y` + `overflow-auto`, same as the DataTable auto_page_size
                 // demo above: user-resizable so the ResizeObserver can be exercised
@@ -2314,7 +2388,13 @@ pub fn DataTableDemo() -> impl IntoView {
                             viewport_fit_query.into(),
                             Callback::new(propose_viewport_fit_query),
                         )
-                        viewport_fit=true
+                        viewport_fit=viewport_fit_ready
+                        page_size_preference=viewport_fit_preference
+                        loading=viewport_fit_loading
+                        page_size_auto_label=Signal::derive(move || {
+                            if viewport_fit_localized.get() { "Ajustar ({rows})" } else { "Auto ({rows})" }.to_owned()
+                        })
+                        control_id="viewport-fit-offset"
                         viewport_fit_min_rows=3_usize
                         max_height="100%"
                         attr:id="viewport-fit-offset-server-table"

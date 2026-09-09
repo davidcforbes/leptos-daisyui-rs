@@ -114,6 +114,8 @@ pub use server_column_tools::{
     ServerTableDisplayRow, ServerTableDisplayedSlice,
 };
 pub use server_component::*;
+mod server_page_size;
+pub use server_page_size::ServerTablePageSizePreference;
 pub use server_selection::{
     ServerTableMultiSelection, ServerTableRowSelectability, ServerTableSelectionCause,
     ServerTableSelectionProposal, ServerTableSelectionTexts, ServerTableSliceSelectionState,

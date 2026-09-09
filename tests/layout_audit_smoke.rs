@@ -54,7 +54,17 @@ use ldui_audit::family;
 /// latched `truncated` on every run forever. (An empty `type_ramp` would not
 /// have helped: the family comparison is independent of the ramp.)
 async fn profile(h: &ldui_audit::Harness) -> ldui_audit::StyleProfile {
-    ldui_audit::from_ui_tokens(body_font_family(h).await)
+    let base = ldui_audit::from_ui_tokens(body_font_family(h).await);
+    // Match style_audit_smoke's declaration of the intentional button push
+    // shadows in demo/input.css. Otherwise a control-heavy page can exhaust
+    // the DEPTH report cap before this suite checks its layout families.
+    // Keep truncation fail-closed and every layout ceiling unchanged.
+    let mut shadows = base.shadows.clone();
+    shadows.extend([
+        ldui_audit::ShadowSpec::new(0.0, 6.0, 12.0, 0.15).with_spread(-2.0),
+        ldui_audit::ShadowSpec::new(0.0, 3.0, 6.0, 0.10).with_spread(-2.0),
+    ]);
+    base.shadows(shadows)
 }
 
 /// Pages swept, with their current violation ceilings.
