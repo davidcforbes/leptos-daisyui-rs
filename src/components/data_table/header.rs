@@ -15,6 +15,7 @@ struct ResizeDrag {
     col_id: &'static str,
     start_x: f64,
     start_width: f64,
+    prior_width: Option<f64>,
 }
 
 const IDLE_SORT_SYMBOL: &str = "⇅";
@@ -73,9 +74,10 @@ pub fn DataTableHeader(
     /// Explicit resize commit boundary for preference-owning parents.
     /// Focus hydration and pointer-move previews update `column_widths`
     /// without invoking this callback; keyboard changes and completed,
-    /// changed pointer drags invoke it exactly once.
+    /// changed pointer drags invoke it exactly once with only the committed
+    /// column id and width.
     #[prop(optional_no_strip)]
-    on_column_width_commit: Option<Callback<()>>,
+    on_column_width_commit: Option<Callback<(&'static str, f64)>>,
 
     /// Optional leading `<th>` rendered before every declared column, for a
     /// non-data control column that is not part of `columns` -- currently
@@ -277,11 +279,13 @@ pub fn DataTableHeader(
                                                 widths.insert(col_id, new_width.round());
                                             });
                                             if let Some(on_commit) = on_column_width_commit {
-                                                on_commit.run(());
+                                                on_commit.run((col_id, new_width.round()));
                                             }
                                         }
                                         on:pointerdown=move |ev: web_sys::PointerEvent| {
                                             ev.stop_propagation();
+                                            let prior_width = column_widths
+                                                .with_untracked(|m| m.get(col_id).copied());
                                             // Start from the divider's own <th> rendered width when
                                             // available (most accurate), else the last override, else
                                             // the effective minimum.
@@ -298,6 +302,7 @@ pub fn DataTableHeader(
                                                 col_id,
                                                 start_x: ev.client_x() as f64,
                                                 start_width,
+                                                prior_width,
                                             }));
                                             if let Some(target) = ev.target()
                                                 && let Ok(el) = target.dyn_into::<web_sys::Element>()
@@ -360,17 +365,21 @@ fn commit_resize(
     pointer_id: i32,
     resize_drag: RwSignal<Option<ResizeDrag>>,
     column_widths: RwSignal<HashMap<&'static str, f64>>,
-    on_column_width_commit: Option<Callback<()>>,
+    on_column_width_commit: Option<Callback<(&'static str, f64)>>,
 ) {
     release_pointer_capture(target, pointer_id);
-    let changed = resize_drag.get_untracked().is_some_and(|drag| {
-        column_widths
-            .with_untracked(|widths| widths.get(drag.col_id).copied())
-            .is_some_and(|width| width.round() != drag.start_width.round())
+    let committed = resize_drag.get_untracked().and_then(|drag| {
+        column_widths.with_untracked(|widths| {
+            widths
+                .get(drag.col_id)
+                .copied()
+                .filter(|width| width.round() != drag.start_width.round())
+                .map(|width| (drag.col_id, width.round()))
+        })
     });
     resize_drag.set(None);
-    if changed && let Some(on_commit) = on_column_width_commit {
-        on_commit.run(());
+    if let (Some(committed), Some(on_commit)) = (committed, on_column_width_commit) {
+        on_commit.run(committed);
     }
 }
 
@@ -383,7 +392,11 @@ fn cancel_resize(
     release_pointer_capture(target, pointer_id);
     if let Some(drag) = resize_drag.get_untracked() {
         column_widths.update(|widths| {
-            widths.insert(drag.col_id, drag.start_width.round());
+            if let Some(prior_width) = drag.prior_width {
+                widths.insert(drag.col_id, prior_width);
+            } else {
+                widths.remove(drag.col_id);
+            }
         });
     }
     resize_drag.set(None);

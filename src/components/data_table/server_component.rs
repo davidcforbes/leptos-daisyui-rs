@@ -1651,12 +1651,13 @@ pub fn ServerDataTable(
         });
     }
     let on_column_width_commit = column_tools_state.map(|state| {
-        Callback::new(move |()| {
-            let runtime = column_widths.get_untracked();
-            if runtime == state.runtime_widths_untracked() {
+        Callback::new(move |(column_id, width)| {
+            let mut committed = state.runtime_widths_untracked();
+            if committed.get(column_id).copied() == Some(width) {
                 return;
             }
-            state.replace_widths(&runtime);
+            committed.insert(column_id, width);
+            state.replace_widths(&committed);
             // Controlled owners may decline or delay the replacement. Reread
             // accepted truth only after the completed action, never during a
             // pointer preview, and restore it immediately when unchanged.

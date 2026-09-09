@@ -715,6 +715,25 @@ async fn finish_real_pointer_drag(harness: &pixelproof_web::Harness, x: f64, y: 
     tokio::time::sleep(std::time::Duration::from_millis(harness.config().settle_ms)).await;
 }
 
+async fn cancel_real_pointer_drag(harness: &pixelproof_web::Harness, selector: &str) {
+    eval_json(
+        harness,
+        &format!(
+            r#"(() => {{
+                const separator = document.querySelector({selector:?});
+                return separator.dispatchEvent(new PointerEvent('pointercancel', {{
+                    bubbles: true,
+                    pointerId: 1,
+                    pointerType: 'mouse',
+                    isPrimary: true,
+                }}));
+            }})()"#
+        ),
+    )
+    .await;
+    tokio::time::sleep(std::time::Duration::from_millis(harness.config().settle_ms)).await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires demo dev server (cargo xtask test-server-table-column-tools)"]
 async fn focusing_an_unstored_server_resize_separator_emits_no_proposal() {
@@ -744,6 +763,82 @@ async fn focusing_an_unstored_server_resize_separator_emits_no_proposal() {
         "focus may hydrate local ARIA/rendered width but must not persist it"
     );
     assert_no_browser_errors(&harness, "server resize focus-only boundary").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-server-table-column-tools)"]
+async fn focusing_one_column_cannot_leak_into_another_columns_commit() {
+    let harness = harness_at("/components/data-table").await;
+    wait_for_selector(&harness, "#server-table tbody tr").await;
+    begin_browser_error_capture(&harness).await;
+
+    let email_separator = "#server-table [role='separator'][aria-label='Resize Email column']";
+    let name_separator = "#server-table [role='separator'][aria-label='Resize Name column']";
+    harness
+        .page()
+        .find_element(email_separator)
+        .await
+        .expect("find Email resize separator")
+        .focus()
+        .await
+        .expect("focus unstored Email resize separator");
+    harness
+        .page()
+        .find_element(name_separator)
+        .await
+        .expect("find Name resize separator")
+        .focus()
+        .await
+        .expect("focus stored Name resize separator");
+    harness
+        .press_key_sequence(&[pixelproof_web::Key::ArrowRight])
+        .await
+        .expect("commit Name resize after focusing Email");
+
+    let committed = server_name_width_snapshot(&harness).await;
+    assert_eq!(committed["proposals"], json!(1));
+    assert_eq!(
+        committed["acceptedWidths"],
+        json!({ "name": 200 }),
+        "a Name commit must not persist Email's focus-only runtime width: {committed}"
+    );
+    assert_no_browser_errors(&harness, "cross-column focus/commit isolation").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-server-table-column-tools)"]
+async fn canceling_an_unstored_column_drag_restores_the_absent_override() {
+    let harness = harness_at("/components/data-table").await;
+    wait_for_selector(&harness, "#server-table tbody tr").await;
+    begin_browser_error_capture(&harness).await;
+
+    let separator = "#server-table [role='separator'][aria-label='Resize Email column']";
+    let before = server_email_width_snapshot(&harness).await;
+    assert_eq!(before["acceptedWidth"], Value::Null);
+    assert_eq!(before["proposals"], json!(0));
+
+    begin_real_pointer_drag(&harness, separator, 96.0).await;
+    let preview = server_email_width_snapshot(&harness).await;
+    assert!(
+        preview["trackWidth"].as_f64() > before["trackWidth"].as_f64(),
+        "the canceled journey must first prove a visible pointer preview: before={before}, preview={preview}"
+    );
+    cancel_real_pointer_drag(&harness, separator).await;
+
+    let canceled = server_email_width_snapshot(&harness).await;
+    assert_eq!(canceled["acceptedWidth"], Value::Null);
+    assert_eq!(canceled["proposals"], json!(0));
+    assert_eq!(
+        canceled["now"], before["now"],
+        "cancel must remove an override that was absent before pointerdown: before={before}, canceled={canceled}"
+    );
+    let restored_delta =
+        (canceled["trackWidth"].as_f64().unwrap() - before["trackWidth"].as_f64().unwrap()).abs();
+    assert!(
+        restored_delta <= 0.5,
+        "cancel must restore the implicit track geometry: before={before}, canceled={canceled}"
+    );
+    assert_no_browser_errors(&harness, "server pointer-cancel rollback").await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
