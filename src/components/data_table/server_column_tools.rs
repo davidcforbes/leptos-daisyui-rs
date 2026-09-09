@@ -18,6 +18,7 @@
 //! Its doc comment says so explicitly, and there is no code path that could
 //! silently promote a page to a population.
 
+use crate::components::data_table::resize::{effective_min_width, resized_width};
 use crate::components::data_table::types::{Column, TableRow};
 use crate::components::entity_table::{
     EntityColumn, EntityColumnChooserTrigger, EntityColumnMove, EntityTablePreferenceOwnership,
@@ -26,6 +27,7 @@ use crate::components::entity_table::{
     toggle_hidden_column,
 };
 use leptos::prelude::*;
+use std::collections::HashMap;
 
 /// `localStorage` key prefix for [`ServerTableColumnTools`]'s uncontrolled
 /// persistence. Deliberately distinct from `EntityTable`'s own prefix so the
@@ -138,9 +140,67 @@ pub(crate) fn server_column_tools_entity_columns(
             if column.required {
                 entity_column = entity_column.required();
             }
+            if let Some(min_width) = column.min_width {
+                entity_column = entity_column.with_min_width(min_width);
+            }
+            if !column.resizable {
+                entity_column = entity_column.non_resizable();
+            }
             entity_column
         })
         .collect()
+}
+
+/// Converts accepted, normalized preference widths into the floating-point
+/// map shared by `DataTableHeader` and `DataTableBody`.
+pub(crate) fn server_runtime_widths(
+    preferences: &EntityTablePreferences,
+    columns: &[Column],
+) -> HashMap<&'static str, f64> {
+    columns
+        .iter()
+        .filter(|column| column.resizable)
+        .filter_map(|column| {
+            preferences.column_widths.get(column.id).map(|width| {
+                (
+                    column.id,
+                    resized_width(
+                        f64::from(*width),
+                        0.0,
+                        0.0,
+                        effective_min_width(column.min_width),
+                    )
+                    .round(),
+                )
+            })
+        })
+        .collect()
+}
+
+/// Replaces only the persisted resize-width field, discarding undeclared and
+/// non-resizable ids while applying the shared resize bounds and rounding.
+pub(crate) fn server_preferences_with_widths(
+    preferences: &EntityTablePreferences,
+    widths: &HashMap<&'static str, f64>,
+    columns: &[Column],
+) -> EntityTablePreferences {
+    let mut replacement = preferences.clone();
+    replacement.column_widths.clear();
+    for column in columns.iter().filter(|column| column.resizable) {
+        let Some(width) = widths
+            .get(column.id)
+            .copied()
+            .filter(|width| width.is_finite())
+        else {
+            continue;
+        };
+        let bounded =
+            resized_width(width, 0.0, 0.0, effective_min_width(column.min_width)).round() as u32;
+        replacement
+            .column_widths
+            .insert(column.id.to_owned(), bounded);
+    }
+    replacement
 }
 
 /// Reorders and hides columns per normalized preferences. Required columns
@@ -300,6 +360,26 @@ impl ServerColumnToolsState {
         normalize_preferences(&raw, self.schema_version, &self.entity_columns_untracked())
     }
 
+    pub(crate) fn runtime_widths(self) -> HashMap<&'static str, f64> {
+        server_runtime_widths(&self.get(), &self.columns.get())
+    }
+
+    pub(crate) fn runtime_widths_untracked(self) -> HashMap<&'static str, f64> {
+        server_runtime_widths(&self.get_untracked(), &self.columns.get_untracked())
+    }
+
+    pub(crate) fn replace_widths(self, widths: &HashMap<&'static str, f64>) {
+        let replacement = server_preferences_with_widths(
+            &self.get_untracked(),
+            widths,
+            &self.columns.get_untracked(),
+        );
+        match self.source {
+            ServerColumnToolsSource::Controlled { on_change, .. } => on_change.run(replacement),
+            ServerColumnToolsSource::Uncontrolled { current, .. } => current.set(replacement),
+        }
+    }
+
     pub(crate) fn update(self, mutate: impl FnOnce(&mut EntityTablePreferences)) {
         let mut next = self.get_untracked();
         mutate(&mut next);
@@ -435,6 +515,7 @@ pub(crate) fn server_table_displayed_slice(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::components::entity_table::{EntityPageSizeIntent, EntitySort};
     use std::collections::HashMap;
 
     fn columns() -> Vec<Column> {
@@ -447,6 +528,57 @@ mod tests {
 
     fn preferences() -> EntityTablePreferences {
         EntityTablePreferences::new(1)
+    }
+
+    fn resize_columns() -> Vec<Column> {
+        vec![
+            Column::new("module", "Module").with_min_width(80),
+            Column::new("owner", "Owner").non_resizable(),
+        ]
+    }
+
+    // ── preference-owned resize widths ──
+
+    #[test]
+    fn accepted_preference_widths_hydrate_the_runtime_width_map() {
+        let mut preferences = EntityTablePreferences::new(7);
+        preferences.column_widths.insert("module".to_owned(), 184);
+
+        assert_eq!(
+            server_runtime_widths(&preferences, &resize_columns()),
+            HashMap::from([("module", 184.0)])
+        );
+    }
+
+    #[test]
+    fn runtime_width_replacement_normalizes_ids_and_preserves_unrelated_preferences() {
+        let mut preferences = EntityTablePreferences::new(7);
+        preferences.page_size = 50;
+        preferences.page_size_mode = EntityPageSizeIntent::Fixed;
+        preferences.sort = EntitySort::descending("module");
+        preferences.column_order = vec!["owner".to_owned(), "module".to_owned()];
+        preferences.hidden_columns.insert("owner".to_owned());
+        preferences.column_widths.insert("module".to_owned(), 184);
+        let widths = HashMap::from([("module", 195.6), ("unknown", 640.0)]);
+
+        let replacement = server_preferences_with_widths(&preferences, &widths, &resize_columns());
+
+        assert_eq!(replacement.schema_version, 7);
+        assert_eq!(replacement.page_size, 50);
+        assert_eq!(replacement.page_size_mode, EntityPageSizeIntent::Fixed);
+        assert_eq!(replacement.sort, EntitySort::descending("module"));
+        assert_eq!(
+            replacement.column_order,
+            vec!["owner".to_owned(), "module".to_owned()]
+        );
+        assert_eq!(
+            replacement.hidden_columns,
+            std::collections::BTreeSet::from(["owner".to_owned()])
+        );
+        assert_eq!(
+            replacement.column_widths,
+            std::collections::BTreeMap::from([("module".to_owned(), 196)])
+        );
     }
 
     // ── apply_column_tools_presentation ──

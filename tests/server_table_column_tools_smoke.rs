@@ -570,6 +570,138 @@ async fn column_tools_chooser_projection_and_required_column_contract() {
     assert_no_browser_errors(&harness, "server-table column-tools chooser/projection").await;
 }
 
+async fn server_name_width_snapshot(harness: &pixelproof_web::Harness) -> Value {
+    eval_json(
+        harness,
+        r#"(() => {
+            const root = document.querySelector('#server-table');
+            const separator = Array.from(root.querySelectorAll('[role="separator"]'))
+                .find(el => el.getAttribute('aria-label') === 'Resize Name column');
+            const track = root.querySelector('[data-table-column-track="name"]');
+            const accepted = document.querySelector('[data-testid="server-column-widths"]');
+            const proposals = document.querySelector(
+                '[data-testid="server-column-preference-proposals"]'
+            );
+            return {
+                separatorName: separator ? separator.getAttribute('aria-label') : null,
+                min: separator ? Number(separator.getAttribute('aria-valuemin')) : null,
+                now: separator ? Number(separator.getAttribute('aria-valuenow')) : null,
+                max: separator ? Number(separator.getAttribute('aria-valuemax')) : null,
+                valueText: separator ? separator.getAttribute('aria-valuetext') : null,
+                trackWidth: track ? track.getBoundingClientRect().width : null,
+                acceptedWidths: accepted ? JSON.parse(accepted.textContent) : null,
+                proposals: proposals ? Number(proposals.textContent) : null,
+                queryProposals: Number(
+                    document.querySelector('[data-testid="server-query-proposals"]').textContent
+                ),
+                scrollX: window.scrollX,
+            };
+        })()"#,
+    )
+    .await
+}
+
+/// `ldui-9ke9`: server resize widths are controlled preference state, not
+/// header-local presentation. Real keyboard commits update the rendered
+/// track and accepted model exactly once; a declined commit restores truth.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-server-table-column-tools)"]
+async fn controlled_server_resize_round_trips_the_accepted_width_model() {
+    let harness = harness_at("/components/data-table").await;
+    wait_for_selector(&harness, "#server-table tbody tr").await;
+    begin_browser_error_capture(&harness).await;
+
+    let separator = "#server-table [role='separator'][aria-label='Resize Name column']";
+    let initial = server_name_width_snapshot(&harness).await;
+    assert_eq!(initial["separatorName"], json!("Resize Name column"));
+    assert_eq!(initial["acceptedWidths"], json!({ "name": 184 }));
+    assert_eq!(initial["proposals"], json!(0));
+    assert_eq!(initial["now"].as_f64(), Some(184.0));
+    assert_eq!(initial["trackWidth"].as_f64(), Some(184.0));
+    assert!(
+        initial["min"].as_f64() <= initial["now"].as_f64()
+            && initial["now"].as_f64() <= initial["max"].as_f64(),
+        "separator range must be ordered: {initial}"
+    );
+    assert_eq!(initial["valueText"], json!("184 pixels"));
+
+    harness
+        .page()
+        .find_element(separator)
+        .await
+        .expect("find named Name resize separator")
+        .focus()
+        .await
+        .expect("focus named Name resize separator");
+
+    let mut previous = initial;
+    for (key, expected) in [
+        (pixelproof_web::Key::ArrowRight, 200_u64),
+        (pixelproof_web::Key::Home, 48_u64),
+        (pixelproof_web::Key::End, 1_200_u64),
+    ] {
+        harness
+            .press_key_sequence(&[key])
+            .await
+            .expect("commit a keyboard column resize");
+        let current = server_name_width_snapshot(&harness).await;
+        assert_eq!(current["acceptedWidths"]["name"], json!(expected));
+        assert_eq!(current["now"].as_f64(), Some(expected as f64));
+        assert_eq!(current["trackWidth"].as_f64(), Some(expected as f64));
+        assert_ne!(
+            current["trackWidth"], previous["trackWidth"],
+            "each committed resize must change the rendered column track"
+        );
+        assert_eq!(
+            current["proposals"].as_u64(),
+            previous["proposals"].as_u64().map(|count| count + 1),
+            "each committed keyboard resize must emit exactly one replacement"
+        );
+        assert_eq!(
+            current["queryProposals"], previous["queryProposals"],
+            "resize must not activate server sorting or mutate the query"
+        );
+        assert_eq!(
+            current["scrollX"], previous["scrollX"],
+            "resize keys must not scroll the page"
+        );
+        assert!(
+            current["min"].as_f64() <= current["now"].as_f64()
+                && current["now"].as_f64() <= current["max"].as_f64(),
+            "separator range must remain ordered: {current}"
+        );
+        previous = current;
+    }
+
+    click(&harness, "[data-testid='server-column-preference-accept']").await;
+    harness
+        .page()
+        .find_element(separator)
+        .await
+        .expect("find named Name resize separator after toggling acceptance")
+        .focus()
+        .await
+        .expect("restore focus to named Name resize separator");
+    harness
+        .press_key_sequence(&[pixelproof_web::Key::Home])
+        .await
+        .expect("propose a declined keyboard resize");
+    let declined = server_name_width_snapshot(&harness).await;
+    assert_eq!(
+        declined["proposals"].as_u64(),
+        previous["proposals"].as_u64().map(|count| count + 1)
+    );
+    assert_eq!(declined["acceptedWidths"]["name"], json!(1_200));
+    assert_eq!(declined["now"].as_f64(), Some(1_200.0));
+    assert_eq!(
+        declined["trackWidth"].as_f64(),
+        Some(1_200.0),
+        "declining the replacement must restore the accepted rendered width"
+    );
+
+    assert_no_browser_errors(&harness, "controlled server column resize").await;
+}
+
 // ---------------------------------------------------------------------------
 // ldui-px06: controlled checkbox multi-selection over a server slice
 // ---------------------------------------------------------------------------

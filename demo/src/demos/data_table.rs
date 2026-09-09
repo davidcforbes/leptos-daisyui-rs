@@ -387,7 +387,13 @@ pub fn DataTableDemo() -> impl IntoView {
     // Opt-in presentation tools (ldui-9j16): the compact gear chooser, an
     // Export toolbar action beside it, and the atomic displayed-slice
     // projection -- the current server page only, never "all rows".
-    let server_column_preferences = RwSignal::new(EntityTablePreferences::new(1));
+    let mut initial_server_column_preferences = EntityTablePreferences::new(1);
+    initial_server_column_preferences
+        .column_widths
+        .insert("name".to_owned(), 184);
+    let server_column_preferences = RwSignal::new(initial_server_column_preferences);
+    let server_column_preference_proposals = RwSignal::new(0_u32);
+    let server_accept_column_preferences = RwSignal::new(true);
     let server_displayed_slice = RwSignal::new(ServerTableDisplayedSlice::default());
     let server_export_count = RwSignal::new(0_u32);
 
@@ -1938,6 +1944,33 @@ pub fn DataTableDemo() -> impl IntoView {
                             {move || server_proposal_count.get().to_string()}
                         </code>
                     </span>
+                    <Button
+                        on:click=move |_| {
+                            server_accept_column_preferences.update(|accept| *accept = !*accept)
+                        }
+                        attr:data-testid="server-column-preference-accept"
+                    >
+                        {move || if server_accept_column_preferences.get() {
+                            "Decline column preferences"
+                        } else {
+                            "Accept column preferences"
+                        }}
+                    </Button>
+                    <span class="text-xs">
+                        "Column preference proposals: "
+                        <code
+                            class="font-sans"
+                            data-testid="server-column-preference-proposals"
+                        >
+                            {move || server_column_preference_proposals.get().to_string()}
+                        </code>
+                        " · Accepted widths: "
+                        <code class="font-sans" data-testid="server-column-widths">
+                            {move || serde_json::to_string(
+                                &server_column_preferences.get().column_widths,
+                            ).unwrap_or_default()}
+                        </code>
+                    </span>
                 </div>
                 <ServerDataTable
                     rows=server_rows
@@ -1971,7 +2004,13 @@ pub fn DataTableDemo() -> impl IntoView {
                     column_tools=ServerTableColumnTools::new(
                         EntityTablePreferenceOwnership::controlled(
                             server_column_preferences.into(),
-                            Callback::new(move |next| server_column_preferences.set(next)),
+                            Callback::new(move |next| {
+                                server_column_preference_proposals
+                                    .update(|count| *count += 1);
+                                if server_accept_column_preferences.get_untracked() {
+                                    server_column_preferences.set(next);
+                                }
+                            }),
                         ),
                         1,
                     )

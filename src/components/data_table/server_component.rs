@@ -1591,11 +1591,6 @@ pub fn ServerDataTable(
     #[prop(optional, into)]
     on_displayed_slice: Option<Callback<ServerTableDisplayedSlice>>,
 ) -> impl IntoView {
-    // Column-width overrides from dragging a header divider, keyed by
-    // column id. Shared between the header (writer) and body (reader) so
-    // resized columns stay aligned.
-    let column_widths = RwSignal::new(HashMap::<&'static str, f64>::new());
-
     // ── Optional presentation tools (ldui-9j16) ──
     //
     // `column_tools` is consumed once here into its constituent pieces so
@@ -1622,6 +1617,15 @@ pub fn ServerDataTable(
                 None,
             ),
         };
+    // Column-width overrides from dragging a header divider, keyed by
+    // column id. Shared between the header (writer) and body (reader) so
+    // resized columns stay aligned. With column tools, accepted preferences
+    // own this initial rendered state; mounting must not emit a proposal.
+    let column_widths = RwSignal::new(
+        column_tools_state
+            .map(ServerColumnToolsState::runtime_widths_untracked)
+            .unwrap_or_default(),
+    );
     // Autosave mirrors `EntityTable`'s own uncontrolled persistence Effect
     // (`PreferenceState`'s save-on-change): only an uncontrolled table with
     // `LegacyLocalStorage` persistence writes anything.
@@ -1633,6 +1637,34 @@ pub fn ServerDataTable(
     {
         Effect::new(move |_| {
             current.with(|preferences| save_column_tools_preferences(persistence, preferences));
+        });
+    }
+    if let Some(state) = column_tools_state {
+        // Accepted controlled/uncontrolled preferences hydrate the rendered
+        // signal. The comparison is untracked so a local header write cannot
+        // make this effect race the proposal effect below.
+        Effect::new(move |_| {
+            let accepted = state.runtime_widths();
+            if accepted != column_widths.get_untracked() {
+                column_widths.set(accepted);
+            }
+        });
+
+        // Header keyboard/pointer commits write the runtime signal. Propose
+        // one complete normalized replacement only when it differs from the
+        // accepted preference map, then immediately rehydrate accepted truth.
+        // That last step restores the rendered width when a controlled owner
+        // deliberately declines the proposal.
+        Effect::new(move |_| {
+            let runtime = column_widths.get();
+            if runtime == state.runtime_widths_untracked() {
+                return;
+            }
+            state.replace_widths(&runtime);
+            let accepted = state.runtime_widths_untracked();
+            if accepted != column_widths.get_untracked() {
+                column_widths.set(accepted);
+            }
         });
     }
     // One resolved identity prefix per mounted table (ldui-j6sh): every
