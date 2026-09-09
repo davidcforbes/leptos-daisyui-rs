@@ -1,7 +1,6 @@
 # Server EntityTable Design
 
-**Status:** Approved in chat on 2026-09-09; written contract pending final
-user review.
+**Status:** Approved by the user on 2026-09-09.
 
 **Scope:** Beads `ldui-9ke9`. Consumer reference:
 `C:/dev/4iiz-etl`, Beads `bd_4iiz-etl-namz.1`, History screen
