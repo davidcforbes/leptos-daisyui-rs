@@ -24,6 +24,9 @@
 
 mod common;
 
+use chromiumoxide::cdp::browser_protocol::input::{
+    DispatchMouseEventParams, DispatchMouseEventType, MouseButton,
+};
 use common::{
     assert_no_browser_errors, begin_browser_error_capture, click, harness_at, wait_for_selector,
 };
@@ -599,6 +602,193 @@ async fn server_name_width_snapshot(harness: &pixelproof_web::Harness) -> Value 
         })()"#,
     )
     .await
+}
+
+async fn server_email_width_snapshot(harness: &pixelproof_web::Harness) -> Value {
+    eval_json(
+        harness,
+        r#"(() => {
+            const root = document.querySelector('#server-table');
+            const separator = Array.from(root.querySelectorAll('[role="separator"]'))
+                .find(el => el.getAttribute('aria-label') === 'Resize Email column');
+            const track = root.querySelector('[data-table-column-track="email"]');
+            const accepted = JSON.parse(
+                document.querySelector('[data-testid="server-column-widths"]').textContent
+            );
+            return {
+                now: separator ? Number(separator.getAttribute('aria-valuenow')) : null,
+                trackWidth: track ? track.getBoundingClientRect().width : null,
+                acceptedWidth: accepted.email ?? null,
+                proposals: Number(
+                    document.querySelector(
+                        '[data-testid="server-column-preference-proposals"]'
+                    ).textContent
+                ),
+            };
+        })()"#,
+    )
+    .await
+}
+
+async fn dispatch_real_mouse(
+    harness: &pixelproof_web::Harness,
+    params: DispatchMouseEventParams,
+    action: &str,
+) {
+    harness
+        .page()
+        .execute(params)
+        .await
+        .unwrap_or_else(|error| panic!("dispatch {action}: {error}"));
+}
+
+async fn begin_real_pointer_drag(
+    harness: &pixelproof_web::Harness,
+    selector: &str,
+    delta_x: f64,
+) -> (f64, f64) {
+    harness
+        .page()
+        .find_element(selector)
+        .await
+        .expect("find pointer resize separator")
+        .scroll_into_view()
+        .await
+        .expect("scroll pointer resize separator into view");
+    let bounds = harness
+        .element_box(selector)
+        .await
+        .unwrap_or_else(|error| panic!("element_box {selector}: {error}"));
+    let start_x = bounds.x + bounds.width / 2.0;
+    let y = bounds.y + bounds.height / 2.0;
+    let end_x = start_x + delta_x;
+    for (event_type, x, button, buttons, click_count) in [
+        (DispatchMouseEventType::MouseMoved, start_x, None, 0, None),
+        (
+            DispatchMouseEventType::MousePressed,
+            start_x,
+            Some(MouseButton::Left),
+            1,
+            Some(1),
+        ),
+        (
+            DispatchMouseEventType::MouseMoved,
+            end_x,
+            Some(MouseButton::Left),
+            1,
+            None,
+        ),
+    ] {
+        let mut builder = DispatchMouseEventParams::builder()
+            .r#type(event_type)
+            .x(x)
+            .y(y)
+            .buttons(buttons);
+        if let Some(button) = button {
+            builder = builder.button(button);
+        }
+        if let Some(click_count) = click_count {
+            builder = builder.click_count(click_count);
+        }
+        dispatch_real_mouse(
+            harness,
+            builder.build().expect("pointer drag event params"),
+            "pointer drag preview",
+        )
+        .await;
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(harness.config().settle_ms)).await;
+    (end_x, y)
+}
+
+async fn finish_real_pointer_drag(harness: &pixelproof_web::Harness, x: f64, y: f64) {
+    let released = DispatchMouseEventParams::builder()
+        .r#type(DispatchMouseEventType::MouseReleased)
+        .x(x)
+        .y(y)
+        .button(MouseButton::Left)
+        .buttons(0)
+        .click_count(1)
+        .build()
+        .expect("pointer release params");
+    dispatch_real_mouse(harness, released, "pointer drag commit").await;
+    tokio::time::sleep(std::time::Duration::from_millis(harness.config().settle_ms)).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-server-table-column-tools)"]
+async fn focusing_an_unstored_server_resize_separator_emits_no_proposal() {
+    let harness = harness_at("/components/data-table").await;
+    wait_for_selector(&harness, "#server-table tbody tr").await;
+    begin_browser_error_capture(&harness).await;
+
+    let separator = "#server-table [role='separator'][aria-label='Resize Email column']";
+    let before = server_email_width_snapshot(&harness).await;
+    assert_eq!(before["acceptedWidth"], Value::Null);
+    assert_eq!(before["proposals"], json!(0));
+    harness
+        .page()
+        .find_element(separator)
+        .await
+        .expect("find Email resize separator")
+        .focus()
+        .await
+        .expect("focus Email resize separator");
+    tokio::time::sleep(std::time::Duration::from_millis(harness.config().settle_ms)).await;
+
+    let focused = server_email_width_snapshot(&harness).await;
+    assert_eq!(focused["acceptedWidth"], Value::Null);
+    assert_eq!(
+        focused["proposals"],
+        json!(0),
+        "focus may hydrate local ARIA/rendered width but must not persist it"
+    );
+    assert_no_browser_errors(&harness, "server resize focus-only boundary").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-server-table-column-tools)"]
+async fn real_pointer_drag_previews_locally_and_commits_exactly_once() {
+    let harness = harness_at("/components/data-table").await;
+    wait_for_selector(&harness, "#server-table tbody tr").await;
+    begin_browser_error_capture(&harness).await;
+
+    let separator = "#server-table [role='separator'][aria-label='Resize Email column']";
+    let before = server_email_width_snapshot(&harness).await;
+    assert_eq!(before["acceptedWidth"], Value::Null);
+    assert_eq!(before["proposals"], json!(0));
+
+    let (end_x, y) = begin_real_pointer_drag(&harness, separator, 96.0).await;
+    let preview = server_email_width_snapshot(&harness).await;
+    assert!(
+        preview["trackWidth"].as_f64() > before["trackWidth"].as_f64(),
+        "pointer movement must remain visible before commit: before={before}, preview={preview}"
+    );
+    assert_eq!(
+        preview["acceptedWidth"],
+        Value::Null,
+        "pointer preview must remain local until release"
+    );
+    assert_eq!(
+        preview["proposals"],
+        json!(0),
+        "pointer movement must not emit intermediate replacements"
+    );
+
+    finish_real_pointer_drag(&harness, end_x, y).await;
+    let committed = server_email_width_snapshot(&harness).await;
+    assert_eq!(committed["proposals"], json!(1));
+    assert_eq!(
+        committed["acceptedWidth"].as_f64(),
+        committed["trackWidth"].as_f64(),
+        "pointer release must commit the exact rendered preview width"
+    );
+    assert_eq!(
+        committed["now"].as_f64(),
+        committed["acceptedWidth"].as_f64(),
+        "ARIA state and accepted pointer width must agree"
+    );
+    assert_no_browser_errors(&harness, "server pointer resize commit boundary").await;
 }
 
 /// `ldui-9ke9`: server resize widths are controlled preference state, not

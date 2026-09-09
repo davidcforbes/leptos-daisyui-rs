@@ -70,6 +70,13 @@ pub fn DataTableHeader(
     /// `column_widths` prop.
     column_widths: RwSignal<HashMap<&'static str, f64>>,
 
+    /// Explicit resize commit boundary for preference-owning parents.
+    /// Focus hydration and pointer-move previews update `column_widths`
+    /// without invoking this callback; keyboard changes and completed,
+    /// changed pointer drags invoke it exactly once.
+    #[prop(optional_no_strip)]
+    on_column_width_commit: Option<Callback<()>>,
+
     /// Optional leading `<th>` rendered before every declared column, for a
     /// non-data control column that is not part of `columns` -- currently
     /// `ServerDataTable`'s controlled multi-selection checkbox (`ldui-px06`).
@@ -269,6 +276,9 @@ pub fn DataTableHeader(
                                             column_widths.update(|widths| {
                                                 widths.insert(col_id, new_width.round());
                                             });
+                                            if let Some(on_commit) = on_column_width_commit {
+                                                on_commit.run(());
+                                            }
                                         }
                                         on:pointerdown=move |ev: web_sys::PointerEvent| {
                                             ev.stop_propagation();
@@ -309,20 +319,21 @@ pub fn DataTableHeader(
                                             }
                                         }
                                         on:pointerup=move |ev: web_sys::PointerEvent| {
-                                            if let Some(target) = ev.target()
-                                                && let Ok(el) = target.dyn_into::<web_sys::Element>()
-                                            {
-                                                let _ = el.release_pointer_capture(ev.pointer_id());
-                                            }
-                                            resize_drag.set(None);
+                                            commit_resize(
+                                                ev.target(),
+                                                ev.pointer_id(),
+                                                resize_drag,
+                                                column_widths,
+                                                on_column_width_commit,
+                                            );
                                         }
                                         on:pointercancel=move |ev: web_sys::PointerEvent| {
-                                            if let Some(target) = ev.target()
-                                                && let Ok(el) = target.dyn_into::<web_sys::Element>()
-                                            {
-                                                let _ = el.release_pointer_capture(ev.pointer_id());
-                                            }
-                                            resize_drag.set(None);
+                                            cancel_resize(
+                                                ev.target(),
+                                                ev.pointer_id(),
+                                                resize_drag,
+                                                column_widths,
+                                            );
                                         }
                                     ></span>
                                 })}
@@ -334,6 +345,48 @@ pub fn DataTableHeader(
             {children.map(|c| c())}
         </thead>
     }
+}
+
+fn release_pointer_capture(target: Option<web_sys::EventTarget>, pointer_id: i32) {
+    if let Some(target) = target
+        && let Ok(element) = target.dyn_into::<web_sys::Element>()
+    {
+        let _ = element.release_pointer_capture(pointer_id);
+    }
+}
+
+fn commit_resize(
+    target: Option<web_sys::EventTarget>,
+    pointer_id: i32,
+    resize_drag: RwSignal<Option<ResizeDrag>>,
+    column_widths: RwSignal<HashMap<&'static str, f64>>,
+    on_column_width_commit: Option<Callback<()>>,
+) {
+    release_pointer_capture(target, pointer_id);
+    let changed = resize_drag.get_untracked().is_some_and(|drag| {
+        column_widths
+            .with_untracked(|widths| widths.get(drag.col_id).copied())
+            .is_some_and(|width| width.round() != drag.start_width.round())
+    });
+    resize_drag.set(None);
+    if changed && let Some(on_commit) = on_column_width_commit {
+        on_commit.run(());
+    }
+}
+
+fn cancel_resize(
+    target: Option<web_sys::EventTarget>,
+    pointer_id: i32,
+    resize_drag: RwSignal<Option<ResizeDrag>>,
+    column_widths: RwSignal<HashMap<&'static str, f64>>,
+) {
+    release_pointer_capture(target, pointer_id);
+    if let Some(drag) = resize_drag.get_untracked() {
+        column_widths.update(|widths| {
+            widths.insert(drag.col_id, drag.start_width.round());
+        });
+    }
+    resize_drag.set(None);
 }
 
 fn separator_parent_width(target: Option<web_sys::EventTarget>) -> Option<f64> {

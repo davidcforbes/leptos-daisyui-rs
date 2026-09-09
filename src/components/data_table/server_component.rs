@@ -1641,32 +1641,31 @@ pub fn ServerDataTable(
     }
     if let Some(state) = column_tools_state {
         // Accepted controlled/uncontrolled preferences hydrate the rendered
-        // signal. The comparison is untracked so a local header write cannot
-        // make this effect race the proposal effect below.
+        // signal. Runtime focus/preview writes are deliberately untracked;
+        // only the header's explicit commit callback below can propose them.
         Effect::new(move |_| {
             let accepted = state.runtime_widths();
             if accepted != column_widths.get_untracked() {
                 column_widths.set(accepted);
             }
         });
-
-        // Header keyboard/pointer commits write the runtime signal. Propose
-        // one complete normalized replacement only when it differs from the
-        // accepted preference map, then immediately rehydrate accepted truth.
-        // That last step restores the rendered width when a controlled owner
-        // deliberately declines the proposal.
-        Effect::new(move |_| {
-            let runtime = column_widths.get();
+    }
+    let on_column_width_commit = column_tools_state.map(|state| {
+        Callback::new(move |()| {
+            let runtime = column_widths.get_untracked();
             if runtime == state.runtime_widths_untracked() {
                 return;
             }
             state.replace_widths(&runtime);
+            // Controlled owners may decline or delay the replacement. Reread
+            // accepted truth only after the completed action, never during a
+            // pointer preview, and restore it immediately when unchanged.
             let accepted = state.runtime_widths_untracked();
             if accepted != column_widths.get_untracked() {
                 column_widths.set(accepted);
             }
-        });
-    }
+        })
+    });
     // One resolved identity prefix per mounted table (ldui-j6sh): every
     // framework-owned control below derives its `id`/`name` from it, so a
     // consumer names the table once instead of patching descendants after
@@ -3129,6 +3128,7 @@ pub fn ServerDataTable(
                             on_sort=on_sort
                             header_cell_class=classes.header_cell
                             column_widths=column_widths
+                            on_column_width_commit=on_column_width_commit
                             leading_header=selection_leading_header
                         >
                             {move || {
