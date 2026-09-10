@@ -6,6 +6,9 @@ use leptos_daisyui_rs::components::*;
 pub fn TooltipDemo() -> impl IntoView {
     let (open, set_open) = signal(false);
     let (position, set_position) = signal(TooltipPosition::Top);
+    let subject_activations = RwSignal::new(0_u32);
+    let unrelated_escapes = RwSignal::new(0_u32);
+    let removable_mounted = RwSignal::new(false);
 
     view! {
         <ContentLayout
@@ -125,6 +128,86 @@ pub fn TooltipDemo() -> impl IntoView {
                             </div>
                         </div>
                     </Tooltip>
+                </div>
+            </Section>
+
+            <Section title="Supplementary Help" col=true>
+                <div
+                    id="help-hint-fixture"
+                    class="flex max-w-2xl flex-col gap-4 rounded-box bg-base-200 p-4"
+                    on:keydown=move |event: web_sys::KeyboardEvent| {
+                        if event.key() == "Escape" {
+                            unrelated_escapes.update(|count| *count += 1);
+                        }
+                    }
+                >
+                    <p class="text-sm text-base-content/70">
+                        "HelpHint is for supplementary definitions. Essential instructions stay visible."
+                    </p>
+                    <HelpHint
+                        id="help-hint-visible".to_string()
+                        label=Signal::derive(|| "Why this matters".to_string())
+                        text=Signal::derive(|| "This definition is supplementary, not an instruction.".to_string())
+                    />
+                    <HelpHint
+                        id="help-hint-compact".to_string()
+                        label=Signal::derive(|| "About archive eligibility".to_string())
+                        text=Signal::derive(|| "Archiving removes the case from the active queue.".to_string())
+                        compact=true
+                    >
+                        <Button
+                            attr:data-help-subject="true"
+                            attr:aria-describedby=help_hint_description_id("help-hint-compact")
+                            on_click=Callback::new(move |_| subject_activations.update(|count| *count += 1))
+                        >
+                            "Archive case"
+                        </Button>
+                    </HelpHint>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <HelpHint
+                            id="help-hint-multi-a".to_string()
+                            label=Signal::derive(|| "First independent hint".to_string())
+                            text=Signal::derive(|| "First description.".to_string())
+                        />
+                        <HelpHint
+                            id="help-hint-multi-b".to_string()
+                            label=Signal::derive(|| "Second independent hint".to_string())
+                            text=Signal::derive(|| "Second description.".to_string())
+                        />
+                    </div>
+                    <Show when=move || removable_mounted.get()>
+                        <HelpHint
+                            id="help-hint-removable".to_string()
+                            label=Signal::derive(|| "Temporary hint".to_string())
+                            text=Signal::derive(|| "This listener is removed with the component.".to_string())
+                            compact=true
+                        />
+                    </Show>
+                    <div class="flex flex-wrap gap-2">
+                        <Button
+                            attr:id="remove-help-hint"
+                            style=ButtonStyle::Outline
+                            size=ButtonSize::Sm
+                            on_click=Callback::new(move |_| removable_mounted.update(|mounted| *mounted = !*mounted))
+                        >
+                            {move || if removable_mounted.get() { "Unmount temporary hint" } else { "Mount temporary hint" }}
+                        </Button>
+                        <Button attr:id="help-hint-outside" size=ButtonSize::Sm>
+                            "Outside focus target"
+                        </Button>
+                    </div>
+                    <span
+                        class="sr-only"
+                        data-subject-activations=move || subject_activations.get().to_string()
+                    >
+                        {move || subject_activations.get()}
+                    </span>
+                    <span
+                        class="sr-only"
+                        data-unrelated-escapes=move || unrelated_escapes.get().to_string()
+                    >
+                        {move || unrelated_escapes.get()}
+                    </span>
                 </div>
             </Section>
         </ContentLayout>

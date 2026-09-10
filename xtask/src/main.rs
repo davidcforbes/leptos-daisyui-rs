@@ -675,6 +675,17 @@ fn softphone_step() -> Step {
     }
 }
 
+/// Focused release-browser proof for supplementary HelpHint disclosure.
+fn help_hint_step() -> Step {
+    Step {
+        name: "test-help-hint",
+        run: Run::BrowserSuite {
+            test: "help_hint_smoke",
+            html_target: None,
+        },
+    }
+}
+
 /// The full release gate. The catalog browser suites are deliberately
 /// consecutive: [`run_steps`] reuses one verified release server for adjacent
 /// suites targeting the same HTML entry point.
@@ -704,6 +715,7 @@ fn full_steps() -> Vec<Step> {
     steps.push(app_shell_step());
     steps.push(field_context_scoping_step());
     steps.push(softphone_step());
+    steps.push(help_hint_step());
     steps
 }
 
@@ -2335,6 +2347,7 @@ fn main() -> ExitCode {
         "test-collapse-naming" => run_steps(&[collapse_naming_step()]),
         "test-data-table-fit" => run_steps(&[data_table_fit_step()]),
         "test-softphone" => run_steps(&[softphone_step()]),
+        "test-help-hint" => run_steps(&[help_hint_step()]),
         "gen-tokens" => {
             let check = std::env::args().any(|a| a == "--check");
             gen_tokens(check)
@@ -2348,7 +2361,7 @@ fn main() -> ExitCode {
         other => {
             eprintln!("xtask: unknown subcommand {other:?}");
             eprintln!(
-                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-selectable-summary|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-snapshot-table-page-filter-actions|test-server-table-column-tools|test-collapse-naming|test-data-table-fit|test-app-shell|test-field-context-scoping|test-entity-draft-row|test-softphone|gen-tokens|check-sibling-tokens|bump>"
+                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-selectable-summary|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-snapshot-table-page-filter-actions|test-server-table-column-tools|test-collapse-naming|test-data-table-fit|test-app-shell|test-field-context-scoping|test-entity-draft-row|test-softphone|test-help-hint|gen-tokens|check-sibling-tokens|bump>"
             );
             ExitCode::from(2)
         }
