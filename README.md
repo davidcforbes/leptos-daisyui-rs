@@ -494,6 +494,12 @@ This causes the close animation to target the viewport edge instead of the conta
 See [`demo/custom-components.css`](demo/custom-components.css#L376-L400) for the complete fix.
 
 
+## Choosing a table
+
+- Use [`EntityTable<T>`](doc/components/entity_table.md) for a complete typed client snapshot.
+- Use [`ServerEntityTable`](doc/components/data_table.md#serverentitytable) for the standard server-owned offset table: accepted queries, all-column filters, gear preferences, widths, and footer Auto/fixed paging. See the [History integration example](examples/server_entity_history.rs).
+- Use `ServerDataTable` for cursor paging or deliberately partial server compositions. Never locally filter or sort one server page as if it were the complete dataset.
+
 ## Testing
 
 - **Default gate**: `cargo xtask verify` runs 16 native-only checks, including the library suite with `test-mode`; it does not build Wasm or invoke Chrome.

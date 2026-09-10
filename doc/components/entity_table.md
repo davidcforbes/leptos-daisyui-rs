@@ -12,7 +12,8 @@ filtering, the caller supplies the locally filtered snapshot and changes
 | Data ownership | Component | Observable mode | Rule |
 |---|---|---|---|
 | Complete typed snapshot is already in the browser | `EntityTable<T>` | `client-snapshot` | Preferred for new contracted snapshot pages. |
-| Server owns filtering, sorting, paging, and total count | `ServerDataTable` | `server-query` | Pass only the current slice and round-trip every query change. |
+| Server owns offset filtering, sorting, paging, and total count | [`ServerEntityTable`](./data_table.md#serverentitytable) | `server-query` | Canonical server facade; pass the accepted slice and round-trip every query change. |
+| Cursor paging or deliberately partial server composition | `ServerDataTable` | `server-query` | Lower-level compatibility with explicit capabilities. |
 | Existing client table uses dynamic `HashMap` rows or DataTable-only features | `components::DataTable` | `compatibility-client` | Compatibility path; do not choose it for a new contracted snapshot by habit. |
 | Existing simple table needs automatic link/badge columns or bulk selection | `widgets::DataTable` | n/a | Retained legacy widget with a different row model. |
 
@@ -21,6 +22,11 @@ That silently changes a server query into page-local behavior. Do not download a
 complete dataset merely to satisfy `EntityTable` when the server must own the
 query. The component roots expose `data-table-data-mode` so browser audits can
 detect an ownership mismatch on the running page.
+
+`ServerEntityTable` is the supported opinionated choice for server-backed
+History pages. It shares server rendering rather than adapting a page into
+`EntityTable<T>`'s client snapshot model. See its
+[History adoption example and consumer responsibilities](./data_table.md#history-adoption-example).
 
 ## Shared mechanics, separate data models
 

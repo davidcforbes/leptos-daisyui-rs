@@ -9,7 +9,8 @@ Choose from data ownership before choosing features:
 | Data ownership | Use | Runtime marker |
 |---|---|---|
 | Complete, typed client snapshot | [`EntityTable<T>`](./entity_table.md) | `data-table-data-mode="client-snapshot"` |
-| Server-owned query and current-page slice | [`ServerDataTable`](#serverdatatable) | `data-table-data-mode="server-query"` |
+| Server-owned offset query and current-page slice | [`ServerEntityTable`](#serverentitytable) | `data-table-data-mode="server-query"` |
+| Cursor paging or deliberately partial server composition | [`ServerDataTable`](#serverdatatable) | `data-table-data-mode="server-query"` |
 | Existing dynamic `HashMap` client rows or DataTable-only features | `components::DataTable` | `data-table-data-mode="compatibility-client"` |
 | Existing `Vec<Vec<String>>` table needing automatic link/badge columns or bulk select | `widgets::DataTable` | n/a |
 
@@ -23,7 +24,63 @@ preference-ownership path.
 
 `DataTable` renders rows of `HashMap<&'static str, String>` against a list of `Column` definitions. Almost every feature is **opt-in**: a table declared with just `data` and `columns` sorts and paginates, and nothing else. Filtering, search, selection, activation and responsive paging each switch on via a single prop or `Column` builder, so adding one never changes the behaviour of a table that doesn't use it.
 
-For server-side pagination (the parent owns the page and fetches each slice), use [ServerDataTable](#serverdatatable) below.
+For standard server-side offset pagination, use [ServerEntityTable](#serverentitytable).
+Use [ServerDataTable](#serverdatatable) for cursor paging or lower-level compatibility.
+
+## ServerEntityTable
+
+`ServerEntityTable` is the canonical opinionated server-backed table. It composes
+`ServerDataTable` with controlled query ownership, per-column filters, the gear
+chooser, visibility/order/width preferences, sticky headers, and bottom paging
+and rows-per-page controls. It renders the accepted server slice as supplied:
+it never fetches, sorts, filters, or pages that slice locally.
+
+The host explicitly supplies accepted `rows`, `query`, `total_count`, `loading`,
+and `on_query_change`, plus a unique stable `control_id`, `preference_ownership`,
+`preference_version`, `page_size_preference`, `query_capabilities`, and
+`viewport_fit`. The last flag enables Auto measurement only when a definite
+parent height is available; fixed-size intent remains fixed through resizes.
+Auto/fixed intent is distinct from the accepted query's effective page size.
+
+Every declared domain column, including an action column, must use
+`.filterable()` or `.filterable_text()`. Exact-filter vocabularies must describe
+the authorized population, not just the current page. Filtering and page-size
+capabilities are mandatory; global search may be explicitly disabled. Invalid
+configuration renders a named alert instead of a reduced table. Reactive
+column changes are revalidated, and recovering from an error retains column
+preferences.
+
+Query gestures propose a complete replacement. Start loading without replacing
+accepted rows, query, or total; publish them together only when the matching
+request succeeds. On failure or stale completion keep the accepted snapshot.
+Existing rows remain visible while loading (the footer reports loading); an
+initial empty load still renders a loading body. With controlled preference
+ownership, the host similarly acknowledges visibility, order, and committed
+width replacements. Pointer previews do not persist, and cancellation restores
+the prior width.
+
+### History adoption example
+
+The [compile-checked History integration example](../../examples/server_entity_history.rs)
+declares all ten History-shaped fields, population-wide exact options, stable
+row identity, controlled preferences, and a definite-height table slot. Check it
+with `cargo check -p leptos-daisyui-rs --example server_entity_history`. It is an
+integration shape, not a backend or a standalone running application. The
+[showcase fixture](../../demo/src/demos/data_table.rs) at
+`/components/data-table#server-entity-history` adds a deterministic 48-row
+simulated server, delayed acknowledgments and a failed-request control.
+
+Consumers still own:
+
+- Mapping domain records to `TableRow` and declaring field IDs, renderers and filters.
+- Translating `TableQuery` into endpoint filters/sort/paging, with population-wide option vocabularies.
+- Authorization, request correlation, cancellation policy and atomic acceptance of rows/query/total.
+- Navigation and action handlers, preference storage policy and acknowledgment, and failure copy.
+
+LDUI supplies the table composition and interaction contract; it does not supply
+ETL-specific queries, persistence, navigation, or a consumer deployment. The
+[verification record](../verification/server-entity-table-2026-09-09.md) distinguishes
+the simulated-server evidence from production transport behavior.
 
 ### Opinionated visual hierarchy and stable geometry
 
