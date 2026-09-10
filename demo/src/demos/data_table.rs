@@ -397,6 +397,19 @@ pub fn DataTableDemo() -> impl IntoView {
     let server_displayed_slice = RwSignal::new(ServerTableDisplayedSlice::default());
     let server_export_count = RwSignal::new(0_u32);
 
+    // Canonical facade reactivity fixture: its domain columns deliberately
+    // move valid -> invalid -> valid so the configuration alert must follow
+    // the accepted signal rather than a mount-time snapshot.
+    let facade_reactive_columns =
+        RwSignal::new(vec![Column::new("name", "Name").filterable_text()]);
+    let facade_reactive_rows = RwSignal::new(vec![HashMap::from([(
+        "name",
+        "Accepted server row".to_owned(),
+    )])]);
+    let facade_reactive_query = RwSignal::new(TableQuery::first_page(10));
+    let facade_reactive_total = RwSignal::new(1_i64);
+    let facade_reactive_page_size = RwSignal::new(ServerTablePageSizePreference::fixed(10));
+
     let run_server_query = move |q: TableQuery| {
         let query_debug = serde_json::json!({
             "page": q.page,
@@ -1856,6 +1869,49 @@ pub fn DataTableDemo() -> impl IntoView {
                     })
                     attr:id="custom-filter-table"
                 />
+            </Section>
+
+            <Section title="Canonical ServerEntityTable reactive configuration">
+                <div class="mb-3 flex flex-wrap items-center gap-2">
+                    <Button
+                        attr:data-testid="server-entity-columns-invalid"
+                        on:click=move |_| {
+                            facade_reactive_columns.set(vec![Column::new("name", "Name")]);
+                        }
+                    >
+                        "Supply invalid columns"
+                    </Button>
+                    <Button
+                        attr:data-testid="server-entity-columns-valid"
+                        on:click=move |_| {
+                            facade_reactive_columns.set(vec![
+                                Column::new("name", "Name").filterable_text(),
+                            ]);
+                        }
+                    >
+                        "Supply valid columns"
+                    </Button>
+                </div>
+                <div data-testid="server-entity-reactive-fixture" class="h-80 min-h-0">
+                    <ServerEntityTable
+                        rows=facade_reactive_rows
+                        columns=facade_reactive_columns
+                        query=facade_reactive_query
+                        total_count=facade_reactive_total
+                        on_query_change=Callback::new(move |next| {
+                            facade_reactive_query.set(next);
+                        })
+                        loading=false
+                        control_id="server-entity-reactive".to_owned()
+                        preference_ownership=EntityTablePreferenceOwnership::uncontrolled(
+                            EntityTablePreferencePersistence::Disabled,
+                        )
+                        preference_version=1
+                        page_size_preference=facade_reactive_page_size
+                        query_capabilities=ServerQueryCapabilities::all().with_search(false)
+                        viewport_fit=false
+                    />
+                </div>
             </Section>
 
             // Server-owned table: the typed query round-trip

@@ -42,6 +42,54 @@ async fn eval_json(harness: &pixelproof_web::Harness, expression: &str) -> Value
         .expect("server-table column-tools expression returns JSON")
 }
 
+/// Reactive column declarations must switch the facade between its standard
+/// table and its fail-visible configuration alert in both directions.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-server-table-column-tools)"]
+async fn server_entity_table_column_validation_tracks_reactive_columns() {
+    let h = harness_at("/components/data-table").await;
+    wait_for_selector(
+        &h,
+        "[data-testid='server-entity-reactive-fixture'] [data-server-entity-table='true']",
+    )
+    .await;
+    begin_browser_error_capture(&h).await;
+
+    click(&h, "[data-testid='server-entity-columns-invalid']").await;
+    let invalid = eval_json(
+        &h,
+        r#"(() => {
+            const fixture = document.querySelector('[data-testid="server-entity-reactive-fixture"]');
+            const alert = fixture.querySelector('[role="alert"][data-server-entity-table-config-error]');
+            return {
+                alert: alert?.dataset.serverEntityTableConfigError,
+                table: !!fixture.querySelector('[data-server-entity-table="true"]'),
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(invalid["alert"], json!("name"), "invalid swap: {invalid}");
+    assert_eq!(invalid["table"], json!(false), "invalid swap: {invalid}");
+
+    click(&h, "[data-testid='server-entity-columns-valid']").await;
+    let recovered = eval_json(
+        &h,
+        r#"(() => {
+            const fixture = document.querySelector('[data-testid="server-entity-reactive-fixture"]');
+            return {
+                alert: !!fixture.querySelector('[data-server-entity-table-config-error]'),
+                facade: !!fixture.querySelector('[data-server-entity-table="true"]'),
+                server: !!fixture.querySelector('[data-table-data-mode="server-query"]'),
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(recovered["alert"], json!(false), "recovery: {recovered}");
+    assert_eq!(recovered["facade"], json!(true), "recovery: {recovered}");
+    assert_eq!(recovered["server"], json!(true), "recovery: {recovered}");
+    assert_no_browser_errors(&h, "reactive ServerEntityTable validation").await;
+}
+
 /// The opinionated server footer keeps the named size control below the body.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires demo dev server (cargo xtask test-server-table-column-tools)"]

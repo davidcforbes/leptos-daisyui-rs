@@ -22,6 +22,20 @@ pub enum ServerEntityTableConfigurationError {
         /// Stable id of the column that lacks a filter declaration.
         column_id: &'static str,
     },
+    /// The endpoint disabled the canonical per-column filtering controls.
+    FilteringDisabled,
+    /// The endpoint disabled the canonical rows-per-page control.
+    PageSizeDisabled,
+}
+
+impl ServerEntityTableConfigurationError {
+    fn code(self) -> &'static str {
+        match self {
+            Self::MissingFilter { column_id } => column_id,
+            Self::FilteringDisabled => "filtering-disabled",
+            Self::PageSizeDisabled => "page-size-disabled",
+        }
+    }
 }
 
 impl fmt::Display for ServerEntityTableConfigurationError {
@@ -31,8 +45,34 @@ impl fmt::Display for ServerEntityTableConfigurationError {
                 formatter,
                 "ServerEntityTable column `{column_id}` must declare an exact or text filter"
             ),
+            Self::FilteringDisabled => formatter.write_str(
+                "ServerEntityTable requires endpoint filtering support; use ServerDataTable for a partial composition",
+            ),
+            Self::PageSizeDisabled => formatter.write_str(
+                "ServerEntityTable requires endpoint page-size support; use ServerDataTable for a partial composition",
+            ),
         }
     }
+}
+
+fn validate_server_entity_capabilities(
+    capabilities: ServerQueryCapabilities,
+) -> Result<(), ServerEntityTableConfigurationError> {
+    if !capabilities.filtering_enabled() {
+        return Err(ServerEntityTableConfigurationError::FilteringDisabled);
+    }
+    if !capabilities.page_size_enabled() {
+        return Err(ServerEntityTableConfigurationError::PageSizeDisabled);
+    }
+    Ok(())
+}
+
+fn validate_server_entity_configuration(
+    columns: &[Column],
+    capabilities: ServerQueryCapabilities,
+) -> Result<(), ServerEntityTableConfigurationError> {
+    validate_server_entity_capabilities(capabilities)?;
+    validate_server_entity_columns(columns)
 }
 
 impl std::error::Error for ServerEntityTableConfigurationError {}
@@ -157,92 +197,102 @@ pub fn ServerEntityTable(
     #[prop(optional, into)]
     on_row_inspect_keyed: Option<Callback<ServerTableRowAction>>,
     /// Caller-owned actions placed beside the always-present gear control.
-    #[prop(optional)]
-    toolbar_actions: Option<Children>,
+    #[prop(optional, into)]
+    toolbar_actions: Option<ViewFn>,
     /// Observes exactly the accepted server slice currently displayed.
     #[prop(optional, into)]
     on_displayed_slice: Option<Callback<ServerTableDisplayedSlice>>,
 ) -> impl IntoView {
-    if let Err(error) = validate_server_entity_columns(&columns.get_untracked()) {
-        let ServerEntityTableConfigurationError::MissingFilter { column_id } = error;
-        return view! {
+    let configuration = Memo::new(move |_| {
+        columns.with(|columns| validate_server_entity_configuration(columns, query_capabilities))
+    });
+
+    move || {
+        match configuration.get() {
+        Err(error) => view! {
             <div
                 role="alert"
-                data-server-entity-table-config-error=column_id
+                data-server-entity-table-config-error=error.code()
                 class="rounded-box border border-error bg-error/10 px-3 py-2 text-sm text-error forced-colors:border-[CanvasText] forced-colors:text-[CanvasText]"
             >
                 {error.to_string()}
             </div>
         }
-        .into_any();
-    }
+        .into_any(),
+        Ok(()) => {
+            let current_page = Signal::derive(move || query.get().page.max(1));
+            let page_size = Signal::derive(move || query.get().page_size.max(1));
+            let no_op_compatibility_page_change = Callback::new(|_: i64| {});
+            let query_ownership =
+                ServerTableQueryOwnership::controlled(query, on_query_change);
+            let mut column_tools = ServerTableColumnTools::new(
+                preference_ownership.clone(),
+                preference_version,
+            )
+            .with_chooser_trigger(Signal::stored(EntityColumnChooserTrigger::Icon))
+            .with_texts(column_tools_texts);
+            if let Some(render_actions) = toolbar_actions.clone() {
+                column_tools = column_tools.with_toolbar_actions(move || render_actions.run());
+            }
 
-    let current_page = Signal::derive(move || query.get().page.max(1));
-    let page_size = Signal::derive(move || query.get().page_size.max(1));
-    let no_op_compatibility_page_change = Callback::new(|_: i64| {});
-    let query_ownership = ServerTableQueryOwnership::controlled(query, on_query_change);
-    let mut column_tools = ServerTableColumnTools::new(preference_ownership, preference_version)
-        .with_chooser_trigger(Signal::stored(EntityColumnChooserTrigger::Icon))
-        .with_texts(column_tools_texts);
-    if let Some(render_actions) = toolbar_actions {
-        column_tools = column_tools.with_toolbar_actions(move || render_actions());
-    }
+            let server_table = ServerDataTable(ServerDataTableProps {
+                rows,
+                columns,
+                current_page: Some(current_page),
+                total_count: Some(total_count),
+                page_size: Some(page_size),
+                on_page_change: Some(no_op_compatibility_page_change),
+                pagination: None,
+                query_capabilities,
+                loading,
+                classes: DataTableClasses::default(),
+                texts,
+                sort_texts,
+                text_filter_label,
+                control_id: MaybeProp::from(control_id.clone()),
+                class: "h-full min-h-0",
+                table_size: Signal::stored(TableSize::default()),
+                zebra: Signal::stored(false),
+                pin_rows: Signal::stored(true),
+                pin_cols: Signal::stored(false),
+                max_height: Some("100%".to_owned()),
+                viewport_fit,
+                viewport_fit_min_rows,
+                page_size_preference: Some(page_size_preference),
+                page_size_auto_label,
+                on_search: None,
+                on_query_change: None,
+                query_ownership: Some(query_ownership),
+                query_reset_key: None,
+                page_size_options,
+                filter_options,
+                filter_option_entries,
+                filter_vocabulary: None,
+                node_ref: NodeRef::new(),
+                cell_renderers: cell_renderers.clone(),
+                typed_cells: typed_cells.clone(),
+                detail_renderer,
+                row_class_fn,
+                row_key,
+                selection,
+                multi_selection: multi_selection.clone(),
+                on_row_activate,
+                on_row_activate_keyed,
+                on_row_inspect,
+                on_row_inspect_keyed,
+                column_tools: Some(column_tools),
+                on_displayed_slice,
+            });
 
-    let server_table = ServerDataTable(ServerDataTableProps {
-        rows,
-        columns,
-        current_page: Some(current_page),
-        total_count: Some(total_count),
-        page_size: Some(page_size),
-        on_page_change: Some(no_op_compatibility_page_change),
-        pagination: None,
-        query_capabilities,
-        loading,
-        classes: DataTableClasses::default(),
-        texts,
-        sort_texts,
-        text_filter_label,
-        control_id: MaybeProp::from(control_id),
-        class: "h-full min-h-0",
-        table_size: Signal::stored(TableSize::default()),
-        zebra: Signal::stored(false),
-        pin_rows: Signal::stored(true),
-        pin_cols: Signal::stored(false),
-        max_height: Some("100%".to_owned()),
-        viewport_fit,
-        viewport_fit_min_rows,
-        page_size_preference: Some(page_size_preference),
-        page_size_auto_label,
-        on_search: None,
-        on_query_change: None,
-        query_ownership: Some(query_ownership),
-        query_reset_key: None,
-        page_size_options,
-        filter_options,
-        filter_option_entries,
-        filter_vocabulary: None,
-        node_ref: NodeRef::new(),
-        cell_renderers,
-        typed_cells,
-        detail_renderer,
-        row_class_fn,
-        row_key,
-        selection,
-        multi_selection,
-        on_row_activate,
-        on_row_activate_keyed,
-        on_row_inspect,
-        on_row_inspect_keyed,
-        column_tools: Some(column_tools),
-        on_displayed_slice,
-    });
-
-    view! {
-        <div class="contents" data-server-entity-table="true">
-            {server_table}
-        </div>
+            view! {
+                <div class="contents" data-server-entity-table="true">
+                    {server_table}
+                </div>
+            }
+            .into_any()
+        }
     }
-    .into_any()
+    }
 }
 
 #[cfg(test)]
@@ -282,6 +332,54 @@ mod tests {
                 Column::new("verdict", "Verdict").filterable(),
             ])
             .is_ok()
+        );
+    }
+
+    #[test]
+    fn filtering_capability_is_required_by_the_canonical_facade() {
+        assert_eq!(
+            validate_server_entity_capabilities(
+                ServerQueryCapabilities::all().with_filtering(false)
+            ),
+            Err(ServerEntityTableConfigurationError::FilteringDisabled)
+        );
+    }
+
+    #[test]
+    fn page_size_capability_is_required_by_the_canonical_facade() {
+        assert_eq!(
+            validate_server_entity_capabilities(
+                ServerQueryCapabilities::all().with_page_size(false)
+            ),
+            Err(ServerEntityTableConfigurationError::PageSizeDisabled)
+        );
+    }
+
+    #[test]
+    fn capability_errors_have_stable_alert_codes_and_copy() {
+        assert_eq!(
+            ServerEntityTableConfigurationError::FilteringDisabled.code(),
+            "filtering-disabled"
+        );
+        assert_eq!(
+            ServerEntityTableConfigurationError::FilteringDisabled.to_string(),
+            "ServerEntityTable requires endpoint filtering support; use ServerDataTable for a partial composition"
+        );
+        assert_eq!(
+            ServerEntityTableConfigurationError::PageSizeDisabled.code(),
+            "page-size-disabled"
+        );
+        assert_eq!(
+            ServerEntityTableConfigurationError::PageSizeDisabled.to_string(),
+            "ServerEntityTable requires endpoint page-size support; use ServerDataTable for a partial composition"
+        );
+    }
+
+    #[test]
+    fn search_capability_can_be_disabled_for_history_like_endpoints() {
+        assert!(
+            validate_server_entity_capabilities(ServerQueryCapabilities::all().with_search(false))
+                .is_ok()
         );
     }
 
