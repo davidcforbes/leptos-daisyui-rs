@@ -187,6 +187,421 @@ async fn wait_for_history_acceptance(
     );
 }
 
+async fn history_interaction_snapshot(harness: &pixelproof_web::Harness) -> Value {
+    eval_json(
+        harness,
+        r#"(() => {
+            const root = document.querySelector('#server-entity-history');
+            const table = root.querySelector('[data-table-data-mode="server-query"]');
+            const footer = table.querySelector('[data-server-table-footer]');
+            const pageSize = footer.querySelector('[data-table-page-size-control]');
+            const chooser = table.querySelector('[data-server-column-chooser="true"]');
+            const chooserMenu = chooser.closest('.dropdown').querySelector('.dropdown-content');
+            const moduleSeparator = Array.from(table.querySelectorAll('[role="separator"]'))
+                .find(separator => separator.getAttribute('aria-label') === 'Resize Module column');
+            const moduleTrack = table.querySelector('[data-table-column-track="module"]');
+            const headers = Array.from(table.querySelectorAll(
+                'colgroup[data-table-column-tracks] col[data-table-column-track]'
+            )).map(track => track.dataset.tableColumnTrack);
+            const auditedControls = Array.from(document.querySelectorAll(
+                '[data-testid="server-entity-reactive-fixture"] input, ' +
+                '[data-testid="server-entity-reactive-fixture"] select, ' +
+                '#server-entity-history input, #server-entity-history select'
+            ));
+            const rect = element => {
+                const box = element?.getBoundingClientRect();
+                return box ? { left: box.left, top: box.top, right: box.right,
+                    bottom: box.bottom, width: box.width, height: box.height } : null;
+            };
+            return {
+                headers,
+                chooserExpanded: chooser.getAttribute('aria-expanded'),
+                chooserVisible: rect(chooserMenu)?.width > 0 && rect(chooserMenu)?.height > 0,
+                chooserInsideViewport: !rect(chooserMenu) || (
+                    rect(chooserMenu).left >= 0 &&
+                    rect(chooserMenu).right <= document.documentElement.clientWidth
+                ),
+                pageSize: {
+                    value: pageSize.value,
+                    label: pageSize.selectedOptions[0]?.textContent,
+                    values: Array.from(pageSize.options).map(option => option.value),
+                    id: pageSize.id,
+                    name: pageSize.name,
+                    ariaLabel: pageSize.getAttribute('aria-label'),
+                },
+                range: footer.querySelector('[data-server-row-range]').textContent.trim(),
+                auditFixtureControls: {
+                    count: auditedControls.length,
+                    withUnexpectedShadow: auditedControls.filter(control => {
+                        const shadow = getComputedStyle(control).boxShadow;
+                        return shadow !== 'none' && !shadow.includes('0px 0px 0px 0px');
+                    }).length,
+                },
+                moduleResize: {
+                    name: moduleSeparator?.getAttribute('aria-label'),
+                    now: Number(moduleSeparator?.getAttribute('aria-valuenow')),
+                    min: Number(moduleSeparator?.getAttribute('aria-valuemin')),
+                    max: Number(moduleSeparator?.getAttribute('aria-valuemax')),
+                    valueText: moduleSeparator?.getAttribute('aria-valuetext'),
+                    trackWidth: rect(moduleTrack)?.width,
+                },
+                geometry: {
+                    root: rect(root),
+                    table: rect(table),
+                    footer: rect(footer),
+                    chooser: rect(chooserMenu),
+                    horizontalOverflowAvailable: ['auto', 'scroll'].includes(
+                        getComputedStyle(table.querySelector('.overflow-x-auto')).overflowX
+                    ),
+                    footerInside: rect(footer).left >= rect(table).left - 1 &&
+                        rect(footer).right <= rect(table).right + 1 &&
+                        rect(footer).bottom <= rect(table).bottom + 1,
+                },
+            };
+        })()"#,
+    )
+    .await
+}
+
+async fn choose_history_page_size(harness: &pixelproof_web::Harness, value: &str) {
+    let selector = format!("{HISTORY_ROOT} [data-table-page-size-control]");
+    let option_index = eval_json(
+        harness,
+        &format!(
+            r#"(() => {{
+                const select = document.querySelector({selector:?});
+                select.scrollIntoView({{ block: 'center' }});
+                select.focus();
+                return Array.from(select.options).findIndex(option => option.value === {value:?});
+            }})()"#
+        ),
+    )
+    .await
+    .as_i64()
+    .expect("History page-size option index");
+    assert!(
+        option_index >= 0,
+        "History page-size option {value} is present"
+    );
+    harness
+        .press_key_sequence(&[pixelproof_web::Key::Space])
+        .await
+        .expect("open the real History native page-size menu");
+    let mut keys = vec![pixelproof_web::Key::Home];
+    keys.extend(std::iter::repeat_n(
+        pixelproof_web::Key::ArrowDown,
+        option_index as usize,
+    ));
+    keys.push(pixelproof_web::Key::Enter);
+    harness
+        .press_key_sequence(&keys)
+        .await
+        .expect("confirm the real History native page-size choice");
+}
+
+async fn wait_for_history_query(
+    harness: &pixelproof_web::Harness,
+    expected_token: u64,
+    predicate: impl Fn(&Value) -> bool,
+) -> Value {
+    for _ in 0..120 {
+        let snapshot = history_snapshot(harness).await;
+        if snapshot["proposals"] == json!(expected_token)
+            && snapshot["requestState"] == json!(format!("accepted:{expected_token}"))
+            && predicate(&snapshot["accepted"])
+        {
+            return snapshot;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    panic!(
+        "History fixture never accepted matching token {expected_token}: {}",
+        history_snapshot(harness).await
+    );
+}
+
+/// `ldui-9ke9`: the canonical server facade exposes one complete standard
+/// interaction surface. Every gesture is real browser input, and query
+/// controls move only after the fixture acknowledges a full replacement.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-server-table-column-tools)"]
+async fn server_entity_history_standard_controls_preserve_accepted_truth() {
+    let harness = harness_at("/components/data-table").await;
+    wait_for_selector(&harness, &format!("{HISTORY_ROOT} tbody tr[data-row-key]")).await;
+    begin_browser_error_capture(&harness).await;
+
+    let initial = history_snapshot(&harness).await;
+    let initial_controls = history_interaction_snapshot(&harness).await;
+    assert_eq!(initial_controls["pageSize"]["value"], json!("8"));
+    assert!(
+        initial_controls["pageSize"]["values"]
+            .as_array()
+            .is_some_and(|values| values.contains(&json!("auto"))),
+        "the canonical fill-parent facade must expose Auto sizing: {initial_controls}"
+    );
+    assert_eq!(
+        initial_controls["pageSize"]["id"],
+        json!("server-entity-history-table-page-size")
+    );
+    assert_eq!(
+        initial_controls["pageSize"]["name"],
+        initial_controls["pageSize"]["id"]
+    );
+    assert_eq!(
+        initial_controls["pageSize"]["ariaLabel"],
+        json!("Rows per page")
+    );
+    assert_eq!(
+        initial_controls["auditFixtureControls"]["count"],
+        json!(14),
+        "the two audit fixtures must expose the expected 14 native controls"
+    );
+    assert_eq!(
+        initial_controls["auditFixtureControls"]["withUnexpectedShadow"],
+        json!(0),
+        "fixture normalization must add zero non-transparent control shadows"
+    );
+
+    // Gear: hide, restore, then reorder through real pointer input. The DOM
+    // projection and accepted preference payload must agree after each click.
+    click(
+        &harness,
+        &format!("{HISTORY_ROOT} [data-server-column-chooser='true']"),
+    )
+    .await;
+    let opened = history_interaction_snapshot(&harness).await;
+    assert_eq!(opened["chooserExpanded"], json!("true"));
+    assert_eq!(opened["chooserVisible"], json!(true));
+    assert_eq!(opened["chooserInsideViewport"], json!(true));
+    click(
+        &harness,
+        &format!("{HISTORY_ROOT} [data-server-column='build'] [role='menuitemcheckbox']"),
+    )
+    .await;
+    let hidden = history_snapshot(&harness).await;
+    let hidden_controls = history_interaction_snapshot(&harness).await;
+    assert!(
+        hidden["preferences"]["hidden_columns"]
+            .as_array()
+            .is_some_and(|columns| columns.contains(&json!("build")))
+    );
+    assert!(
+        !hidden_controls["headers"]
+            .as_array()
+            .is_some_and(|columns| columns.contains(&json!("build")))
+    );
+    click(
+        &harness,
+        &format!("{HISTORY_ROOT} [data-server-column='build'] [role='menuitemcheckbox']"),
+    )
+    .await;
+    click(
+        &harness,
+        &format!(
+            "{HISTORY_ROOT} [data-server-column-order='build'][data-server-column-move='earlier']"
+        ),
+    )
+    .await;
+    let reordered = history_snapshot(&harness).await;
+    let reordered_controls = history_interaction_snapshot(&harness).await;
+    assert_eq!(
+        reordered_controls["headers"], reordered["preferences"]["column_order"],
+        "rendered header order must equal accepted preference order"
+    );
+
+    // Named separator: each real keyboard gesture commits through controlled
+    // preference ownership and is reflected in both ARIA and track geometry.
+    let separator = format!("{HISTORY_ROOT} [role='separator'][aria-label='Resize Module column']");
+    harness
+        .page()
+        .find_element(&separator)
+        .await
+        .expect("find named History Module separator")
+        .focus()
+        .await
+        .expect("focus named History Module separator");
+
+    for key in [
+        pixelproof_web::Key::ArrowRight,
+        pixelproof_web::Key::ArrowLeft,
+        pixelproof_web::Key::Home,
+        pixelproof_web::Key::End,
+    ] {
+        harness
+            .press_key_sequence(&[key])
+            .await
+            .expect("resize the History Module track by keyboard");
+        let accepted = history_snapshot(&harness).await;
+        let controls = history_interaction_snapshot(&harness).await;
+        let width = accepted["preferences"]["column_widths"]["module"]
+            .as_u64()
+            .expect("accepted Module width");
+        assert_eq!(controls["moduleResize"]["now"].as_u64(), Some(width));
+        assert_eq!(
+            controls["moduleResize"]["trackWidth"].as_f64(),
+            Some(width as f64)
+        );
+        assert!(
+            controls["moduleResize"]["min"].as_u64() <= Some(width)
+                && Some(width) <= controls["moduleResize"]["max"].as_u64(),
+            "named separator range must remain ordered: {controls}"
+        );
+        assert_eq!(
+            controls["moduleResize"]["valueText"],
+            json!(format!("{width} pixels"))
+        );
+    }
+
+    // Fixed intent is accepted as a query replacement and survives an actual
+    // desktop viewport resize without another proposal.
+    let mut token = initial["proposals"].as_u64().expect("proposal token");
+    choose_history_page_size(&harness, "10").await;
+    token += 1;
+    let fixed =
+        wait_for_history_query(&harness, token, |query| query["page_size"] == json!(10)).await;
+    let fixed_controls = history_interaction_snapshot(&harness).await;
+    assert_eq!(fixed_controls["pageSize"]["value"], json!("10"));
+    harness
+        .set_viewport(pixelproof_web::ViewportSize::new(1280, 1_000))
+        .await
+        .expect("resize the History desktop viewport");
+    tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+    let fixed_after_resize = history_snapshot(&harness).await;
+    assert_eq!(fixed_after_resize["proposals"], fixed["proposals"]);
+    assert_eq!(fixed_after_resize["accepted"], fixed["accepted"]);
+
+    // Auto is chosen through the native menu, then a second desktop resize
+    // must propose and accept a different server capacity.
+    choose_history_page_size(&harness, "auto").await;
+    token += 1;
+    let auto =
+        wait_for_history_query(&harness, token, |query| query["page_size"] != json!(10)).await;
+    let first_auto_size = auto["accepted"]["page_size"]
+        .as_i64()
+        .expect("first accepted Auto capacity");
+    let auto_controls = history_interaction_snapshot(&harness).await;
+    assert_eq!(auto_controls["pageSize"]["value"], json!("auto"));
+    assert_eq!(
+        auto_controls["pageSize"]["label"],
+        json!(format!("Auto ({first_auto_size})"))
+    );
+    harness
+        .set_viewport(pixelproof_web::ViewportSize::new(1280, 700))
+        .await
+        .expect("resize the Auto-sized History desktop viewport");
+    token += 1;
+    let resized_auto = wait_for_history_query(&harness, token, |query| {
+        query["page_size"].as_i64() != Some(first_auto_size)
+    })
+    .await;
+    assert_ne!(
+        resized_auto["accepted"]["page_size"],
+        auto["accepted"]["page_size"]
+    );
+
+    // Sort then move to page two. Both visible changes await accepted server
+    // replacements; no client-local row transform is allowed.
+    click(
+        &harness,
+        &format!("{HISTORY_ROOT} [data-table-sort-column='started_at']"),
+    )
+    .await;
+    token += 1;
+    let sorted = wait_for_history_query(&harness, token, |query| {
+        query["sort"]["column"] == json!("started_at")
+            && query["sort"]["order"] == json!("ascending")
+    })
+    .await;
+    assert_eq!(sorted["acceptedIds"], sorted["domIds"]);
+    click(
+        &harness,
+        &format!("{HISTORY_ROOT} [data-server-table-footer] button:nth-last-child(1)"),
+    )
+    .await;
+    token += 1;
+    let page_two = wait_for_history_query(&harness, token, |query| query["page"] == json!(2)).await;
+    assert_eq!(page_two["acceptedIds"], page_two["domIds"]);
+    assert!(
+        history_interaction_snapshot(&harness).await["range"]
+            .as_str()
+            .is_some_and(|range| range.starts_with("Showing "))
+    );
+
+    // Fail the next filter request. Accepted query, rows, population count,
+    // range, page-size label, order, widths, and preferences all remain the
+    // exact pre-request truth while the proposal/failure state is observable.
+    click(
+        &harness,
+        "[data-testid='server-entity-history-fail-next-request']",
+    )
+    .await;
+    let before_failure = history_snapshot(&harness).await;
+    let controls_before_failure = history_interaction_snapshot(&harness).await;
+
+    choose_history_exact_filter(&harness, "mode", "Replay").await;
+    token += 1;
+    for _ in 0..120 {
+        let failed = history_snapshot(&harness).await;
+        if failed["requestState"] == json!(format!("failed:{token}")) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let failed = history_snapshot(&harness).await;
+    let controls_after_failure = history_interaction_snapshot(&harness).await;
+    assert_eq!(failed["requestState"], json!(format!("failed:{token}")));
+    assert_eq!(failed["failureState"], json!("retained-failure"));
+    assert_eq!(failed["loading"], json!(false));
+    for field in ["accepted", "acceptedIds", "domIds", "total", "preferences"] {
+        assert_eq!(
+            failed[field], before_failure[field],
+            "failed {field}: {failed}"
+        );
+    }
+    for field in ["range", "pageSize", "headers", "moduleResize"] {
+        assert_eq!(
+            controls_after_failure[field], controls_before_failure[field],
+            "failed request changed accepted {field}"
+        );
+    }
+    assert_eq!(
+        controls_after_failure["geometry"]["footerInside"],
+        json!(true)
+    );
+    assert_eq!(
+        controls_after_failure["geometry"]["horizontalOverflowAvailable"],
+        json!(true),
+        "wide History columns must remain available through horizontal scrolling when needed"
+    );
+
+    // Layer C: inject the vendored axe runtime, then scope blocking WCAG
+    // findings to this deterministic fixture rather than unrelated examples.
+    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
+        .expect("load vendored axe-core");
+    let _page_report = axe
+        .run(harness.page())
+        .await
+        .expect("inject and run axe-core");
+    let blocking = eval_json(
+        &harness,
+        r#"(async () => {
+            const report = await axe.run(document.querySelector('#server-entity-history'), {
+                runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa'] }
+            });
+            return report.violations
+                .filter(v => v.impact === 'serious' || v.impact === 'critical')
+                .map(v => ({ id: v.id, impact: v.impact, nodes: v.nodes.length }));
+        })()"#,
+    )
+    .await;
+    assert_eq!(
+        blocking,
+        json!([]),
+        "blocking History axe findings: {blocking}"
+    );
+    assert_no_browser_errors(&harness, "ServerEntityTable complete interaction contract").await;
+}
+
 /// `ldui-9ke9`: every History filter is evaluated against the complete
 /// simulated population. The accepted page and DOM remain locked while a
 /// proposal is pending, then move together to a page containing an id that

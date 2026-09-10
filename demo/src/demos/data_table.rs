@@ -2158,7 +2158,10 @@ pub fn DataTableDemo() -> impl IntoView {
                         "Supply valid columns"
                     </Button>
                 </div>
-                <div data-testid="server-entity-reactive-fixture" class="h-80 min-h-0">
+                <div
+                    data-testid="server-entity-reactive-fixture"
+                    class="h-80 min-h-0 [&_input]:shadow-none [&_select]:shadow-none"
+                >
                     <ServerEntityTable
                         rows=facade_reactive_rows
                         columns=facade_reactive_columns
@@ -2181,7 +2184,7 @@ pub fn DataTableDemo() -> impl IntoView {
             </Section>
 
             <Section title="Canonical ServerEntityTable History population">
-                <div id="server-entity-history">
+                <div id="server-entity-history" class="[&_input]:shadow-none [&_select]:shadow-none">
                     <p class="text-sm opacity-70 mb-2">
                         "This History-shaped simulator keeps all 48 rows behind an accepted "
                         <code>"TableQuery"</code>
@@ -2258,7 +2261,7 @@ pub fn DataTableDemo() -> impl IntoView {
                                 .unwrap_or_default()}
                         </code>
                     </div>
-                    <div class="h-[34rem] min-h-0">
+                    <div class="h-[60vh] min-h-0">
                         <ServerEntityTable
                             rows=history_rows
                             columns=history_columns
@@ -2274,7 +2277,7 @@ pub fn DataTableDemo() -> impl IntoView {
                             preference_version=1
                             page_size_preference=history_page_size
                             query_capabilities=ServerQueryCapabilities::all().with_search(false)
-                            viewport_fit=false
+                            viewport_fit=true
                             filter_options=Signal::derive(move || {
                                 let all = history_population.get_value();
                                 HashMap::from([
