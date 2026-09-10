@@ -280,7 +280,7 @@ pub fn ServerEntityTable(
                 row_class_fn,
                 row_key,
                 selection,
-                multi_selection: multi_selection.clone(),
+                multi_selection,
                 on_row_activate,
                 on_row_activate_keyed,
                 on_row_inspect,
