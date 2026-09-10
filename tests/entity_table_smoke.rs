@@ -6836,11 +6836,11 @@ async fn grouped_pages_keep_a_fitting_group_whole_and_stay_truthful() {
         let footer_height = state["footerHeight"]
             .as_f64()
             .unwrap_or_else(|| panic!("missing footer height at {width}px: {state}"));
-        if let Some((previous_width, previous_height)) = previous {
-            if (footer_height - previous_height).abs() > 0.5 {
-                transition = Some((previous_width, width));
-                break;
-            }
+        if let Some((previous_width, previous_height)) = previous
+            && (footer_height - previous_height).abs() > 0.5
+        {
+            transition = Some((previous_width, width));
+            break;
         }
         previous = Some((width, footer_height));
     }

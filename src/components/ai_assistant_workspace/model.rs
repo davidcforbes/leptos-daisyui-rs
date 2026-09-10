@@ -2,6 +2,139 @@
 
 use super::*;
 
+/// Validates the complete workspace boundary while keeping optional services independent.
+pub fn validate_workspace(state: &AssistantWorkspaceState) -> Result<(), AssistantContractError> {
+    match &state.access {
+        AssistantAccess::Granted => {}
+        AssistantAccess::Denied { reason } | AssistantAccess::Unresolved { reason } => {
+            validate_reason(reason)?
+        }
+        AssistantAccess::Unknown(_) => return Err(AssistantContractError::UnknownState),
+    }
+    let context = state
+        .context
+        .as_ref()
+        .ok_or(AssistantContractError::InvalidReceipt)?;
+    validate_context(context)?;
+    let conversation = match &state.conversation {
+        AssistantLoad::Ready(value) => value,
+        AssistantLoad::Denied { reason } | AssistantLoad::Unavailable { reason } => {
+            validate_reason(reason)?;
+            return Ok(());
+        }
+        AssistantLoad::Loading => return Ok(()),
+        AssistantLoad::ContractError(error) => return Err(*error),
+    };
+    validate_conversation(conversation)?;
+    if conversation.context_id != context.id || conversation.scope_id != context.scope.id {
+        return Err(AssistantContractError::ScopeMismatch);
+    }
+    if let AssistantLoad::Ready(settings) = &state.settings {
+        validate_settings(settings, &context.actor.id)?;
+    }
+    Ok(())
+}
+
+/// Returns whether an explicit Ask is currently admissible by every required owner.
+pub fn can_dispatch(state: &AssistantWorkspaceState, action: &AssistantAction) -> bool {
+    let Some(context) = state.context.as_ref() else {
+        return false;
+    };
+    if state.access != AssistantAccess::Granted
+        || !context.capabilities.allows(&AssistantCapability::Ask)
+        || action.context != context.stamp()
+    {
+        return false;
+    }
+    let AssistantActionKind::Ask = action.kind else {
+        return false;
+    };
+    let AssistantIntentTarget::Conversation {
+        conversation: conversation_target,
+        draft: draft_target,
+    } = &action.target
+    else {
+        return false;
+    };
+    let AssistantLoad::Ready(conversation) = &state.conversation else {
+        return false;
+    };
+    if conversation.closed
+        || !conversation.capabilities.allows(&AssistantCapability::Ask)
+        || conversation.id != conversation_target.id
+        || conversation.revision != conversation_target.revision
+        || conversation.draft.id != draft_target.id
+        || conversation.draft.revision != draft_target.revision
+        || conversation.draft.context_id != context.id
+        || conversation.draft.context_revision != context.revision
+        || conversation.draft.text.trim().is_empty()
+        || conversation.draft.text.chars().count() > conversation.draft.max_chars
+    {
+        return false;
+    }
+    if !matches!(conversation.submission, SubmissionDisposition::Idle) {
+        return false;
+    }
+    let Some(request_id) = state.next_request_id.as_ref() else {
+        return false;
+    };
+    if request_id.trim().is_empty() {
+        return false;
+    }
+    let Some(settings) = state.settings_ready() else {
+        return false;
+    };
+    engine_ready_for_ask(settings, &context.actor.id).is_some()
+}
+
+/// Builds a typed command from an admissible intent without changing state.
+pub fn command_for(
+    state: &AssistantWorkspaceState,
+    action: AssistantAction,
+) -> Option<AssistantCommand> {
+    if !can_dispatch(state, &action) {
+        return None;
+    }
+    let context = state.context.as_ref()?;
+    let conversation = match &state.conversation {
+        AssistantLoad::Ready(value) => value,
+        _ => return None,
+    };
+    let settings = state.settings_ready()?;
+    let engine = engine_ready_for_ask(settings, &context.actor.id)?;
+    let request = AssistantRequest {
+        id: state.next_request_id.as_ref()?.clone(),
+        context: action.context.clone(),
+        target: action.target.clone(),
+    };
+    Some(AssistantCommand {
+        action,
+        request: Some(request),
+        payload: AssistantCommandPayload::Ask {
+            question: conversation.draft.text.clone(),
+            selected_engine_id: engine.id.clone(),
+            scope: context.scope.clone(),
+        },
+    })
+}
+
+/// Checks that a command still matches the current host projection and allocation.
+pub fn accepts_command(state: &AssistantWorkspaceState, command: &AssistantCommand) -> bool {
+    let Some(expected) = command_for(state, command.action.clone()) else {
+        return false;
+    };
+    expected == *command
+}
+
+impl AssistantWorkspaceState {
+    fn settings_ready(&self) -> Option<&AssistantSettings> {
+        match &self.settings {
+            AssistantLoad::Ready(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
 /// Validates an answer against its admitted scope, not the currently viewed page.
 pub fn validate_answer(
     answer: &AssistantAnswer,

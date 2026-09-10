@@ -1,5 +1,6 @@
 //! Owned presentation values for the controlled assistant workspace.
 
+use super::settings::AssistantSettings;
 use super::{AssistantEvidence, AssistantProvenance};
 
 /// Display-safe host explanation; the code is opaque, never provider diagnostics.
@@ -652,6 +653,102 @@ pub struct AssistantContextStamp {
     pub permission_revision: u64,
     /// Expected policy generation.
     pub policy_generation: u64,
+}
+
+/// The bounded interaction kinds understood by the workspace.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AssistantActionKind {
+    /// Submit the conversation's current controlled draft.
+    Ask,
+    /// Unknown actions are never dispatchable.
+    Unknown(String),
+}
+
+/// The only destination currently supported by the assistant composer.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AssistantIntentTarget {
+    /// A specific conversation and draft revision.
+    Conversation {
+        /// Conversation identity and expected revision.
+        conversation: AssistantItemRevision,
+        /// Draft identity and expected revision.
+        draft: AssistantItemRevision,
+    },
+    /// Unknown destinations are never dispatchable.
+    Unknown(String),
+}
+
+/// An explicit user intent carrying the authority snapshot it was created from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AssistantAction {
+    /// Captured context and authority generations.
+    pub context: AssistantContextStamp,
+    /// Exact destination identities.
+    pub target: AssistantIntentTarget,
+    /// Requested bounded operation.
+    pub kind: AssistantActionKind,
+}
+
+/// Host allocation and identity context attached to an admitted command.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AssistantRequest {
+    /// Host-allocated request identity.
+    pub id: String,
+    /// Authority snapshot copied from the action.
+    pub context: AssistantContextStamp,
+    /// Exact destination identities.
+    pub target: AssistantIntentTarget,
+}
+
+/// The typed payload sent for a validated assistant command.
+#[non_exhaustive]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AssistantCommandPayload {
+    /// Submit the exact controlled question and accepted scope.
+    Ask {
+        /// Exact draft text at admission.
+        question: String,
+        /// Accepted selected preference, never execution provenance.
+        selected_engine_id: String,
+        /// Exact accepted scope snapshot.
+        scope: AssistantScope,
+    },
+    /// Unknown payloads are never accepted.
+    Unknown(String),
+}
+
+/// A host-owned command proposal; creating it mutates no workspace state.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AssistantCommand {
+    /// Original explicit intent.
+    pub action: AssistantAction,
+    /// Present only when the host allocated a request identity.
+    pub request: Option<AssistantRequest>,
+    /// Typed bounded payload.
+    pub payload: AssistantCommandPayload,
+}
+
+/// Complete controlled workspace projection, with independently loaded services.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AssistantWorkspaceState {
+    /// Page-level access verdict.
+    pub access: AssistantAccess,
+    /// Current page context, when accepted by the host.
+    pub context: Option<AssistantContext>,
+    /// Next host request allocation.
+    pub next_request_id: Option<String>,
+    /// Conversation projection.
+    pub conversation: AssistantLoad<AssistantConversation>,
+    /// Accepted/proposed settings projection.
+    pub settings: AssistantLoad<AssistantSettings>,
+    /// Optional actor-owned memory projection.
+    pub memory: AssistantLoad<()>,
+    /// Optional learning projection.
+    pub learning: AssistantLoad<()>,
+    /// Host clock used for time-sensitive projections.
+    pub now_ms: u64,
 }
 
 impl AssistantContext {
