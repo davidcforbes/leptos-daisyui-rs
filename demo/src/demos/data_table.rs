@@ -2,7 +2,177 @@ use crate::core::{ContentLayout, Section};
 use leptos::prelude::*;
 use leptos_daisyui_rs::components::*;
 use leptos_daisyui_rs::widgets::{DataTable as WidgetDataTable, TableColumn as WidgetTableColumn};
+use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap, HashSet};
+
+fn history_fixture_rows() -> Vec<TableRow> {
+    (0..48)
+        .map(|index| {
+            let number = index + 1;
+            let is_population_probe = number == 37;
+            HashMap::from([
+                ("id", format!("history-{number:03}")),
+                ("run", format!("run-{number:03}")),
+                (
+                    "module",
+                    if is_population_probe {
+                        "matter_timeline_history".to_owned()
+                    } else {
+                        format!("etl_module_{:02}", index % 6)
+                    },
+                ),
+                (
+                    "mode",
+                    if is_population_probe {
+                        "Replay".to_owned()
+                    } else if index % 2 == 0 {
+                        "Incremental".to_owned()
+                    } else {
+                        "Snapshot".to_owned()
+                    },
+                ),
+                (
+                    "started_at",
+                    if is_population_probe {
+                        "2026-09-07T03:37".to_owned()
+                    } else {
+                        format!("2026-09-{:02}T{:02}:00", 1 + index % 6, index % 24)
+                    },
+                ),
+                (
+                    "duration",
+                    if is_population_probe {
+                        "901".to_owned()
+                    } else {
+                        (20 + index).to_string()
+                    },
+                ),
+                (
+                    "verdict",
+                    if is_population_probe {
+                        "Retried".to_owned()
+                    } else if index % 5 == 0 {
+                        "Rejected".to_owned()
+                    } else {
+                        "Succeeded".to_owned()
+                    },
+                ),
+                (
+                    "captured",
+                    if is_population_probe {
+                        "370037".to_owned()
+                    } else {
+                        (10_000 + index * 101).to_string()
+                    },
+                ),
+                (
+                    "rejected",
+                    if is_population_probe {
+                        "137".to_owned()
+                    } else {
+                        (index % 4).to_string()
+                    },
+                ),
+                (
+                    "trigger",
+                    if is_population_probe {
+                        "Backfill".to_owned()
+                    } else if index % 2 == 0 {
+                        "Schedule".to_owned()
+                    } else {
+                        "Manual".to_owned()
+                    },
+                ),
+                (
+                    "build",
+                    if is_population_probe {
+                        "history-proof-37".to_owned()
+                    } else {
+                        format!("build-{:02}", index % 4)
+                    },
+                ),
+            ])
+        })
+        .collect()
+}
+
+fn history_filter_contains(column: &str) -> bool {
+    matches!(
+        column,
+        "run" | "module" | "started_at" | "duration" | "captured" | "rejected"
+    )
+}
+
+fn history_sort_order(left: &TableRow, right: &TableRow, column: &str) -> Ordering {
+    let left_value = left.get(column).map(String::as_str).unwrap_or_default();
+    let right_value = right.get(column).map(String::as_str).unwrap_or_default();
+    if matches!(column, "duration" | "captured" | "rejected") {
+        return left_value
+            .parse::<i64>()
+            .unwrap_or_default()
+            .cmp(&right_value.parse::<i64>().unwrap_or_default());
+    }
+    left_value.cmp(right_value)
+}
+
+fn history_server_response(population: &[TableRow], query: &TableQuery) -> (Vec<TableRow>, i64) {
+    let mut matches = population
+        .iter()
+        .filter(|row| {
+            query.filters.iter().all(|(column, requested)| {
+                let cell = row.get(column).map(String::as_str).unwrap_or_default();
+                if history_filter_contains(column) {
+                    cell.to_lowercase().contains(&requested.to_lowercase())
+                } else {
+                    cell == requested
+                }
+            })
+        })
+        .filter(|row| {
+            query.search.is_empty()
+                || row
+                    .values()
+                    .any(|cell| cell.to_lowercase().contains(&query.search.to_lowercase()))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    if let Some((column, direction)) = query.sort {
+        matches.sort_by(|left, right| {
+            let ordering = history_sort_order(left, right, column);
+            match direction {
+                SortOrder::Asc => ordering,
+                SortOrder::Desc => ordering.reverse(),
+            }
+        });
+    }
+    let total = matches.len() as i64;
+    let start = ((query.page.max(1) - 1) * query.page_size.max(1)) as usize;
+    let page = matches
+        .into_iter()
+        .skip(start)
+        .take(query.page_size.max(1) as usize)
+        .collect();
+    (page, total)
+}
+
+fn history_row_ids(rows: &[TableRow]) -> Vec<String> {
+    rows.iter()
+        .map(|row| row.get("id").cloned().unwrap_or_default())
+        .collect()
+}
+
+fn history_query_json(query: &TableQuery) -> serde_json::Value {
+    serde_json::json!({
+        "page": query.page,
+        "page_size": query.page_size,
+        "search": query.search.clone(),
+        "sort": query.sort.map(|(column, order)| serde_json::json!({
+            "column": column,
+            "order": order.as_aria_str(),
+        })),
+        "filters": query.filters.clone(),
+    })
+}
 
 /// Ten narrow-content columns for the column-track fit fixture (ldui-qsqz).
 /// With `declared = None` every column is undeclared (auto track); with
@@ -411,6 +581,98 @@ pub fn DataTableDemo() -> impl IntoView {
     let facade_reactive_query = RwSignal::new(TableQuery::first_page(10));
     let facade_reactive_total = RwSignal::new(1_i64);
     let facade_reactive_page_size = RwSignal::new(ServerTablePageSizePreference::fixed(10));
+
+    // History-shaped canonical facade proof. The complete 48-row population
+    // remains inside this fixture-only simulated server; the component sees
+    // only the last atomically accepted eight-row response.
+    let history_population = StoredValue::new(history_fixture_rows());
+    let history_initial_query = TableQuery::first_page(8);
+    let (history_initial_rows, history_initial_total) =
+        history_server_response(&history_population.get_value(), &history_initial_query);
+    let history_accepted_ids = RwSignal::new(history_row_ids(&history_initial_rows));
+    let history_rows = RwSignal::new(history_initial_rows);
+    let history_total = RwSignal::new(history_initial_total);
+    let history_accepted_query = RwSignal::new(history_initial_query.clone());
+    let history_proposed_query = RwSignal::new(history_initial_query);
+    let history_proposal_count = RwSignal::new(0_u64);
+    let history_request_token = RwSignal::new(0_u64);
+    let history_request_state = RwSignal::new("accepted:0".to_owned());
+    let history_failure_state = RwSignal::new("none".to_owned());
+    let history_fail_next_request = RwSignal::new(false);
+    let history_loading = RwSignal::new(false);
+    let history_page_size = RwSignal::new(ServerTablePageSizePreference::fixed(8));
+    let history_preferences = RwSignal::new(EntityTablePreferences::new(1));
+    let history_columns = RwSignal::new(vec![
+        Column::new("run", "Run")
+            .filterable_text()
+            .with_min_width(76)
+            .action()
+            .non_resizable(),
+        Column::new("module", "Module")
+            .filterable_text()
+            .with_min_width(120)
+            .with_max_width(240),
+        Column::new_non_sortable("mode", "Mode").filterable(),
+        Column::new("started_at", "Started")
+            .filterable_text()
+            .with_min_width(140)
+            .with_max_width(240),
+        Column::new_non_sortable("duration", "Duration (s)")
+            .filterable_text()
+            .with_min_width(104),
+        Column::new("verdict", "Verdict").filterable(),
+        Column::new("captured", "Captured")
+            .filterable_text()
+            .with_sort_as(SortAs::Number),
+        Column::new("rejected", "Rejected")
+            .filterable_text()
+            .with_sort_as(SortAs::Number),
+        Column::new("trigger", "Trigger").filterable(),
+        Column::new("build", "Build").filterable(),
+    ]);
+    let propose_history_query = move |query: TableQuery| {
+        let token = history_request_token.get_untracked().wrapping_add(1);
+        history_request_token.set(token);
+        history_proposal_count.set(token);
+        history_proposed_query.set(query.clone());
+        history_request_state.set(format!("pending:{token}"));
+        history_failure_state.set("none".to_owned());
+        let fail_request = history_fail_next_request.get_untracked();
+        history_fail_next_request.set(false);
+
+        set_timeout(
+            move || {
+                // A later proposal owns the request state. This stale response
+                // is ignored without touching accepted rows/query/total.
+                if history_request_token.get_untracked() != token {
+                    return;
+                }
+                if fail_request {
+                    batch(move || {
+                        history_loading.set(false);
+                        history_request_state.set(format!("failed:{token}"));
+                        history_failure_state.set("retained-failure".to_owned());
+                    });
+                    return;
+                }
+                let (rows, total) =
+                    history_server_response(&history_population.get_value(), &query);
+                let ids = history_row_ids(&rows);
+                batch(move || {
+                    history_accepted_query.set(query);
+                    history_rows.set(rows);
+                    history_total.set(total);
+                    history_accepted_ids.set(ids);
+                    history_loading.set(false);
+                    history_request_state.set(format!("accepted:{token}"));
+                    history_failure_state.set("none".to_owned());
+                });
+            },
+            // This is deliberately longer than the table's 150 ms text
+            // debounce, leaving a deterministic pending-state observation.
+            std::time::Duration::from_millis(240),
+        );
+    };
 
     let run_server_query = move |q: TableQuery| {
         let query_debug = serde_json::json!({
@@ -1914,6 +2176,111 @@ pub fn DataTableDemo() -> impl IntoView {
                         query_capabilities=ServerQueryCapabilities::all().with_search(false)
                         viewport_fit=false
                     />
+                </div>
+            </Section>
+
+            <Section title="Canonical ServerEntityTable History population">
+                <div id="server-entity-history">
+                    <p class="text-sm opacity-70 mb-2">
+                        "This History-shaped simulator keeps all 48 rows behind an accepted "
+                        <code>"TableQuery"</code>
+                        " boundary. Filters, sorting, and paging run over that complete "
+                        "population; only the accepted page reaches "
+                        <code>"ServerEntityTable"</code>"."
+                    </p>
+                    <div class="mb-3 flex flex-wrap items-center gap-2">
+                        <Button
+                            attr:data-testid="server-entity-history-reset-query"
+                            on:click=move |_| {
+                                propose_history_query(TableQuery::first_page(8));
+                            }
+                        >
+                            "Reset accepted query"
+                        </Button>
+                        <Button
+                            attr:data-testid="server-entity-history-fail-next-request"
+                            on:click=move |_| history_fail_next_request.set(true)
+                        >
+                            "Fail next request"
+                        </Button>
+                        <span class="text-xs">
+                            "Request: "
+                            <code
+                                class="font-sans"
+                                data-testid="server-entity-history-request-state"
+                            >
+                                {move || history_request_state.get()}
+                            </code>
+                            " · Failure: "
+                            <code
+                                class="font-sans"
+                                data-testid="server-entity-history-failure-state"
+                            >
+                                {move || history_failure_state.get()}
+                            </code>
+                            " · Proposals: "
+                            <code
+                                class="font-sans"
+                                data-testid="server-entity-history-proposals"
+                            >
+                                {move || history_proposal_count.get().to_string()}
+                            </code>
+                            " · Total: "
+                            <code
+                                class="font-sans"
+                                data-testid="server-entity-history-total"
+                            >
+                                {move || history_total.get().to_string()}
+                            </code>
+                        </span>
+                    </div>
+                    <div class="sr-only" aria-hidden="true">
+                        <code data-testid="server-entity-history-proposed-query">
+                            {move || history_query_json(&history_proposed_query.get()).to_string()}
+                        </code>
+                        <code data-testid="server-entity-history-accepted-query">
+                            {move || history_query_json(&history_accepted_query.get()).to_string()}
+                        </code>
+                        <code data-testid="server-entity-history-accepted-ids">
+                            {move || serde_json::to_string(&history_accepted_ids.get())
+                                .unwrap_or_default()}
+                        </code>
+                        <code data-testid="server-entity-history-preferences">
+                            {move || serde_json::to_string(&history_preferences.get())
+                                .unwrap_or_default()}
+                        </code>
+                    </div>
+                    <div class="h-[34rem] min-h-0">
+                        <ServerEntityTable
+                            rows=history_rows
+                            columns=history_columns
+                            query=history_accepted_query
+                            total_count=history_total
+                            on_query_change=Callback::new(propose_history_query)
+                            loading=history_loading
+                            control_id="server-entity-history-table".to_owned()
+                            preference_ownership=EntityTablePreferenceOwnership::controlled(
+                                history_preferences.into(),
+                                Callback::new(move |next| history_preferences.set(next)),
+                            )
+                            preference_version=1
+                            page_size_preference=history_page_size
+                            query_capabilities=ServerQueryCapabilities::all().with_search(false)
+                            viewport_fit=false
+                            filter_options=Signal::derive(move || {
+                                let all = history_population.get_value();
+                                HashMap::from([
+                                    ("mode", distinct_values(&all, "mode")),
+                                    ("verdict", distinct_values(&all, "verdict")),
+                                    ("trigger", distinct_values(&all, "trigger")),
+                                    ("build", distinct_values(&all, "build")),
+                                ])
+                            })
+                            row_key=Callback::new(|row: TableRow| {
+                                row.get("id").cloned().unwrap_or_default()
+                            })
+                        />
+                    </div>
                 </div>
             </Section>
 

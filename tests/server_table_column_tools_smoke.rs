@@ -42,6 +42,243 @@ async fn eval_json(harness: &pixelproof_web::Harness, expression: &str) -> Value
         .expect("server-table column-tools expression returns JSON")
 }
 
+const HISTORY_ROOT: &str = "#server-entity-history";
+
+async fn history_snapshot(harness: &pixelproof_web::Harness) -> Value {
+    eval_json(
+        harness,
+        r#"(() => {
+            const root = document.querySelector('#server-entity-history');
+            const parse = testid => JSON.parse(
+                root.querySelector(`[data-testid="${testid}"]`).textContent
+            );
+            return {
+                accepted: parse('server-entity-history-accepted-query'),
+                proposed: parse('server-entity-history-proposed-query'),
+                acceptedIds: parse('server-entity-history-accepted-ids'),
+                domIds: Array.from(root.querySelectorAll('tbody tr[data-row-key]'))
+                    .map(row => row.dataset.rowKey),
+                total: Number(root.querySelector(
+                    '[data-testid="server-entity-history-total"]'
+                ).textContent),
+                proposals: Number(root.querySelector(
+                    '[data-testid="server-entity-history-proposals"]'
+                ).textContent),
+                preferences: parse('server-entity-history-preferences'),
+                requestState: root.querySelector(
+                    '[data-testid="server-entity-history-request-state"]'
+                ).textContent.trim(),
+                failureState: root.querySelector(
+                    '[data-testid="server-entity-history-failure-state"]'
+                ).textContent.trim(),
+            };
+        })()"#,
+    )
+    .await
+}
+
+async fn choose_history_exact_filter(harness: &pixelproof_web::Harness, column: &str, value: &str) {
+    let selector = format!(
+        "{HISTORY_ROOT} [data-table-filter-column='{column}'] select[data-table-filter-kind='exact']"
+    );
+    let option_index = eval_json(
+        harness,
+        &format!(
+            r#"(() => {{
+                const select = document.querySelector({selector:?});
+                return Array.from(select.options).findIndex(option => option.value === {value:?});
+            }})()"#
+        ),
+    )
+    .await
+    .as_i64()
+    .expect("native exact-filter option index");
+    assert!(
+        option_index > 0,
+        "fixture option must follow the All choice"
+    );
+
+    harness
+        .page()
+        .find_element(&selector)
+        .await
+        .expect("find native exact-filter control")
+        .focus()
+        .await
+        .expect("focus native exact-filter control");
+    let mut keys = vec![pixelproof_web::Key::Space, pixelproof_web::Key::Home];
+    keys.extend(std::iter::repeat_n(
+        pixelproof_web::Key::ArrowDown,
+        option_index as usize,
+    ));
+    keys.push(pixelproof_web::Key::Enter);
+    harness
+        .press_key_sequence(&keys)
+        .await
+        .expect("choose native exact-filter option");
+}
+
+async fn type_history_text_filter(harness: &pixelproof_web::Harness, column: &str, value: &str) {
+    let selector = format!(
+        "{HISTORY_ROOT} [data-table-filter-column='{column}'] input[data-table-filter-kind='contains']"
+    );
+    let input = harness
+        .page()
+        .find_element(selector)
+        .await
+        .expect("find History text-filter control");
+    input
+        .focus()
+        .await
+        .expect("focus History text-filter control");
+    input
+        .type_str(value)
+        .await
+        .expect("type through the real History text-filter control");
+}
+
+async fn wait_for_history_pending(
+    harness: &pixelproof_web::Harness,
+    expected_token: u64,
+    column: &str,
+    value: &str,
+) -> Value {
+    for _ in 0..60 {
+        let snapshot = history_snapshot(harness).await;
+        if snapshot["proposals"] == json!(expected_token)
+            && snapshot["requestState"] == json!(format!("pending:{expected_token}"))
+            && snapshot["proposed"]["filters"][column] == json!(value)
+        {
+            return snapshot;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    panic!(
+        "History fixture never exposed pending token {expected_token}: {}",
+        history_snapshot(harness).await
+    );
+}
+
+async fn wait_for_history_acceptance(
+    harness: &pixelproof_web::Harness,
+    expected_token: u64,
+    expected_filter: Option<(&str, &str)>,
+) -> Value {
+    for _ in 0..60 {
+        let snapshot = history_snapshot(harness).await;
+        let query_matches = expected_filter.map_or_else(
+            || snapshot["accepted"]["filters"] == json!({}),
+            |(column, value)| snapshot["accepted"]["filters"][column] == json!(value),
+        );
+        if snapshot["proposals"] == json!(expected_token)
+            && snapshot["requestState"] == json!(format!("accepted:{expected_token}"))
+            && query_matches
+        {
+            return snapshot;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    panic!(
+        "History fixture never accepted token {expected_token}: {}",
+        history_snapshot(harness).await
+    );
+}
+
+/// `ldui-9ke9`: every History filter is evaluated against the complete
+/// simulated population. The accepted page and DOM remain locked while a
+/// proposal is pending, then move together to a page containing an id that
+/// was not present in the original eight-row slice.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-server-table-column-tools)"]
+async fn server_entity_history_filters_use_accepted_population_truth() {
+    let harness = harness_at("/components/data-table").await;
+    wait_for_selector(&harness, &format!("{HISTORY_ROOT} tbody tr[data-row-key]")).await;
+    begin_browser_error_capture(&harness).await;
+
+    let initial = history_snapshot(&harness).await;
+    assert_eq!(
+        initial["acceptedIds"], initial["domIds"],
+        "initial: {initial}"
+    );
+    assert_eq!(initial["acceptedIds"].as_array().map(Vec::len), Some(8));
+    assert_eq!(initial["total"], json!(48));
+    assert_eq!(initial["proposals"], json!(0));
+    assert_eq!(initial["requestState"], json!("accepted:0"));
+    assert_eq!(initial["failureState"], json!("none"));
+    assert_eq!(initial["preferences"]["schema_version"], json!(1));
+    let original_ids = initial["acceptedIds"]
+        .as_array()
+        .expect("initial accepted ids")
+        .clone();
+
+    let cases = [
+        ("run", "run-037", true),
+        ("module", "matter_timeline_history", true),
+        ("mode", "Replay", false),
+        ("started_at", "2026-09-07T03:37", true),
+        ("duration", "901", true),
+        ("verdict", "Retried", false),
+        ("captured", "370037", true),
+        ("rejected", "137", true),
+        ("trigger", "Backfill", false),
+        ("build", "history-proof-37", false),
+    ];
+
+    let mut previous_proposals = 0_u64;
+    for (column, value, text_filter) in cases {
+        click(
+            &harness,
+            "[data-testid='server-entity-history-reset-query']",
+        )
+        .await;
+        previous_proposals += 1;
+        let reset = wait_for_history_acceptance(&harness, previous_proposals, None).await;
+        assert_eq!(reset["proposals"], json!(previous_proposals));
+        assert_eq!(reset["accepted"]["filters"], json!({}));
+        assert_eq!(reset["acceptedIds"], initial["acceptedIds"]);
+
+        if text_filter {
+            type_history_text_filter(&harness, column, value).await;
+        } else {
+            choose_history_exact_filter(&harness, column, value).await;
+        }
+
+        previous_proposals += 1;
+        let pending = wait_for_history_pending(&harness, previous_proposals, column, value).await;
+        assert_eq!(
+            pending["proposals"],
+            json!(previous_proposals),
+            "{column}: {pending}"
+        );
+        assert_eq!(pending["proposed"]["filters"][column], json!(value));
+        assert_eq!(pending["accepted"]["filters"], json!({}));
+        assert_eq!(pending["acceptedIds"], initial["acceptedIds"]);
+        assert_eq!(pending["domIds"], initial["acceptedIds"]);
+        assert!(
+            pending["requestState"]
+                .as_str()
+                .is_some_and(|state| state.starts_with("pending:")),
+            "{column}: {pending}"
+        );
+
+        let accepted =
+            wait_for_history_acceptance(&harness, previous_proposals, Some((column, value))).await;
+        assert_eq!(accepted["accepted"]["filters"][column], json!(value));
+        assert_eq!(accepted["acceptedIds"], accepted["domIds"]);
+        assert!(
+            accepted["acceptedIds"]
+                .as_array()
+                .expect("filtered accepted ids")
+                .iter()
+                .any(|id| !original_ids.contains(id)),
+            "{column} must find a complete-population row outside page one: {accepted}"
+        );
+        assert_eq!(accepted["failureState"], json!("none"));
+    }
+
+    assert_no_browser_errors(&harness, "ServerEntityTable History population truth").await;
+}
+
 /// Reactive column declarations must switch the facade between its standard
 /// table and its fail-visible configuration alert in both directions.
 #[tokio::test(flavor = "multi_thread")]
