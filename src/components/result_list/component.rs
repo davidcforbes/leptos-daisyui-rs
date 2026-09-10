@@ -36,6 +36,7 @@ use leptos::{html::Div, prelude::*};
 ///     view! {
 ///         <ResultList
 ///             items=Signal::derive(move || items.clone())
+///             label="Search results"
 ///             on_select=Callback::new(|row: ResultRow| leptos::logging::log!("selected {}", row.title))
 ///         />
 ///     }
@@ -57,6 +58,10 @@ use leptos::{html::Div, prelude::*};
 /// - `node_ref` - References the listbox container div ([HTMLDivElement](https://developer.mozilla.org/en-US/docs/Web/API/HTMLDivElement))
 #[component]
 pub fn ResultList(
+    /// Accessible name for the interactive listbox.
+    #[prop(into)]
+    label: Signal<String>,
+
     /// Ranked result rows to display, top to bottom.
     #[prop(optional, into)]
     items: Signal<Vec<ResultRow>>,
@@ -116,6 +121,7 @@ pub fn ResultList(
     view! {
         <ResultListCore
             items=core_items
+            label=label
             empty_message=empty_message
             replacement_policy=ResultReplacementPolicy::ResetFirst
             on_select=core_on_select
@@ -201,6 +207,7 @@ pub fn ResultList(
 ///     view! {
 ///         <KeyedResultList
 ///             items=Signal::derive(move || items.clone())
+///             label="Case results"
 ///             selection=selection
 ///         />
 ///     }
@@ -234,6 +241,7 @@ pub fn ResultList(
 ///     view! {
 ///         <KeyedResultList
 ///             items=Signal::derive(move || items.clone())
+///             label="Case results"
 ///             on_select=Callback::new(|item: ResultListItem<CaseRef>| {
 ///                 leptos::logging::log!("activated {}", item.payload.case_number);
 ///             })
@@ -250,6 +258,10 @@ pub fn ResultList(
 /// - `node_ref` - References the listbox container div ([HTMLDivElement](https://developer.mozilla.org/en-US/docs/Web/API/HTMLDivElement))
 #[component]
 pub fn KeyedResultList<T>(
+    /// Accessible name for the interactive listbox.
+    #[prop(into)]
+    label: Signal<String>,
+
     /// Ranked, keyed results to display, top to bottom. Every key must be
     /// non-blank and unique within the current list; see
     /// [`validate_result_list_items`].
@@ -313,6 +325,7 @@ where
     view! {
         <ResultListCore
             items=items
+            label=label
             empty_message=empty_message
             replacement_policy=ResultReplacementPolicy::PreserveKey
             on_select=on_select

@@ -438,6 +438,7 @@ where
                             view! {
                                 <KeyedResultList
                                     items=items
+                                    label=title
                                     nostrip:on_select=on_select
                                     node_ref=list_ref
                                 />
@@ -1153,6 +1154,7 @@ where
                                 <div data-confirmable-search-picker-results="true">
                                     <KeyedResultList
                                         items=items
+                                        label=title
                                         selection=selection
                                         node_ref=list_ref
                                     />

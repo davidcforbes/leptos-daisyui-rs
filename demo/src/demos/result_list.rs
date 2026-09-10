@@ -227,6 +227,7 @@ pub fn ResultListDemo() -> impl IntoView {
                 <div class="max-w-md">
                     <ResultList
                         items=Signal::derive(move || files.clone())
+                        label="Files"
                         on_selection_change=Callback::new(move |idx: Option<usize>| {
                             set_highlighted
                                 .set(
@@ -246,6 +247,7 @@ pub fn ResultListDemo() -> impl IntoView {
                 <div class="max-w-md">
                     <ResultList
                         items=Signal::derive(move || empty.clone())
+                        label="Search results"
                         empty_message=Signal::derive(|| "No matches for your search.".to_string())
                     />
                 </div>
@@ -274,6 +276,7 @@ pub fn ResultListDemo() -> impl IntoView {
                 <div class="max-w-md mb-4" id="keyed-result-list" data-testid="keyed-result-list">
                     <KeyedResultList
                         items=keyed_items
+                        label="Cases"
                         on_selection_change=on_keyed_selection_change
                         on_select=on_keyed_select
                     />
@@ -356,6 +359,7 @@ pub fn ResultListDemo() -> impl IntoView {
                 >
                     <KeyedResultList
                         items=controlled_items
+                        label="Controlled cases"
                         selection=controlled_selection
                         on_select=on_controlled_select
                     />

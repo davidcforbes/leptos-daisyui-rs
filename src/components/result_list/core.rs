@@ -125,6 +125,7 @@ where
 #[component]
 pub(super) fn ResultListCore<T>(
     items: Signal<Vec<ResultListItem<T>>>,
+    label: Signal<String>,
     empty_message: Signal<String>,
     replacement_policy: ResultReplacementPolicy,
     #[prop(optional_no_strip)] on_select: Option<Callback<ResultListItem<T>>>,
@@ -302,6 +303,7 @@ where
             node_ref=node_ref
             role="listbox"
             tabindex="0"
+            aria-label=move || label.get()
             aria-activedescendant=move || {
                 let latest = items.get();
                 if validate_result_list_items(&latest).is_err() {

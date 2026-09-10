@@ -229,6 +229,7 @@ fn keyed_result_list_uses_preserve_key_policy() {
     assert!(source.contains("ResultReplacementPolicy::PreserveKey"));
     assert!(source.contains("Callback<ResultListItem<T>>"));
     assert!(source.contains("Callback<Option<String>>"));
+    assert!(source.contains("label: Signal<String>"));
 }
 
 #[test]
@@ -241,10 +242,13 @@ fn option_dom_ids_are_collision_free_for_arbitrary_key_bytes() {
 #[test]
 fn legacy_result_list_remains_an_adapter_with_reset_first_policy() {
     let source = include_str!("component.rs");
+    let core = include_str!("core.rs");
     assert!(source.contains("pub fn ResultList("));
     assert!(source.contains("ResultReplacementPolicy::ResetFirst"));
     assert!(source.contains("Callback<ResultRow>"));
     assert!(source.contains("Callback<Option<usize>>"));
+    assert!(source.contains("label: Signal<String>"));
+    assert!(core.contains("aria-label=move || label.get()"));
 }
 
 // ── move_selection ──

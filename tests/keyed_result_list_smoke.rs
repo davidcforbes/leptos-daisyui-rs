@@ -50,6 +50,7 @@ async fn state(h: &pixelproof_web::Harness) -> Value {
             const options = Array.from(root?.querySelectorAll('[role="option"]') ?? []);
             return {
                 statusText: status?.textContent.trim() ?? null,
+                accessibleName: root?.getAttribute('aria-label') ?? null,
                 activeDescendantId: activeId,
                 activeDescendantKey: activeEl?.dataset.resultKey ?? null,
                 optionKeys: options.map(o => o.dataset.resultKey),
@@ -140,6 +141,11 @@ async fn duplicate_labels_activate_their_own_distinct_payload() {
     click(&h, &row_selector("case-b")).await;
     let s = state(&h).await;
     assert_eq!(s["selectedKeys"], json!(["case-b"]), "case-b selected: {s}");
+    assert_eq!(
+        s["accessibleName"],
+        json!("Cases"),
+        "listbox has an accessible name: {s}"
+    );
     assert_eq!(
         s["statusText"],
         json!("Highlighted key: case-b | Activated: case-b (B-200)"),
