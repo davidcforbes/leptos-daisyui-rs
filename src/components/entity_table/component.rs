@@ -2988,7 +2988,7 @@ where
                     <label data-entity-page-size-control="true" class="flex min-w-0 max-w-full flex-wrap items-center gap-2 text-sm text-base-content/75">
                         <span class="min-w-0 break-words">{move || texts.with(|texts| texts.rows_per_page.clone())}</span>
                         <Select
-                            class="select-sm w-20 shrink-0"
+                            class="select-sm w-28 shrink-0"
                             id=page_size_select_id
                             name=page_size_select_id
                             label=Signal::derive(move || {

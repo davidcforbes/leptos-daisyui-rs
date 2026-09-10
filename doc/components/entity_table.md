@@ -106,6 +106,8 @@ across resizes, so a resize never moves the user's selection -- while its
 *label* carries the fitted count from
 `EntityTableTexts::rows_per_page_auto` (default `"Auto ({rows})"`, so
 `Auto (5)`). Localize that key like any other; it is never hardcoded English.
+The framework-sized native select retains readable clearance before the browser
+arrow for bounded one-, two-, and three-digit fitted counts.
 Without `viewport_fit` the option list and behavior are exactly as before.
 
 **Controlled state.** `EntityTablePreferences` gained

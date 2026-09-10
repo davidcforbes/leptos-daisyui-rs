@@ -374,6 +374,131 @@ async fn choose_page_size(harness: &pixelproof_web::Harness, value: &str) {
     tokio::time::sleep(Duration::from_millis(250)).await;
 }
 
+async fn choose_page_size_with_keyboard(harness: &pixelproof_web::Harness, value: &str) {
+    let option_index = eval_json(
+        harness,
+        &format!(
+            r#"(() => {{
+                const select = document.querySelector('#viewport-fit-page-size');
+                select.scrollIntoView({{ block: 'center' }});
+                select.focus();
+                return [...select.options].findIndex(option => option.value === {value:?});
+            }})()"#,
+        ),
+    )
+    .await
+    .as_i64()
+    .expect("page-size option index");
+    assert!(option_index >= 0, "missing page-size option {value}");
+
+    harness
+        .press_key_sequence(&[Key::Space])
+        .await
+        .expect("open native page-size select");
+    let mut keys = vec![Key::Home];
+    keys.extend((0..option_index).map(|_| Key::ArrowDown));
+    keys.push(Key::Enter);
+    harness
+        .press_key_sequence(&keys)
+        .await
+        .expect("commit native page-size selection");
+    tokio::time::sleep(Duration::from_millis(250)).await;
+}
+
+async fn page_size_label_clearance(harness: &pixelproof_web::Harness, labels: &[&str]) -> Value {
+    let labels = serde_json::to_string(labels).expect("encode page-size labels");
+    eval_json(
+        harness,
+        &format!(
+            r#"(() => {{
+                const select = document.querySelector('#viewport-fit-page-size');
+                const style = getComputedStyle(select);
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d');
+                context.font = style.font;
+                const contentWidth = select.clientWidth
+                    - Number.parseFloat(style.paddingInlineStart)
+                    - Number.parseFloat(style.paddingInlineEnd);
+                return {{
+                    controlWidth: select.getBoundingClientRect().width,
+                    paddingInlineStart: Number.parseFloat(style.paddingInlineStart),
+                    paddingInlineEnd: Number.parseFloat(style.paddingInlineEnd),
+                    contentWidth,
+                    labels: {labels}.map(label => {{
+                        const textWidth = context.measureText(label).width;
+                        return {{ label, textWidth, clearance: contentWidth - textWidth }};
+                    }}),
+                }};
+            }})()"#,
+        ),
+    )
+    .await
+}
+
+/// ldui-ova3: the native arrow occupies the select's trailing padding. The
+/// framework control must leave readable text width for bounded Auto labels,
+/// including a three-digit fitted capacity, without changing selection state.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
+async fn auto_page_size_labels_leave_native_arrow_clearance() {
+    let harness = harness_at("/components/entity-table-viewport-fit").await;
+    wait_for_selector(&harness, "#viewport-fit-page-size").await;
+    begin_browser_error_capture(&harness).await;
+
+    choose_page_size_with_keyboard(&harness, "25").await;
+    let fixed = page_size_agreement_snapshot(&harness).await;
+    assert_eq!(fixed["mode"], json!("fixed"), "{fixed}");
+    assert_eq!(fixed["controlValue"], json!("25"), "{fixed}");
+    assert_eq!(fixed["effective"], json!(25), "{fixed}");
+
+    choose_page_size_with_keyboard(&harness, "auto").await;
+    let automatic = page_size_agreement_snapshot(&harness).await;
+    assert_eq!(automatic["mode"], json!("auto"), "{automatic}");
+    assert_eq!(automatic["controlValue"], json!("auto"), "{automatic}");
+    assert_one_page_size_everywhere(&automatic, "keyboard-selected Auto");
+
+    let clearance =
+        page_size_label_clearance(&harness, &["Auto (9)", "Auto (11)", "Auto (100)"]).await;
+    for label in clearance["labels"].as_array().expect("measured labels") {
+        assert!(
+            label["clearance"]
+                .as_f64()
+                .is_some_and(|clearance| clearance >= 4.0),
+            "page-size label must retain at least 4px before the native-arrow padding: {clearance}"
+        );
+    }
+
+    let negative_control = eval_json(
+        &harness,
+        r#"(() => {
+            const select = document.querySelector('#viewport-fit-page-size');
+            const original = select.style.width;
+            select.style.width = '80px';
+            const style = getComputedStyle(select);
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            context.font = style.font;
+            const available = select.clientWidth
+                - Number.parseFloat(style.paddingInlineStart)
+                - Number.parseFloat(style.paddingInlineEnd);
+            const caught = available - context.measureText('Auto (100)').width < 4;
+            select.style.width = original;
+            return caught;
+        })()"#,
+    )
+    .await;
+    assert_eq!(
+        negative_control,
+        json!(true),
+        "the clearance oracle must catch and revert the former 80px control"
+    );
+
+    let restored = page_size_agreement_snapshot(&harness).await;
+    assert_eq!(restored["mode"], json!("auto"), "{restored}");
+    assert_eq!(restored["controlValue"], json!("auto"), "{restored}");
+    assert_no_browser_errors(&harness, "EntityTable page-size arrow clearance").await;
+}
+
 /// ldui-5p06: with 17 rows, a control reading `25` may never sit over a
 /// five-row body advertising four pages. Auto is an explicit choice that names
 /// its own fitted count; a numeric choice renders that many rows.

@@ -69,6 +69,7 @@ Every file in this directory follows the same shape:
 | [`default-component-not-specced.md`](./default-component-not-specced.md) | rulebook-only | — | Every computed style is individually valid, but the screen ships on library defaults instead of the specced variants |
 | [`table-hierarchy-drift.md`](./table-hierarchy-drift.md) | automated (browser assertion) | grid / separate geometry oracle | The dark header, light aligned filter band, and faint full-cell grid disappear or the table shell moves when rows sort |
 | [`broken-table-height-chain.md`](./broken-table-height-chain.md) | automated (native topology + browser assertions) | layout / state | A fill-parent table shrinks to its painted rows, and Auto rows-per-page can latch onto a transient filtered subset |
+| [`native-select-label-arrow-overlap.md`](./native-select-label-arrow-overlap.md) | automated (browser geometry assertion) | layout / legibility | A native select's label paints beneath its browser-owned arrow because fixed width leaves too little content space |
 
 See `../ci-cd.md` for how `cargo xtask test-style` / `test-layout` / `verify`
 run these suites, and `../../audit/src/lib.rs` for the `ldui-audit` crate
