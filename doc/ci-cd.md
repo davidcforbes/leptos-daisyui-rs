@@ -285,6 +285,35 @@ Use this cadence when working through an issue queue:
    then repeat the affected final gate. A previous pass describes the previous
    tree, not the one being shipped.
 
+For prose-only documentation changes after a successful gate, check the diff,
+links, command names and any edited skill instead of rebuilding the application.
+Record the original tested commit explicitly. This does not cover source,
+rustdoc/doctest, dependency, generated-asset or build-configuration changes.
+
+### Long-run evidence and stalled-process checks
+
+Before a long run, state the exact command, candidate commit, scope and log
+location. Capture the native exit code immediately when the command ends and
+record it with elapsed time in the log; a successful wrapper or output filter
+is not the gate's exit status. Preserve the actual summary, not remembered
+counts. See the [integrated gate evidence](verification/help-hint-2026-09-10.md)
+for a completed run; its duration is historical evidence, not a timeout target.
+
+When output pauses, identify the current phase and inspect log modification
+time plus the owned child process's CPU-time change across observations. A
+quiet release optimizer and a browser assertion/teardown hang need different
+diagnoses. Wall-clock age alone proves neither progress nor a stall. Report
+which phase is active and what evidence has changed; do not start a competing
+build against the same assets to check whether the first one is alive.
+
+The advisory gate continues after failures. If a known native failure makes a
+run unsuitable as final evidence, it can be stopped before expensive browser
+work after verifying the exact owned PID and process tree. Preserve the failed
+log, fix and rerun the focused failure, then run the required final gate on the
+corrected candidate. Never terminate all Cargo, Trunk or Chrome processes by
+name. At exit, verify owned hosts stopped and preserve maintained verification
+records before archiving only the session's scratch logs.
+
 ## Testing policy — screenshot vs. no-screenshot
 
 The dividing line for what may run in an automated gate is **screenshot vs. no
@@ -568,15 +597,26 @@ any consumer-visible effect.
 
 ## Opt-in pre-push hook
 
-[`.githooks/pre-push`](../.githooks/pre-push) runs `cargo xtask verify` and
-reports the result but **never blocks the push** (advisory). Enable per clone:
+[`.githooks/pre-push`](../.githooks/pre-push) runs `cargo xtask verify`; that
+quality-check portion reports failures without blocking the push. The same
+file also contains a managed Beads hook whose failure can block the push.
+Enable per clone:
 
 ```bash
 git config core.hooksPath .githooks
 ```
 
-The repo already ships a bd (beads) `pre-commit` hook under `.git/hooks/`; the
-advisory `pre-push` is additive and independent of it.
+The active `core.hooksPath` selects the hook directory; `.githooks/` also
+contains managed Beads commit/checkout/merge hooks. Inspect the active hooks
+before landing when a session prohibits Beads Git/GitHub operations.
+
+Under that explicit restriction, create and verify an empty temporary hooks
+directory, then pass `git -c core.hooksPath=<absolute-empty-directory>` on each
+affected ordinary Git commit, pull/rebase and push command. This avoids the
+prohibited Beads operations without rewriting persistent configuration. Run
+the applicable project checks explicitly, verify the remote branch equals
+local HEAD, and verify persistent `core.hooksPath` is unchanged afterward.
+This is a policy-specific isolation procedure, not a general test bypass.
 
 ## Idempotency / resumability
 

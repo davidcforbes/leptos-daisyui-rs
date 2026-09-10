@@ -101,6 +101,27 @@ description node has `role="tooltip"`; the shared Button supplies keyboard
 operation and focus-visible styling. Global Escape listeners and active-hint
 registration are removed on component cleanup.
 
+## Maintenance checks
+
+- Keep dismissal state authoritative over Tooltip hover/focus CSS. Suppress
+  both `::before` and `::after` locally: a real description node does not remove
+  the shared tooltip's otherwise empty pseudo-element chrome.
+- Preserve a continuous pointer path from the trigger into the description.
+  Check the actual boundary and text bounds near the pane edge; visibility
+  alone does not catch a dead hover gap or a clipped, centered tooltip.
+- Test multiple pinned hints in reverse registration order. One Escape must
+  dismiss only the latest visible hint, and hiding or unmounting it must leave
+  the previous visible hint dismissible. Preserve immediate propagation stop
+  for a consumed Escape and remove the exact registered listener on cleanup.
+- Move keyboard focus between subject and trigger after dismissal; an internal
+  transition must not masquerade as leaving and re-entering the composition.
+  Assert the subject's action count remains unchanged during help interaction,
+  then prove that direct subject activation still works.
+- In the browser harness, scroll the fixture into view before coordinate input.
+  CDP `touchEnd` needs an explicit empty `touchPoints` array; a serializer that
+  omits it produces a transport error, not evidence of a component defect. Keep
+  fixture/harness failures distinct from intentional product negative controls.
+
 ## Verification and consumer boundary
 
 Run the focused release browser lane from the repository root:

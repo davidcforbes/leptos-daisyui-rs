@@ -37,6 +37,9 @@ candidate tree, and announce the exact command before a long run. After every
 long gate and immediately before landing, re-run `bd ready --json` plus the
 open, in-progress, and blocked queries; a consumer audit can file new work while
 tests are running. See `doc/ci-cd.md` for the gate cadence and step breakdown.
+For a prose-only documentation exit pass, validate the changed references and
+diff without restarting a completed application gate. Preserve the tested
+candidate's commit and results; do not imply the gate ran on later changes.
 
 ## Coding Style & Testing
 
@@ -74,6 +77,15 @@ and commit payload. Scope action selectors to the active wide/compact layout;
 both variants can exist in the DOM, and a broad selector can hit a hidden Save.
 For fill-parent tables, assert the slot reaches the page bottom and keeps its
 height and Auto capacity through filtering to one row and restoring all rows.
+
+For server-owned offset pages, use `ServerEntityTable` and read
+`doc/components/data_table.md#serverentitytable`; its focused release lane is
+`cargo xtask test-server-table-column-tools`. Preserve accepted rows/query/total
+until correlated host acknowledgment, population-wide filters, and separately
+acknowledged column preferences. A server page is not a client snapshot.
+For supplementary help, read `doc/components/help_hint.md` and use
+`cargo xtask test-help-hint`. Preserve one-Escape/one-hint dismissal, independent
+subject activation, hoverable text, and exact listener cleanup.
 
 ## Commits & Pull Requests
 
@@ -150,13 +162,15 @@ bd close bd-42 --reason "Completed" --json
    - `bd create "Found bug" --description="Details about what was found" -p 1 --deps discovered-from:<parent-id>`
 5. **Complete**: `bd close <id> --reason "Done"`
 
-### Auto-Sync
+### Persistence and remote policy
 
-bd automatically syncs via Dolt:
+bd persists issue changes locally through Dolt:
 
 - Each write auto-commits to Dolt history
-- Use `bd dolt push`/`bd dolt pull` for remote sync
-- No manual export/import needed!
+- Remote synchronization is separate from a successful local write
+- Follow the active session's Beads Git/GitHub policy. In stealth sessions,
+  omit Beads Git/GitHub operations, including `bd dolt push`/`bd dolt pull`
+- Ordinary project Git commits and pushes remain separate and required
 
 ### Important Rules
 
@@ -181,11 +195,13 @@ For more details, see README.md and docs/QUICKSTART.md.
 3. **Update issue status** - Close finished work, update in-progress items
 4. **PUSH TO REMOTE** - This is MANDATORY:
    ```bash
-   git pull --rebase
-   bd dolt push
-   git push
-   git status  # MUST show "up to date with origin"
+   git pull --rebase fork main
+   git push fork main
+   git status  # MUST show "up to date with fork/main"
    ```
+   Apply the active Beads remote policy above. If that policy prohibits the
+   Beads operations installed in Git hooks, see `doc/ci-cd.md` for the
+   per-command hook isolation procedure; do not change persistent Git config.
 5. **Clean up** - Clear stashes, prune remote branches
 6. **Verify** - All changes committed AND pushed
 7. **Hand off** - Provide context for next session
