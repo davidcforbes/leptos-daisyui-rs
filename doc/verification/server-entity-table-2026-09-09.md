@@ -173,3 +173,24 @@ green exact-test rerun.
 - The fixture is a deterministic in-memory server simulator. It proves the
   controlled replacement boundary and correlation tokens, not transport-level
   cancellation or a production backend.
+
+## Final integrated gate — 2026-09-10
+
+Candidate `b85cf57` passed `cargo xtask verify-full`: **41/41 steps, exit 0**,
+in 2793.2 seconds. All 16 native and 25 release-browser steps passed. The final
+server-table column-tools lane passed 15/15 in 117.46 seconds, including both
+History journeys and reactive facade validation. EntityTable passed 25/25,
+including the `ldui-ova3` Auto-label/native-selection regression. Layout passed
+15/15 in 68.67 seconds and style passed 13/13 in 58.10 seconds, with unchanged
+ceilings. The library suite passed 3287 tests.
+
+The first gate attempt exposed one redundant `clone()` of the `Copy`
+multi-selection configuration. It was stopped before browsers; `b85cf57`
+removed the clone, passed the exact failed clippy command, and then passed the
+complete restarted gate above. This correction does not change selection
+behavior. The canonical ten-field adoption example also passed
+`cargo check -p leptos-daisyui-rs --example server_entity_history`.
+
+The gate stopped both owned browser hosts. The post-gate Beads snapshot had
+no additional ready, open, or blocked work. Consumer migration and deployment
+remain outside this library qualification.
