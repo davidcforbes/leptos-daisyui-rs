@@ -6,6 +6,7 @@ use super::{
     ServerTableQueryOwnership, ServerTableRowAction, ServerTableSelection, TableQuery, TableRow,
     TypedCellFn,
 };
+use crate::components::data_table::server_column_tools::ServerColumnToolsState;
 use crate::components::entity_table::{EntityColumnChooserTrigger, EntityTablePreferenceOwnership};
 use crate::components::table::TableSize;
 use leptos::prelude::*;
@@ -203,6 +204,8 @@ pub fn ServerEntityTable(
     #[prop(optional, into)]
     on_displayed_slice: Option<Callback<ServerTableDisplayedSlice>>,
 ) -> impl IntoView {
+    let stable_column_tools_state =
+        ServerColumnToolsState::new(preference_ownership.clone(), preference_version, columns);
     let configuration = Memo::new(move |_| {
         columns.with(|columns| validate_server_entity_configuration(columns, query_capabilities))
     });
@@ -229,6 +232,7 @@ pub fn ServerEntityTable(
                 preference_ownership.clone(),
                 preference_version,
             )
+            .with_prebuilt_state(stable_column_tools_state)
             .with_chooser_trigger(Signal::stored(EntityColumnChooserTrigger::Icon))
             .with_texts(column_tools_texts);
             if let Some(render_actions) = toolbar_actions.clone() {

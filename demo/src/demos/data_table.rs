@@ -400,12 +400,14 @@ pub fn DataTableDemo() -> impl IntoView {
     // Canonical facade reactivity fixture: its domain columns deliberately
     // move valid -> invalid -> valid so the configuration alert must follow
     // the accepted signal rather than a mount-time snapshot.
-    let facade_reactive_columns =
-        RwSignal::new(vec![Column::new("name", "Name").filterable_text()]);
-    let facade_reactive_rows = RwSignal::new(vec![HashMap::from([(
-        "name",
-        "Accepted server row".to_owned(),
-    )])]);
+    let facade_reactive_columns = RwSignal::new(vec![
+        Column::new("name", "Name").filterable_text().required(),
+        Column::new("verdict", "Verdict").filterable_text(),
+    ]);
+    let facade_reactive_rows = RwSignal::new(vec![HashMap::from([
+        ("name", "Accepted server row".to_owned()),
+        ("verdict", "Succeeded".to_owned()),
+    ])]);
     let facade_reactive_query = RwSignal::new(TableQuery::first_page(10));
     let facade_reactive_total = RwSignal::new(1_i64);
     let facade_reactive_page_size = RwSignal::new(ServerTablePageSizePreference::fixed(10));
@@ -1885,7 +1887,8 @@ pub fn DataTableDemo() -> impl IntoView {
                         attr:data-testid="server-entity-columns-valid"
                         on:click=move |_| {
                             facade_reactive_columns.set(vec![
-                                Column::new("name", "Name").filterable_text(),
+                                Column::new("name", "Name").filterable_text().required(),
+                                Column::new("verdict", "Verdict").filterable_text(),
                             ]);
                         }
                     >

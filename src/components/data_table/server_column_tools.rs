@@ -72,6 +72,7 @@ impl Default for ServerTableColumnToolsTexts {
 pub struct ServerTableColumnTools {
     pub(crate) preference_ownership: EntityTablePreferenceOwnership,
     pub(crate) schema_version: u16,
+    pub(crate) prebuilt_state: Option<ServerColumnToolsState>,
     pub(crate) chooser_trigger: Signal<EntityColumnChooserTrigger>,
     pub(crate) texts: Signal<ServerTableColumnToolsTexts>,
     pub(crate) toolbar_actions: Option<Children>,
@@ -85,10 +86,18 @@ impl ServerTableColumnTools {
         Self {
             preference_ownership,
             schema_version,
+            prebuilt_state: None,
             chooser_trigger: Signal::stored(EntityColumnChooserTrigger::default()),
             texts: Signal::stored(ServerTableColumnToolsTexts::default()),
             toolbar_actions: None,
         }
+    }
+
+    /// Reuses preference state owned by a stable outer composition across
+    /// delegate unmount/remount cycles.
+    pub(crate) fn with_prebuilt_state(mut self, state: ServerColumnToolsState) -> Self {
+        self.prebuilt_state = Some(state);
+        self
     }
 
     /// Replaces the chooser trigger's visible presentation.

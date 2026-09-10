@@ -55,6 +55,27 @@ async fn server_entity_table_column_validation_tracks_reactive_columns() {
     .await;
     begin_browser_error_capture(&h).await;
 
+    click(
+        &h,
+        "[data-testid='server-entity-reactive-fixture'] [data-server-column-chooser='true']",
+    )
+    .await;
+    click(
+        &h,
+        "[data-testid='server-entity-reactive-fixture'] [data-server-column='verdict'] [role='menuitemcheckbox']",
+    )
+    .await;
+    let hidden_before_invalid = eval_json(
+        &h,
+        r#"!!document.querySelector('[data-testid="server-entity-reactive-fixture"] [data-table-sort-column="verdict"]')"#,
+    )
+    .await;
+    assert_eq!(
+        hidden_before_invalid,
+        json!(false),
+        "uncontrolled preference must hide Verdict before the configuration swap"
+    );
+
     click(&h, "[data-testid='server-entity-columns-invalid']").await;
     let invalid = eval_json(
         &h,
@@ -80,6 +101,7 @@ async fn server_entity_table_column_validation_tracks_reactive_columns() {
                 alert: !!fixture.querySelector('[data-server-entity-table-config-error]'),
                 facade: !!fixture.querySelector('[data-server-entity-table="true"]'),
                 server: !!fixture.querySelector('[data-table-data-mode="server-query"]'),
+                verdict: !!fixture.querySelector('[data-table-sort-column="verdict"]'),
             };
         })()"#,
     )
@@ -87,6 +109,11 @@ async fn server_entity_table_column_validation_tracks_reactive_columns() {
     assert_eq!(recovered["alert"], json!(false), "recovery: {recovered}");
     assert_eq!(recovered["facade"], json!(true), "recovery: {recovered}");
     assert_eq!(recovered["server"], json!(true), "recovery: {recovered}");
+    assert_eq!(
+        recovered["verdict"],
+        json!(false),
+        "uncontrolled hidden-column preference must survive recovery: {recovered}"
+    );
     assert_no_browser_errors(&h, "reactive ServerEntityTable validation").await;
 }
 

@@ -1600,16 +1600,24 @@ pub fn ServerDataTable(
     // plain no-op -- historical rendering is unchanged.
     let (column_tools_state, column_tools_trigger, column_tools_texts, column_tools_actions) =
         match column_tools {
-            Some(tools) => (
-                Some(ServerColumnToolsState::new(
-                    tools.preference_ownership,
-                    tools.schema_version,
-                    columns,
-                )),
-                tools.chooser_trigger,
-                tools.texts,
-                tools.toolbar_actions,
-            ),
+            Some(tools) => {
+                let ServerTableColumnTools {
+                    preference_ownership,
+                    schema_version,
+                    prebuilt_state,
+                    chooser_trigger,
+                    texts,
+                    toolbar_actions,
+                } = tools;
+                (
+                    Some(prebuilt_state.unwrap_or_else(|| {
+                        ServerColumnToolsState::new(preference_ownership, schema_version, columns)
+                    })),
+                    chooser_trigger,
+                    texts,
+                    toolbar_actions,
+                )
+            }
             None => (
                 None,
                 Signal::stored(EntityColumnChooserTrigger::default()),
