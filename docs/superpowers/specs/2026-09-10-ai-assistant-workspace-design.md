@@ -57,6 +57,14 @@ Both inspected HEADs equaled their local `main` at research time. Office's
 pre-existing `.beads/issues.jsonl` change and its detached short-path build
 worktree were not part of this work. LDUI's pre-existing `.tmp/` was preserved.
 
+**Office review, 2026-09-10.** Office `main` was re-read at `a27d3fcc` (unchanged
+since the research snapshot). The framework revision under review is `22e9db0`.
+Office's vendored copy of this library is `e01255c`
+(`vendor/PROVENANCE.json:657`), which predates both the softphone adoption under
+`op-zhksn` and this proposal; see section 15. The review itself is
+`4iiz-Office/docs/research/2026-09-10-ai-assistant-workspace-adoption-review.md`
+and its claim audit is the evidence for every amendment recorded in section 18.
+
 This is a **static source and document audit**, not a production certification.
 No live client records, prompts, credentials, subscription entitlements, provider
 responses, or operational metrics were inspected. No application tests or long
@@ -114,14 +122,14 @@ These are distinct experiences, not instances of one existing chat component.
 | Surface or capability | Observed source behavior | Required preservation or gap |
 |---|---|---|
 | Leader dashboard | One-question coach; 1,000-character bound; current office and selected KPI; answer, grounded KPI facts, current/baseline values, qualifications, limitations, as-of and model/prompt fields | Preserve structured facts and unavailable values. The response model field is currently Groq-labeled, not proof of actual executor identity. No shared settings mount observed.[^dashboard][^provenance-gap] |
-| Coordinator | Locally retained `Vec<ChatMessage>`; selected office/worker scope; grounded answer details; explicit not-enabled versus failure; collapsible right rail | Local transcript is not durable Office history. This is the observed production callsite of the shared settings dialog; its engine label/gear are manually wired.[^coordinator] |
+| Coordinator | Locally retained `Vec<ChatMessage>`; selected office/worker scope; grounded answer details; explicit not-enabled versus failure; collapsible right rail. Also observed: the draft is cleared before the request resolves (`coordinator.rs:3887`); a transport or HTTP failure is pushed into the transcript as an assistant message (`coordinator.rs:3936-3942`); facts, qualifications, limitations and as-of are flattened into one text line (`coordinator.rs:3903-3915`); the header engine label is the dialog's read-back of the SELECTED preference (`coordinator.rs:2958-2962`, `:4378`) | Local transcript is not durable Office history. This is the observed production callsite of the shared settings dialog; its engine label/gear are manually wired. Sections 6.3, 9.1 and 13.1 deliberately replace the early clearing, the failure-as-message and the flattening; section 14 must show each as a migration case.[^coordinator] |
 | Journal | One-question assistant over the actor's journal, lessons, and application primers; answer, as-of and limitations; editing the question clears the old answer | Preserve own-journal scope and visible errors. Do not relabel old questions as persisted history or assume journal text is free of client information.[^journal] |
-| Existing client conversation | Stored/refreshed transcript analysis, objections, grounded talking points, suggested next action, caveats; separate one-off coaching; separate reply generation and shorter rewrite | Analysis, internal coaching, and client-facing drafts need different artifact types. Numeric Desk-ticket/capability restrictions remain host-owned.[^conversation] |
+| Existing client conversation | Stored/refreshed transcript analysis, objections, grounded talking points, suggested next action, caveats; separate one-off coaching; separate reply generation and shorter rewrite. Also observed: Insert replaces the composer wholesale (`conversation_detail.rs:1940`); an empty `answer` with `limitations` is a healthy pre-model refusal rendered as "refused", not a failure (`conversation_assistant.rs:96-108`, `conversation_detail.rs:2087-2096`) | Analysis, internal coaching, and client-facing drafts need different artifact types. Numeric Desk-ticket/capability restrictions remain host-owned. Section 9.3's conflict rule changes the wholesale insert; that is an owner question (section 16.1), not a silent migration.[^conversation] |
 | Prepared client contact | One initial opener request when valid prepared mode is entered; review preview; explicit use into an empty composer; exact-template identity, expiry, changed-context and uncertain-attempt states | SMS/WhatsApp preparation does not imply email drafting support: prepared email drafting is intentionally unsupported in this snapshot. No automatic retry after uncertain paid work; human Send remains separate.[^prepared] |
-| AI call preparation / No-Hire | Script loading/ready/preparing/failed/missing/unavailable is independent of page readiness; script suggestion seeds editable SMS; ordered beats, editable opening, Save edit, Reset and simulated call | Preserve capability-gated/read-back-backed script editing and keep Call/Text usable when the script fails. A cached artifact is not a chat turn; no hidden model call on its read GET.[^call-script] |
+| AI call preparation / No-Hire | Script loading/ready/preparing/failed/missing/unavailable is independent of page readiness; script suggestion seeds editable SMS; ordered beats, editable opening, Save edit, Reset and simulated call. The present beat renderer reads title, intent and say only (`no_hire_detail.rs:1804-1806`); `use_facts`, `no_file_detail` and `avoid` are carried by the DTO (`calls.rs:122-155`) and required by Office's call-script UI contract (`docs/ai-architecture.md:786-788`) | Preserve capability-gated/read-back-backed script editing and keep Call/Text usable when the script fails. A cached artifact is not a chat turn; no hidden model call on its read GET. The missing beat fields are a live code-versus-controlling-document divergence in Office (review bead O-2), and the beat renderer now has two candidate owners, `ClientCallGuidance` (`ldui-26tv`) and this workspace's call-preparation lane; one owner is an open question (section 16.1).[^call-script] |
 | Active Account detail | `surfaces/account` loads payment-call-script suggestions, seeds SMS/email without replacing human edits, bounds script polling, offers regeneration and prepares contact in the existing workflow | Keep script generation, editable message drafts, Place call and explicit Queue actions separate. The surrounding softphone is host-owned, not a second assistant implementation.[^account] |
 | Account Conversations | Independently reads the payment-call script to seed SMS/email; preserves typed drafts on refresh; offers channel preparation, editable composers and softphone/contact workflows | Consolidate assistant-artifact presentation and suggestion reconciliation without replacing channel consent, contact updates, softphone or human dispatch.[^account-conversations] |
-| Shared assistant settings | Reads one engine projection; changes common engine preference and memory switch; handles 204 then re-reads; shows availability reasons and optional budget information; best-effort warm | Retain read-back verification. Sign-in/out and export/forget controls are disabled placeholders in this UI snapshot, even though related backend routes exist.[^settings] |
+| Shared assistant settings | Reads one engine projection; changes common engine preference and memory switch; handles 204 then re-reads; shows availability reasons and optional budget information; best-effort warm. The disabled controls' tooltips name `op-mf67y` as the delivering bead (`assistant_config_dialog.rs:121-125`, `:135-139`); that bead is closed and the seven sign-in routes exist (`app_router.rs:807-820`) | Retain read-back verification. Sign-in/out and export/forget controls are disabled placeholders in this UI snapshot, even though related backend routes exist; Office bead `op-gbjlp` (in progress) already carries the stale tooltip. The memory switch this dialog writes IS the memory policy's use flag (section 10).[^settings] |
 | Durable turns | Conversation creation, typed admission/lifecycle, replayable SSE, snapshot, cancel, feedback, restart recovery | Source-exposed platform API; current coach screens still use legacy requests. Do not claim the current screens stream, resume, or browse durable conversations.[^turn-contract][^turn-runtime][^routes] |
 | Governed memory | Personal memory/policy, Group Important candidate, knowledge revision and curator APIs; recall in several coach/artifact paths | Recall is not universal: simple conversation Q&A does not adopt it. Backend source is not a completed memory drawer, full publication workbench, export workflow, or daily learning operation.[^memory] |
 | Provider engines | Closed Groq/Claude Code/Codex choices, preference/availability projection, bounded execution and journal attribution | Engine existence does not establish usable employee sign-in, entitlement, isolation proof, or a selected-engine guarantee for every generated artifact.[^engines] |
@@ -142,11 +150,17 @@ These are distinct experiences, not instances of one existing chat component.
    returns `published_text`, not the unpublished candidate body. A curator must
    see the actual proposed revision and its sources before approving it; the
    workspace cannot manufacture a review screen from revision metadata.[^memory]
-4. **The old configuration HTTP mismatch has been repaired in source.** The
-   current dialog uses the engine projection and 204-plus-read-back workflow.
+4. **The old configuration HTTP mismatch has been repaired in the client.** The
+   current dialog uses the engine projection and 204-plus-read-back workflow
+   (`assistant_config_dialog.rs:40-42`, `:988-1017`; no usage route remains).
    Do not re-file the comparison document's old GET-preferences/usage-route
-   mismatch as an unfixed defect. Remaining gaps are adoption and disabled
-   journeys, not that historical request shape.[^settings][^comparison]
+   mismatch as an unfixed defect. What remains open in Office is not that
+   request shape but its proofs and fail-closed edges: the router-level
+   read-back test (`op-qac4b`), the projection and warm answering a failed
+   store read as Groq (`op-b6ufa`), sign-in status answering a failed read as
+   not signed in (`op-kakzj`), and the stale tooltip (`op-gbjlp`, in
+   progress). A UI adoption must not close any of them by
+   implication.[^settings][^comparison]
 5. **No silent change of engine provenance.** Chat preference, pre-generated call
    scripts, transcript analysis, and background reasoning can have different
    generation paths. Actual artifact attribution wins over the currently selected
@@ -160,6 +174,24 @@ These are distinct experiences, not instances of one existing chat component.
    observed production incident. Office must pin/reconcile execution identity
    and project actual provenance, including cache-only/no-provider execution,
    before the shared UI can claim it.[^provenance-gap]
+7. **A completed attempt can be a declined answer.** Office's conversation
+   coach answers an empty `answer` with `limitations` naming the record when
+   the transcript cannot ground an answer, before any model spend
+   (`conversation_assistant.rs:96-108`); the journal records it as its own
+   non-answered outcome, distinct from a model that returned nothing
+   (`:70-77`), and both pages render it as declined, not failed
+   (`coordinator.rs:3895-3899`, `conversation_detail.rs:2087-2096`). The
+   typed snapshot carries it as `completed` with an answer present
+   (`assistant_turns.rs` DTO `:262-264`). A UI without a `Declined` outcome
+   renders an empty bubble or misfiles a healthy refusal as a failure
+   (requirement 8.3).
+8. **The reasoning cache is keyed on the step `version`.** UI adoption must
+   not change any prompt or bundle shape; if the Office adapter adds context
+   to a step (memory, expanded scope), that step's `version` must be bumped or
+   the OLD prompt's cached answers keep being served with no error anywhere
+   (`docs/reasoning-prompts.md:108-124`; `op-fjzkr` already plans the bumps
+   for the three memory-less paths). A green CI golden run proves the case
+   set is intact, never that the model obeys it (`:151-169`).
 
 ## 4. Complete feature coverage
 
@@ -252,7 +284,7 @@ guess based solely on browser width.
 
 ```text
 +---------------------------------------------------------------+
-| Assistant       [actual engine/status]       New  Expand  Close |
+| Assistant     [selected engine · status]     New  Expand  Close |
 | Context: page / subject / office / period     [Why this scope]  |
 | [stale / expanded-scope / policy / availability notice]         |
 | Assist | Preparation | History | Memory | Activity | Settings   |
@@ -272,6 +304,13 @@ detail replaces the body with a labeled Back control; it does not squeeze two
 columns into a 400-pixel panel. Full-width mode can show body and inspector
 together. Navigation labels may collapse into a labeled view selector. Only
 one active variant is interactive; no hidden duplicate Send/Save/Ask controls.
+
+The header's engine slot shows the **selected** preference and the connection
+state, labeled as such. The actual engine belongs to each answer's attribution
+and appears only when the host projects it (section 10, requirement 10.2).
+Office's header today is fed from the settings dialog's read-back of the stored
+preference (`coordinator.rs:2958-2962`, `:4378`), and Office has no per-attempt
+actual-engine projection yet (section 3.1, item 6).
 
 Preparation appears when the host supplies an analysis, script, draft or other
 supported artifact. Activity contains ordinary usage and, for expressly granted
@@ -405,6 +444,42 @@ failed/unknown result. Stale acknowledgments cannot update another item or a new
 draft. A callback invocation, HTTP write echo, SSE connection, or clipboard intent
 is not an acknowledgment that the requested result exists.
 
+### 7.3 Presentation requirements from the Office review
+
+Each names the Office behaviour it must hold and the line that pays for it.
+
+1. **A fact's qualification is required; an absent value carries its own
+   availability text.** Office's `LeaderCoachFactDto`
+   (`crates/office-perf-dto/src/dashboard.rs:428-438`) is `current: Option`,
+   `baseline: Option`, `qualification: String` and `availability: String`,
+   present exactly when `current` is absent; the satellite refuses the whole
+   response when a fact breaks that invariant or has an empty qualification
+   (`surfaces/dashboard/src/api.rs:514-541`). The Coordinator's facts are
+   label/value/qualification and exist because the model answer "deliberately
+   owns no digits" (`coordinator_work.rs:306-332`). Model
+   `AssistantFact { label, current: Option<Display>, baseline: Option<Comparison
+   { display, basis }>, qualification: NonEmptyText, availability:
+   Option<NonEmptyText> }` behind a validated constructor enforcing
+   `current.is_none() == availability.is_some()`, and render the qualification
+   beside the value in every variant, never behind disclosure. This is the
+   executable form of Office's rule that caveats travel with the numbers
+   (`2026-08-07-ai-assistants-design.md:167-182`).
+2. **Controls render from the conversation's capability list.** Office answers
+   `capabilities` as a subset of `["ask", "cancel", "feedback"]` per
+   conversation (`assistant_turns.rs` DTO `:94-97`, `:185-186`). Ask, Stop and
+   feedback appear only when granted; the component never assumes them.
+3. **The answered scope travels with the answer and a mismatch is a contract
+   error.** Office refuses a Leader answer whose `office_scope` differs from
+   the office it asked about (`surfaces/dashboard/src/api.rs:504-512`). The
+   Answer carries `answered_scope`; the adapter maps a difference from the
+   attempt's accepted context to a `ContractError::ScopeMismatch` state that
+   renders no answer and no proposal.
+4. **A failed attempt is an attempt state, never a transcript message.**
+   Office's Coordinator pushes `error.to_string()` into its chat history as an
+   assistant utterance (`coordinator.rs:3936-3942`); the component makes that
+   impossible by construction, so an error can never be mistaken for, copied
+   as, or given feedback on as an answer.
+
 ## 8. Turn lifecycle and transport truth
 
 Office currently defines four progress states and six terminal states:
@@ -443,6 +518,35 @@ the UI can also have a local `submitting` state that is not a journal state.
 - A stream error has a different meaning from a failed turn. Use the snapshot
   route to recover the record rather than showing the last partial text as done.
 
+Requirements from the Office review, each a lifecycle fact Office already
+journals:
+
+1. **The Canceled terminal carries whether an answer was discarded.** Office
+   settles a cancel as `canceled {"discarded": true|false}`, "the difference
+   between stopped in time and paid for an answer nobody wanted"
+   (`crates/office-perf-api/src/assistant_turns.rs:728-745`; the late-completion
+   path at `:684-691`; the registry test at `:1454-1499` proves a late answer
+   is journaled canceled, never completed). Model
+   `AttemptLifecycle::Canceled { discarded: bool }` and render the two
+   differently; SH-06 usage honesty depends on it, and Office already tells
+   the user when paid work may have happened without a result
+   (`prepared.rs:1556-1557`).
+2. **Pre-admission refusal has three closed reasons, each with its own next
+   action.** `TURN_REFUSAL_REASONS = evidence_admission_unavailable |
+   assistant_preference_unavailable | conversation_closed`
+   (`crates/office-perf-dto/src/assistant_turns.rs:99-111`), answered
+   503/503/409 (`routes_workspace/assistant_turns.rs:370-401`). Their user
+   actions differ: retain the draft and retry later; open Settings (there is
+   no honest engine of record); open a new conversation. Model
+   `SubmissionDisposition::Refused { reason, next: RetryLater | OpenSettings |
+   NewConversation }`, draft always retained, with an `Unknown(code)` arm that
+   renders a contract error and retains the draft.
+3. **A completed attempt may be Declined, distinct from Answered and from
+   Failed.** See section 3.1, item 7. Model `AnswerOutcome::Answered { .. } |
+   Declined { limitations: NonEmptyVec, as_of }`; `Declined` renders the
+   limitations as the body, enables feedback `flagged`/`discarded` only, and
+   never enables insertion, sharing or memory capture.
+
 The Office adapter owns SSE parsing, sequence reconciliation, request disposal
 and backoff. The workspace consumes a typed accepted model, not raw events.
 The existing generic `SseBridgeTransport` protocol and permissive parser are not
@@ -457,6 +561,12 @@ structurally separate. Facts can be present, partial or unavailable; zero,
 unknown and not applicable are different. Comparative cards carry baseline and
 period/denominator. Material caveats are visible beside the claim, not only
 inside a collapsed inspector.
+
+Requirement 7.3.1 makes the qualification non-optional and the unavailable
+state a per-fact text. Office's Coordinator today flattens facts,
+qualifications, limitations and as-of into one line
+(`coordinator.rs:3903-3915`); its Dashboard renders them structurally
+(`dashboard.rs:2137-2174`). The component makes the second shape the only one.
 
 “Why this answer?” shows what was supplied: permitted page facts, approved
 lookups, as-of, memory/foundation revisions, prompt/skill/model versions and
@@ -542,10 +652,17 @@ Save follows **proposal -> pending -> host write -> read-back -> accepted**.
 On failure, preserve the previous accepted preference and the unsaved proposal.
 The existing dialog's 204 response is not JSON. Optional warming after a successful
 save is not permission to roll back a confirmed preference or fail over engines.
-The legacy dialog writes `preferences.memoryEnabled`; the newer memory-policy
-contract separately exposes use and capture. Office must supply one reconciled
-accepted projection instead of assuming those fields are interchangeable or
-treating the old toggle as consent to capture.
+The legacy dialog writes `preferences.memoryEnabled`, and in Office that IS
+the memory policy's use flag: `read_memory_policy` selects `memory_enabled,
+capture_enabled FROM assistant_preference`
+(`crates/office-perf-api/src/user_state/memory.rs:1052-1071`), and recall gates
+on `policy.use_enabled` (`crates/office-perf-api/src/assistant_memory.rs:345`).
+The reconciled projection already exists (`GET /api/assistant/memories` answers
+`MemoryPolicyDto { use_enabled, capture_enabled }`). What stays separate is
+`capture_enabled`, which defaults off and is never inherited from the use flag
+(`memory.rs:1065-1067`); the old toggle is not consent to capture. Corrected by
+the Office review from an earlier draft that treated the two as unreconciled
+fields.
 Changing a preference cannot rewrite the attribution of an in-flight or old turn.
 The source provenance gap in section 3.1 must be resolved by the host; the adapter
 must not populate an “actual engine” field from the requested/current preference
@@ -569,6 +686,41 @@ API-equivalent usage to subscription cost and label it actual spending. Show a
 budget/cap only when the host supplies a configured policy; do not introduce an
 unapproved daily cap or upgrade/overage purchase action.[^settings][^platform]
 
+Requirements from the Office review:
+
+1. **Connection state is an eight-state by three-shape matrix with a
+   device-flow payload, and the tier verdict outranks it.** Office pins
+   `ASSISTANT_SIGN_IN_STATES` (not_signed_in, pending, probing, signed_in,
+   expired, rejected, revoked, not_applicable) and `ASSISTANT_SIGN_IN_SHAPES`
+   (paste, device, operator) by width and position
+   (`crates/office-perf-dto/src/assistant.rs:46-60`, test `:308-316`). A
+   `pending`/`device` state carries `verification_url` and `user_code` the
+   dialog opens in a separate window (`:108-113`); `operator` marks an engine
+   with no native flow, displayed as operator-assisted (`:56-60`). Twelve
+   availability reasons (`:27-44`) include `cli_version_untested` and
+   `cli_protocol_unsupported`, added so that a newer CLI and a stream-shape
+   break name themselves instead of being reported as an expired credential;
+   the session layer reads the error's own reason before the expiry flag
+   (`assistant_engine_sessions.rs:603-621`) and marks `expired` only on a
+   rejected sign-in (`:660-675`). The tier's `ai_reasoning` verdict is applied
+   before the engine list (`assistant_config_dialog.rs:830`, test `:2233`).
+   Model `ConnectionState { NotApplicable | NotSignedIn { shape: Native |
+   OperatorAssisted } | Pending { shape: Device { verification_url, user_code,
+   expires_at } | Paste, expires_at } | Probing | SignedIn { account_label?,
+   verified_at?, expires_at? } | Expired { reason } | Rejected { reason } |
+   Revoked }` and `EngineAvailability { Enabled | Disabled { reason_code,
+   text } }` with reason codes opaque and text host-rendered; state the
+   precedence tier verdict, then engine list, then per-engine connection;
+   every enum `#[non_exhaustive]` as `ldui-26tv` did.
+2. **The header engine slot is the selected preference until per-attempt
+   provenance exists.** Office's `running` event carries `engine_requested`
+   (`crates/office-perf-api/src/assistant_turns.rs:668`), the typed runner
+   drops the journal's `EngineTurn` (`:921`, `:938`, `:949`, `:959`), and the
+   Leader label is fixed to the Groq model (`leader_assistant.rs:420`). The
+   component labels the header value "selected" and shows an actual engine
+   only on an answer whose attribution the host supplied; a requested engine
+   may be shown as requested, never as actual.
+
 ## 11. Memory, Group Important, and foundations
 
 Memory is a governed workspace, not a switch labeled “the AI remembers you.”
@@ -579,7 +731,10 @@ Supplied page context and retained answer evidence are separate from all three.
 
 Show typed language, tone, verbosity and working-method entries, their state and
 revision. Memory use and capture are separate policies; use-enabled is not
-consent to automatic extraction. Initial automatic extraction remains off unless
+consent to automatic extraction. In Office they are two columns of one row,
+`assistant_preference.memory_enabled` and `capture_enabled`
+(`user_state/memory.rs:1052-1071`); the settings dialog's memory toggle is the
+use flag, not a third thing (section 10). Initial automatic extraction remains off unless
 the approved host policy and implementation explicitly support it.
 
 Create/confirm/correct/forget operations require named pending and read-back
@@ -689,6 +844,10 @@ counts. These are target capabilities requiring Office review.[^platform]
 | Stream disconnected / journal unreadable | Retain acknowledged content, mark recovery status, use snapshot/replay; do not re-ask automatically |
 | Validation failure / stale generation | No actionable final output; show display-safe reason and preserved historical content where permitted |
 | Cancel requested / boot interrupted | Separate pending cancellation from terminal cancellation and interruption; ignore stale completion |
+| Canceled after spend | Render the `discarded` terminal distinctly from a cancel that stopped in time; the usage view counts it (requirement 8.1) |
+| Completed but declined | Render the limitations as the answer body; no insertion, sharing or capture; feedback limited to flagged/discarded; never a failure state (requirement 8.3) |
+| Refused before admission | One of three named reasons with its own next action: retry later, open Settings, or new conversation; the draft is always retained (requirement 8.2) |
+| Answer scope differs from the asked context | Contract error; no answer text, no proposal; the adapter re-reads the snapshot before any retry (requirement 7.3.3) |
 | Provider unavailable / quota or capacity refusal | Show actual engine and reason; no alternate provider, automatic upgrade or hidden maintenance priority |
 | Settings/memory/proposal conflict | Keep accepted state and unsaved proposal; refresh exact item/revision and require human reconciliation |
 | Draft target edited or expired | Refuse insertion; preserve destination text, expose review/refresh path, do not overwrite |
@@ -792,6 +951,42 @@ preserve declared Office deltas, and requalify the affected satellites. A clean
 sibling build does not prove the vendored consumer has changed. No vendor patch
 or re-vendoring was performed for this document.[^vendor]
 
+Office-side constraints confirmed by the review (2026-09-10):
+
+- **Two vendor syncs are in flight.** Office is vendored at `e01255c`
+  (`vendor/PROVENANCE.json:657`); `op-zhksn`'s lane V re-vendors at `c3c32cf`
+  on `feature/op-zhksn-softphone-adoption`; this component would need a third
+  revision. Every vendor byte change moves the foundation digest pinned in
+  `xtask/src/surfaces/build_inputs.rs`, and `vendor_provenance.py --update` is
+  refused by the snapshot-core sibling's drift, so the digest is re-pinned by
+  script. Land the softphone re-vendor first, then one sync for this. The
+  three declared deltas (`PROVENANCE.json:21-24`, including the Select
+  re-assert whose loss reproduces a six-page panic) survive every sync.
+- **The 26-attribute cap on a `view!` tag.** tachys implements `add_any_attr`
+  for arities up to 26 and the 27th is `todo!`; three Office surfaces panicked
+  at runtime on their `<main` tag before a spread refactor, and a `{..spread}`
+  counts as one
+  (`crates/office-perf-satellite-ui/tests/view_attribute_budget.rs:1-11`,
+  `:63`, `:72`). The Office adapter mounts the workspace through one spread and
+  keeps every diagnostic hook on the page-model element
+  (`coordinator.rs:38-56`), never on `<main`.
+- **Source-shape tests bound to today's DOM must be retired or re-pointed in
+  the same change:** the Dashboard's panel-order test on `data-coach-*`
+  needles (`dashboard.rs:2380-2413`), the Coordinator's `<AssistantConfigDialog`
+  mount count (`coordinator.rs:4930`), and the dialog's own
+  `data-assistant-dialog-state` contract (`assistant_config_dialog.rs:15-16`).
+  No xtask or script consumer keys on the assistant hooks.
+- **Closed vocabularies are pinned by width and position** and must be mapped
+  into `#[non_exhaustive]` LDUI enums with an `Unknown(code)` arm, never
+  re-declared: `ASSISTANT_UNAVAILABLE_REASONS` (12), `ASSISTANT_SIGN_IN_STATES`
+  (8), `ASSISTANT_SIGN_IN_SHAPES` (3), `TURN_STATES` (10), `TURN_EVENT_KINDS`
+  (15), `TURN_REFUSAL_REASONS` (3), `TURN_FEEDBACK_OUTCOMES` (4), the memory
+  kinds/states/classes and `KNOWLEDGE_STATUSES` (9).
+- **Page capabilities are typed per surface today** (`coordinator.coach`,
+  `conversation.assist`, `journal-assistant.ask`, the Dashboard's
+  `can_ask_coach`; the operation allowlist names 23 assistant operations,
+  `surface_portfolio.rs:28-59`). The facade mounts against these; no registry.
+
 ## 16. Office-agent review and return contract
 
 The Office agent should amend this file in place and preserve its source/proposal
@@ -819,6 +1014,50 @@ features. Link existing Office work where available; do not duplicate it. Only
 after this review and the user's approval should the primary LDUI agent turn the
 agreed design into implementation-ready Beads and begin coding.
 
+### 16.1 Office review disposition, 2026-09-10
+
+Reviewed Office revision `a27d3fcc`; full evidence in
+`4iiz-Office/docs/research/2026-09-10-ai-assistant-workspace-adoption-review.md`.
+Technical acceptance below is distinct from the unresolved business decisions
+that follow it; nothing here is an owner ruling.
+
+| Review item | Disposition |
+|---|---|
+| Shared boundary and name | **Accepted**: `AiAssistantWorkspace`, the fixed anatomy, the controlled state/command API and the prohibition on shared business/provider execution. **Amended**: the header engine slot is the selected preference (section 6.1) |
+| Inventory and source drift | **Confirmed** at `a27d3fcc`; five section 3 rows and section 3.1 item 4 amended with the observed behaviours the audit omitted (section 18) |
+| Replacement fidelity | **Amended**: the safety contracts of prepared contact, the Account reconcile rule and the Desk restriction are confirmed at the cited lines; three deliberate behaviour changes (early draft clearing, failure-as-message, one-shot answer dropping) need section 14 cases, and two of them need an owner ruling (questions 2 and 3 below) |
+| Host API readiness | Typed turns: exposed, adopted by no surface; adoption is `op-hxqeu`. History list/load/search/close: none. Memory fingerprint at admission: empty (`routes_workspace/assistant_turns.rs:403-415`; `op-hxqeu`/`op-wtww7`). Pending-candidate review body: none (`published_text` only). Edit/export/erase-all: none (create/confirm/forget only). Auth: seven routes exist, the dialog's controls are disabled (`op-gbjlp`). Learning projections: none (BRD section 1.2). Actual-engine provenance on the typed completion: none (review bead O-3) |
+| Requirement coverage | **Deferred to the owner** under D-01; the CO/LD/AC/CV/SH/MEM homes are not contested technically |
+| Existing versus new scope | D-11 preserved: Journal keeps its approved one-question behaviour. D-16 confirmed against code: build, reusing `AiChat`'s presentation mechanics only; `AiChat` owns a `ChatSession` drive loop and model/system-prompt/tools settings and is not the start of this component |
+| Authority and data | **Carried forward, unresolved**: D-02 to D-04, D-07, D-08, D-12, D-17 to D-20 |
+| Memory governance | **Deferred to the owner** under D-05, D-14, D-15, D-18, with one correction: the dialog's memory switch is the memory policy's use flag (section 10) |
+| Generated-content settings | D-09 **open**; requirement 10.2 preserves actual provenance regardless |
+| Pilot and operations | **Owner**: D-06, D-10, D-13, D-21 |
+| Proof and vendoring | **Accepted**; sequenced after `op-zhksn`'s re-vendor; the source-shape tests named in section 15 are retired in the same change |
+
+Open questions for the owner, recorded and not answered:
+
+1. D-09: which generated content follows the selected chat engine.
+2. Insert-into-composer on Conversation Detail: today it replaces whatever is
+   typed (`conversation_detail.rs:1940`); section 9.3 refuses insertion into an
+   edited composer. Keep replace-on-click as explicit intent, or adopt the
+   conflict rule?
+3. One-shot panels and history: Dashboard and Journal drop the previous answer
+   when the question is edited (`dashboard.rs:2074`, `journal.rs:1301`);
+   section 6.2 keeps it visible as historical. Which, and on which panels?
+4. One owner for the call-script beat renderer: `ClientCallGuidance` under
+   `op-zhksn`/`ldui-26tv`, or this workspace's call-preparation lane. No-Hire's
+   renderer is missing three required fields either way (section 3).
+5. First adoption boundary and transport: may the first release run on the
+   legacy synchronous coach routes as a named temporary migration mode, or is
+   typed-turn adoption (`op-hxqeu`) a prerequisite; and which panel first (the
+   Coordinator is the only one with the dialog mounted).
+6. Sign-in shape per engine and tier now that the seven routes exist, under
+   D-04 (paste is not the accepted default; `sign_in_shape_unavailable` is the
+   core's answer when paste is unarmed, `assistant.rs:24-26`).
+7. Whether Account gets a composer in the first release (AC-02, D-01);
+   `surfaces/account` has no assistant today.
+
 ## 17. Source register
 
 Local source links are pinned by the repository revisions in section 2; line
@@ -839,7 +1078,7 @@ content was submitted to external research services.
 
 [^coordinator]: Office, [Coordinator assistant panel](C:/dev/4iiz-office/surfaces/coordinator/src/coordinator.rs:4356) and [assistant request](C:/dev/4iiz-office/surfaces/coordinator/src/api.rs:494). Local history 1234–1239; scoped ask 2920–2966; grounded response 3174–3237; availability 3871–3947; panel/config 4356–4519.
 
-[^journal]: Office, [Journal assistant](C:/dev/4iiz-office/surfaces/journal/src/journal.rs:1268) and [request adapter](C:/dev/4iiz-office/surfaces/journal/src/api.rs:188). Input/answer model 169–202; scope/response 560–617; ask flow 862–896; editing 949–963; UI 1268–1349.
+[^journal]: Office, [Journal assistant](C:/dev/4iiz-office/surfaces/journal/src/journal.rs:1268) and [request adapter](C:/dev/4iiz-office/surfaces/journal/src/api.rs:188). Input/answer model 169–202; scope/response 560–617; ask flow 862–896; page-model state 949–963; the edit that clears the previous answer 1298–1303; UI 1268–1349.
 
 [^conversation]: Office, [conversation-detail assistant and draft UI](C:/dev/4iiz-office/surfaces/conversation-detail/src/conversation_detail.rs:3427) and [API adapter](C:/dev/4iiz-office/surfaces/conversation-detail/src/api.rs:1081). Human-dispatch boundary 448–452 and 518–526; generated-artifact handlers 1939–2104; analysis/Q&A/draft rendering 3427–3736.
 
@@ -855,7 +1094,7 @@ content was submitted to external research services.
 
 [^turn-contract]: Office, [assistant turn DTO contract](C:/dev/4iiz-office/crates/office-perf-dto/src/assistant_turns.rs:37). States/events/capabilities 37–126; bounds 128–151; conversation/turn submission 155–203; admission/events/snapshot/feedback 205–284. Consult constants rather than inaccurate count prose in nearby comments.
 
-[^turn-runtime]: Office, [durable attempt runtime](C:/dev/4iiz-office/crates/office-perf-api/src/assistant_turns.rs:497) and [turn SSE/snapshot routes](C:/dev/4iiz-office/crates/office-perf-api/src/routes_workspace/assistant_turns.rs:537). Journal-first publication, execution/cancel 497–742; interruption recovery 1204–1235; SSE replay/lag handling and snapshot routes 537–722.
+[^turn-runtime]: Office, [durable attempt runtime](C:/dev/4iiz-office/crates/office-perf-api/src/assistant_turns.rs:497) and [turn SSE/snapshot routes](C:/dev/4iiz-office/crates/office-perf-api/src/routes_workspace/assistant_turns.rs:537). Journal-first publication 1–60, the cancel registry 222–310 (the `send_replace` at 299 is why a cancel survives having no listener yet), the runner 555–800; interruption recovery 1204–1240; SSE replay/lag handling and snapshot routes 537–722.
 
 [^routes]: Office, [registered assistant routes](C:/dev/4iiz-office/crates/office-perf-api/src/app_router.rs:796) and [satellite operation allowlist](C:/dev/4iiz-office/crates/office-perf-api/src/surface_portfolio.rs:28). Engine/config 796–825; memory 826–867; typed conversations/turns 868–895; legacy coach routes remain separately registered.
 
@@ -882,3 +1121,27 @@ content was submitted to external research services.
 [^a11y-status]: W3C WAI, [Understanding SC 4.1.3: Status Messages](https://www.w3.org/WAI/WCAG22/Understanding/status-messages.html), accessed 2026-09-10. Programmatic exposure of waiting/results/error status without requiring focus movement.
 
 [^a11y-log]: W3C WAI, [ARIA23: Using role=log to identify sequential information updates](https://www.w3.org/WAI/WCAG22/Techniques/aria/ARIA23), accessed 2026-09-10. Reference for sequential transcript semantics, not a requirement to announce individual stream tokens.
+
+
+## 18. Change log
+
+All entries 2026-09-10, by the Office review (`4iiz-Office/docs/research/2026-09-10-ai-assistant-workspace-adoption-review.md`), each: section; what changed; why; Office evidence.
+
+- §2.1; added the reviewed revisions and the vendored copy; the return contract asks for the reviewed Office revision; `git rev-parse HEAD` = `a27d3fcc`, `vendor/PROVENANCE.json:657`.
+- §3 Coordinator; recorded early draft clearing, failure-as-message, flattened facts, and the header label's source; the audit omitted behaviours the spec changes on purpose; `coordinator.rs:3887`, `:3936-3942`, `:3903-3915`, `:2958-2962`, `:4378`.
+- §3 Existing client conversation; recorded the wholesale insert and the declined-answer shape; both are contracts the migration must state; `conversation_detail.rs:1940`, `:2087-2096`, `conversation_assistant.rs:96-108`.
+- §3 AI call preparation; recorded the omitted beat fields as a divergence from a controlling document and the two candidate owners; the audit called it a target; `no_hire_detail.rs:1804-1806`, `calls.rs:122-155`, `docs/ai-architecture.md:786-788`.
+- §3 Shared assistant settings; recorded the tooltip naming a closed bead and the memory switch's meaning; stale text misinforms; `assistant_config_dialog.rs:121-125`, `:135-139`, `app_router.rs:807-820`.
+- §3.1 item 4; "repaired in source" narrowed to the client, with the three open proof/fail-closed beads named; the item overstated; `assistant_config_dialog.rs:40-42`, `:988-1017`; `op-qac4b`, `op-b6ufa`, `op-kakzj`, `op-gbjlp`.
+- §3.1 items 7 and 8 added; the declined answer and the reasoning-cache version rule were missing hazards; `conversation_assistant.rs:70-108`, `docs/reasoning-prompts.md:108-124`.
+- §6.1; header slot reworded from actual engine to selected engine and a paragraph added; §10 forbids fabricating an actual engine and Office has no per-attempt projection; `coordinator.rs:2958-2962`, `:4378`.
+- §7.3 added; four presentation requirements: required qualification with per-fact availability, capability-driven controls, answered scope with contract error, failure never a transcript message; each a shipped Office behaviour; `dashboard.rs` DTO `:428-438`, `dashboard/api.rs:504-541`, `assistant_turns.rs` DTO `:94-97`, `coordinator.rs:3936-3942`.
+- §8; three lifecycle requirements: Canceled carries `discarded`, three closed pre-admission refusals with next actions, Declined outcome; each already journaled or answered by Office; `assistant_turns.rs:728-745`, `:684-691`, DTO `:99-111`, `routes_workspace/assistant_turns.rs:370-401`.
+- §9.1; tied fact rendering to requirement 7.3.1 with the two Office shapes; `coordinator.rs:3903-3915`, `dashboard.rs:2137-2174`.
+- §10; corrected the memory-switch paragraph: `memoryEnabled` IS the policy's use flag, one column; the earlier text treated them as unreconciled; `user_state/memory.rs:1052-1071`, `assistant_memory.rs:345`.
+- §10; two engine requirements: the connection matrix with device payload and tier precedence, and the header label rule; `assistant.rs:27-60`, `:108-113`, `assistant_engine_sessions.rs:603-621`, `:660-675`, `assistant_config_dialog.rs:830`, `assistant_turns.rs:668`, `:921-959`, `leader_assistant.rs:420`.
+- §11.1; named the storage of the use and capture policies; `user_state/memory.rs:1052-1071`.
+- §13.1; four failure rows for the new requirements.
+- §15; vendoring sequence after `op-zhksn`, the 26-attribute cap, the source-shape tests to retire, the pinned vocabularies, the typed page capabilities; `vendor/PROVENANCE.json:21-24`, `:657`, `tests/view_attribute_budget.rs:1-72`, `dashboard.rs:2380-2413`, `coordinator.rs:4930`, `surface_portfolio.rs:28-59`.
+- §16.1 added; the disposition per review item and seven open owner questions, unanswered.
+- §17; two footnote anchors corrected; `journal.rs:1298-1303`, `assistant_turns.rs:222-310`, `:555-800`.
