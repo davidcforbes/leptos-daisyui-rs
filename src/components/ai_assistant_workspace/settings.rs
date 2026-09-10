@@ -186,14 +186,13 @@ pub fn validate_connection(connection: &AssistantConnection) -> Result<(), Assis
     {
         return Err(AssistantContractError::InvalidConnection);
     }
-    if let Some(device) = &connection.device {
-        if connection.shape != SignInShape::Device
+    if let Some(device) = &connection.device
+        && (connection.shape != SignInShape::Device
             || device.verification_url.trim().is_empty()
             || device.user_code.trim().is_empty()
-            || device.expires_at.trim().is_empty()
-        {
-            return Err(AssistantContractError::InvalidConnection);
-        }
+            || device.expires_at.trim().is_empty())
+    {
+        return Err(AssistantContractError::InvalidConnection);
     }
     for value in [
         &connection.account_label,

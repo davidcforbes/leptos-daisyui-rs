@@ -295,6 +295,9 @@ pub struct AssistantAnswer {
 
 /// Durable attempt lifecycle. Transport delivery is independently projected.
 #[non_exhaustive]
+// The lifecycle is intentionally value-shaped so callers can pattern-match
+// accepted answers without an allocation or pointer-specific API change.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AttemptLifecycle {
     /// Admission was acknowledged; execution has not been queued yet.

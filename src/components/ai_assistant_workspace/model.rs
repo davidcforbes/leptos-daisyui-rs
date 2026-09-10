@@ -123,14 +123,12 @@ pub fn validate_conversation(
     if let SubmissionDisposition::Submitting { request_id }
     | SubmissionDisposition::Uncertain { request_id, .. }
     | SubmissionDisposition::Refused { request_id, .. } = &conversation.submission
-    {
-        if conversation
+        && conversation
             .attempts
             .iter()
             .any(|attempt| attempt.request_id == *request_id)
-        {
-            return Err(AssistantContractError::InvalidReceipt);
-        }
+    {
+        return Err(AssistantContractError::InvalidReceipt);
     }
     match &conversation.submission {
         SubmissionDisposition::Idle => Ok(()),

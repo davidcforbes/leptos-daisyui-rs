@@ -243,6 +243,9 @@ pub struct AssistantProposal {
 
 /// Artifact families have intentionally different presentation and action rules.
 #[non_exhaustive]
+// Keep the public enum's value-shaped variants stable; boxing would be an API
+// change for the typed artifact contract and its callers.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ArtifactKind {
     /// Read-only conversation analysis with material limitations.

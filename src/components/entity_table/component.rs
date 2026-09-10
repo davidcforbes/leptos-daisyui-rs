@@ -208,6 +208,7 @@ pub(super) fn next_entity_page(current: usize, plan: &EntityPagePlan) -> usize {
 /// an extreme geometric row-only capacity. The documented `min_rows` behavior
 /// is preserved after finding an actual fit: when nothing fits or too few rows
 /// fit, keep the configured page size and scroll.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn grouped_auto_page_size_for_height(
     viewport_height: f64,
     header_height: f64,
