@@ -602,6 +602,7 @@ pub fn DataTableDemo() -> impl IntoView {
     let history_loading = RwSignal::new(false);
     let history_page_size = RwSignal::new(ServerTablePageSizePreference::fixed(8));
     let history_preferences = RwSignal::new(EntityTablePreferences::new(1));
+    let history_preference_proposal_count = RwSignal::new(0_u64);
     let history_columns = RwSignal::new(vec![
         Column::new("run", "Run")
             .filterable_text()
@@ -2260,6 +2261,9 @@ pub fn DataTableDemo() -> impl IntoView {
                             {move || serde_json::to_string(&history_preferences.get())
                                 .unwrap_or_default()}
                         </code>
+                        <code data-testid="server-entity-history-preference-proposals">
+                            {move || history_preference_proposal_count.get().to_string()}
+                        </code>
                     </div>
                     <div class="h-[60vh] min-h-0">
                         <ServerEntityTable
@@ -2272,7 +2276,10 @@ pub fn DataTableDemo() -> impl IntoView {
                             control_id="server-entity-history-table".to_owned()
                             preference_ownership=EntityTablePreferenceOwnership::controlled(
                                 history_preferences.into(),
-                                Callback::new(move |next| history_preferences.set(next)),
+                                Callback::new(move |next| {
+                                    history_preference_proposal_count.update(|count| *count += 1);
+                                    history_preferences.set(next);
+                                }),
                             )
                             preference_version=1
                             page_size_preference=history_page_size

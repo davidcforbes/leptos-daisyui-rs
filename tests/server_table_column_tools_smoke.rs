@@ -64,6 +64,11 @@ async fn history_snapshot(harness: &pixelproof_web::Harness) -> Value {
                 proposals: Number(root.querySelector(
                     '[data-testid="server-entity-history-proposals"]'
                 ).textContent),
+                preferenceProposals: root.querySelector(
+                    '[data-testid="server-entity-history-preference-proposals"]'
+                ) ? Number(root.querySelector(
+                    '[data-testid="server-entity-history-preference-proposals"]'
+                ).textContent) : null,
                 preferences: parse('server-entity-history-preferences'),
                 requestState: root.querySelector(
                     '[data-testid="server-entity-history-request-state"]'
@@ -162,6 +167,27 @@ async fn wait_for_history_pending(
     );
 }
 
+async fn wait_for_history_pending_query(
+    harness: &pixelproof_web::Harness,
+    expected_token: u64,
+    predicate: impl Fn(&Value) -> bool,
+) -> Value {
+    for _ in 0..60 {
+        let snapshot = history_snapshot(harness).await;
+        if snapshot["proposals"] == json!(expected_token)
+            && snapshot["requestState"] == json!(format!("pending:{expected_token}"))
+            && predicate(&snapshot["proposed"])
+        {
+            return snapshot;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    panic!(
+        "History fixture never exposed matching pending token {expected_token}: {}",
+        history_snapshot(harness).await
+    );
+}
+
 async fn wait_for_history_acceptance(
     harness: &pixelproof_web::Harness,
     expected_token: u64,
@@ -213,13 +239,50 @@ async fn history_interaction_snapshot(harness: &pixelproof_web::Harness) -> Valu
                 return box ? { left: box.left, top: box.top, right: box.right,
                     bottom: box.bottom, width: box.width, height: box.height } : null;
             };
+            const splitShadowLayers = value => {
+                const layers = [];
+                let depth = 0;
+                let start = 0;
+                for (let index = 0; index < value.length; index += 1) {
+                    if (value[index] === '(') depth += 1;
+                    if (value[index] === ')') depth -= 1;
+                    if (value[index] === ',' && depth === 0) {
+                        layers.push(value.slice(start, index).trim());
+                        start = index + 1;
+                    }
+                }
+                layers.push(value.slice(start).trim());
+                return layers;
+            };
+            const shadowLayerIsTransparentAndZero = layer => {
+                const lengths = Array.from(layer.matchAll(/(-?\d*\.?\d+)px/g), match => Number(match[1]));
+                const transparent = /\btransparent\b/i.test(layer) ||
+                    /rgba?\([^)]*(?:,|\/)\s*0(?:\.0+)?\s*\)/i.test(layer) ||
+                    /#[0-9a-f]{6}00\b/i.test(layer);
+                return lengths.length >= 2 && lengths.every(length => length === 0) && transparent;
+            };
+            const shadowIsNormalized = value => value === 'none' ||
+                splitShadowLayers(value).every(shadowLayerIsTransparentAndZero);
+            const modeFilter = table.querySelector(
+                '[data-table-filter-column="mode"] select[data-table-filter-kind="exact"]'
+            );
+            const startedSort = table.querySelector(
+                '[data-table-sort-column="started_at"]'
+            )?.closest('th')?.getAttribute('aria-sort') ?? null;
             return {
                 headers,
+                modeFilterValue: modeFilter?.value ?? null,
+                startedSort,
                 chooserExpanded: chooser.getAttribute('aria-expanded'),
                 chooserVisible: rect(chooserMenu)?.width > 0 && rect(chooserMenu)?.height > 0,
+                chooserClass: chooserMenu.className,
+                chooserMaxHeight: getComputedStyle(chooserMenu).maxHeight,
+                chooserOverflowY: getComputedStyle(chooserMenu).overflowY,
                 chooserInsideViewport: !rect(chooserMenu) || (
                     rect(chooserMenu).left >= 0 &&
-                    rect(chooserMenu).right <= document.documentElement.clientWidth
+                    rect(chooserMenu).top >= 0 &&
+                    rect(chooserMenu).right <= document.documentElement.clientWidth &&
+                    rect(chooserMenu).bottom <= document.documentElement.clientHeight
                 ),
                 pageSize: {
                     value: pageSize.value,
@@ -234,8 +297,11 @@ async fn history_interaction_snapshot(harness: &pixelproof_web::Harness) -> Valu
                     count: auditedControls.length,
                     withUnexpectedShadow: auditedControls.filter(control => {
                         const shadow = getComputedStyle(control).boxShadow;
-                        return shadow !== 'none' && !shadow.includes('0px 0px 0px 0px');
+                        return !shadowIsNormalized(shadow);
                     }).length,
+                    rejectsMixedShadow: !shadowIsNormalized(
+                        'rgba(0, 0, 0, 0) 0px 0px 0px 0px, rgba(0, 0, 0, 0.5) 0px 4px 6px 0px'
+                    ),
                 },
                 moduleResize: {
                     name: moduleSeparator?.getAttribute('aria-label'),
@@ -254,6 +320,7 @@ async fn history_interaction_snapshot(harness: &pixelproof_web::Harness) -> Valu
                         getComputedStyle(table.querySelector('.overflow-x-auto')).overflowX
                     ),
                     footerInside: rect(footer).left >= rect(table).left - 1 &&
+                        rect(footer).top >= rect(table).top - 1 &&
                         rect(footer).right <= rect(table).right + 1 &&
                         rect(footer).bottom <= rect(table).bottom + 1,
                 },
@@ -261,6 +328,31 @@ async fn history_interaction_snapshot(harness: &pixelproof_web::Harness) -> Valu
         })()"#,
     )
     .await
+}
+
+fn expected_history_range(snapshot: &Value) -> String {
+    let page = snapshot["accepted"]["page"]
+        .as_u64()
+        .expect("accepted page");
+    let page_size = snapshot["accepted"]["page_size"]
+        .as_u64()
+        .expect("accepted page size");
+    let row_count = snapshot["acceptedIds"]
+        .as_array()
+        .expect("accepted ids")
+        .len() as u64;
+    let total = snapshot["total"].as_u64().expect("accepted total");
+    let start = if row_count == 0 {
+        0
+    } else {
+        (page - 1) * page_size + 1
+    };
+    let end = if row_count == 0 {
+        0
+    } else {
+        (start + row_count - 1).min(total)
+    };
+    format!("Showing {start}\u{2013}{end} of {total}")
 }
 
 async fn choose_history_page_size(harness: &pixelproof_web::Harness, value: &str) {
@@ -320,6 +412,20 @@ async fn wait_for_history_query(
     );
 }
 
+/// Dispatch the same real CDP element click as the shared helper without its
+/// post-click visual settle delay, so the fixture's explicit pending token can
+/// be observed before the 240 ms simulated response is acknowledged.
+async fn click_history_immediate(harness: &pixelproof_web::Harness, selector: &str) {
+    harness
+        .page()
+        .find_element(selector)
+        .await
+        .unwrap_or_else(|error| panic!("find immediate History click {selector}: {error}"))
+        .click()
+        .await
+        .unwrap_or_else(|error| panic!("click immediate History control {selector}: {error}"));
+}
+
 /// `ldui-9ke9`: the canonical server facade exposes one complete standard
 /// interaction surface. Every gesture is real browser input, and query
 /// controls move only after the fixture acknowledges a full replacement.
@@ -361,6 +467,12 @@ async fn server_entity_history_standard_controls_preserve_accepted_truth() {
         json!(0),
         "fixture normalization must add zero non-transparent control shadows"
     );
+    assert_eq!(
+        initial_controls["auditFixtureControls"]["rejectsMixedShadow"],
+        json!(true),
+        "the shadow oracle must reject a zero layer followed by a visible layer"
+    );
+    assert_eq!(initial["preferenceProposals"], json!(0));
 
     // Gear: hide, restore, then reorder through real pointer input. The DOM
     // projection and accepted preference payload must agree after each click.
@@ -372,7 +484,13 @@ async fn server_entity_history_standard_controls_preserve_accepted_truth() {
     let opened = history_interaction_snapshot(&harness).await;
     assert_eq!(opened["chooserExpanded"], json!("true"));
     assert_eq!(opened["chooserVisible"], json!(true));
-    assert_eq!(opened["chooserInsideViewport"], json!(true));
+    assert_eq!(opened["chooserMaxHeight"], json!("320px"));
+    assert_eq!(opened["chooserOverflowY"], json!("auto"));
+    assert_eq!(
+        opened["chooserInsideViewport"],
+        json!(true),
+        "open chooser must fit the viewport on both axes: {opened}"
+    );
     click(
         &harness,
         &format!("{HISTORY_ROOT} [data-server-column='build'] [role='menuitemcheckbox']"),
@@ -390,11 +508,32 @@ async fn server_entity_history_standard_controls_preserve_accepted_truth() {
             .as_array()
             .is_some_and(|columns| columns.contains(&json!("build")))
     );
+    assert_eq!(hidden["preferenceProposals"], json!(1));
     click(
         &harness,
         &format!("{HISTORY_ROOT} [data-server-column='build'] [role='menuitemcheckbox']"),
     )
     .await;
+    let restored = history_snapshot(&harness).await;
+    let restored_controls = history_interaction_snapshot(&harness).await;
+    assert_eq!(restored["preferenceProposals"], json!(2));
+    assert!(
+        !restored["preferences"]["hidden_columns"]
+            .as_array()
+            .is_some_and(|columns| columns.contains(&json!("build")))
+    );
+    let order_before_reorder = restored_controls["headers"]
+        .as_array()
+        .expect("restored header order")
+        .clone();
+    let build_before = order_before_reorder
+        .iter()
+        .position(|column| column == "build")
+        .expect("restored Build header");
+    assert!(
+        build_before > 0,
+        "Build must have an earlier slot available"
+    );
     click(
         &harness,
         &format!(
@@ -404,6 +543,27 @@ async fn server_entity_history_standard_controls_preserve_accepted_truth() {
     .await;
     let reordered = history_snapshot(&harness).await;
     let reordered_controls = history_interaction_snapshot(&harness).await;
+    let order_after_reorder = reordered_controls["headers"]
+        .as_array()
+        .expect("reordered header order");
+    let build_after = order_after_reorder
+        .iter()
+        .position(|column| column == "build")
+        .expect("reordered Build header");
+    let mut expected_order = order_before_reorder.clone();
+    expected_order.swap(build_before - 1, build_before);
+    assert_eq!(
+        order_after_reorder, &expected_order,
+        "Build must move exactly one position earlier"
+    );
+    assert_eq!(build_after + 1, build_before);
+    assert_ne!(order_after_reorder, &order_before_reorder);
+    assert!(
+        !reordered["preferences"]["hidden_columns"]
+            .as_array()
+            .is_some_and(|columns| columns.contains(&json!("build")))
+    );
+    assert_eq!(reordered["preferenceProposals"], json!(3));
     assert_eq!(
         reordered_controls["headers"], reordered["preferences"]["column_order"],
         "rendered header order must equal accepted preference order"
@@ -421,11 +581,30 @@ async fn server_entity_history_standard_controls_preserve_accepted_truth() {
         .await
         .expect("focus named History Module separator");
 
-    for key in [
-        pixelproof_web::Key::ArrowRight,
-        pixelproof_web::Key::ArrowLeft,
-        pixelproof_web::Key::Home,
-        pixelproof_web::Key::End,
+    let focused_controls = history_interaction_snapshot(&harness).await;
+    let mut previous_width = focused_controls["moduleResize"]["now"]
+        .as_u64()
+        .expect("focused Module width");
+    let minimum_width = focused_controls["moduleResize"]["min"]
+        .as_u64()
+        .expect("Module minimum width");
+    let maximum_width = focused_controls["moduleResize"]["max"]
+        .as_u64()
+        .expect("Module maximum width");
+    let mut preference_token = reordered["preferenceProposals"]
+        .as_u64()
+        .expect("preference proposal token");
+    for (key, expected_width) in [
+        (
+            pixelproof_web::Key::ArrowRight,
+            (previous_width + 16).min(maximum_width),
+        ),
+        (pixelproof_web::Key::Home, minimum_width),
+        (pixelproof_web::Key::End, maximum_width),
+        (
+            pixelproof_web::Key::ArrowLeft,
+            maximum_width.saturating_sub(16).max(minimum_width),
+        ),
     ] {
         harness
             .press_key_sequence(&[key])
@@ -436,6 +615,10 @@ async fn server_entity_history_standard_controls_preserve_accepted_truth() {
         let width = accepted["preferences"]["column_widths"]["module"]
             .as_u64()
             .expect("accepted Module width");
+        preference_token += 1;
+        assert_eq!(width, expected_width, "keyboard resize outcome: {controls}");
+        assert_ne!(width, previous_width, "resize key must not be a no-op");
+        assert_eq!(accepted["preferenceProposals"], json!(preference_token));
         assert_eq!(controls["moduleResize"]["now"].as_u64(), Some(width));
         assert_eq!(
             controls["moduleResize"]["trackWidth"].as_f64(),
@@ -450,7 +633,47 @@ async fn server_entity_history_standard_controls_preserve_accepted_truth() {
             controls["moduleResize"]["valueText"],
             json!(format!("{width} pixels"))
         );
+        previous_width = width;
     }
+
+    // The same controlled ownership path must preview and accept one real
+    // pointer drag on the canonical History facade.
+    let (end_x, y) = begin_real_pointer_drag(&harness, &separator, -96.0).await;
+    let pointer_preview = history_interaction_snapshot(&harness).await;
+    let pointer_pending_model = history_snapshot(&harness).await;
+    assert_eq!(
+        pointer_pending_model["preferenceProposals"],
+        json!(preference_token)
+    );
+    assert_eq!(
+        pointer_pending_model["preferences"]["column_widths"]["module"],
+        json!(previous_width)
+    );
+    assert_eq!(
+        pointer_preview["moduleResize"]["now"],
+        json!(previous_width - 96)
+    );
+    finish_real_pointer_drag(&harness, end_x, y).await;
+    let pointer_accepted = history_snapshot(&harness).await;
+    let pointer_controls = history_interaction_snapshot(&harness).await;
+    preference_token += 1;
+    let pointer_width = previous_width - 96;
+    assert_eq!(
+        pointer_accepted["preferenceProposals"],
+        json!(preference_token)
+    );
+    assert_eq!(
+        pointer_accepted["preferences"]["column_widths"]["module"],
+        json!(pointer_width)
+    );
+    assert_eq!(
+        pointer_controls["moduleResize"]["now"],
+        json!(pointer_width)
+    );
+    assert_eq!(
+        pointer_controls["moduleResize"]["trackWidth"],
+        json!(pointer_width)
+    );
 
     // Fixed intent is accepted as a query replacement and survives an actual
     // desktop viewport resize without another proposal.
@@ -467,8 +690,17 @@ async fn server_entity_history_standard_controls_preserve_accepted_truth() {
         .expect("resize the History desktop viewport");
     tokio::time::sleep(std::time::Duration::from_millis(700)).await;
     let fixed_after_resize = history_snapshot(&harness).await;
+    let fixed_controls_after_resize = history_interaction_snapshot(&harness).await;
     assert_eq!(fixed_after_resize["proposals"], fixed["proposals"]);
     assert_eq!(fixed_after_resize["accepted"], fixed["accepted"]);
+    assert_eq!(
+        fixed_controls_after_resize["pageSize"]["value"],
+        json!("10")
+    );
+    assert_eq!(
+        fixed_controls_after_resize["pageSize"]["label"],
+        json!("10")
+    );
 
     // Auto is chosen through the native menu, then a second desktop resize
     // must propose and accept a different server capacity.
@@ -498,33 +730,88 @@ async fn server_entity_history_standard_controls_preserve_accepted_truth() {
         resized_auto["accepted"]["page_size"],
         auto["accepted"]["page_size"]
     );
+    let resized_auto_controls = history_interaction_snapshot(&harness).await;
+    assert_eq!(resized_auto_controls["pageSize"]["value"], json!("auto"));
+    assert_eq!(
+        resized_auto_controls["pageSize"]["label"],
+        json!(format!(
+            "Auto ({})",
+            resized_auto["accepted"]["page_size"]
+                .as_u64()
+                .expect("resized Auto capacity")
+        ))
+    );
 
     // Sort then move to page two. Both visible changes await accepted server
     // replacements; no client-local row transform is allowed.
-    click(
+    let before_sort = history_snapshot(&harness).await;
+    let controls_before_sort = history_interaction_snapshot(&harness).await;
+    click_history_immediate(
         &harness,
         &format!("{HISTORY_ROOT} [data-table-sort-column='started_at']"),
     )
     .await;
     token += 1;
+    let pending_sort = wait_for_history_pending_query(&harness, token, |query| {
+        query["sort"]["column"] == json!("started_at")
+            && query["sort"]["order"] == json!("ascending")
+    })
+    .await;
+    let controls_pending_sort = history_interaction_snapshot(&harness).await;
+    assert_eq!(pending_sort["loading"], json!(true));
+    assert_eq!(controls_pending_sort["range"], json!("Loading..."));
+    for field in ["accepted", "acceptedIds", "domIds", "total"] {
+        assert_eq!(
+            pending_sort[field], before_sort[field],
+            "pending sort changed {field}"
+        );
+    }
+    for field in ["pageSize", "headers", "modeFilterValue", "startedSort"] {
+        assert_eq!(
+            controls_pending_sort[field], controls_before_sort[field],
+            "pending sort changed visible {field}"
+        );
+    }
     let sorted = wait_for_history_query(&harness, token, |query| {
         query["sort"]["column"] == json!("started_at")
             && query["sort"]["order"] == json!("ascending")
     })
     .await;
     assert_eq!(sorted["acceptedIds"], sorted["domIds"]);
-    click(
+    assert_eq!(
+        history_interaction_snapshot(&harness).await["startedSort"],
+        json!("ascending")
+    );
+    let before_page = history_snapshot(&harness).await;
+    let controls_before_page = history_interaction_snapshot(&harness).await;
+    click_history_immediate(
         &harness,
         &format!("{HISTORY_ROOT} [data-server-table-footer] button:nth-last-child(1)"),
     )
     .await;
     token += 1;
+    let pending_page =
+        wait_for_history_pending_query(&harness, token, |query| query["page"] == json!(2)).await;
+    let controls_pending_page = history_interaction_snapshot(&harness).await;
+    assert_eq!(pending_page["loading"], json!(true));
+    assert_eq!(controls_pending_page["range"], json!("Loading..."));
+    for field in ["accepted", "acceptedIds", "domIds", "total"] {
+        assert_eq!(
+            pending_page[field], before_page[field],
+            "pending page changed {field}"
+        );
+    }
+    for field in ["pageSize", "headers", "modeFilterValue", "startedSort"] {
+        assert_eq!(
+            controls_pending_page[field], controls_before_page[field],
+            "pending page changed visible {field}"
+        );
+    }
     let page_two = wait_for_history_query(&harness, token, |query| query["page"] == json!(2)).await;
     assert_eq!(page_two["acceptedIds"], page_two["domIds"]);
-    assert!(
-        history_interaction_snapshot(&harness).await["range"]
-            .as_str()
-            .is_some_and(|range| range.starts_with("Showing "))
+    assert_eq!(
+        history_interaction_snapshot(&harness).await["range"],
+        json!(expected_history_range(&page_two))
     );
 
     // Fail the next filter request. Accepted query, rows, population count,
@@ -540,6 +827,30 @@ async fn server_entity_history_standard_controls_preserve_accepted_truth() {
 
     choose_history_exact_filter(&harness, "mode", "Replay").await;
     token += 1;
+    let pending_failure = wait_for_history_pending(&harness, token, "mode", "Replay").await;
+    let controls_pending_failure = history_interaction_snapshot(&harness).await;
+    assert_eq!(pending_failure["loading"], json!(true));
+    assert_eq!(controls_pending_failure["range"], json!("Loading..."));
+    for field in ["accepted", "acceptedIds", "domIds", "total", "preferences"] {
+        assert_eq!(
+            pending_failure[field], before_failure[field],
+            "pending failed request changed accepted {field}"
+        );
+    }
+    for field in [
+        "pageSize",
+        "headers",
+        "moduleResize",
+        "modeFilterValue",
+        "startedSort",
+        "chooserExpanded",
+        "chooserVisible",
+    ] {
+        assert_eq!(
+            controls_pending_failure[field], controls_before_failure[field],
+            "pending failed request changed visible {field}"
+        );
+    }
     for _ in 0..120 {
         let failed = history_snapshot(&harness).await;
         if failed["requestState"] == json!(format!("failed:{token}")) {
@@ -558,7 +869,16 @@ async fn server_entity_history_standard_controls_preserve_accepted_truth() {
             "failed {field}: {failed}"
         );
     }
-    for field in ["range", "pageSize", "headers", "moduleResize"] {
+    for field in [
+        "range",
+        "pageSize",
+        "headers",
+        "moduleResize",
+        "modeFilterValue",
+        "startedSort",
+        "chooserExpanded",
+        "chooserVisible",
+    ] {
         assert_eq!(
             controls_after_failure[field], controls_before_failure[field],
             "failed request changed accepted {field}"

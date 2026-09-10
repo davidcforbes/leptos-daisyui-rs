@@ -2932,7 +2932,7 @@ pub fn ServerDataTable(
                                 }.into_any(),
                             }}
                         </button>
-                        <div class="dropdown-content bg-base-100 rounded-box z-[2] w-72 p-0 shadow-lg border border-base-300">
+                        <div class="dropdown-content bg-base-100 rounded-box z-[2] w-72 max-h-80 overflow-y-auto p-0 shadow-lg border border-base-300">
                             <Menu class="w-full" attr:id=column_tools_menu_id>
                                 {move || columns.get()
                                     .into_iter()
@@ -3720,6 +3720,18 @@ mod tests {
                 && source.contains("leading_cell=selection_leading_cell"),
             "the selection column must render through the shared leading-cell contract"
         );
+    }
+
+    /// The server chooser preserves its established right/bottom anchor, but
+    /// many columns scroll inside a bounded menu instead of escaping the
+    /// canonical desktop viewport.
+    #[test]
+    fn server_column_chooser_bounds_vertical_growth_without_changing_alignment() {
+        let source = include_str!("server_component.rs");
+        assert!(source.contains("class=\"dropdown dropdown-end dropdown-bottom\""));
+        assert!(source.contains(
+            "dropdown-content bg-base-100 rounded-box z-[2] w-72 max-h-80 overflow-y-auto"
+        ));
     }
 
     #[test]
