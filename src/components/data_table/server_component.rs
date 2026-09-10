@@ -296,6 +296,10 @@ fn options_with_active_filter_values(
     options
 }
 
+fn server_body_loading(loading: bool, retain_rows: bool, has_rows: bool) -> bool {
+    loading && !(retain_rows && has_rows)
+}
+
 /// The full query a server-owned table is currently displaying: everything a
 /// backend needs to produce the matching page. Emitted through
 /// [`ServerDataTable`]'s `on_query_change` on every user change, so the query
@@ -1307,6 +1311,13 @@ pub fn ServerDataTable(
     /// Loading state
     #[prop(optional, into)]
     loading: Signal<bool>,
+
+    /// Keeps a nonempty accepted offset page mounted while `loading` reports
+    /// replacement activity. Initial loading with no accepted rows still
+    /// renders the loading body. Cursor pagination continues to derive
+    /// retention from [`ServerCursorPageState`] instead of this option.
+    #[prop(optional, into)]
+    retain_rows_while_loading: Signal<bool>,
 
     /// Custom CSS classes
     #[prop(optional)]
@@ -2554,12 +2565,14 @@ pub fn ServerDataTable(
     });
     let body_loading = Signal::derive(move || {
         let retain_rows = match pagination {
-            ServerTablePagination::Cursor(cursor) => {
-                cursor.page.get().state.retains_rows() && rows.with(|rows| !rows.is_empty())
-            }
-            ServerTablePagination::Offset(_) => false,
+            ServerTablePagination::Cursor(cursor) => cursor.page.get().state.retains_rows(),
+            ServerTablePagination::Offset(_) => retain_rows_while_loading.get(),
         };
-        loading.get() && !retain_rows
+        server_body_loading(
+            loading.get(),
+            retain_rows,
+            rows.with(|rows| !rows.is_empty()),
+        )
     });
     // Atomic displayed-slice projection (ldui-9j16): fires whenever the
     // currently *rendered* columns or rows change. `rows` is entirely
@@ -3566,6 +3579,14 @@ mod tests {
 
     fn identified_row(id: &str) -> TableRow {
         HashMap::from([("id", id.to_owned())])
+    }
+
+    #[test]
+    fn retained_loading_hides_only_when_an_accepted_slice_exists() {
+        assert!(!server_body_loading(false, false, false));
+        assert!(server_body_loading(true, false, true));
+        assert!(server_body_loading(true, true, false));
+        assert!(!server_body_loading(true, true, true));
     }
 
     #[test]

@@ -71,6 +71,9 @@ async fn history_snapshot(harness: &pixelproof_web::Harness) -> Value {
                 failureState: root.querySelector(
                     '[data-testid="server-entity-history-failure-state"]'
                 ).textContent.trim(),
+                loading: root.querySelector(
+                    '[data-testid="server-entity-history-loading"]'
+                ).textContent.trim() === 'true',
             };
         })()"#,
     )
@@ -205,6 +208,7 @@ async fn server_entity_history_filters_use_accepted_population_truth() {
     assert_eq!(initial["proposals"], json!(0));
     assert_eq!(initial["requestState"], json!("accepted:0"));
     assert_eq!(initial["failureState"], json!("none"));
+    assert_eq!(initial["loading"], json!(false));
     assert_eq!(initial["preferences"]["schema_version"], json!(1));
     let original_ids = initial["acceptedIds"]
         .as_array()
@@ -236,6 +240,7 @@ async fn server_entity_history_filters_use_accepted_population_truth() {
         assert_eq!(reset["proposals"], json!(previous_proposals));
         assert_eq!(reset["accepted"]["filters"], json!({}));
         assert_eq!(reset["acceptedIds"], initial["acceptedIds"]);
+        assert_eq!(reset["loading"], json!(false));
 
         if text_filter {
             type_history_text_filter(&harness, column, value).await;
@@ -254,6 +259,8 @@ async fn server_entity_history_filters_use_accepted_population_truth() {
         assert_eq!(pending["accepted"]["filters"], json!({}));
         assert_eq!(pending["acceptedIds"], initial["acceptedIds"]);
         assert_eq!(pending["domIds"], initial["acceptedIds"]);
+        assert_eq!(pending["total"], json!(48));
+        assert_eq!(pending["loading"], json!(true));
         assert!(
             pending["requestState"]
                 .as_str()
@@ -265,6 +272,7 @@ async fn server_entity_history_filters_use_accepted_population_truth() {
             wait_for_history_acceptance(&harness, previous_proposals, Some((column, value))).await;
         assert_eq!(accepted["accepted"]["filters"][column], json!(value));
         assert_eq!(accepted["acceptedIds"], accepted["domIds"]);
+        assert_eq!(accepted["loading"], json!(false));
         assert!(
             accepted["acceptedIds"]
                 .as_array()

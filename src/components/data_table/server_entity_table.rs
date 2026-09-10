@@ -249,6 +249,7 @@ pub fn ServerEntityTable(
                 pagination: None,
                 query_capabilities,
                 loading,
+                retain_rows_while_loading: Signal::stored(true),
                 classes: DataTableClasses::default(),
                 texts,
                 sort_texts,

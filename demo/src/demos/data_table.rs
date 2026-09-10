@@ -637,6 +637,7 @@ pub fn DataTableDemo() -> impl IntoView {
         history_proposed_query.set(query.clone());
         history_request_state.set(format!("pending:{token}"));
         history_failure_state.set("none".to_owned());
+        history_loading.set(true);
         let fail_request = history_fail_next_request.get_untracked();
         history_fail_next_request.set(false);
 
@@ -2217,6 +2218,13 @@ pub fn DataTableDemo() -> impl IntoView {
                                 data-testid="server-entity-history-failure-state"
                             >
                                 {move || history_failure_state.get()}
+                            </code>
+                            " · Loading: "
+                            <code
+                                class="font-sans"
+                                data-testid="server-entity-history-loading"
+                            >
+                                {move || history_loading.get().to_string()}
                             </code>
                             " · Proposals: "
                             <code
