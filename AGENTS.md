@@ -19,8 +19,8 @@ Integration tests are in `tests/`, PixelProof baselines in
 - `cargo xtask verify-full` adds the browser suites and release Trunk build;
   it requires npm, Trunk, and Chrome. Run `npm install` in `demo/` once.
   All browser hosts, including the page-scoped snapshot host, use release
-  builds. Debug Wasm is not required. Current gate: 16 native + 24 browser
-  steps; use the actual xtask summary as the authority when counts change.
+  builds. Debug Wasm is not required. Use the actual xtask summary as the
+  authority for the native and registered browser step counts.
 - `cargo xtask test-style`, `test-layout`, or `test-reactivity` runs one
   self-hosted browser suite. The 69-check reactivity lane is explicitly
   requested, not part of ordinary `verify` rebuilds. `cargo make test-visual`

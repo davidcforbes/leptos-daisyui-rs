@@ -242,6 +242,9 @@ Its Office adoption cases (`ldui-26tv`) cover contact target selection, blocked
 mobile choices after writes, typed refusals, independent regeneration acceptance
 and completion, stale context, structured guidance, measured talk time and
 wide/mobile zero-ceiling visual audits. These remain in the same lane.
+The supplementary HelpHint lane (`test-help-hint`, ldui-q25n) shares that
+catalog host and covers disclosure semantics, pointer/keyboard/trusted-touch
+interaction, independent instances, Escape isolation and listener cleanup.
 That catalog server is the real `wasm32-unknown-unknown` release build, so a
 second standalone `trunk build --release` would only repeat the same pipeline
 and is intentionally absent. It is a **separate task**, not part of the
@@ -255,16 +258,15 @@ require two server builds. Consecutive suites for the same target share one
 server. In measured warm runs, Cargo's catalog compile was under one second but
 Trunk's Wasm optimization took roughly two minutes per invocation; sharing the
 catalog server across consecutive catalog suites avoids repeating that
-optimization for each test executable. The current full gate groups six
-page-scoped suites and eighteen catalog suites; `full_steps()` is the source
-of truth for membership.
+optimization for each test executable. `full_steps()` is the source of truth
+for page-scoped and catalog suite membership and grouping.
 
 ### Gate cadence during a live Beads drain
 
 `cargo xtask verify` is the 16-step native gate listed in the table above.
-`cargo xtask verify-full` adds 24 browser checks and reports 40 steps
-(re-count `full_steps()` in `xtask/src/main.rs` whenever a lane is added; this
-figure has drifted before).
+`cargo xtask verify-full` adds every registered browser lane. Report its actual
+summary count; `full_steps()` in `xtask/src/main.rs` defines membership, and a
+remembered total can drift when a lane is added.
 Say which command is running before starting it; "the verification gate" is
 ambiguous because the two commands have materially different cost and coverage.
 
