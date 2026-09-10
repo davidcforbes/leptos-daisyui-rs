@@ -459,8 +459,14 @@ fn card_class(selected: bool, disabled: bool) -> String {
 /// offset. Identical reasoning -- and identical numbers -- to
 /// [`KpiCard`](super::KpiCard)'s label, deliberately, so the two card
 /// families line up when they share a page.
-fn card_label_class() -> &'static str {
-    "ld-text-small font-semibold uppercase tracking-wide text-base-content/75 line-clamp-2 break-words min-h-8"
+///
+/// Wrapped labels trade the shared count baseline for complete visible text.
+fn card_label_class(wrap: bool) -> &'static str {
+    if wrap {
+        "ld-text-small font-semibold uppercase tracking-wide text-base-content/75 break-words"
+    } else {
+        "ld-text-small font-semibold uppercase tracking-wide text-base-content/75 line-clamp-2 break-words min-h-8"
+    }
 }
 
 /// Count classes. An unmeasured card renders italic and muted, so the
@@ -612,6 +618,11 @@ pub fn SelectableSummaryCard(
     #[prop(optional, into, default = Signal::stored(SelectableSummaryTexts::default()))]
     texts: Signal<SelectableSummaryTexts>,
 
+    /// Show the complete label on as many lines as needed instead of using
+    /// the default two-line clamp and reserved label height.
+    #[prop(optional, into)]
+    wrap_labels: Signal<bool>,
+
     /// Additional CSS classes for the card button.
     #[prop(optional, into)]
     class: &'static str,
@@ -678,7 +689,10 @@ pub fn SelectableSummaryCard(
             ></span>
             <span class=card_body_class()>
                 <span class="flex items-center gap-1 min-w-0">
-                    <span class=card_label_class()>
+                    <span
+                        class=move || card_label_class(wrap_labels.get())
+                        title=move || item.with(|item| item.label.clone())
+                    >
                         {move || item.with(|item| item.label.clone())}
                     </span>
                     {move || {
@@ -822,6 +836,11 @@ pub fn SelectableSummaryGroup(
     #[prop(optional, into, default = Signal::stored(SelectableSummaryTexts::default()))]
     texts: Signal<SelectableSummaryTexts>,
 
+    /// Forwarded to every card to show complete wrapped labels instead of
+    /// the default two-line clamp.
+    #[prop(optional, into)]
+    wrap_labels: Signal<bool>,
+
     /// Additional CSS classes for the grid.
     #[prop(optional, into)]
     class: &'static str,
@@ -909,6 +928,7 @@ pub fn SelectableSummaryGroup(
                                 tab_stop=is_tab_stop
                                 on_select=relay
                                 texts=texts
+                                wrap_labels=wrap_labels
                             />
                         }
                     }
@@ -1284,9 +1304,18 @@ mod tests {
 
     #[test]
     fn label_clamps_to_two_reserved_lines_instead_of_truncating() {
-        let label = card_label_class();
+        let label = card_label_class(false);
         assert!(label.contains("line-clamp-2"));
         assert!(label.contains("min-h-8"));
+        assert!(!label.contains("truncate"));
+    }
+
+    #[test]
+    fn wrapped_labels_drop_the_clamp_and_reserved_height() {
+        let label = card_label_class(true);
+        assert!(!label.contains("line-clamp"));
+        assert!(!label.contains("min-h-"));
+        assert!(label.contains("break-words"));
         assert!(!label.contains("truncate"));
     }
 

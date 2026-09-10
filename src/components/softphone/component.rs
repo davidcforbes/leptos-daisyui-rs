@@ -25,6 +25,7 @@ fn action_for(kind: SoftphoneActionKind, state: &SoftphoneState) -> SoftphoneAct
 fn supports(state: &SoftphoneState, kind: SoftphoneActionKind) -> bool {
     match kind {
         SoftphoneActionKind::Mute => state.capabilities.mute,
+        SoftphoneActionKind::EndCall => state.capabilities.end_call,
         SoftphoneActionKind::Hold => state.capabilities.hold,
         SoftphoneActionKind::Voicemail => state.capabilities.voicemail,
         SoftphoneActionKind::Record => state.capabilities.recording,
@@ -32,6 +33,15 @@ fn supports(state: &SoftphoneState, kind: SoftphoneActionKind) -> bool {
         SoftphoneActionKind::Keypad => state.capabilities.keypad,
         _ => true,
     }
+}
+
+fn primary_action_accessible_label(
+    kind: SoftphoneActionKind,
+    state: &SoftphoneState,
+    texts: &SoftphoneTexts,
+) -> Option<String> {
+    (kind == SoftphoneActionKind::EndCall && !state.capabilities.end_call)
+        .then(|| texts.end_call_unavailable.clone())
 }
 
 fn pressed(state: &SoftphoneState, kind: SoftphoneActionKind) -> Option<bool> {
@@ -246,6 +256,11 @@ pub fn Softphone(
                     view! {
                         <Button color=if kind == SoftphoneActionKind::EndCall { ButtonColor::Error } else { ButtonColor::Primary }
                             class="min-h-12 w-full shadow-none" attr:data-softphone-action=kind.as_str()
+                            attr:aria-label=move || {
+                                let current = state.get();
+                                let copy = texts.get();
+                                primary_action_accessible_label(kind, &current, &copy)
+                            }
                             disabled=Signal::derive(move || state.with(|s| !s.can_dispatch(&action_for(kind, s))))
                             on_click=Callback::new(move |_| emit(state, on_command, action_for(kind, &state.get_untracked())))>
                             <CallGlyph kind=kind />{move || texts.get().action(kind, &state.get())}
@@ -254,5 +269,38 @@ pub fn Softphone(
                 }}
             </div>
         </section>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unsupported_end_call_gets_a_localized_accessible_explanation() {
+        let mut state = SoftphoneState {
+            phase: SoftphonePhase::Active,
+            ..Default::default()
+        };
+        let texts = SoftphoneTexts {
+            end_call_unavailable: "End call is unavailable in this phone system".into(),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            primary_action_accessible_label(SoftphoneActionKind::EndCall, &state, &texts),
+            Some("End call is unavailable in this phone system".to_owned())
+        );
+        state.capabilities.end_call = true;
+        assert_eq!(
+            primary_action_accessible_label(SoftphoneActionKind::EndCall, &state, &texts),
+            None,
+            "a supported End call keeps its visible label as its accessible name"
+        );
+        assert_eq!(
+            primary_action_accessible_label(SoftphoneActionKind::Call, &state, &texts),
+            None,
+            "ordinary Call keeps its visible label as its accessible name"
+        );
     }
 }

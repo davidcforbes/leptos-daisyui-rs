@@ -19,6 +19,9 @@ pub struct SoftphoneTexts {
     pub call: String,
     /// Termination label.
     pub end_call: String,
+    /// Accessible explanation for a disabled End call control. Keep the
+    /// visible `end_call` label at the start for label-in-name compliance.
+    pub end_call_unavailable: String,
     /// Local microphone suppression label.
     pub mute: String,
     /// Restore microphone label.
@@ -74,6 +77,7 @@ impl Default for SoftphoneTexts {
             not_started: "--:--".into(),
             call: "Call".into(),
             end_call: "End call".into(),
+            end_call_unavailable: "End call is unavailable for this phone system".into(),
             mute: "Mute".into(),
             unmute: "Unmute".into(),
             hold: "Hold".into(),

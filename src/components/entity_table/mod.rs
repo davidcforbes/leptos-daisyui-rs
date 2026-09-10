@@ -35,10 +35,10 @@ pub use grouping::{
 };
 pub use model::{
     ENTITY_PAGE_SIZE_CHOICES, EntityColumnMove, EntityFocusRecord, EntityFocusTarget,
-    entity_table_display_projection, focus_target, move_column, next_sort, next_sort_additive,
-    normalize_preferences, ordered_columns, page_after_dataset_change, page_after_row_delta,
-    reset_columns, reset_sort, resolve_entity_page_size, set_preferred_width, sorted_indices,
-    toggle_hidden_column, valid_page_size,
+    default_hidden_columns, entity_table_display_projection, focus_target, move_column, next_sort,
+    next_sort_additive, normalize_preferences, ordered_columns, page_after_dataset_change,
+    page_after_row_delta, reset_columns, reset_sort, resolve_entity_page_size, set_preferred_width,
+    sorted_indices, toggle_hidden_column, valid_page_size,
 };
 pub use multi_selection::{
     EntityTableDisplayedPage, EntityTableDisplayedPageSelection, EntityTableMultiSelection,

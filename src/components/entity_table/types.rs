@@ -169,7 +169,8 @@ pub type EntityRowRenderer<T> = Rc<dyn Fn(&T) -> AnyView>;
 /// A callback that renders one controlled filter beneath its stable column.
 pub type EntityColumnFilterRenderer = Rc<dyn Fn() -> AnyView>;
 
-type EntityControlledColumnFilterRenderer = Rc<dyn Fn(EntityColumnFilterPlacement) -> AnyView>;
+type EntityControlledColumnFilterRenderer =
+    Rc<dyn Fn(EntityColumnFilterPlacement, Option<String>) -> AnyView>;
 
 #[derive(Clone, Copy)]
 pub(crate) enum EntityColumnFilterPlacement {
@@ -483,6 +484,7 @@ pub struct EntityColumnFilter {
     renderer: EntityColumnFilterRender,
     responsive: Option<EntityColumnFilterResponsive>,
     control_id: Option<Rc<str>>,
+    description: Option<String>,
 }
 
 #[derive(Clone)]
@@ -525,6 +527,7 @@ impl EntityColumnFilter {
             renderer: EntityColumnFilterRender::Custom(Rc::new(render)),
             responsive: None,
             control_id: None,
+            description: None,
         }
     }
 
@@ -549,7 +552,7 @@ impl EntityColumnFilter {
         let value = value.into();
         let placeholder = placeholder.into();
         let renderer_control_id = Rc::clone(&control_id);
-        let renderer = Rc::new(move |placement| {
+        let renderer = Rc::new(move |placement, description: Option<String>| {
             let id = placed_entity_filter_control_id(&renderer_control_id, placement);
             let label_for = id.clone();
             let node_ref = NodeRef::<HtmlInput>::new();
@@ -574,6 +577,8 @@ impl EntityColumnFilter {
                         attr:data-entity-filter-control=column_id
                         attr:data-entity-filter-kind="text"
                         attr:data-entity-filter-placement=entity_filter_placement_name(placement)
+                        attr:title=description.clone()
+                        attr:aria-description=description.clone()
                     />
                 </label>
             }
@@ -611,7 +616,7 @@ impl EntityColumnFilter {
         let all_label = all_label.into();
         let options = options.into();
         let renderer_control_id = Rc::clone(&control_id);
-        let renderer = Rc::new(move |placement| {
+        let renderer = Rc::new(move |placement, description: Option<String>| {
             let id = placed_entity_filter_control_id(&renderer_control_id, placement);
             let label_for = id.clone();
             let node_ref = NodeRef::<HtmlSelect>::new();
@@ -636,6 +641,8 @@ impl EntityColumnFilter {
                         attr:data-entity-filter-control=column_id
                         attr:data-entity-filter-kind="select"
                         attr:data-entity-filter-placement=entity_filter_placement_name(placement)
+                        attr:title=description.clone()
+                        attr:aria-description=description.clone()
                     >
                         <option value="">{move || all_label.get()}</option>
                         {move || {
@@ -726,7 +733,7 @@ impl EntityColumnFilter {
         let invalid_hint = invalid_hint.into();
         let invalid = Signal::derive(move || EntityDateBound::parse(&value.get()).is_invalid());
         let renderer_control_id = Rc::clone(&control_id);
-        let renderer = Rc::new(move |placement| {
+        let renderer = Rc::new(move |placement, description: Option<String>| {
             let id = placed_entity_filter_control_id(&renderer_control_id, placement);
             let label_for = id.clone();
             let hint_id = format!("{id}-invalid");
@@ -759,6 +766,8 @@ impl EntityColumnFilter {
                         attr:data-entity-filter-control=column_id
                         attr:data-entity-filter-kind="date"
                         attr:data-entity-filter-placement=entity_filter_placement_name(placement)
+                        attr:title=description.clone()
+                        attr:aria-description=description.clone()
                         attr:data-entity-filter-invalid=move || invalid.get().then_some("true")
                         attr:aria-invalid=move || invalid.get().then_some("true")
                         attr:aria-describedby=move || invalid.get().then(|| described_by.clone())
@@ -806,6 +815,7 @@ impl EntityColumnFilter {
                 on_clear,
             }),
             control_id: Some(control_id),
+            description: None,
         }
     }
 
@@ -815,6 +825,23 @@ impl EntityColumnFilter {
     /// caller-owned.
     pub fn control_id(&self) -> Option<&str> {
         self.control_id.as_deref()
+    }
+
+    /// Attaches a short explanation of what the filter matches.
+    ///
+    /// Typed controlled filters render the explanation as both a hover title
+    /// and an accessible description in their header and responsive
+    /// placements. Custom renderers retain ownership of their markup and can
+    /// read the value through [`Self::description`].
+    #[must_use]
+    pub fn with_description(mut self, text: impl Into<String>) -> Self {
+        self.description = Some(text.into());
+        self
+    }
+
+    /// Returns the optional explanation supplied by [`Self::with_description`].
+    pub fn description(&self) -> Option<&str> {
+        self.description.as_deref()
     }
 
     /// Adds localized compact/hidden-column presentation to a controlled filter.
@@ -864,7 +891,9 @@ impl EntityColumnFilter {
     pub(crate) fn render(&self, placement: EntityColumnFilterPlacement) -> AnyView {
         match &self.renderer {
             EntityColumnFilterRender::Custom(renderer) => renderer(),
-            EntityColumnFilterRender::Controlled(renderer) => renderer(placement),
+            EntityColumnFilterRender::Controlled(renderer) => {
+                renderer(placement, self.description.clone())
+            }
         }
     }
 }
@@ -898,6 +927,7 @@ impl fmt::Debug for EntityColumnFilter {
         formatter
             .debug_struct("EntityColumnFilter")
             .field("column_id", &self.column_id)
+            .field("description", &self.description)
             .finish_non_exhaustive()
     }
 }
@@ -1389,6 +1419,9 @@ pub struct EntityColumn<T> {
     pub sortable: bool,
     /// Whether users are forbidden from hiding this column.
     pub required: bool,
+    /// Whether this optional column starts hidden before a user records a
+    /// column preference.
+    pub hidden_by_default: bool,
     /// Whether this cell contains actions and therefore suppresses row activation.
     pub is_action: bool,
     /// Whether this existing action column owns inline Edit/Save/Cancel.
@@ -1600,6 +1633,7 @@ impl<T> Clone for EntityColumn<T> {
             header: self.header.clone(),
             sortable: self.sortable,
             required: self.required,
+            hidden_by_default: self.hidden_by_default,
             is_action: self.is_action,
             inline_edit_host: self.inline_edit_host,
             resizable: self.resizable,
@@ -1626,6 +1660,7 @@ impl<T> fmt::Debug for EntityColumn<T> {
             .field("header", &self.header)
             .field("sortable", &self.sortable)
             .field("required", &self.required)
+            .field("hidden_by_default", &self.hidden_by_default)
             .field("is_action", &self.is_action)
             .field("inline_edit_host", &self.inline_edit_host)
             .field("resizable", &self.resizable)
@@ -1653,6 +1688,7 @@ impl<T: 'static> EntityColumn<T> {
             header: header.into(),
             sortable: true,
             required: false,
+            hidden_by_default: false,
             is_action: false,
             inline_edit_host: false,
             resizable: true,
@@ -1734,6 +1770,18 @@ impl<T: 'static> EntityColumn<T> {
     /// Makes this column mandatory in the visible-column set.
     pub fn required(mut self) -> Self {
         self.required = true;
+        self
+    }
+
+    /// Starts this column hidden until the user records a visibility choice.
+    ///
+    /// The column remains available in the chooser. A required column always
+    /// remains visible, even when both builders are used. If every column is
+    /// optional and marked hidden by default, the first declaration remains
+    /// visible so the table never starts with no columns.
+    #[must_use]
+    pub fn hidden_by_default(mut self) -> Self {
+        self.hidden_by_default = true;
         self
     }
 

@@ -16,7 +16,8 @@
 //! utility: see [`kpi_card_shell_class`] and `ld-card-depth` (ldui-k4fn).
 
 use crate::components::{
-    CapacityBar, CapacityBarColor, Pressable, StatDeltaTrend, Tooltip, capacity_bar_percent,
+    Badge, BadgeColor, BadgeSize, BadgeStyle, CapacityBar, CapacityBarColor, Pressable,
+    StatDeltaTrend, Tooltip, capacity_bar_percent,
 };
 use crate::merge_classes;
 use leptos::{html::Div, prelude::*};
@@ -607,6 +608,34 @@ impl KpiAction {
     }
 }
 
+/// Caller-owned, localized status text rendered on a [`KpiItem`]'s title row.
+///
+/// This is separate from [`KpiStatus`]: `KpiStatus` styles the value and accent,
+/// while a status chip names the state in words. Cards may use either, both, or
+/// neither. The chip uses the existing soft [`Badge`] treatment and its
+/// wrapping contract; see [`KpiCard`]'s `input.css` section for the required
+/// authored `.badge-wrap` rule. Its text uses `base-content` rather than the
+/// soft badge's semantic hue: the background and border still communicate the
+/// typed color, while the caller-owned status words retain AA contrast across
+/// light and dark themes.
+#[derive(Clone, Debug, PartialEq)]
+pub struct KpiStatusChip {
+    /// Visible caller-owned label; the component does not transform it.
+    pub label: String,
+    /// Semantic badge color.
+    pub color: BadgeColor,
+}
+
+impl KpiStatusChip {
+    /// Creates a status chip from caller-owned text and a semantic color.
+    pub fn new(label: impl Into<String>, color: BadgeColor) -> Self {
+        Self {
+            label: label.into(),
+            color,
+        }
+    }
+}
+
 /// One KPI's content -- `KpiStrip`'s opinionated typed item model.
 ///
 /// Plain owned data, not a `Signal`-bearing struct: the whole `items` list
@@ -657,6 +686,8 @@ pub struct KpiItem {
     /// Optional activation affordance. Renders only when the card ALSO
     /// receives an `on_activate` callback; see [`KpiAction`].
     pub action: Option<KpiAction>,
+    /// Optional title-row status chip. `None` preserves the historical markup.
+    pub status_chip: Option<KpiStatusChip>,
 }
 
 impl KpiItem {
@@ -672,6 +703,7 @@ impl KpiItem {
             help: String::new(),
             baseline: None,
             action: None,
+            status_chip: None,
         }
     }
 
@@ -716,6 +748,12 @@ impl KpiItem {
     /// Takes effect only once the card also has an `on_activate` callback.
     pub fn action(mut self, action: KpiAction) -> Self {
         self.action = Some(action);
+        self
+    }
+
+    /// Adds caller-owned status text to the title row in a soft badge.
+    pub fn with_status_chip(mut self, label: impl Into<String>, color: BadgeColor) -> Self {
+        self.status_chip = Some(KpiStatusChip::new(label, color));
         self
     }
 }
@@ -1265,6 +1303,23 @@ fn kpi_card_accessible_name(
 /// @source inline("relative h-3 w-full overflow-hidden rounded-full bg-base-200");
 /// @source inline("absolute inset-y-0 left-0 top-0 h-full rounded-full w-0.5");
 /// @source inline("bg-base-content/80 bg-neutral bg-primary");
+/// @source inline("badge badge-soft badge-sm ml-auto h-auto max-w-full shrink shrink-0 whitespace-normal py-0.5 text-right text-base-content font-semibold leading-tight badge-neutral badge-primary badge-secondary badge-accent badge-info badge-success badge-warning badge-error");
+/// ```
+///
+/// Status chips opt into [`Badge`]'s wrapping escape hatch so long localized
+/// copy stays inside a narrow card. `@source` can generate the utilities above,
+/// but it cannot author this rule; include it alongside the safelist:
+///
+/// ```css
+/// .badge-wrap {
+///   height: auto;
+///   min-height: calc(var(--size, 1.25rem));
+///   white-space: normal;
+///   line-height: 1.2;
+///   padding-top: 0.125rem;
+///   padding-bottom: 0.125rem;
+///   text-align: left;
+/// }
 /// ```
 ///
 /// The last three lines are `CapacityBar`'s own classes: a card carrying a
@@ -1337,6 +1392,7 @@ pub fn KpiCard(
         help,
         baseline,
         action,
+        status_chip,
     } = item;
 
     let available = value.is_some();
@@ -1517,6 +1573,24 @@ pub fn KpiCard(
         view! { <span id=id class="sr-only">{help}</span> }
     });
 
+    let has_status_chip = status_chip.is_some();
+    let status_chip_node = status_chip.map(|chip| {
+        let KpiStatusChip { label, color } = chip;
+        let marker = label.clone();
+        view! {
+            <Badge
+                style=BadgeStyle::Soft
+                color=color
+                size=BadgeSize::Sm
+                wrap=true
+                class="ml-auto h-auto max-w-full shrink whitespace-normal break-words py-0.5 text-right text-base-content font-semibold leading-tight"
+                attr:data-kpi-status-chip=marker
+            >
+                {label}
+            </Badge>
+        }
+    });
+
     // A LEFT edge, not a top stripe: left-edge accents are the prevailing
     // convention for stat cards, and the geometry is better behaved, because
     // a vertical edge cannot shift the body's vertical rhythm at all.
@@ -1615,9 +1689,15 @@ pub fn KpiCard(
         >
             {accent}
             <div class=move || kpi_card_body_class(compact.get())>
-                <div class="flex items-center gap-1 min-w-0">
+                <div class=if has_status_chip {
+                    "flex items-center gap-1 min-w-0 flex-wrap"
+                } else {
+                    // Preserve the historical no-chip layout byte for byte.
+                    "flex items-center gap-1 min-w-0"
+                }>
                     <span class=kpi_card_label_class()>{label}</span>
                     {help_button}
+                    {status_chip_node}
                 </div>
                 <p class=value_class data-kpi-card-value="true">{value_node}</p>
                 {comparison_node}
@@ -2758,6 +2838,34 @@ mod tests {
                 "a changed card must get a new key or it will never re-render"
             );
         }
+    }
+
+    #[test]
+    fn status_chip_is_absent_by_default_and_changes_the_reconciliation_key() {
+        let base = KpiItem::new("behind", "Weekly hires", "3");
+        assert!(base.status_chip.is_none());
+
+        let chipped = KpiItem::new("behind", "Weekly hires", "3")
+            .with_status_chip("Behind", BadgeColor::Error);
+        assert_ne!(
+            kpi_item_fingerprint(&base),
+            kpi_item_fingerprint(&chipped),
+            "adding a chip must re-render a keyed card"
+        );
+    }
+
+    #[test]
+    fn status_chip_builder_preserves_caller_owned_copy_and_semantic_color() {
+        let item = KpiItem::new("watch", "Conversions", "41%")
+            .with_status_chip("Needs review", BadgeColor::Warning);
+        let chip = item.status_chip.expect("status chip");
+
+        assert_eq!(chip.label, "Needs review");
+        assert_eq!(chip.color, BadgeColor::Warning);
+        assert_eq!(
+            chip,
+            KpiStatusChip::new("Needs review", BadgeColor::Warning)
+        );
     }
 
     /// The track's right edge is a fixed multiple of the baseline, and the

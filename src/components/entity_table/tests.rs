@@ -1,6 +1,7 @@
+use super::model::{entity_pagination_reservation, stable_entity_page_window};
 use super::*;
 use crate::components::badge::{BadgeColor, BadgeStyle};
-use crate::components::data_table::{clamp_page, page_bounds, page_count, row_range};
+use crate::components::data_table::{PageSlot, clamp_page, page_bounds, page_count, row_range};
 use leptos::prelude::{Callback, Get, IntoAny, RwSignal, Set, Signal, StoredValue, Update};
 use leptos::reactive::owner::Owner;
 use std::cell::{Cell, RefCell};
@@ -43,6 +44,188 @@ fn columns() -> Vec<EntityColumn<Row>> {
         EntityColumn::text("office", "Office", |row: &Row| row.id.to_owned()),
         EntityColumn::action("actions", "Actions", |_: &Row| "Claim".to_owned()).required(),
     ]
+}
+
+#[test]
+fn stable_entity_page_window_reserves_every_slot_while_navigating() {
+    for total in 4..=128 {
+        for current in 0..total {
+            let slots = stable_entity_page_window(current, total, 3);
+            assert_eq!(
+                slots.len(),
+                3,
+                "current={current}, total={total}: {slots:?}"
+            );
+            assert!(slots.contains(&PageSlot::Page(current)));
+            let pages = slots
+                .iter()
+                .filter_map(|slot| match slot {
+                    PageSlot::Page(page) => Some(page),
+                    PageSlot::Ellipsis => None,
+                })
+                .collect::<Vec<_>>();
+            assert!(pages.windows(2).all(|pair| pair[0] < pair[1]));
+        }
+    }
+}
+
+#[test]
+fn stable_entity_page_window_keeps_small_page_sets_complete() {
+    for total in 0..=3 {
+        let slots = stable_entity_page_window(usize::MAX, total, 3);
+        assert_eq!(slots, (0..total).map(PageSlot::Page).collect::<Vec<_>>());
+    }
+}
+
+#[test]
+fn auto_pagination_reservation_survives_filtering_to_one_row() {
+    let full = entity_pagination_reservation(27, 81, true, 3);
+    let filtered = entity_pagination_reservation(1, 81, true, 3);
+
+    assert_eq!(full, (3, 2));
+    assert_eq!(filtered, full);
+    assert_eq!(entity_pagination_reservation(1, 1, true, 3), (1, 1));
+    assert_eq!(entity_pagination_reservation(2, 81, false, 3), (2, 1));
+}
+
+#[test]
+fn row_range_reservation_covers_positive_and_custom_empty_copy() {
+    let texts = EntityTableTexts {
+        row_range: "Showing {start}-{end} of {total}".to_owned(),
+        ..EntityTableTexts::default()
+    };
+
+    assert_eq!(
+        super::component::entity_row_range_reservations(
+            &texts,
+            Some("No matching records among {total}; refine filters"),
+            81,
+        ),
+        [
+            "Showing 81-81 of 81".to_owned(),
+            "No matching records among 81; refine filters".to_owned(),
+        ]
+    );
+}
+
+#[test]
+fn row_range_reservation_uses_localized_fallback_for_empty_copy() {
+    let texts = EntityTableTexts {
+        row_range: "Mostrando {start}-{end} de {total}".to_owned(),
+        ..EntityTableTexts::default()
+    };
+
+    assert_eq!(
+        super::component::entity_row_range_reservations(&texts, None, 128),
+        [
+            "Mostrando 128-128 de 128".to_owned(),
+            "Mostrando 0-0 de 128".to_owned(),
+        ]
+    );
+}
+
+#[test]
+fn next_page_uses_the_grouped_plan_instead_of_uniform_arithmetic() {
+    let plan = EntityPagePlan::grouped(&[14, 14, 14, 14], 25);
+    assert_eq!(plan.page_count(), 4);
+    assert_eq!(
+        page_count(56, 25),
+        3,
+        "the fixture must distinguish the two clamps"
+    );
+
+    let mut page = 0;
+    page = super::component::next_entity_page(page, &plan);
+    assert_eq!(page, 1);
+    page = super::component::next_entity_page(page, &plan);
+    assert_eq!(page, 2);
+    page = super::component::next_entity_page(page, &plan);
+    assert_eq!(page, 3, "Next must reach the grouped plan's extra page");
+    assert_eq!(super::component::next_entity_page(page, &plan), 3);
+}
+
+#[test]
+fn grouped_auto_fit_budgets_the_heading_before_counting_data_rows() {
+    // Grouped-fixture geometry with enough room for two headings at an odd
+    // run boundary. Three data rows fit only when the synthetic headings are
+    // omitted from the body budget; capacity two keeps even the two-heading
+    // transition pages inside the viewport.
+    assert_eq!(
+        super::component::grouped_auto_page_size_for_height(
+            234.0, 76.555_557, 38.111_11, 36.888_89, 81, 4, false, 25, 2,
+        ),
+        2
+    );
+}
+
+#[test]
+fn grouped_auto_fit_reserves_for_filtering_one_row_from_each_source_group() {
+    // A source with three large runs normally paints one heading per page, but
+    // a local filter can leave one row in each group and pack three headings
+    // onto the same page. Capacity two is the largest filter-stable fit.
+    assert_eq!(
+        super::component::grouped_auto_page_size_for_height(
+            200.0, 0.0, 40.0, 30.0, 300, 3, false, 10, 1,
+        ),
+        2
+    );
+}
+
+#[test]
+fn grouped_auto_fit_preserves_the_minimum_rows_scroll_fallback() {
+    // The exact same geometry fits only two rows across every grouped page. A
+    // caller requiring at least three rows keeps its configured 25-row page
+    // and scrolls, matching the existing viewport-fit contract rather than
+    // mislabelling two as fitted.
+    assert_eq!(
+        super::component::grouped_auto_page_size_for_height(
+            234.0, 76.555_557, 38.111_11, 36.888_89, 81, 4, false, 25, 3,
+        ),
+        25
+    );
+}
+
+#[test]
+fn grouped_auto_fit_budgets_collapsed_headings_without_record_slots() {
+    // Any subset of the four groups may be collapsed and their headings can
+    // accumulate before a fresh group (or at the final page) without using a
+    // data-row slot. Budget all four when collapse is configured.
+    assert_eq!(
+        super::component::grouped_auto_page_size_for_height(
+            234.0, 76.555_557, 38.111_11, 36.888_89, 81, 4, true, 25, 2,
+        ),
+        25
+    );
+}
+
+#[test]
+fn grouped_auto_fit_does_not_label_a_clipped_single_row_as_fitted() {
+    assert_eq!(
+        super::component::grouped_auto_page_size_for_height(
+            80.0, 40.0, 40.0, 30.0, 10, 1, false, 10, 1,
+        ),
+        10
+    );
+}
+
+#[test]
+fn grouped_auto_fit_keeps_geometric_capacity_for_tiny_and_empty_sources() {
+    for (source_rows, source_groups) in [(1, 1), (0, 0)] {
+        assert_eq!(
+            super::component::grouped_auto_page_size_for_height(
+                436.0,
+                36.0,
+                40.0,
+                30.0,
+                source_rows,
+                source_groups,
+                false,
+                25,
+                3,
+            ),
+            10
+        );
+    }
 }
 
 #[test]
@@ -1413,6 +1596,49 @@ fn controlled_select_filter_keeps_value_identity_separate_from_reactive_labels()
         value.set(String::new());
         assert!(!filter.is_active());
     });
+}
+
+#[test]
+fn a_filter_description_is_opt_in_and_read_back_verbatim() {
+    let owner = Owner::new();
+    owner.with(|| {
+        let plain = EntityColumnFilter::text(
+            "client",
+            "client-name-filter",
+            "Client",
+            "",
+            "Filter clients",
+            Callback::new(|_next: String| {}),
+        );
+        assert_eq!(plain.description(), None);
+
+        let described = plain.with_description("Matches any part of the client name");
+        assert_eq!(
+            described.description(),
+            Some("Matches any part of the client name")
+        );
+        assert_eq!(described.control_id(), Some("client-name-filter"));
+
+        let custom = EntityColumnFilter::new("status", || "filter".into_any())
+            .with_description("Custom markup places this itself");
+        assert_eq!(
+            custom.description(),
+            Some("Custom markup places this itself")
+        );
+    });
+}
+
+#[test]
+fn every_controlled_filter_renders_its_description_as_title_and_aria_description() {
+    let source = include_str!("types.rs");
+    let renderers = source
+        .matches("let renderer = Rc::new(move |placement, description")
+        .count();
+    assert_eq!(renderers, 3, "text, select and date renderers");
+    let title = ["attr:", "title=description"].concat();
+    let aria = ["attr:", "aria-description=description"].concat();
+    assert_eq!(source.matches(&title).count(), renderers);
+    assert_eq!(source.matches(&aria).count(), renderers);
 }
 
 fn date(year: i32, month: u8, day: u8) -> EntityDate {
@@ -3538,4 +3764,129 @@ fn region_stays_out_of_the_tab_order_when_rows_are_interactive() {
 #[test]
 fn empty_interactive_table_keeps_its_scroll_region_keyboard_reachable() {
     assert_eq!(entity_region_tabindex(true, false), "0");
+}
+
+fn columns_with_a_hidden_by_default_office() -> Vec<EntityColumn<Row>> {
+    vec![
+        EntityColumn::text("client", "Client", |row: &Row| row.name.to_owned()).required(),
+        EntityColumn::new("rank", "Rank", |row: &Row| row.rank.to_string()),
+        EntityColumn::text("office", "Office", |row: &Row| row.id.to_owned()).hidden_by_default(),
+        EntityColumn::action("actions", "Actions", |_: &Row| "Claim".to_owned()).required(),
+    ]
+}
+
+#[test]
+fn hidden_by_default_seeds_only_an_untouched_preference() {
+    let columns = columns_with_a_hidden_by_default_office();
+    let pristine = EntityTablePreferences::new(1);
+    let seeded = normalize_preferences(&pristine, 1, &columns);
+
+    assert_eq!(seeded.hidden_columns, default_hidden_columns(&columns));
+    assert!(seeded.hidden_columns.contains("office"));
+    assert!(!seeded.hidden_columns.contains("rank"));
+
+    let mut explicit_all_visible = EntityTablePreferences::new(1);
+    explicit_all_visible.column_order = columns.iter().map(|column| column.id.to_owned()).collect();
+    let normalized = normalize_preferences(&explicit_all_visible, 1, &columns);
+    assert!(
+        normalized.hidden_columns.is_empty(),
+        "an explicit normalized all-visible choice must win over declaration defaults"
+    );
+}
+
+#[test]
+fn a_saved_preference_that_shows_a_hidden_by_default_column_wins() {
+    let columns = columns_with_a_hidden_by_default_office();
+    let persistence = EntityTablePreferencePersistence::LegacyLocalStorage {
+        storage_key: "stored-shows-office",
+    };
+    let mut stored = EntityTablePreferences::new(1);
+    stored.column_order = columns.iter().map(|column| column.id.to_owned()).collect();
+    let payload = encode_preferences(&stored).expect("preferences encode");
+
+    let loaded =
+        super::storage::load_preferences_with(persistence, 1, &columns, |_| Some(payload.clone()));
+    assert!(loaded.hidden_columns.is_empty());
+    assert_eq!(normalize_preferences(&loaded, 1, &columns), loaded);
+}
+
+#[test]
+fn a_user_visibility_choice_is_not_reseeded() {
+    let columns = columns_with_a_hidden_by_default_office();
+    let seeded = normalize_preferences(&EntityTablePreferences::new(1), 1, &columns);
+    let mut chosen = seeded.clone();
+
+    assert!(toggle_hidden_column(&mut chosen, &columns, "office"));
+    assert!(!chosen.hidden_columns.contains("office"));
+    let renormalized = normalize_preferences(&chosen, 1, &columns);
+    assert!(!renormalized.hidden_columns.contains("office"));
+}
+
+#[test]
+fn required_columns_are_never_hidden_by_default() {
+    let columns = vec![
+        EntityColumn::text("client", "Client", |row: &Row| row.name.to_owned())
+            .required()
+            .hidden_by_default(),
+        EntityColumn::text("office", "Office", |row: &Row| row.id.to_owned()).hidden_by_default(),
+    ];
+
+    assert_eq!(
+        default_hidden_columns(&columns)
+            .into_iter()
+            .collect::<Vec<_>>(),
+        ["office"]
+    );
+    let seeded = normalize_preferences(&EntityTablePreferences::new(1), 1, &columns);
+    assert!(!seeded.hidden_columns.contains("client"));
+    assert!(seeded.hidden_columns.contains("office"));
+}
+
+#[test]
+fn all_hidden_by_default_columns_keep_the_first_column_visible() {
+    let columns = vec![
+        EntityColumn::text("client", "Client", |row: &Row| row.name.to_owned()).hidden_by_default(),
+        EntityColumn::text("office", "Office", |row: &Row| row.id.to_owned()).hidden_by_default(),
+    ];
+
+    let defaults = default_hidden_columns(&columns);
+    let normalized = normalize_preferences(&EntityTablePreferences::new(1), 1, &columns);
+    assert_eq!(defaults, normalized.hidden_columns);
+    assert!(
+        !defaults.contains("client"),
+        "the first declaration stays visible"
+    );
+    assert!(defaults.contains("office"));
+}
+
+#[test]
+fn reset_columns_normalizes_back_to_declared_visibility_defaults() {
+    let columns = columns_with_a_hidden_by_default_office();
+    let mut customized = normalize_preferences(&EntityTablePreferences::new(1), 1, &columns);
+    assert!(toggle_hidden_column(&mut customized, &columns, "office"));
+    assert!(toggle_hidden_column(&mut customized, &columns, "rank"));
+    customized.column_widths.insert("rank".to_owned(), 200);
+
+    assert!(reset_columns(&mut customized));
+    let reset = normalize_preferences(&customized, 1, &columns);
+    assert_eq!(reset.hidden_columns, default_hidden_columns(&columns));
+    assert!(reset.column_widths.is_empty());
+    assert_eq!(
+        reset.column_order,
+        columns
+            .iter()
+            .map(|column| column.id.to_owned())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn hidden_by_default_defaults_to_false_and_survives_clone_and_debug() {
+    let hidden =
+        EntityColumn::text("office", "Office", |row: &Row| row.id.to_owned()).hidden_by_default();
+    assert!(hidden.clone().hidden_by_default);
+    assert!(format!("{hidden:?}").contains("hidden_by_default: true"));
+
+    let plain = EntityColumn::text("office", "Office", |row: &Row| row.id.to_owned());
+    assert!(!plain.hidden_by_default);
 }

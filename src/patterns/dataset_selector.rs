@@ -88,7 +88,8 @@ pub fn DatasetSelector(
     /// Current dataset key.
     #[prop(into)]
     selected: Signal<String>,
-    /// Available datasets.
+    /// Available datasets. Values must be unique, stable keys. Labels and
+    /// disabled state remain reactive when a refresh retains the same key.
     #[prop(into)]
     options: Signal<Vec<DatasetOption>>,
     /// Called when the user requests a different dataset.
@@ -146,9 +147,28 @@ pub fn DatasetSelector(
                     })
                     on_change=on_change
                 >
-                    {move || options.get().into_iter().map(|option| view! {
-                        <option value=option.value disabled=option.disabled>{option.label}</option>
-                    }).collect_view()}
+                    <For
+                        each=move || options.get()
+                        key=|option| option.value.clone()
+                        children=move |option| {
+                            let value = option.value;
+                            let key = value.clone();
+                            // Keep DOM identity by value, but derive mutable
+                            // metadata again when a same-key option changes.
+                            let current = Memo::new(move |_| options.with(|items| {
+                                items.iter().find(|item| item.value == key).cloned()
+                            }));
+                            view! {
+                                <option value=value disabled=move || current.with(|option| {
+                                    option.as_ref().is_none_or(|option| option.disabled)
+                                })>
+                                    {move || current.with(|option| {
+                                        option.as_ref().map(|option| option.label.clone()).unwrap_or_default()
+                                    })}
+                                </option>
+                            }
+                        }
+                    />
                 </Select>
                 {move || loading.get().then(|| view! {
                     <span

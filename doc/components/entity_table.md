@@ -57,7 +57,7 @@ erase the compile-time distinction the snapshot component exists to provide.
 | `draft_row: EntityDraftRow<T>` | Optional inline draft-row and per-row editing (`ldui-ff2f`). Absent, the table renders no `+`, has no edit mode, and emits no extra DOM. |
 | `compact_row: EntityCompactRow<T>` | Default, static, or reactive single-cell renderer used at compact breakpoints without duplicating rows. |
 | `column_filters: EntityColumnFilters` | Controlled one-to-one filter controls aligned beneath stable desktop columns. |
-| `source_data` | Optional authoritative source membership used only for safe post-removal focus recovery. |
+| `source_data` | Optional complete authoritative source membership used for provider-empty semantics, safe post-removal focus recovery, and stable Auto pager/footer geometry across local filtering. |
 | `focus_scope` | Optional opaque dataset/access generation; recovery never crosses a change. |
 | `preference_ownership` | Controlled or uncontrolled preference policy. |
 | `storage_key` | Legacy local-storage compatibility prop; mutually exclusive with `preference_ownership`. |
@@ -112,9 +112,22 @@ across resizes, so a resize never moves the user's selection -- while its
 *label* carries the fitted count from
 `EntityTableTexts::rows_per_page_auto` (default `"Auto ({rows})"`, so
 `Auto (5)`). Localize that key like any other; it is never hardcoded English.
-The framework-sized native select retains readable clearance before the browser
-arrow for bounded one-, two-, and three-digit fitted counts.
+The intrinsically sized native select has a 144px minimum so localized bounded
+one-, two-, and three-digit fitted counts retain readable clearance before the
+browser arrow.
 Without `viewport_fit` the option list and behavior are exactly as before.
+
+For a grouped viewport-fitted table, Auto capacity budgets both measured data
+rows and synthetic group headings. The stable upper bound comes from complete
+`source_data`: local filtering can leave one row from each source group on the
+same page, so the current expanded page shape is not a safe estimate. When
+collapse is configured, every source-group heading is budgeted because
+collapsed headings consume height without consuming record slots; if that
+leaves fewer than `viewport_fit.min_rows`, the documented configured-page
+fallback remains in force and the table region scrolls. Callers that pass an
+already-filtered `data` projection must also pass its complete `source_data` to
+receive this cross-filter stability; when omitted, `data` is necessarily the
+best available source snapshot.
 
 **Controlled state.** `EntityTablePreferences` gained
 `page_size_mode: EntityPageSizeIntent` (`Auto` | `Fixed`, `#[serde(default)]`
@@ -415,6 +428,12 @@ callback. Active metadata is derived from the accepted value and cannot drift
 from the rendered control. The header uses the supplied base ID and the
 responsive copy uses its deterministic `-responsive` suffix, avoiding duplicate
 IDs when presentation changes.
+
+Add `.with_description("...")` when a controlled filter needs a short matching
+hint. The typed text, select, and date controls apply it as both a hover title
+and an accessible description in every placement. A custom filter can read the
+same value through `.description()`, but remains responsible for placing it in
+its own markup.
 
 ### Controlled date filter (ldui-lx5t)
 
@@ -1420,6 +1439,15 @@ occurrence of each sortable known id while removing duplicates, unknown ids,
 and non-sortable columns. Required ids are removed from `hidden_columns`, and
 widths use the shared DataTable bounds.
 
+`EntityColumn::hidden_by_default()` seeds an optional column into
+`hidden_columns` only while the column preference value is untouched. Once a
+normalized saved or controlled preference records `column_order`, an empty
+hidden set is an explicit all-visible choice and is not reseeded. Reset Columns
+returns to the declared hidden-by-default set, system order, and default widths;
+required columns remain visible even if both builders are present. If every
+column is optional and hidden by default, the first declaration stays visible
+to preserve the last-visible-column invariant.
+
 ## Ordered columns and multi-column sort
 
 `EntityTablePreferences::column_order` is the complete ordered list of stable
@@ -1481,6 +1509,14 @@ maximum. Keyboard and pointer changes use the same shared bounds; in controlled
 mode each completed keyboard action emits one normalized preference
 replacement and performs no browser storage I/O. The shared `DataTable` header
 uses the same keyboard resize math and separator semantics.
+
+Focusing a separator does not change preferences or widths. Resize gestures
+start from the declared or accepted width. When every visible track has an
+explicit width, EntityTable uses their sum instead of stretching them to fill
+the viewport; resizing one track therefore preserves neighboring widths.
+An undeclared or non-resizable flexible track can still absorb spare space.
+Use `with_width` for a starting size that users may shrink; `with_min_width`
+is an enforced consumer constraint. The default resize minimum is 48px.
 
 ### Interaction and accessibility release evidence
 

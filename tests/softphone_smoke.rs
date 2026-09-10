@@ -31,7 +31,8 @@ async fn state(h: &Harness) -> Value {
             selectedValue: root.querySelector('select')?.value ?? null,
             locked: root.querySelector('select')?.disabled ?? null,
             actions: Object.fromEntries([...root.querySelectorAll('[data-softphone-action]')].map(b =>
-                [b.dataset.softphoneAction, {disabled: b.disabled, pressed: b.getAttribute('aria-pressed'), name: b.textContent.trim()}]))
+                [b.dataset.softphoneAction, {disabled: b.disabled, pressed: b.getAttribute('aria-pressed'),
+                    name: b.textContent.trim(), accessibleName: b.getAttribute('aria-label')}]))
         };
     })()"#).await
 }
@@ -445,6 +446,61 @@ async fn number_guards_keypad_and_responsive_accessible_controls() {
             .keys()
             .collect::<Vec<_>>(),
         vec!["end-call"]
+    );
+    assert_eq!(unsupported["actions"]["end-call"]["disabled"], true);
+    assert_eq!(
+        unsupported["actions"]["end-call"]["accessibleName"],
+        "End call is unavailable for this phone system"
+    );
+    click(&h, "#softphone-french").await;
+    let unsupported_french = state(&h).await;
+    assert_eq!(unsupported_french["actions"]["end-call"]["disabled"], true);
+    assert_eq!(
+        unsupported_french["actions"]["end-call"]["accessibleName"],
+        "Terminer l’appel est indisponible pour ce système téléphonique"
+    );
+    assert!(
+        unsupported_french["actions"]["end-call"]["accessibleName"]
+            .as_str()
+            .unwrap()
+            .starts_with(
+                unsupported_french["actions"]["end-call"]["name"]
+                    .as_str()
+                    .unwrap()
+            ),
+        "the unavailable explanation must include the current visible localized label: {unsupported_french}"
+    );
+    assert_eq!(unsupported_french["count"], unsupported["count"]);
+    click(&h, "#softphone-french").await;
+    let keyboard_focus = eval(
+        &h,
+        r#"(() => {
+            const notes = document.querySelector('#softphone-notes');
+            const end = document.querySelector('#softphone-demo [data-softphone-action=end-call]');
+            notes.focus();
+            end.focus();
+            return {activeId: document.activeElement?.id ?? '', endDisabled: end.disabled};
+        })()"#,
+    )
+    .await;
+    assert_eq!(keyboard_focus["endDisabled"], true, "{keyboard_focus}");
+    assert_eq!(
+        keyboard_focus["activeId"], "softphone-notes",
+        "a disabled End call must not take keyboard focus: {keyboard_focus}"
+    );
+    h.press_key_sequence(&[Key::Enter])
+        .await
+        .expect("Enter on the retained notes focus");
+    assert_eq!(
+        state(&h).await["count"],
+        unsupported["count"],
+        "keyboard interaction must not emit unsupported EndCall"
+    );
+    eval(&h, r#"(() => { const b = document.querySelector('#softphone-demo [data-softphone-action=end-call]'); b.disabled = false; b.click(); return true; })()"#).await;
+    assert_eq!(
+        state(&h).await["count"],
+        unsupported["count"],
+        "the dispatch guard must reject an unsupported synthetic EndCall"
     );
     assert_eq!(
         eval(

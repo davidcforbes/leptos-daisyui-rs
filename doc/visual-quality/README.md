@@ -57,6 +57,8 @@ Every file in this directory follows the same shape:
 
 ## Index
 
+Column resize geometry: [Resizing one column changes its neighbors](redistributed-table-resize.md).
+
 | Entry | Status | Family | What it looks like |
 |---|---|---|---|
 | [`fallback-font.md`](./fallback-font.md) | automated | typography | Text renders in the platform default font instead of the declared one — looks "slightly off", nobody files it. Both failure modes caught since 2026-08-09 — but only if the profile pins a **real family name**, never a CSS generic |
@@ -70,6 +72,8 @@ Every file in this directory follows the same shape:
 | [`table-hierarchy-drift.md`](./table-hierarchy-drift.md) | automated (browser assertion) | grid / separate geometry oracle | The dark header, light aligned filter band, and faint full-cell grid disappear or the table shell moves when rows sort |
 | [`broken-table-height-chain.md`](./broken-table-height-chain.md) | automated (native topology + browser assertions) | layout / state | A fill-parent table shrinks to its painted rows, and Auto rows-per-page can latch onto a transient filtered subset |
 | [`native-select-label-arrow-overlap.md`](./native-select-label-arrow-overlap.md) | automated (browser geometry assertion) | layout / legibility | A native select's label paints beneath its browser-owned arrow because fixed width leaves too little content space |
+| [`kpi-chip-squeezes-label.md`](./kpi-chip-squeezes-label.md) | automated (browser geometry assertion) | layout / legibility | A bounded KPI status chip stays intact by crushing its short sibling label into a clipped column |
+| [`low-contrast-kpi-status-chip.md`](./low-contrast-kpi-status-chip.md) | automated (fresh-build GREEN pending) | color / legibility | A soft semantic KPI chip keeps its tint but paints small status words at only 1.69:1 contrast |
 
 See `../ci-cd.md` for how `cargo xtask test-style` / `test-layout` / `verify`
 run these suites, and `../../audit/src/lib.rs` for the `ldui-audit` crate

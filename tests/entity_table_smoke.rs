@@ -4,8 +4,8 @@ mod common;
 
 use common::{
     assert_no_browser_errors, assert_not_truncated, begin_browser_error_capture, body_font_family,
-    click, force_desktop_hover_media, harness_at, move_pointer_to_svg_fraction, oracle,
-    shift_click, shift_enter, wait_for_selector,
+    click, drag_horizontal, force_desktop_hover_media, harness_at, move_pointer_to_svg_fraction,
+    oracle, shift_click, shift_enter, wait_for_selector,
 };
 use ldui_audit::{Ceiling, ShadowSpec, family};
 use pixelproof_web::{Key, ViewportSize};
@@ -20,6 +20,682 @@ async fn eval_json(harness: &pixelproof_web::Harness, expression: &str) -> Value
         .unwrap_or_else(|error| panic!("evaluate `{expression}`: {error}"))
         .into_value()
         .unwrap_or_else(|error| panic!("JSON value for `{expression}`: {error}"))
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
+async fn office_status_chip_and_wrapped_summary_remain_reactive() {
+    let harness = harness_at("/components/office-select-regressions").await;
+    wait_for_selector(&harness, "[data-kpi-status-chip='Behind']").await;
+    begin_browser_error_capture(&harness).await;
+    click(&harness, "[data-testid='chip-update']").await;
+    wait_for_selector(&harness, "[data-kpi-status-chip='Needs review']").await;
+    assert_eq!(
+        eval_json(
+            &harness,
+            "document.querySelectorAll('[data-kpi-status-chip]').length"
+        )
+        .await,
+        json!(1)
+    );
+    harness
+        .set_viewport(ViewportSize::new(390, 844))
+        .await
+        .unwrap();
+    let chip_bounds = eval_json(
+        &harness,
+        r#"(() => {
+        const chip = document.querySelector('[data-kpi-status-chip]');
+        const card = chip.closest('[data-kpi-card]');
+        const c = card.getBoundingClientRect(), b = chip.getBoundingClientRect();
+        return {inside: b.left >= c.left && b.right <= c.right && b.bottom <= c.bottom,
+            fits: chip.scrollWidth <= chip.clientWidth, cardWidth: c.width, chipWidth: b.width};
+    })()"#,
+    )
+    .await;
+    assert_eq!(
+        chip_bounds["inside"], true,
+        "status chip escapes a narrow card: {chip_bounds}"
+    );
+    assert_eq!(
+        chip_bounds["fits"], true,
+        "status chip text is clipped: {chip_bounds}"
+    );
+    let title_bounds = eval_json(&harness, r#"(() => {
+        const chip = document.querySelector('[data-kpi-status-chip]');
+        const title = chip.parentElement.querySelector('span');
+        return {text: title.textContent, width: title.clientWidth,
+            scrollWidth: title.scrollWidth, height: title.clientHeight, scrollHeight: title.scrollHeight};
+    })()"#).await;
+    assert_eq!(title_bounds["text"], "Weekly hires");
+    assert!(
+        title_bounds["scrollWidth"].as_f64().unwrap() <= title_bounds["width"].as_f64().unwrap()
+            && title_bounds["scrollHeight"].as_f64().unwrap()
+                <= title_bounds["height"].as_f64().unwrap(),
+        "a status chip must not squeeze a short KPI label into clipped letters: {title_bounds}"
+    );
+    let title_control = eval_json(&harness, r#"(() => {
+        const chip = document.querySelector('[data-kpi-status-chip]');
+        const row = chip.parentElement;
+        const title = row.querySelector('span');
+        const rowStyle = row.getAttribute('style');
+        const chipStyle = chip.getAttribute('style');
+        const clipped = () => title.scrollWidth > title.clientWidth || title.scrollHeight > title.clientHeight;
+        row.style.flexWrap = 'nowrap';
+        chip.style.flexShrink = '0';
+        const caught = clipped();
+        if (rowStyle === null) row.removeAttribute('style'); else row.setAttribute('style', rowStyle);
+        if (chipStyle === null) chip.removeAttribute('style'); else chip.setAttribute('style', chipStyle);
+        return {caught, restored: !clipped()};
+    })()"#).await;
+    assert_eq!(
+        title_control["caught"], true,
+        "title-squeeze negative control was not detected: {title_control}"
+    );
+    assert_eq!(
+        title_control["restored"], true,
+        "title-squeeze negative control did not restore cleanly: {title_control}"
+    );
+    let chip_contrast = eval_json(&harness, r#"(async () => {
+        const chip = document.querySelector('[data-kpi-status-chip]');
+        const root = document.documentElement;
+        const originalTheme = root.getAttribute('data-theme');
+        const originalStyle = chip.getAttribute('style');
+        const canvas = document.createElement('canvas');
+        canvas.width = 1;
+        canvas.height = 1;
+        const context = canvas.getContext('2d', { willReadFrequently: true });
+        const parseColor = value => {
+            context.clearRect(0, 0, 1, 1);
+            context.fillStyle = value;
+            context.fillRect(0, 0, 1, 1);
+            const [r, g, b, alpha] = context.getImageData(0, 0, 1, 1).data;
+            return { r, g, b, a: alpha / 255 };
+        };
+        const over = (foreground, background) => {
+            const alpha = foreground.a + background.a * (1 - foreground.a);
+            if (alpha === 0) return { r: 0, g: 0, b: 0, a: 0 };
+            return {
+                r: (foreground.r * foreground.a + background.r * background.a * (1 - foreground.a)) / alpha,
+                g: (foreground.g * foreground.a + background.g * background.a * (1 - foreground.a)) / alpha,
+                b: (foreground.b * foreground.a + background.b * background.a * (1 - foreground.a)) / alpha,
+                a: alpha,
+            };
+        };
+        const effectiveBackground = element => {
+            let background = { r: 0, g: 0, b: 0, a: 0 };
+            for (let node = element; node; node = node.parentElement) {
+                background = over(background, parseColor(getComputedStyle(node).backgroundColor));
+                if (background.a >= 0.999) return background;
+            }
+            return over(background, { r: 255, g: 255, b: 255, a: 1 });
+        };
+        const luminance = color => {
+            const channel = value => {
+                const normalized = value / 255;
+                return normalized <= 0.04045
+                    ? normalized / 12.92
+                    : Math.pow((normalized + 0.055) / 1.055, 2.4);
+            };
+            return 0.2126 * channel(color.r) + 0.7152 * channel(color.g) + 0.0722 * channel(color.b);
+        };
+        const measure = () => {
+            const style = getComputedStyle(chip);
+            const background = effectiveBackground(chip);
+            const foreground = over(parseColor(style.color), background);
+            const foregroundLuminance = luminance(foreground);
+            const backgroundLuminance = luminance(background);
+            return {
+                foreground: style.color,
+                background: `rgb(${Math.round(background.r)}, ${Math.round(background.g)}, ${Math.round(background.b)})`,
+                ratio: (Math.max(foregroundLuminance, backgroundLuminance) + 0.05)
+                    / (Math.min(foregroundLuminance, backgroundLuminance) + 0.05),
+                fontSize: style.fontSize,
+                fontWeight: style.fontWeight,
+            };
+        };
+        const settle = () => new Promise(resolve =>
+            requestAnimationFrame(() => requestAnimationFrame(resolve))
+        );
+        const results = [];
+        for (const theme of ['light', 'dark']) {
+            root.setAttribute('data-theme', theme);
+            await settle();
+            const baseline = measure();
+            chip.style.setProperty('color', baseline.background, 'important');
+            await settle();
+            const injected = measure();
+            if (originalStyle === null) chip.removeAttribute('style');
+            else chip.setAttribute('style', originalStyle);
+            await settle();
+            const restored = measure();
+            results.push({ theme, ...baseline, injectedRatio: injected.ratio,
+                restoredRatio: restored.ratio });
+        }
+        if (originalTheme === null) root.removeAttribute('data-theme');
+        else root.setAttribute('data-theme', originalTheme);
+        await settle();
+        return results;
+    })()"#).await;
+    let chip_contrast = chip_contrast
+        .as_array()
+        .expect("light/dark KPI status-chip contrast results");
+    assert_eq!(chip_contrast.len(), 2, "{chip_contrast:?}");
+    for state in chip_contrast {
+        let ratio = state["ratio"].as_f64().expect("computed contrast ratio");
+        let injected = state["injectedRatio"]
+            .as_f64()
+            .expect("injected contrast ratio");
+        let restored = state["restoredRatio"]
+            .as_f64()
+            .expect("restored contrast ratio");
+        assert!(
+            injected < 4.5,
+            "the contrast negative control was not detected: {state}"
+        );
+        assert!(
+            (restored - ratio).abs() <= 0.01,
+            "the contrast negative control did not restore cleanly: {state}"
+        );
+        assert!(
+            ratio >= 4.5,
+            "KPI status-chip text must clear WCAG AA in both themes: {state}"
+        );
+    }
+    harness
+        .set_viewport(ViewportSize::new(1280, 800))
+        .await
+        .unwrap();
+    let label_selector = "[data-selectable-summary-card='review'] [title]";
+    let before = eval_json(&harness, &format!(r#"(() => {{
+        const label = document.querySelector({label_selector:?});
+        return {{clamp: getComputedStyle(label).webkitLineClamp, height: label.clientHeight, title: label.title, text: label.textContent}};
+    }})()"#)).await;
+    assert_eq!(before["clamp"], json!("2"));
+    assert_eq!(before["title"], before["text"]);
+    click(&harness, "[data-testid='summary-wrap']").await;
+    let after = eval_json(&harness, &format!(r#"(() => {{
+        const label = document.querySelector({label_selector:?});
+        return {{clamp: getComputedStyle(label).webkitLineClamp, height: label.clientHeight, scrollHeight: label.scrollHeight}};
+    }})()"#)).await;
+    assert_eq!(after["clamp"], json!("none"));
+    assert!(
+        after["height"].as_u64().unwrap() > before["height"].as_u64().unwrap(),
+        "unclamped label did not grow: {before} -> {after}"
+    );
+    assert_eq!(
+        after["height"], after["scrollHeight"],
+        "wrapped label remains clipped"
+    );
+    eval_json(&harness, "(() => { const card = document.querySelector('[data-selectable-summary-card=review]'); card.scrollIntoView({block:'center'}); card.focus(); return true; })()").await;
+    harness.press_key_sequence(&[Key::Space]).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    assert_eq!(eval_json(&harness, "document.querySelector('[data-selectable-summary-card=review]').getAttribute('aria-checked')").await, json!("true"));
+    click(&harness, "[data-testid='chip-remove']").await;
+    assert_eq!(
+        eval_json(
+            &harness,
+            "document.querySelectorAll('[data-kpi-status-chip]').length"
+        )
+        .await,
+        json!(0)
+    );
+    assert_no_browser_errors(&harness, "Office status chip and wrapped summary").await;
+}
+
+/// A revision can precede nested option mounting. Reconciliation must follow
+/// the DOM mutation without manufacturing a user change, and stop on unmount.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
+async fn delayed_select_options_reconcile_after_revision_and_dispose_cleanly() {
+    let harness = harness_at("/components/office-select-regressions").await;
+    wait_for_selector(&harness, "#office-select-fixture").await;
+    begin_browser_error_capture(&harness).await;
+    eval_json(
+        &harness,
+        r#"(() => {
+        const active = new Set();
+        const prototype = MutationObserver.prototype;
+        const observe = prototype.observe;
+        const disconnect = prototype.disconnect;
+        prototype.observe = function(target, options) {
+            const result = observe.call(this, target, options);
+            if (target.id === 'delayed-office-select') active.add(this);
+            return result;
+        };
+        prototype.disconnect = function() {
+            active.delete(this);
+            return disconnect.call(this);
+        };
+        window.__selectObservers = { active, restore() {
+            prototype.observe = observe;
+            prototype.disconnect = disconnect;
+        }};
+        return true;
+    })()"#,
+    )
+    .await;
+    click(&harness, "[data-testid='select-mount']").await;
+    click(&harness, "[data-testid='select-revision']").await;
+    assert_eq!(
+        eval_json(
+            &harness,
+            "document.getElementById('delayed-office-select').options.length"
+        )
+        .await,
+        json!(0)
+    );
+    click(&harness, "[data-testid='select-options']").await;
+    wait_for_selector(&harness, "#delayed-office-select option[value='virtual']").await;
+    let accepted = eval_json(
+        &harness,
+        r#"(() => ({
+        value: document.getElementById('delayed-office-select').value,
+        model: document.querySelector('[data-testid="select-accepted"]').textContent,
+        changes: document.querySelector('[data-testid="select-changes"]').textContent,
+        observers: window.__selectObservers.active.size,
+    }))()"#,
+    )
+    .await;
+    assert_eq!(
+        accepted["value"],
+        json!("virtual"),
+        "late options replaced accepted selection: {accepted}"
+    );
+    assert_eq!(accepted["model"], json!("virtual"));
+    assert_eq!(
+        accepted["changes"],
+        json!("0"),
+        "DOM reconciliation is not a user change"
+    );
+    assert_eq!(accepted["observers"], json!(1));
+
+    for _ in 0..3 {
+        eval_json(
+            &harness,
+            r#"(() => {
+            const select = document.getElementById('delayed-office-select');
+            select.querySelector('optgroup').append(new Option('Late', 'late'));
+            document.querySelector('[data-testid="select-unmount"]').click();
+            return true;
+        })()"#,
+        )
+        .await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(
+            eval_json(&harness, "window.__selectObservers.active.size").await,
+            json!(0),
+            "unmounted select retained a DOM observer"
+        );
+        click(&harness, "[data-testid='select-mount']").await;
+        assert_eq!(
+            eval_json(&harness, "window.__selectObservers.active.size").await,
+            json!(1),
+            "remount must own exactly one observer"
+        );
+        assert_eq!(
+            eval_json(
+                &harness,
+                "document.getElementById('delayed-office-select').value"
+            )
+            .await,
+            json!("virtual")
+        );
+    }
+    click(&harness, "[data-testid='select-unmount']").await;
+    assert_eq!(
+        eval_json(&harness, "window.__selectObservers.active.size").await,
+        json!(0)
+    );
+    eval_json(&harness, "(() => { window.__selectObservers.restore(); delete window.__selectObservers; return true; })()").await;
+    assert_no_browser_errors(&harness, "Select delayed options and observer cleanup").await;
+}
+
+/// Stable keys retain option nodes while labels/eligibility remain reactive;
+/// a controlled refresh must not emit a user change or display another dataset.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
+async fn dataset_refresh_preserves_nodes_and_updates_same_key_metadata() {
+    let harness = harness_at("/components/office-select-regressions").await;
+    wait_for_selector(&harness, "#stable-office-select option[value='virtual']").await;
+    begin_browser_error_capture(&harness).await;
+    eval_json(&harness, r#"(() => {
+        window.__datasetVirtualOption = document.querySelector('#stable-office-select option[value="virtual"]');
+        window.__datasetRealOption = document.querySelector('#stable-office-select option[value="real"]');
+        return true;
+    })()"#).await;
+    click(&harness, "[data-testid='dataset-refresh']").await;
+    let refreshed_identity = eval_json(
+        &harness,
+        r#"(() => ({
+            virtualSame: window.__datasetVirtualOption === document.querySelector('#stable-office-select option[value="virtual"]'),
+            realSame: window.__datasetRealOption === document.querySelector('#stable-office-select option[value="real"]'),
+        }))()"#,
+    )
+    .await;
+    assert_eq!(
+        refreshed_identity["virtualSame"],
+        json!(true),
+        "identical dataset refresh replaced the virtual option"
+    );
+    assert_eq!(
+        refreshed_identity["realSame"],
+        json!(true),
+        "identical dataset refresh replaced the real option"
+    );
+    click(&harness, "[data-testid='dataset-relabel']").await;
+    click(&harness, "[data-testid='dataset-reorder']").await;
+    let state = eval_json(
+        &harness,
+        r#"(() => {
+        const select = document.getElementById('stable-office-select');
+        const option = select.querySelector('option[value="virtual"]');
+        return {
+            virtualSame: window.__datasetVirtualOption === option,
+            realSame: window.__datasetRealOption === select.querySelector('option[value="real"]'),
+            label: option.textContent,
+            disabled: option.disabled,
+            value: select.value,
+            model: document.querySelector('[data-testid="select-accepted"]').textContent,
+            changes: document.querySelector('[data-testid="select-changes"]').textContent,
+            status: document.querySelector('[data-dataset-selector-status]').textContent,
+        };
+    })()"#,
+    )
+    .await;
+    assert_eq!(state["virtualSame"], json!(true));
+    assert_eq!(state["realSame"], json!(true));
+    assert_eq!(state["label"], json!("Oficina virtual actualizada"));
+    assert_eq!(state["disabled"], json!(true));
+    assert_eq!(state["value"], json!("virtual"));
+    assert_eq!(state["model"], json!("virtual"));
+    assert_eq!(state["changes"], json!("0"));
+    assert!(
+        state["status"]
+            .as_str()
+            .unwrap()
+            .contains("Oficina virtual actualizada")
+    );
+    // Negative control: replacing a same-key node must trip the identity
+    // oracle even when every visible attribute and the value are identical.
+    let identity_control = eval_json(&harness, r#"(() => {
+        const original = window.__datasetVirtualOption;
+        const replacement = original.cloneNode(true);
+        original.replaceWith(replacement);
+        const caught = window.__datasetVirtualOption !== document.querySelector('#stable-office-select option[value="virtual"]');
+        replacement.replaceWith(original);
+        return {caught, restored: window.__datasetVirtualOption === document.querySelector('#stable-office-select option[value="virtual"]')};
+    })()"#).await;
+    assert_eq!(identity_control, json!({"caught": true, "restored": true}));
+
+    // Reordered options are disabled Virtual, Other, Real. Home skips the
+    // disabled Virtual option to Other; ArrowDown reaches Real, and only the
+    // confirmed keyboard gesture may commit.
+    eval_json(&harness, "(() => { const select = document.getElementById('stable-office-select'); select.scrollIntoView({block:'center'}); select.focus(); return true; })()").await;
+    harness.press_key_sequence(&[Key::Space]).await.unwrap();
+    harness
+        .press_key_sequence(&[Key::Home, Key::ArrowDown, Key::Enter])
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    assert_eq!(
+        eval_json(
+            &harness,
+            "document.getElementById('stable-office-select').value"
+        )
+        .await,
+        json!("real")
+    );
+    assert_eq!(
+        eval_json(
+            &harness,
+            "document.querySelector('[data-testid=select-accepted]').textContent"
+        )
+        .await,
+        json!("real")
+    );
+    assert_eq!(
+        eval_json(
+            &harness,
+            "document.querySelector('[data-testid=select-changes]').textContent"
+        )
+        .await,
+        json!("1")
+    );
+    eval_json(
+        &harness,
+        "(() => { delete window.__datasetVirtualOption; delete window.__datasetRealOption; return true; })()",
+    )
+    .await;
+    assert_no_browser_errors(&harness, "DatasetSelector option identity and metadata").await;
+}
+
+/// Attributes spread onto `Tooltip` belong to its one semantic root, and a
+/// bubbled child activation must reach the spread handler exactly once.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
+async fn tooltip_spread_attributes_and_click_share_one_root() {
+    let harness = harness_at("/components/office-select-regressions").await;
+    wait_for_selector(&harness, "[data-testid='tooltip-spread-trigger']").await;
+    begin_browser_error_capture(&harness).await;
+
+    let state = eval_json(
+        &harness,
+        r#"(() => {
+            const trigger = document.querySelector('[data-testid="tooltip-spread-trigger"]');
+            const root = trigger.closest('.tooltip');
+            return {
+                tooltipRoots: document.querySelectorAll('.tooltip[data-tooltip-probe="landed"]').length,
+                sameRoot: root === document.querySelector('.tooltip[data-tooltip-probe="landed"]'),
+                probe: root?.getAttribute('data-tooltip-probe'),
+                classLanded: root?.classList.contains('office-tooltip-spread'),
+                styleLanded: root?.style.getPropertyValue('--office-tooltip-spread').trim(),
+                tip: root?.getAttribute('data-tip'),
+                clicks: document.querySelector('[data-testid="tooltip-spread-clicks"]').textContent,
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(state["tooltipRoots"], json!(1), "{state}");
+    assert_eq!(state["sameRoot"], json!(true), "{state}");
+    assert_eq!(state["probe"], json!("landed"), "{state}");
+    assert_eq!(state["classLanded"], json!(true), "{state}");
+    assert_eq!(state["styleLanded"], json!("1"), "{state}");
+    assert_eq!(state["tip"], json!("hint"), "{state}");
+    assert_eq!(state["clicks"], json!("0"), "{state}");
+
+    click(&harness, "[data-testid='tooltip-spread-trigger']").await;
+    assert_eq!(
+        eval_json(
+            &harness,
+            "document.querySelector('[data-testid=tooltip-spread-clicks]').textContent",
+        )
+        .await,
+        json!("1"),
+        "one child activation must produce exactly one spread click receipt"
+    );
+    assert_no_browser_errors(&harness, "Tooltip spread attributes and click").await;
+}
+
+/// Declaration defaults seed only an untouched preference model. A controlled
+/// consumer can accept later keyboard changes, Reset restores the declaration,
+/// and an explicit all-visible model remains authoritative.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
+async fn hidden_by_default_columns_seed_controlled_ui_and_reset_to_declarations() {
+    let harness = harness_at("/components/office-entity-defaults").await;
+    wait_for_selector(
+        &harness,
+        "[data-testid='seeded-defaults-table'] tbody tr[data-entity-row-key]",
+    )
+    .await;
+    begin_browser_error_capture(&harness).await;
+
+    let inspect = || {
+        let harness = &harness;
+        async move {
+            eval_json(
+                harness,
+                r#"(() => {
+                    const seeded = document.querySelector('[data-testid="seeded-defaults-table"]');
+                    const explicit = document.querySelector('[data-testid="explicit-visible-table"]');
+                    const headers = root => Array.from(
+                        root.querySelectorAll('thead tr:first-child th[data-entity-column]')
+                    ).map(cell => cell.dataset.entityColumn);
+                    const filterControls = Array.from(
+                        seeded.querySelectorAll('[data-entity-filter-control="rank"]')
+                    );
+                    return {
+                        seededHeaders: headers(seeded),
+                        seededOfficeCells: seeded.querySelectorAll('tbody td[data-entity-column="office"]').length,
+                        seededResetDisabled: seeded.querySelector('[data-entity-reset-columns]').disabled,
+                        seededPreferences: JSON.parse(
+                            document.querySelector('[data-testid="seeded-defaults-preferences"]').textContent
+                        ),
+                        seededChanges: document.querySelector('[data-testid="seeded-defaults-change-count"]').textContent,
+                        explicitHeaders: headers(explicit),
+                        explicitOfficeCells: explicit.querySelectorAll('tbody td[data-entity-column="office"]').length,
+                        explicitPreferences: JSON.parse(
+                            document.querySelector('[data-testid="explicit-visible-preferences"]').textContent
+                        ),
+                        filterControls: filterControls.length,
+                        filterDescriptions: filterControls.map(control => ({
+                            title: control.getAttribute('title'),
+                            aria: control.getAttribute('aria-description'),
+                        })),
+                    };
+                })()"#,
+            )
+            .await
+        }
+    };
+
+    let initial = inspect().await;
+    assert_eq!(initial["seededHeaders"], json!(["client", "rank"]));
+    assert_eq!(initial["seededOfficeCells"], json!(0));
+    assert_eq!(initial["seededResetDisabled"], json!(true));
+    assert_eq!(initial["seededChanges"], json!("0"));
+    assert_eq!(
+        initial["explicitHeaders"],
+        json!(["client", "office", "rank"])
+    );
+    assert_eq!(initial["explicitOfficeCells"], json!(2));
+    assert_eq!(initial["explicitPreferences"]["hidden_columns"], json!([]));
+    assert!(
+        initial["filterControls"].as_u64().unwrap_or(0) >= 1,
+        "typed rank filter did not render: {initial}"
+    );
+    assert!(
+        initial["filterDescriptions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|description| description
+                == &json!({
+                    "title": "Matches any part of the rank label",
+                    "aria": "Matches any part of the rank label",
+                })),
+        "typed filter description must reach every rendered placement: {initial}"
+    );
+
+    harness
+        .page()
+        .find_element("[data-testid='seeded-defaults-table'] [data-entity-column-chooser]")
+        .await
+        .expect("find seeded column chooser")
+        .focus()
+        .await
+        .expect("focus seeded column chooser");
+    harness
+        .press_key_sequence(&[Key::Enter])
+        .await
+        .expect("open seeded column chooser with Enter");
+    // Move into the menu with the real Tab journey. A direct CDP
+    // `Element.focus()` does not reliably populate `focusout.relatedTarget`,
+    // which correctly makes the dropdown treat that synthetic jump as focus
+    // leaving the widget and close itself.
+    harness
+        .press_key_sequence(&[Key::Tab, Key::Home])
+        .await
+        .expect("move into the seeded chooser and highlight its first item");
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => {
+                const root = document.querySelector('[data-testid="seeded-defaults-table"]');
+                const menu = root.querySelector('[role="menu"]');
+                const active = document.getElementById(menu.getAttribute('aria-activedescendant'));
+                return {
+                    focused: document.activeElement === menu,
+                    expanded: root.querySelector('[data-entity-column-chooser]').getAttribute('aria-expanded'),
+                    activeColumn: active?.closest('[data-entity-column]')?.dataset.entityColumn ?? null,
+                };
+            })()"#,
+        )
+        .await,
+        json!({ "focused": true, "expanded": "true", "activeColumn": "office" }),
+        "the real keyboard journey must remain inside the open Office chooser"
+    );
+    harness
+        .press_key_sequence(&[Key::Space])
+        .await
+        .expect("show the hidden-by-default Office column with Space");
+    tokio::time::sleep(Duration::from_millis(150)).await;
+
+    let shown = inspect().await;
+    assert_eq!(shown["seededHeaders"], json!(["client", "office", "rank"]));
+    assert_eq!(shown["seededOfficeCells"], json!(2));
+    assert_eq!(shown["seededResetDisabled"], json!(false));
+    assert_eq!(shown["seededPreferences"]["hidden_columns"], json!([]));
+    assert_eq!(
+        shown["seededPreferences"]["column_order"],
+        json!(["client", "office", "rank"])
+    );
+    assert_eq!(shown["seededChanges"], json!("1"));
+
+    harness
+        .press_key_sequence(&[Key::Escape])
+        .await
+        .expect("close seeded column chooser");
+    harness
+        .page()
+        .find_element("[data-testid='seeded-defaults-table'] [data-entity-reset-columns]")
+        .await
+        .expect("find seeded Reset columns button")
+        .focus()
+        .await
+        .expect("focus seeded Reset columns button");
+    harness
+        .press_key_sequence(&[Key::Space])
+        .await
+        .expect("reset seeded columns with Space");
+    tokio::time::sleep(Duration::from_millis(150)).await;
+
+    let reset = inspect().await;
+    assert_eq!(reset["seededHeaders"], json!(["client", "rank"]));
+    assert_eq!(reset["seededOfficeCells"], json!(0));
+    assert_eq!(reset["seededResetDisabled"], json!(true));
+    assert_eq!(
+        reset["seededPreferences"]["hidden_columns"],
+        json!(["office"])
+    );
+    assert_eq!(
+        reset["seededPreferences"]["column_order"],
+        json!(["client", "office", "rank"])
+    );
+    assert_eq!(reset["seededChanges"], json!("2"));
+    assert_eq!(
+        reset["explicitHeaders"],
+        json!(["client", "office", "rank"])
+    );
+    assert_eq!(reset["explicitOfficeCells"], json!(2));
+    assert_eq!(reset["explicitPreferences"]["hidden_columns"], json!([]));
+
+    assert_no_browser_errors(
+        &harness,
+        "EntityTable declaration defaults and explicit all-visible intent",
+    )
+    .await;
 }
 
 async fn assert_entity_projection_matches_wide_dom(
@@ -320,8 +996,13 @@ fn assert_one_page_size_everywhere(snapshot: &Value, context: &str) {
     );
     assert_eq!(
         snapshot["lastAdvertisedPage"].as_u64(),
-        Some(total.div_ceil(effective)),
-        "{context}: the pager advertises a page count from a different size: {snapshot}"
+        Some(total.div_ceil(effective).min(3)),
+        "{context}: the first-page window must contain up to three valid page numbers: {snapshot}"
+    );
+    assert_eq!(
+        snapshot["nextDisabled"],
+        json!(total <= effective),
+        "{context}: {snapshot}"
     );
     // The control names the MODE, and its label carries the resolved count --
     // it can never read a number the body is not rendering.
@@ -468,11 +1149,39 @@ async fn auto_page_size_labels_leave_native_arrow_clearance() {
         );
     }
 
+    click(&harness, "[data-testid='viewport-fit-three-digits']").await;
+    click(&harness, "[data-testid='viewport-fit-locale']").await;
+    let localized = page_size_agreement_snapshot(&harness).await;
+    assert!(
+        localized["effective"].as_u64().unwrap() >= 100,
+        "fixture must exercise an actual three-digit Auto capacity: {localized}"
+    );
+    let label = localized["controlLabel"]
+        .as_str()
+        .expect("localized selected label")
+        .trim();
+    assert!(
+        label.starts_with("Automático ("),
+        "actual selected option must use localized copy: {localized}"
+    );
+    let localized_clearance = page_size_label_clearance(&harness, &[label]).await;
+    assert!(
+        localized_clearance["labels"][0]["clearance"]
+            .as_f64()
+            .is_some_and(|gap| gap >= 4.0),
+        "localized three-digit label clips beneath native arrow: {localized_clearance}"
+    );
+    click(&harness, "[data-testid='viewport-fit-locale']").await;
+
     let negative_control = eval_json(
         &harness,
         r#"(() => {
             const select = document.querySelector('#viewport-fit-page-size');
             const original = select.style.width;
+            const originalMinWidth = select.style.minWidth;
+            // The new minimum is itself a guard. Remove it for this deliberate
+            // regression so the injected 80px width actually reaches the DOM.
+            select.style.minWidth = '0px';
             select.style.width = '80px';
             const style = getComputedStyle(select);
             const canvas = document.createElement('canvas');
@@ -483,6 +1192,7 @@ async fn auto_page_size_labels_leave_native_arrow_clearance() {
                 - Number.parseFloat(style.paddingInlineEnd);
             const caught = available - context.measureText('Auto (100)').width < 4;
             select.style.width = original;
+            select.style.minWidth = originalMinWidth;
             return caught;
         })()"#,
     )
@@ -694,7 +1404,26 @@ async fn viewport_fit_paging_remeasures_without_persisting_or_nesting_scroll() {
     );
     assert_eq!(hidden_column["clippedLastRow"], json!(false));
 
-    click(&harness, "[data-entity-page='1']").await;
+    for _ in 0..100 {
+        if eval_json(
+            &harness,
+            "document.querySelector('[data-entity-page=\"previous\"]').disabled",
+        )
+        .await
+            == json!(true)
+        {
+            break;
+        }
+        click(&harness, "[data-entity-page='previous']").await;
+    }
+    assert_eq!(
+        eval_json(
+            &harness,
+            "document.querySelector('[data-entity-page=\"previous\"]').disabled"
+        )
+        .await,
+        json!(true)
+    );
     click(&harness, "[data-testid='viewport-fit-short']").await;
     tokio::time::sleep(Duration::from_millis(300)).await;
     let short = viewport_fit_snapshot(&harness).await;
@@ -4161,8 +4890,8 @@ async fn rows_per_page_renders_in_footer_before_row_range_and_never_in_toolbar()
             const group = footer.firstElementChild;
             const groupChildren = Array.from(group.children);
             const label = groupChildren[0];
-            const rowRangeSpan = groupChildren[1];
-            const pagination = footer.lastElementChild;
+            const rowRangeSpan = footer.querySelector('[data-entity-row-range]');
+            const pagination = footer.querySelector('[data-entity-table-pagination]');
             const select = label.querySelector('select');
             return {
                 toolbarHasSelect: toolbar.querySelector('select') !== null,
@@ -4172,8 +4901,9 @@ async fn rows_per_page_renders_in_footer_before_row_range_and_never_in_toolbar()
                 rowRangeTag: rowRangeSpan.tagName.toLowerCase(),
                 labelWrapsSelect: select !== null && label.contains(select),
                 rowRangeText: rowRangeSpan.textContent.trim(),
-                paginationHasJoinClass: pagination.classList.contains('join'),
-                paginationIsAfterGroup: footer.children[1] === pagination,
+                paginationHasJoinClass: pagination.querySelector('.join') !== null,
+                paginationIsAfterGroup: group.children[1] === pagination,
+                sameRow: Math.abs(label.getBoundingClientRect().top - pagination.getBoundingClientRect().top) <= 0.5,
             };
         })()"#,
     )
@@ -4192,7 +4922,7 @@ async fn rows_per_page_renders_in_footer_before_row_range_and_never_in_toolbar()
     assert_eq!(
         layout["groupChildCount"],
         json!(2),
-        "the footer's leading group must contain exactly the rows-per-page label and the row-range text: {layout}"
+        "the footer's leading group must contain the rows-per-page label and pagination: {layout}"
     );
     assert_eq!(
         layout["labelTag"],
@@ -4202,7 +4932,7 @@ async fn rows_per_page_renders_in_footer_before_row_range_and_never_in_toolbar()
     assert_eq!(
         layout["rowRangeTag"],
         json!("span"),
-        "the second footer-group child must be the row-range text: {layout}"
+        "the footer must retain its semantic row-range span: {layout}"
     );
     assert_eq!(
         layout["labelWrapsSelect"],
@@ -4218,13 +4948,14 @@ async fn rows_per_page_renders_in_footer_before_row_range_and_never_in_toolbar()
     assert_eq!(
         layout["paginationHasJoinClass"],
         json!(true),
-        "the footer's second top-level child must be the Pagination join: {layout}"
+        "the pagination wrapper must contain the Pagination join: {layout}"
     );
     assert_eq!(
         layout["paginationIsAfterGroup"],
         json!(true),
-        "pagination must follow the rows-per-page/row-range group in the footer: {layout}"
+        "pagination must follow rows-per-page within the same control row: {layout}"
     );
+    assert_eq!(layout["sameRow"], json!(true), "{layout}");
 
     assert_no_browser_errors(&harness, "EntityTable footer rows-per-page placement").await;
 }
@@ -5157,33 +5888,55 @@ async fn entity_table_date_filter_is_controlled_localized_and_never_silently_emp
 // ── ldui-5in5 / ldui-g4nw / ldui-izkq ──
 
 async fn choose_group_paging_page_size(harness: &pixelproof_web::Harness, value: &str) {
-    let expression = format!(
-        r#"(() => {{
-            const select = document.querySelector('#group-paging-table-page-size');
-            select.value = {value:?};
-            select.dispatchEvent(new Event('change', {{ bubbles: true }}));
-            return select.value;
-        }})()"#
-    );
-    assert_eq!(
-        eval_json(harness, &expression).await,
-        json!(value),
-        "the rows-per-page control did not accept `{value}`"
-    );
-    tokio::time::sleep(Duration::from_millis(250)).await;
+    choose_group_native_option(harness, "#group-paging-table-page-size", value).await;
 }
 
 async fn choose_group_paging_status(harness: &pixelproof_web::Harness, value: &str) {
+    choose_group_native_option(harness, "#entity-group-paging-status-filter", value).await;
+}
+
+async fn choose_group_native_option(
+    harness: &pixelproof_web::Harness,
+    selector: &str,
+    value: &str,
+) {
     let expression = format!(
         r#"(() => {{
-            const select = document.querySelector('#entity-group-paging-status-filter');
-            select.value = {value:?};
-            select.dispatchEvent(new Event('change', {{ bubbles: true }}));
-            return select.value;
+            const select = document.querySelector({selector:?});
+            select.scrollIntoView({{block:'center', inline:'nearest'}});
+            select.focus();
+            return {{focused: document.activeElement === select,
+                index: [...select.options].findIndex(option => option.value === {value:?})}};
         }})()"#
     );
-    assert_eq!(eval_json(harness, &expression).await, json!(value));
+    let option = eval_json(harness, &expression).await;
+    assert_eq!(
+        option["focused"], true,
+        "native group select did not receive focus: {option}"
+    );
+    let index = option["index"].as_i64().expect("native option index");
+    assert!(index >= 0, "missing {value:?} in {selector}");
+    harness
+        .press_key_sequence(&[Key::Space])
+        .await
+        .expect("open native group select");
+    let mut keys = vec![Key::Home];
+    keys.extend((0..index).map(|_| Key::ArrowDown));
+    keys.push(Key::Enter);
+    harness
+        .press_key_sequence(&keys)
+        .await
+        .expect("commit native group selection");
     tokio::time::sleep(Duration::from_millis(250)).await;
+    assert_eq!(
+        eval_json(
+            harness,
+            &format!("document.querySelector({selector:?}).value")
+        )
+        .await,
+        json!(value),
+        "native selection was not adopted for {selector}"
+    );
 }
 
 /// Everything one page of the grouped table currently shows.
@@ -5196,6 +5949,10 @@ async fn group_paging_page_state(harness: &pixelproof_web::Harness) -> Value {
         r#"(() => {
             const root = document.querySelector('#entity-group-paging-table');
             const table = root.querySelector('[data-entity-table-grid]');
+            const region = root.querySelector('[data-entity-focus-region]');
+            const dataRows = Array.from(
+                table.querySelectorAll('tbody tr[data-entity-row-key]')
+            );
             const sections = Array.from(table.querySelectorAll('tbody[data-entity-group]'));
             const meta = section => {
                 const cell = section.querySelector('[data-entity-group-meta]');
@@ -5203,7 +5960,11 @@ async fn group_paging_page_state(harness: &pixelproof_web::Harness) -> Value {
                 return match ? Number(match[0]) : null;
             };
             return {
-                rows: table.querySelectorAll('tbody tr[data-entity-row-key]').length,
+                rows: dataRows.length,
+                region_bottom: region.getBoundingClientRect().bottom,
+                max_row_bottom: dataRows.length
+                    ? Math.max(...dataRows.map(row => row.getBoundingClientRect().bottom))
+                    : null,
                 groups: sections.map(section => section.dataset.entityGroup),
                 continued: sections.map(section =>
                     section
@@ -5221,12 +5982,20 @@ async fn group_paging_page_state(harness: &pixelproof_web::Harness) -> Value {
 }
 
 async fn go_to_group_paging_page(harness: &pixelproof_web::Harness, page: usize) {
-    click(
-        harness,
-        &format!("#entity-group-paging-table [data-entity-page=\"{page}\"]"),
-    )
-    .await;
-    tokio::time::sleep(Duration::from_millis(150)).await;
+    for _ in 0..500 {
+        let current = eval_json(harness, "Number(document.querySelector('#entity-group-paging-table [aria-current=\"page\"]').dataset.entityPage)")
+            .await.as_u64().expect("current grouped page") as usize;
+        if current == page {
+            return;
+        }
+        let direction = if current < page { "next" } else { "previous" };
+        click(
+            harness,
+            &format!("#entity-group-paging-table [data-entity-page=\"{direction}\"]"),
+        )
+        .await;
+    }
+    panic!("group pager failed to reach page {page}");
 }
 
 fn page_rows(state: &Value) -> f64 {
@@ -5276,18 +6045,29 @@ async fn walk_group_paging_pages(harness: &pixelproof_web::Harness) -> Vec<Value
                 if (next.disabled || next.getAttribute('aria-disabled') === 'true') {
                     return 'end';
                 }
-                next.click();
                 return 'advanced';
             })()"#,
         )
         .await;
         match advanced.as_str() {
-            Some("advanced") => {}
+            Some("advanced") => {
+                click(
+                    harness,
+                    "#entity-group-paging-table [data-entity-page=\"next\"]",
+                )
+                .await;
+            }
             Some("end") => return states,
             other => panic!("the pager's next control was unusable: {other:?}"),
         }
         tokio::time::sleep(Duration::from_millis(120)).await;
-        states.push(group_paging_page_state(harness).await);
+        let next = group_paging_page_state(harness).await;
+        assert_ne!(
+            next["range"],
+            states.last().unwrap()["range"],
+            "Next did not advance the accepted page: {next}"
+        );
+        states.push(next);
     }
     panic!("the pager never reached a last page after 500 steps");
 }
@@ -5330,6 +6110,203 @@ fn assert_pages_partition_every_row(states: &[Value], total: usize) {
     );
 }
 
+/// ldui-r3pw: focus is observational, and either resize input changes only
+/// the requested column's declared track. Full-width table slack must never be
+/// copied back into the controlled model or redistributed across neighbors.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
+async fn resizing_one_column_preserves_every_neighbor_width() {
+    let harness = harness_at("/components/entity-table-group-paging").await;
+    begin_browser_error_capture(&harness).await;
+    wait_for_selector(
+        &harness,
+        "#entity-group-paging-table th[data-entity-column='value'] [role='separator']",
+    )
+    .await;
+
+    let geometry = || {
+        let harness = &harness;
+        async move {
+            eval_json(
+                harness,
+                r#"(() => {
+                    const root = document.querySelector('#entity-group-paging-table');
+                    const headers = Array.from(root.querySelectorAll(
+                        'thead th[data-entity-column]'
+                    ));
+                    const value = root.querySelector(
+                        "th[data-entity-column='value'] [role='separator']"
+                    );
+                    const selection = root.querySelector(
+                        'thead th[data-entity-selection-header]'
+                    );
+                    return {
+                        widths: Object.fromEntries(headers.map(header => [
+                            header.dataset.entityColumn,
+                            header.getBoundingClientRect().width,
+                        ])),
+                        selection: selection.getBoundingClientRect().width,
+                        table: root.querySelector('[data-entity-table-grid]')
+                            .getBoundingClientRect().width,
+                        valueNow: Number(value.getAttribute('aria-valuenow')),
+                        valueMin: Number(value.getAttribute('aria-valuemin')),
+                        active: document.activeElement === value,
+                        preferences: JSON.parse(document.querySelector('[data-testid="group-paging-preferences"]').textContent),
+                        proposals: Number(document.querySelector('[data-testid="group-paging-preference-proposals"]').textContent),
+                    };
+                })()"#,
+            )
+            .await
+        }
+    };
+    let unchanged = |before: &Value, after: &Value, label: &str| {
+        let before = before
+            .as_f64()
+            .unwrap_or_else(|| panic!("before {label}: {before}"));
+        let after = after
+            .as_f64()
+            .unwrap_or_else(|| panic!("after {label}: {after}"));
+        assert!(
+            (after - before).abs() <= 0.75,
+            "{label} changed during another column's resize: before={before}, after={after}"
+        );
+    };
+
+    let before = geometry().await;
+    let selector = "#entity-group-paging-table th[data-entity-column='value'] [role='separator']";
+    harness
+        .page()
+        .find_element(selector)
+        .await
+        .expect("find Value resize separator")
+        .focus()
+        .await
+        .expect("focus Value resize separator");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let focused = geometry().await;
+    assert_eq!(focused["active"], json!(true), "{focused}");
+    assert_eq!(focused["preferences"], before["preferences"]);
+    assert_eq!(focused["proposals"], before["proposals"]);
+    assert_eq!(
+        focused["valueNow"], before["valueNow"],
+        "focus must not copy redistributed browser geometry into the model: before={before}, focused={focused}"
+    );
+    for column in ["measure", "status", "value"] {
+        unchanged(
+            &before["widths"][column],
+            &focused["widths"][column],
+            &format!("focused {column}"),
+        );
+    }
+    unchanged(
+        &before["selection"],
+        &focused["selection"],
+        "focused selection",
+    );
+
+    harness
+        .press_key_sequence(&[Key::Home])
+        .await
+        .expect("keyboard-resize Value to its minimum");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let keyboard = geometry().await;
+    assert_eq!(
+        keyboard["preferences"]["column_widths"]["value"],
+        keyboard["valueNow"]
+    );
+    assert_eq!(keyboard["valueNow"], keyboard["valueMin"], "{keyboard}");
+    assert!(
+        (keyboard["widths"]["value"].as_f64().unwrap() - keyboard["valueMin"].as_f64().unwrap())
+            .abs()
+            <= 0.75,
+        "the rendered Value track must match its controlled minimum: {keyboard}"
+    );
+    for column in ["measure", "status"] {
+        unchanged(
+            &before["widths"][column],
+            &keyboard["widths"][column],
+            &format!("keyboard {column}"),
+        );
+    }
+    unchanged(
+        &before["selection"],
+        &keyboard["selection"],
+        "keyboard selection",
+    );
+
+    drag_horizontal(&harness, selector, 64.0).await;
+    let pointer = geometry().await;
+    assert_eq!(
+        pointer["preferences"]["column_widths"]["value"],
+        pointer["valueNow"]
+    );
+    for field in ["sort", "hidden_columns", "page_size"] {
+        assert_eq!(
+            pointer["preferences"][field], before["preferences"][field],
+            "resize changed {field}"
+        );
+    }
+    assert_eq!(
+        pointer["preferences"]["column_order"],
+        json!(["measure", "status", "value"]),
+        "resize normalization must preserve declared column order"
+    );
+    assert_eq!(
+        pointer["valueNow"].as_u64(),
+        keyboard["valueNow"].as_u64().map(|width| width + 64),
+        "real pointer drag must start from the controlled width: keyboard={keyboard}, pointer={pointer}"
+    );
+    assert!(
+        (pointer["widths"]["value"].as_f64().unwrap() - pointer["valueNow"].as_f64().unwrap())
+            .abs()
+            <= 0.75,
+        "the pointer-resized track and controlled value diverged: {pointer}"
+    );
+    for column in ["measure", "status"] {
+        unchanged(
+            &before["widths"][column],
+            &pointer["widths"][column],
+            &format!("pointer {column}"),
+        );
+    }
+    unchanged(
+        &before["selection"],
+        &pointer["selection"],
+        "pointer selection",
+    );
+    for column in ["measure", "status"] {
+        let selector = format!(
+            "#entity-group-paging-table th[data-entity-column='{column}'] [role='separator']"
+        );
+        harness
+            .page()
+            .find_element(&selector)
+            .await
+            .unwrap()
+            .focus()
+            .await
+            .unwrap();
+        harness.press_key_sequence(&[Key::Home]).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let narrow = geometry().await;
+        assert_eq!(
+            narrow["preferences"]["column_widths"][column],
+            json!(48),
+            "{narrow}"
+        );
+        assert!(
+            (narrow["widths"][column].as_f64().unwrap() - 48.0).abs() <= 0.75,
+            "{narrow}"
+        );
+        unchanged(
+            &pointer["widths"]["value"],
+            &narrow["widths"]["value"],
+            "Value after narrowing neighbor",
+        );
+    }
+    assert_no_browser_errors(&harness, "isolated EntityTable resize").await;
+}
+
 /// ldui-5in5: a group that fits inside one page capacity is never split merely
 /// to fill the previous page's remainder; one that cannot fit keeps the
 /// existing continuation heading, and every count stays truthful either way.
@@ -5343,6 +6320,102 @@ async fn grouped_pages_keep_a_fitting_group_whole_and_stay_truthful() {
         "#entity-group-paging-table tbody[data-entity-group] tr[data-entity-row-key]",
     )
     .await;
+    let gear_choosers = eval_json(
+        &harness,
+        r#"(() => ['entity-group-paging-table',
+                    'entity-group-paging-min-rows-table',
+                    'entity-group-paging-neighbor-table'].map(id => {
+            const root = document.querySelector(`#${id}`);
+            const trigger = root.querySelector('[data-entity-column-chooser]');
+            const controlled = document.getElementById(trigger.getAttribute('aria-controls'));
+            return {
+                id,
+                presentation: trigger.dataset.entityColumnChooserPresentation,
+                glyph: trigger.textContent.trim(),
+                label: trigger.getAttribute('aria-label'),
+                title: trigger.getAttribute('title'),
+                controlsMenu: controlled?.getAttribute('role') === 'menu',
+            };
+        }))()"#,
+    )
+    .await;
+    for chooser in gear_choosers.as_array().expect("gear chooser list") {
+        assert_eq!(chooser["presentation"], json!("icon"), "{chooser}");
+        assert_eq!(chooser["glyph"], json!("⚙"), "{chooser}");
+        assert_eq!(chooser["label"], json!("Choose columns"), "{chooser}");
+        assert_eq!(chooser["title"], chooser["label"], "{chooser}");
+        assert_eq!(chooser["controlsMenu"], json!(true), "{chooser}");
+    }
+
+    // Open the standard gear using the real keyboard path, then enter its
+    // registered Menu and establish a virtual active descendant. This keeps
+    // the demo-specific visual request tied to the same accessible behavior
+    // as the text presentation.
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => {
+                const trigger = document.querySelector(
+                    '#entity-group-paging-table [data-entity-column-chooser]'
+                );
+                trigger.focus();
+                return document.activeElement === trigger;
+            })()"#,
+        )
+        .await,
+        json!(true)
+    );
+    harness
+        .press_key_sequence(&[Key::Enter, Key::Tab, Key::Home])
+        .await
+        .expect("open and enter grouped table gear chooser");
+    let opened_chooser = eval_json(
+        &harness,
+        r#"(() => {
+            const trigger = document.querySelector(
+                '#entity-group-paging-table [data-entity-column-chooser]'
+            );
+            const menu = document.getElementById(trigger.getAttribute('aria-controls'));
+            return {
+                expanded: trigger.getAttribute('aria-expanded'),
+                focused: document.activeElement === menu,
+                active: menu.getAttribute('aria-activedescendant'),
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(
+        opened_chooser["expanded"],
+        json!("true"),
+        "{opened_chooser}"
+    );
+    assert_eq!(opened_chooser["focused"], json!(true), "{opened_chooser}");
+    assert!(
+        opened_chooser["active"]
+            .as_str()
+            .is_some_and(|id| !id.is_empty()),
+        "Home did not highlight a registered chooser item: {opened_chooser}"
+    );
+    harness
+        .press_key_sequence(&[Key::Escape])
+        .await
+        .expect("close grouped table gear chooser");
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => {
+                const trigger = document.querySelector(
+                    '#entity-group-paging-table [data-entity-column-chooser]'
+                );
+                return {
+                    expanded: trigger.getAttribute('aria-expanded'),
+                    focused: document.activeElement === trigger,
+                };
+            })()"#,
+        )
+        .await,
+        json!({"expanded": "false", "focused": true})
+    );
     // An explicit capacity, so the expected packing is arithmetic rather than a
     // measurement: 17 + 17 + 17 + 30 rows at 25 per page.
     choose_group_paging_page_size(&harness, "25").await;
@@ -5350,8 +6423,8 @@ async fn grouped_pages_keep_a_fitting_group_whole_and_stay_truthful() {
     let first = group_paging_page_state(&harness).await;
     assert_eq!(
         first["pages"],
-        json!(["1", "2", "3", "4"]),
-        "expected four pages: {first}"
+        json!(["1", "2", "3"]),
+        "expected the first compact window of a four-page plan: {first}"
     );
     // 17 rows, not 25: the eight leftover slots stay empty because Durham fits
     // a page and must not be split to fill them. This is the whole bead.
@@ -5427,6 +6500,19 @@ async fn grouped_pages_keep_a_fitting_group_whole_and_stay_truthful() {
     );
     choose_group_paging_status(&harness, "").await;
 
+    // Four 14-row groups at capacity 25 create four group-aware pages even
+    // though uniform ceil(56 / 25) arithmetic predicts only three. Next must
+    // clamp against the shared page plan or it becomes trapped on page 3.
+    choose_group_paging_status(&harness, "Adversarial").await;
+    let adversarial_pages = walk_group_paging_pages(&harness).await;
+    assert_eq!(adversarial_pages.len(), 4, "{adversarial_pages:?}");
+    assert_pages_partition_every_row(&adversarial_pages, 56);
+    assert_eq!(
+        adversarial_pages.last().unwrap()["range"],
+        json!("Showing 43-56 of 56")
+    );
+    choose_group_paging_status(&harness, "").await;
+
     // Selection is computed over the resulting grouped page, not a second
     // recomputed window: the header checkbox selects exactly the 17 rows this
     // page renders.
@@ -5448,6 +6534,411 @@ async fn grouped_pages_keep_a_fitting_group_whole_and_stay_truthful() {
     // hard-coded shape: a continuation may only ever belong to a group that is
     // larger than a page.
     choose_group_paging_page_size(&harness, "auto").await;
+
+    let auto_geometry = || {
+        let harness = &harness;
+        async move {
+            eval_json(
+                harness,
+                r#"(() => {
+                    const root = document.querySelector('#entity-group-paging-table');
+                    const region = root.querySelector('[data-entity-focus-region]');
+                    const footer = root.querySelector('[data-entity-table-footer]');
+                    const controls = footer.querySelector(
+                        '[data-entity-table-footer-controls]'
+                    );
+                    const pageSize = footer.querySelector(
+                        '[data-entity-page-size-control]'
+                    );
+                    const pager = footer.querySelector(
+                        '[data-entity-table-pagination]'
+                    );
+                    const range = root.querySelector('[data-entity-row-range]');
+                    const caption = range.parentElement;
+                    const pageSlots = Array.from(
+                        pager.querySelectorAll('[data-entity-page-slot]')
+                    );
+                    const placeholders = Array.from(
+                        pager.querySelectorAll('[data-entity-page-placeholder]')
+                    );
+                    return {
+                        rootHeight: root.getBoundingClientRect().height,
+                        regionHeight: region.getBoundingClientRect().height,
+                        regionBottom: region.getBoundingClientRect().bottom,
+                        regionClientHeight: region.clientHeight,
+                        regionScrollHeight: region.scrollHeight,
+                        footerHeight: footer.getBoundingClientRect().height,
+                        pagerHeight: pager.getBoundingClientRect().height,
+                        footerClientWidth: footer.clientWidth,
+                        footerScrollWidth: footer.scrollWidth,
+                        sameControlRow:
+                            pageSize.parentElement === pager.parentElement &&
+                            Math.abs(pageSize.getBoundingClientRect().top -
+                                pager.getBoundingClientRect().top) <= 0.5,
+                        captionHeight: caption.getBoundingClientRect().height,
+                        captionWidth: caption.getBoundingClientRect().width,
+                        effective: Number(root.dataset.entityEffectivePageSize),
+                        rows: root.querySelectorAll(
+                            '[data-entity-table-grid] tr[data-entity-row-key]'
+                        ).length,
+                        groupHeadings: root.querySelectorAll(
+                            '[data-entity-table-grid] tr[data-entity-group-header]'
+                        ).length,
+                        maxRowBottom: Math.max(...Array.from(root.querySelectorAll(
+                            '[data-entity-table-grid] tr[data-entity-row-key]'
+                        ), row => row.getBoundingClientRect().bottom)),
+                        reservedSlots: pageSlots.length,
+                        visibleSlots: pageSlots.filter(slot =>
+                            slot.getClientRects().length > 0
+                        ).length,
+                        currentSlots: pageSlots.filter(slot =>
+                            slot.getAttribute('aria-current') === 'page'
+                        ).length,
+                        visibleCurrentSlots: pageSlots.filter(slot =>
+                            slot.getAttribute('aria-current') === 'page' &&
+                            slot.getClientRects().length > 0
+                        ).length,
+                        placeholders: placeholders.length,
+                        captionReservations: caption.querySelectorAll(
+                            '[data-entity-row-range-reservation]'
+                        ).length,
+                        rangeHooks: caption.querySelectorAll('[data-entity-row-range]').length,
+                        focusablePlaceholders: placeholders.filter(slot =>
+                            slot.matches('button, a, input, select, textarea, [tabindex]')
+                        ).length,
+                    };
+                })()"#,
+            )
+            .await
+        }
+    };
+    let full_geometry = auto_geometry().await;
+    assert_eq!(full_geometry["effective"], json!(2), "{full_geometry}");
+    assert!(
+        full_geometry["maxRowBottom"].as_f64().unwrap()
+            <= full_geometry["regionBottom"].as_f64().unwrap() + 0.5,
+        "Auto called a clipped data row fitted: {full_geometry}"
+    );
+    assert_eq!(full_geometry["reservedSlots"], json!(3), "{full_geometry}");
+    assert_eq!(full_geometry["visibleSlots"], json!(3), "{full_geometry}");
+    assert_eq!(full_geometry["currentSlots"], json!(1), "{full_geometry}");
+    assert_eq!(
+        full_geometry["visibleCurrentSlots"],
+        json!(1),
+        "{full_geometry}"
+    );
+    assert_eq!(full_geometry["sameControlRow"], json!(true));
+    assert_eq!(full_geometry["placeholders"], json!(0), "{full_geometry}");
+    assert_eq!(full_geometry["captionReservations"], json!(2));
+    assert_eq!(full_geometry["rangeHooks"], json!(1));
+
+    // Negative control for the clipping oracle: expand a real synthetic
+    // heading enough to push the last data row below the region, observe the
+    // oracle catch it, then restore the exact inline style before the
+    // ResizeObserver's deferred measurement can turn the injection into state.
+    let clipping_probe = eval_json(
+        &harness,
+        r#"(() => {
+            const root = document.querySelector('#entity-group-paging-table');
+            const region = root.querySelector('[data-entity-focus-region]');
+            const heading = root.querySelector('tr[data-entity-group-header]');
+            const rows = Array.from(root.querySelectorAll('tr[data-entity-row-key]'));
+            const lastBottom = () => Math.max(
+                ...rows.map(row => row.getBoundingClientRect().bottom)
+            );
+            const original = heading.getAttribute('style');
+            const beforeHeight = heading.getBoundingClientRect().height;
+            const beforeBottom = lastBottom();
+            heading.style.height = `${beforeHeight + 64}px`;
+            void heading.offsetHeight;
+            const expandedHeight = heading.getBoundingClientRect().height;
+            const expandedBottom = lastBottom();
+            const caught = expandedBottom > region.getBoundingClientRect().bottom + 0.5;
+            if (original === null) heading.removeAttribute('style');
+            else heading.setAttribute('style', original);
+            void heading.offsetHeight;
+            return {
+                beforeHeight,
+                expandedHeight,
+                beforeBottom,
+                expandedBottom,
+                regionBottom: region.getBoundingClientRect().bottom,
+                caught,
+                restoredBottom: lastBottom(),
+                restoredStyle: heading.hasAttribute('style')
+                    ? heading.getAttribute('style')
+                    : null,
+                originalStyle: original,
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(clipping_probe["caught"], json!(true), "{clipping_probe}");
+    assert!(
+        clipping_probe["expandedHeight"].as_f64().unwrap()
+            >= clipping_probe["beforeHeight"].as_f64().unwrap() + 63.0,
+        "the negative control did not expand a real group heading: {clipping_probe}"
+    );
+    assert!(
+        (clipping_probe["restoredBottom"].as_f64().unwrap()
+            - clipping_probe["beforeBottom"].as_f64().unwrap())
+        .abs()
+            <= 0.5,
+        "the clipping negative control did not restore geometry: {clipping_probe}"
+    );
+    assert!(
+        clipping_probe["restoredStyle"] == clipping_probe["originalStyle"]
+            || (clipping_probe["originalStyle"] == Value::Null
+                && clipping_probe["restoredStyle"] == json!("")),
+        "the clipping negative control left inline style residue: {clipping_probe}"
+    );
+
+    let minimum_three = eval_json(
+        &harness,
+        r#"(() => {
+            const root = document.querySelector('#entity-group-paging-min-rows-table');
+            const region = root.querySelector('[data-entity-focus-region]');
+            return {
+                effective: Number(root.dataset.entityEffectivePageSize),
+                rows: root.querySelectorAll(
+                    '[data-entity-table-grid] tr[data-entity-row-key]'
+                ).length,
+                clientHeight: region.clientHeight,
+                scrollHeight: region.scrollHeight,
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(minimum_three["effective"], json!(25), "{minimum_three}");
+    assert_eq!(minimum_three["rows"], json!(17), "{minimum_three}");
+    assert!(
+        minimum_three["scrollHeight"].as_f64().unwrap()
+            > minimum_three["clientHeight"].as_f64().unwrap() + 1.0,
+        "a grouped fit below min_rows must retain the configured page and scroll: {minimum_three}"
+    );
+
+    // Capacity two encounters an odd group boundary on page nine: one final
+    // Charlotte row and one first Durham row require TWO synthetic headings.
+    // This is the browser counterpart to the worst-page native regression.
+    for _ in 0..8 {
+        click(
+            &harness,
+            "#entity-group-paging-table [data-entity-page=\"next\"]",
+        )
+        .await;
+        tokio::time::sleep(Duration::from_millis(120)).await;
+    }
+    let boundary_geometry = auto_geometry().await;
+    assert_eq!(boundary_geometry["rows"], json!(2), "{boundary_geometry}");
+    assert_eq!(
+        boundary_geometry["groupHeadings"],
+        json!(2),
+        "{boundary_geometry}"
+    );
+    assert!(
+        boundary_geometry["maxRowBottom"].as_f64().unwrap()
+            <= boundary_geometry["regionBottom"].as_f64().unwrap() + 0.5,
+        "the two-heading transition page clipped a data row: {boundary_geometry}"
+    );
+    go_to_group_paging_page(&harness, 1).await;
+
+    // The constrained fixture exercises the dangerous total-page transition,
+    // not merely navigation within one total: filtering 81 rows to one must
+    // not unwrap the footer and feed a larger capacity back into Auto sizing.
+    choose_group_paging_status(&harness, "Single").await;
+    let single_geometry = auto_geometry().await;
+    assert_eq!(single_geometry["rows"], json!(1), "{single_geometry}");
+    assert_eq!(
+        single_geometry["reservedSlots"],
+        json!(3),
+        "{single_geometry}"
+    );
+    assert_eq!(
+        single_geometry["placeholders"],
+        json!(2),
+        "{single_geometry}"
+    );
+    assert_eq!(
+        single_geometry["focusablePlaceholders"],
+        json!(0),
+        "layout reservations must never become phantom keyboard controls: {single_geometry}"
+    );
+    assert_eq!(
+        single_geometry["effective"], full_geometry["effective"],
+        "filtering to one row changed Auto capacity: full={full_geometry}, one={single_geometry}"
+    );
+    for field in [
+        "rootHeight",
+        "regionHeight",
+        "footerHeight",
+        "pagerHeight",
+        "captionHeight",
+        "captionWidth",
+    ] {
+        let before = full_geometry[field].as_f64().expect("full geometry number");
+        let after = single_geometry[field]
+            .as_f64()
+            .expect("single-row geometry number");
+        assert!(
+            (after - before).abs() <= 0.5,
+            "filtering to one row changed {field}: full={full_geometry}, one={single_geometry}"
+        );
+    }
+
+    choose_group_paging_status(&harness, "").await;
+    let restored_geometry = auto_geometry().await;
+    assert_eq!(
+        restored_geometry["effective"], full_geometry["effective"],
+        "restoring all rows changed Auto capacity: full={full_geometry}, restored={restored_geometry}"
+    );
+    assert_eq!(restored_geometry["reservedSlots"], json!(3));
+    assert_eq!(restored_geometry["placeholders"], json!(0));
+    for field in [
+        "rootHeight",
+        "regionHeight",
+        "footerHeight",
+        "pagerHeight",
+        "captionHeight",
+        "captionWidth",
+    ] {
+        let before = full_geometry[field].as_f64().expect("full geometry number");
+        let after = restored_geometry[field]
+            .as_f64()
+            .expect("restored geometry number");
+        assert!(
+            (after - before).abs() <= 0.5,
+            "restoring all rows changed {field}: full={full_geometry}, restored={restored_geometry}"
+        );
+    }
+
+    // Locate a real wrapping threshold in this browser/font combination, then
+    // test on both sides of it. A single hand-picked width can accidentally sit
+    // far from the feedback edge and leave a variable caption undetected.
+    let set_table_width = |width: usize| {
+        let harness = &harness;
+        async move {
+            let expression = format!(
+                r#"(() => {{
+                    const root = document.querySelector('#entity-group-paging-table');
+                    root.style.width = '{width}px';
+                    return root.getBoundingClientRect().width;
+                }})()"#
+            );
+            let _ = eval_json(harness, &expression).await;
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    };
+    let mut transition = None;
+    let mut previous: Option<(usize, f64)> = None;
+    for width in (360..=872).step_by(16) {
+        set_table_width(width).await;
+        let state = auto_geometry().await;
+        let footer_height = state["footerHeight"]
+            .as_f64()
+            .unwrap_or_else(|| panic!("missing footer height at {width}px: {state}"));
+        if let Some((previous_width, previous_height)) = previous {
+            if (footer_height - previous_height).abs() > 0.5 {
+                transition = Some((previous_width, width));
+                break;
+            }
+        }
+        previous = Some((width, footer_height));
+    }
+    let (before_wrap, after_wrap) =
+        transition.expect("the width scan did not cross a real grouped-footer wrapping threshold");
+    let mut threshold_widths = vec![
+        before_wrap.saturating_sub(2),
+        before_wrap,
+        after_wrap,
+        after_wrap + 2,
+    ];
+    threshold_widths.sort_unstable();
+    threshold_widths.dedup();
+
+    for width in threshold_widths {
+        set_table_width(width).await;
+        let full = auto_geometry().await;
+
+        choose_group_paging_status(&harness, "Single").await;
+        let single = auto_geometry().await;
+        assert_eq!(single["rows"], json!(1), "width={width}: {single}");
+        assert_eq!(single["reservedSlots"], full["reservedSlots"]);
+        assert_eq!(single["captionReservations"], json!(2));
+        assert_eq!(single["rangeHooks"], json!(1));
+        assert_eq!(
+            single["effective"], full["effective"],
+            "width={width}: filter-to-one changed Auto capacity: full={full}, one={single}"
+        );
+
+        choose_group_paging_status(&harness, "Void").await;
+        let empty = auto_geometry().await;
+        assert_eq!(empty["rows"], json!(0), "width={width}: {empty}");
+        assert_eq!(
+            empty["effective"], full["effective"],
+            "width={width}: filter-to-empty changed Auto capacity: full={full}, empty={empty}"
+        );
+        assert_eq!(empty["reservedSlots"], full["reservedSlots"]);
+        assert_eq!(empty["captionReservations"], json!(2));
+        assert_eq!(empty["rangeHooks"], json!(1));
+
+        for (state_name, state) in [("one", &single), ("empty", &empty)] {
+            for field in [
+                "rootHeight",
+                "regionHeight",
+                "footerHeight",
+                "pagerHeight",
+                "captionHeight",
+                "captionWidth",
+            ] {
+                let before = full[field]
+                    .as_f64()
+                    .unwrap_or_else(|| panic!("width={width}: full {field}: {full}"));
+                let after = state[field]
+                    .as_f64()
+                    .unwrap_or_else(|| panic!("width={width}: {state_name} {field}: {state}"));
+                assert!(
+                    (after - before).abs() <= 0.5,
+                    "width={width}: {state_name} changed {field}: full={full}, state={state}"
+                );
+            }
+        }
+
+        choose_group_paging_status(&harness, "").await;
+        let restored = auto_geometry().await;
+        assert_eq!(restored["effective"], full["effective"]);
+        for field in [
+            "rootHeight",
+            "regionHeight",
+            "footerHeight",
+            "pagerHeight",
+            "captionHeight",
+            "captionWidth",
+        ] {
+            let before = full[field].as_f64().expect("full geometry number");
+            let after = restored[field].as_f64().expect("restored geometry number");
+            assert!(
+                (after - before).abs() <= 0.5,
+                "width={width}: restore changed {field}: full={full}, restored={restored}"
+            );
+        }
+    }
+
+    // Return to intrinsic width before walking every page; a deliberately
+    // narrow threshold can validly trigger the configured-scroll fallback,
+    // while this pass is the fitted-page oracle.
+    let _ = eval_json(
+        &harness,
+        r#"(() => {
+            const root = document.querySelector('#entity-group-paging-table');
+            root.style.removeProperty('width');
+            return root.getBoundingClientRect().width;
+        })()"#,
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let intrinsic_geometry = auto_geometry().await;
+    assert_eq!(intrinsic_geometry["effective"], json!(2));
+
     let states = walk_group_paging_pages(&harness).await;
     // The partition proof, which also proves the WALK is complete -- see
     // `assert_pages_partition_every_row`. This assertion is the one that would
@@ -5455,6 +6946,14 @@ async fn grouped_pages_keep_a_fitting_group_whole_and_stay_truthful() {
     // first page whose range does not continue the previous one rather than
     // only in an aggregate sum at the end.
     assert_pages_partition_every_row(&states, 81);
+    for (index, state) in states.iter().enumerate() {
+        assert!(
+            state["max_row_bottom"].as_f64().unwrap()
+                <= state["region_bottom"].as_f64().unwrap() + 0.5,
+            "Auto page {} clipped a data row: {state}",
+            index + 1
+        );
+    }
 
     let capacity = states.iter().map(page_rows).fold(0.0_f64, f64::max);
     assert!(capacity > 0.0, "auto paging rendered no rows");

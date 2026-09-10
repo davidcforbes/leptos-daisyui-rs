@@ -8,6 +8,8 @@
 mod client_snapshot_list;
 mod debug;
 mod debug_state;
+mod office_delta_fixture;
+mod office_entity_defaults_fixture;
 #[path = "demos/snapshot_table_page.rs"]
 mod snapshot_table_page;
 
@@ -86,7 +88,15 @@ fn main() {
             <UiTokensPreamble />
             <UiAnimationsPreamble />
             <main class="min-h-screen bg-base-200 p-4 sm:p-6">
-                {if external_focus_fixture {
+                {if web_sys::window()
+                    .and_then(|window| window.location().pathname().ok())
+                    .is_some_and(|path| path.ends_with("/office-select-regressions")) {
+                    view! { <office_delta_fixture::OfficeSelectFixture /> }.into_any()
+                } else if web_sys::window()
+                    .and_then(|window| window.location().pathname().ok())
+                    .is_some_and(|path| path.ends_with("/office-entity-defaults")) {
+                    view! { <office_entity_defaults_fixture::OfficeEntityDefaultsFixture /> }.into_any()
+                } else if external_focus_fixture {
                     view! { <EntityTableExternalFocusFixture /> }.into_any()
                 } else if group_paging_fixture {
                     view! { <EntityTableGroupPagingFixture /> }.into_any()

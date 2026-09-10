@@ -26,6 +26,7 @@ fn initial_state() -> SoftphoneState {
         selected_phone_id: Some("mobile".into()),
         capabilities: SoftphoneCapabilities {
             mute: true,
+            end_call: true,
             hold: true,
             voicemail: true,
             recording: true,
@@ -57,6 +58,8 @@ pub fn SoftphoneDemo() -> impl IntoView {
                 phone_number: "Numéro de téléphone".into(),
                 call: "Appeler".into(),
                 end_call: "Terminer l’appel".into(),
+                end_call_unavailable:
+                    "Terminer l’appel est indisponible pour ce système téléphonique".into(),
                 hold: "Mettre en attente".into(),
                 record: "Enregistrer".into(),
                 ready: "Prêt à appeler".into(),
@@ -181,7 +184,7 @@ pub fn SoftphoneDemo() -> impl IntoView {
                                 s.client.phones.clear(); s.selected_phone_id = None;
                             }))>"No numbers"</Button>
                             <Button attr:id="softphone-capabilities" on_click=Callback::new(move |_| state.update(|s| s.capabilities = SoftphoneCapabilities {
-                                mute: false, hold: false, voicemail: false, recording: false, transcription: false, keypad: false,
+                                mute: false, end_call: false, hold: false, voicemail: false, recording: false, transcription: false, keypad: false,
                             }))>"Hide optional actions"</Button>
                             <Button attr:id="softphone-french" on_click=Callback::new(move |_| french.update(|v| *v = !*v))>"Change labels"</Button>
                             <Button attr:id="softphone-long" on_click=Callback::new(move |_| state.update(|s| {

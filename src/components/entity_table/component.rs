@@ -26,10 +26,12 @@ use super::identity::{
 };
 use super::model::{
     ENTITY_PAGE_SIZE_CHOICES, EntityColumnMove, EntityFocusRecord, EntityFocusTarget,
-    EntityProjectionGrouping, SortedIndexCache, emit_normalized_preference_change,
+    EntityProjectionGrouping, SortedIndexCache, default_hidden_columns,
+    emit_normalized_preference_change, entity_pagination_reservation,
     entity_table_display_projection_from_indices, focus_target, move_column, next_sort,
     next_sort_additive, normalize_preferences, ordered_columns, page_after_dataset_change,
-    reset_columns, reset_sort, resolve_entity_page_size, set_preferred_width, toggle_hidden_column,
+    reset_columns, reset_sort, resolve_entity_page_size, set_preferred_width,
+    stable_entity_page_window, toggle_hidden_column,
 };
 use super::multi_selection::{
     EntityTableMultiSelection, EntityTableSelectionCause, EntityTableSelectionProposal,
@@ -60,8 +62,8 @@ use crate::components::button::Button;
 use crate::components::checkbox::{Checkbox, CheckboxSize};
 use crate::components::data_table::{
     FALLBACK_HEADER_HEIGHT, FALLBACK_ROW_HEIGHT, MAX_COLUMN_WIDTH, PageSlot, StableColumnTrack,
-    StableTableColGroup, auto_page_size_for_height, clamp_page, effective_min_width,
-    keyboard_resized_width, page_window, stable_table_content_style,
+    StableTableColGroup, auto_page_size_for_height, effective_min_width, keyboard_resized_width,
+    max_row_height, rows_per_page_for_height, stable_table_content_style,
 };
 use crate::components::icon::{Icon, IconSize};
 use crate::components::menu::{Menu, MenuCheckItem};
@@ -75,7 +77,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use web_sys::wasm_bindgen::JsCast;
 
-const MAX_VISIBLE_PAGES: usize = 7;
+const MAX_VISIBLE_PAGES: usize = 3;
 static ENTITY_CHOOSER_ID: AtomicU64 = AtomicU64::new(0);
 static ENTITY_PAGE_SIZE_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -152,10 +154,132 @@ pub(super) fn entity_row_range_text(
         &texts.row_range
     };
 
+    format_entity_row_range(template, start, end, total)
+}
+
+fn format_entity_row_range(template: &str, start: usize, end: usize, total: usize) -> String {
     template
         .replace("{start}", &start.to_string())
         .replace("{end}", &end.to_string())
         .replace("{total}", &total.to_string())
+}
+
+/// Produces the two overlapping captions that reserve the widest truthful
+/// footer copy for a complete client-side source snapshot.
+///
+/// Tabular digits make the source row count a width upper bound for every
+/// positive start/end/total value. The separate empty string covers a caller's
+/// custom empty-range template, which can be longer than the ordinary range.
+pub(super) fn entity_row_range_reservations(
+    texts: &EntityTableTexts,
+    empty_row_range: Option<&str>,
+    source_rows: usize,
+) -> [String; 2] {
+    [
+        format_entity_row_range(&texts.row_range, source_rows, source_rows, source_rows),
+        format_entity_row_range(
+            empty_row_range.unwrap_or(&texts.row_range),
+            0,
+            0,
+            source_rows,
+        ),
+    ]
+}
+
+/// Advances within the already-computed page plan.
+///
+/// Group-aware plans can contain more pages than uniform `rows / capacity`
+/// arithmetic predicts, so every navigation clamp must use the plan itself.
+pub(super) fn next_entity_page(current: usize, plan: &EntityPagePlan) -> usize {
+    plan.clamp(current.saturating_add(1))
+}
+
+/// Resolves a grouped Auto capacity against every page's complete rendered
+/// height: data rows plus each synthetic group-heading row on that page.
+///
+/// `source_rows` and `source_groups` come from the complete accepted source,
+/// not the current filtered projection. At most one expanded heading can
+/// accompany each displayed row; collapsible groups are stricter because a
+/// collapsed heading consumes height without consuming a record slot, so all
+/// source-group headings are budgeted. That source-wide upper bound keeps the
+/// capacity stable through filter and collapse changes.
+///
+/// The fit predicate is monotone, so a binary search stays bounded even for
+/// an extreme geometric row-only capacity. The documented `min_rows` behavior
+/// is preserved after finding an actual fit: when nothing fits or too few rows
+/// fit, keep the configured page size and scroll.
+pub(super) fn grouped_auto_page_size_for_height(
+    viewport_height: f64,
+    header_height: f64,
+    row_height: f64,
+    group_header_height: f64,
+    source_rows: usize,
+    source_groups: usize,
+    collapsible_groups: bool,
+    configured_page_size: usize,
+    min_rows: usize,
+) -> usize {
+    let row_height = if row_height.is_finite() && row_height > 0.0 {
+        row_height
+    } else {
+        FALLBACK_ROW_HEIGHT
+    };
+    let group_header_height = if group_header_height.is_finite() && group_header_height > 0.0 {
+        group_header_height
+    } else {
+        FALLBACK_ROW_HEIGHT
+    };
+    let header_height = if header_height.is_finite() && header_height > 0.0 {
+        header_height
+    } else {
+        0.0
+    };
+    let available = viewport_height - header_height;
+    let row_only_capacity = rows_per_page_for_height(viewport_height, header_height, row_height);
+    let fits = |capacity: usize| {
+        let rendered_rows = capacity.min(source_rows);
+        let headings = if collapsible_groups {
+            source_groups
+        } else {
+            rendered_rows.min(source_groups)
+        };
+        rendered_rows as f64 * row_height + headings as f64 * group_header_height <= available
+    };
+    let mut low = 1_usize;
+    let mut high = row_only_capacity;
+    let mut fitted = None;
+    while low <= high {
+        let candidate = low + (high - low) / 2;
+        if fits(candidate) {
+            fitted = Some(candidate);
+            if candidate == usize::MAX {
+                break;
+            }
+            low = candidate + 1;
+        } else {
+            let Some(next_high) = candidate.checked_sub(1) else {
+                break;
+            };
+            high = next_high;
+        }
+    }
+    let min_rows = min_rows.max(1);
+    match fitted {
+        Some(fitted) if fitted >= min_rows => fitted,
+        _ => configured_page_size.max(min_rows),
+    }
+}
+
+fn measured_entity_row_height(region: &web_sys::HtmlElement, selector: &str, fallback: f64) -> f64 {
+    let Ok(nodes) = region.query_selector_all(selector) else {
+        return fallback;
+    };
+    let heights = (0..nodes.length())
+        .filter_map(|index| nodes.item(index))
+        .filter_map(|node| node.dyn_into::<web_sys::HtmlElement>().ok())
+        .map(|element| element.get_bounding_client_rect().height())
+        .collect::<Vec<_>>();
+    max_row_height(&heights, fallback)
 }
 
 /// Prepends the leading selection control track to the data-column tracks.
@@ -173,6 +297,25 @@ pub(super) fn entity_stable_tracks(
     let leading = has_selection_column
         .then(|| StableColumnTrack::new(SELECTION_COLUMN_TRACK_ID, SELECTION_COLUMN_TRACK_WIDTH));
     leading.into_iter().chain(data_tracks).collect()
+}
+
+/// Sizes the desktop table without letting full-width slack rewrite rigid
+/// pixel tracks.
+///
+/// An undeclared or explicitly flexible track can absorb remaining viewport
+/// width. When every track is rigid, the table instead owns their exact sum;
+/// shrinking one column then translates later borders without resizing any
+/// neighboring column.
+pub(super) fn entity_table_content_style(tracks: &[StableColumnTrack]) -> String {
+    if tracks.iter().all(|track| track.declared && !track.flexible) {
+        let width = tracks
+            .iter()
+            .fold(0_u32, |total, track| total.saturating_add(track.width))
+            .max(1);
+        format!("width: {width}px")
+    } else {
+        stable_table_content_style(tracks)
+    }
 }
 
 /// Columns the empty-state message must span.
@@ -635,8 +778,11 @@ pub fn EntityTable<T>(
     /// Controlled filters aligned beneath their stable desktop columns.
     #[prop(optional, into)]
     column_filters: EntityColumnFilters,
-    /// Complete authoritative source membership used only for focus recovery.
-    /// When omitted, the rendered `data` snapshot is also the source snapshot.
+    /// Complete authoritative source membership used for provider-empty
+    /// semantics, focus recovery, and stable Auto-pager/footer geometry across
+    /// local filtering. When omitted, the rendered `data` snapshot is also the
+    /// source snapshot, so a caller supplying a filtered projection must also
+    /// supply its complete source to receive those cross-filter guarantees.
     #[prop(optional)]
     source_data: Option<Signal<Rc<Vec<T>>, LocalStorage>>,
     /// Opaque dataset/access generation. Focus recovery never crosses a change.
@@ -1413,6 +1559,23 @@ where
         })
     });
     let total_pages = Signal::derive_local(move || page_plan.with(|plan| plan.page_count()));
+    // Reserve every numbered/ellipsis slot for the widest page number in this
+    // page plan. Combined with `stable_entity_page_window`, the pagination
+    // strip therefore keeps one width and wrapping shape while navigating;
+    // otherwise its footer height can feed a different Auto capacity back
+    // into the same table.
+    let pagination_reservation = Signal::derive_local(move || {
+        entity_pagination_reservation(
+            total_pages.get(),
+            source_data.with(|rows| rows.len()),
+            page_size.get().is_auto(),
+            MAX_VISIBLE_PAGES,
+        )
+    });
+    let pagination_slot_style = Signal::derive_local(move || {
+        let (_, digits) = pagination_reservation.get();
+        format!("width: calc({digits}ch + 1.5rem)")
+    });
     let page_bounds_signal =
         Signal::derive_local(move || page_plan.with(|plan| plan.bounds(current_page.get())));
     let page_row_keys = Signal::derive_local(move || {
@@ -1747,6 +1910,22 @@ where
         });
     }
 
+    // Geometry is based on the complete accepted source rather than the
+    // filtered display. This memo only reruns when that source changes; a
+    // ResizeObserver pass reads the already-derived counts in O(1).
+    let source_group_geometry = Memo::new(move |_| {
+        let rows = source_data.get();
+        let group_count = group_of.with_value(|group_of| {
+            group_of.as_ref().map_or(0, |group_of| {
+                rows.iter()
+                    .map(|row| group_of(row))
+                    .collect::<BTreeSet<_>>()
+                    .len()
+            })
+        });
+        (rows.len(), group_count)
+    });
+
     let measure_rows = move || {
         if !viewport_fit_enabled {
             return;
@@ -1763,24 +1942,45 @@ where
             .map_or(FALLBACK_HEADER_HEIGHT, |element| {
                 element.get_bounding_client_rect().height()
             });
-        let row_height = region
-            .query_selector("tbody tr")
-            .ok()
-            .flatten()
-            .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
-            .map(|element| element.get_bounding_client_rect().height())
-            .filter(|height| *height > 0.0)
-            .unwrap_or(FALLBACK_ROW_HEIGHT);
+        // Group headings are presentation rows, not records. Measure the
+        // tallest rendered data row separately; treating the first `<tr>` as
+        // a record in a grouped body both picked the shorter heading and then
+        // omitted its own height from the capacity budget.
+        let row_height = measured_entity_row_height(
+            &region,
+            "tbody tr[data-entity-row-key]",
+            FALLBACK_ROW_HEIGHT,
+        );
         let Some(configured) = configured_page_size.try_get_untracked() else {
             return;
         };
-        let rows = auto_page_size_for_height(
-            viewport_height,
-            header_height,
-            row_height,
-            configured,
-            viewport_fit_min_rows,
-        );
+        let rows = if has_grouping {
+            let group_header_height = measured_entity_row_height(
+                &region,
+                "tbody tr[data-entity-group-header]",
+                FALLBACK_ROW_HEIGHT,
+            );
+            let (source_rows, source_groups) = source_group_geometry.get_untracked();
+            grouped_auto_page_size_for_height(
+                viewport_height,
+                header_height,
+                row_height,
+                group_header_height,
+                source_rows,
+                source_groups,
+                collapsible_groups,
+                configured,
+                viewport_fit_min_rows,
+            )
+        } else {
+            auto_page_size_for_height(
+                viewport_height,
+                header_height,
+                row_height,
+                configured,
+                viewport_fit_min_rows,
+            )
+        };
         if measured_page_size.try_get_untracked() != Some(Some(rows)) {
             let _ = measured_page_size.try_set(Some(rows));
         }
@@ -1814,6 +2014,7 @@ where
             let _ = texts.get();
             let _ = preferences.get();
             let _ = page_size.get();
+            let _ = source_group_geometry.get();
             schedule_measure();
         });
 
@@ -2071,6 +2272,10 @@ where
                             EntityColumnChooserTrigger::Icon => "icon",
                         }
                         aria-label=move || texts.with(|texts| texts.choose_columns.clone())
+                        title=move || {
+                            (column_chooser_trigger.get() == EntityColumnChooserTrigger::Icon)
+                                .then(|| texts.with(|texts| texts.choose_columns.clone()))
+                        }
                         aria-haspopup="menu"
                         aria-expanded=move || column_chooser_open.get().to_string()
                         aria-controls=column_chooser_controls_id
@@ -2107,14 +2312,27 @@ where
                         }}
                     </button>
                     <div class="dropdown-content bg-base-100 rounded-box z-[2] w-72 p-0 shadow-lg border border-base-300">
-                        <Menu class="w-full" attr:id=column_chooser_menu_id>
-                            {move || column_store.with_value(|columns| {
-                                columns
-                                    .iter()
-                                    .filter(|column| !column.required)
-                                    .cloned()
-                                    .map(|column| {
-                                        let column_id = column.id;
+                        // Rebuild the Menu and its registrations as one
+                        // ownership unit when reactive column declarations
+                        // change. Keeping Menu static while rendering its
+                        // MenuCheckItems from a later reactive child left the
+                        // root MenuNav's registry empty, so Home/Arrow keys
+                        // could never establish aria-activedescendant.
+                        {move || column_store.with_value(|columns| {
+                            // Only the menu-facing owned fields cross into
+                            // `Menu`'s `Children` closure. `EntityColumn<T>`
+                            // also owns local `Rc` render callbacks and is
+                            // deliberately not `Send`.
+                            let columns = columns
+                                .iter()
+                                .filter(|column| !column.required)
+                                .map(|column| (column.id, column.header.clone()))
+                                .collect::<Vec<_>>();
+                            view! {
+                                <Menu class="w-full" attr:id=column_chooser_menu_id.clone()>
+                                    {columns
+                                    .into_iter()
+                                    .map(|(column_id, column_header)| {
                                         let checked = Signal::derive(move || {
                                             !preferences.with(|preferences| {
                                                 preferences.hidden_columns.contains(column_id)
@@ -2164,7 +2382,7 @@ where
                                                 attr:data-entity-active-filter=move || active_filter.get().then_some("true")
                                             >
                                                 <span class="flex min-w-0 items-center justify-between gap-2">
-                                                    <span class="min-w-0 truncate">{column.header}</span>
+                                                    <span class="min-w-0 truncate">{column_header}</span>
                                                     <Show when=move || active_filter.get()>
                                                         <span class="badge badge-sm shrink-0">
                                                             {move || texts.with(|texts| texts.filter_active.clone())}
@@ -2174,9 +2392,10 @@ where
                                             </MenuCheckItem>
                                         }
                                     })
-                                .collect_view()
-                            })}
-                        </Menu>
+                                    .collect_view()}
+                                </Menu>
+                            }
+                        })}
                         <div class="border-t border-base-300 p-2">
                             <p class="px-2 pb-1 text-xs font-semibold text-base-content/75">
                                 {move || texts.with(|texts| texts.column_order.clone())}
@@ -2344,14 +2563,14 @@ where
                         class="btn-ghost btn-sm"
                         attr:data-entity-reset-columns="true"
                         disabled=Signal::derive(move || preferences.with(|preferences| {
-                            preferences.hidden_columns.is_empty()
-                                && preferences.column_widths.is_empty()
+                            preferences.column_widths.is_empty()
                                 && column_store.with_value(|columns| {
-                                    preferences
-                                        .column_order
-                                        .iter()
-                                        .map(String::as_str)
-                                        .eq(columns.iter().map(|column| column.id))
+                                    preferences.hidden_columns == default_hidden_columns(columns)
+                                        && preferences
+                                            .column_order
+                                            .iter()
+                                            .map(String::as_str)
+                                            .eq(columns.iter().map(|column| column.id))
                                 })
                         }))
                         on_click=Callback::new(move |_| {
@@ -2409,9 +2628,10 @@ where
                     // Compact mode ignores the desktop colgroup's forced
                     // min-width entirely -- it must fit its containing
                     // block, not the sum of desktop column tracks
-                    // (ldui-ibjk). Desktop keeps the exact prior style.
+                    // (ldui-ibjk). Desktop keeps rigid tracks exact while an
+                    // undeclared/flexible track can still absorb spare width.
                     (!compact_filter_layout.get())
-                        .then(|| stable_table_content_style(&stable_tracks.get()))
+                        .then(|| entity_table_content_style(&stable_tracks.get()))
                 }>
                 <table
                     class="table table-sm w-full border-collapse border border-table-grid"
@@ -2631,19 +2851,6 @@ where
                                                     })
                                                 })
                                                 on:click=move |event: web_sys::MouseEvent| event.stop_propagation()
-                                                 on:focus=move |event: web_sys::FocusEvent| {
-                                                    if edit_locked.get_untracked() {
-                                                        return;
-                                                    }
-                                                    if let Some(rendered_width) = separator_parent_width(event.target()) {
-                                                        let width = rendered_width
-                                                            .clamp(minimum_value, MAX_COLUMN_WIDTH)
-                                                            .round() as u32;
-                                                        column_widths.update(|widths| {
-                                                            widths.insert(column_id.to_owned(), width);
-                                                        });
-                                                    }
-                                                }
                                                  on:keydown=move |event: web_sys::KeyboardEvent| {
                                                     if edit_locked.get_untracked() {
                                                         if matches!(event.key().as_str(), "ArrowLeft" | "ArrowRight" | "Home" | "End") {
@@ -2652,12 +2859,12 @@ where
                                                         }
                                                         return;
                                                     }
-                                                    let current_width = separator_parent_width(
-                                                        event.current_target().or_else(|| event.target()),
-                                                    )
-                                                    .or_else(|| column_widths.with_untracked(|widths| {
+                                                    let current_width = column_widths.with_untracked(|widths| {
                                                         widths.get(column_id).copied().map(f64::from)
-                                                    }))
+                                                    })
+                                                    .or_else(|| separator_parent_width(
+                                                        event.current_target().or_else(|| event.target()),
+                                                    ))
                                                     .unwrap_or(minimum_value);
                                                     let Some(requested_width) = keyboard_resized_width(
                                                         current_width,
@@ -2691,10 +2898,10 @@ where
                                                         .and_then(|element| element.parent_element())
                                                         .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
                                                         .map(|element| f64::from(element.offset_width()));
-                                                    let start_width = rendered_width
-                                                        .or_else(|| column_widths.with_untracked(|widths| {
+                                                    let start_width = column_widths.with_untracked(|widths| {
                                                             widths.get(column_id).copied().map(f64::from)
-                                                        }))
+                                                        })
+                                                        .or(rendered_width)
                                                         .unwrap_or_else(|| f64::from(minimum_width.unwrap_or(48)));
                                                     resize_drag.set(Some(ResizeDrag {
                                                         column_id: column_id.to_owned(),
@@ -2973,22 +3180,27 @@ where
             // page holding every row, so none of it would say anything true.
             {(!pagination.is_constrained_scroll()).then(|| view! {
             <div
-                class="flex shrink-0 flex-wrap items-center justify-between gap-3"
+                class="@container shrink-0 space-y-2"
                 data-entity-table-footer="true"
                 inert=move || edit_locked.get()
                 aria-disabled=move || edit_locked.get().then_some("true")
             >
-                <div class="flex min-w-0 flex-wrap items-center gap-3">
+                <div
+                    class="flex min-w-0 items-center justify-between gap-2"
+                    data-entity-table-footer-controls="true"
+                >
                     // Stable hook for tests and consumers. Positional queries such as
                     // `[data-entity-table] label select` used to find this control
                     // because it lived in the toolbar; ldui-z0n1 moved it to the
                     // footer, so the first label-select in the table is now the
                     // status filter and those queries silently read the wrong
                     // element. Identity should not depend on document order.
-                    <label data-entity-page-size-control="true" class="flex min-w-0 max-w-full flex-wrap items-center gap-2 text-sm text-base-content/75">
-                        <span class="min-w-0 break-words">{move || texts.with(|texts| texts.rows_per_page.clone())}</span>
+                    <label data-entity-page-size-control="true" class="flex min-w-0 items-center gap-2 text-sm text-base-content/75">
+                        <span class="hidden min-w-0 @sm:inline">{move || texts.with(|texts| texts.rows_per_page.clone())}</span>
                         <Select
-                            class="select-sm w-28 shrink-0"
+                            // Intrinsic sizing plus a 144px floor leaves the native arrow
+                            // clear of localized three-digit Auto labels.
+                            class="select-sm w-auto min-w-36 shrink-0"
                             id=page_size_select_id
                             name=page_size_select_id
                             label=Signal::derive(move || {
@@ -3034,12 +3246,103 @@ where
                             }).collect_view()}
                         </Select>
                     </label>
-                    // Stable hook, for the same reason as the page-size control above:
-                    // the row-range used to be reachable as the footer's
-                    // last-child span, and ldui-z0n1 regrouped the footer so
-                    // that query now returns null. Identity should not depend
-                    // on document position.
-                    <span data-entity-row-range="true" class="text-sm text-base-content/75">
+                <div data-entity-table-pagination="true" class="flex-none">
+                <Pagination class="max-w-full flex items-center justify-end gap-1">
+                    <Button
+                        class="join-item btn-sm btn-square gap-0"
+                        attr:data-entity-page="previous"
+                        attr:aria-label=move || texts.with(|texts| texts.previous.clone())
+                        attr:title=move || texts.with(|texts| texts.previous.clone())
+                        disabled=Signal::derive(move || current_page.get() == 0)
+                        on_click=Callback::new(move |_| {
+                            if edit_locked.get_untracked() {
+                                return;
+                            }
+                            current_page.update(|page| *page = page.saturating_sub(1));
+                        })
+                    >
+                        <span aria-hidden="true">"‹"</span>
+                    </Button>
+                    {move || {
+                        let slots = stable_entity_page_window(
+                            current_page.get(),
+                            total_pages.get(),
+                            MAX_VISIBLE_PAGES,
+                        );
+                        let placeholder_count = pagination_reservation
+                            .get()
+                            .0
+                            .saturating_sub(slots.len());
+                        slots.into_iter().map(|slot| match slot {
+                            PageSlot::Page(page) => view! {
+                                <Button
+                                    class=if page == current_page.get_untracked() {
+                                        "join-item btn-sm flex-none tabular-nums"
+                                    } else {
+                                        "join-item btn-sm hidden flex-none tabular-nums @sm:inline-flex"
+                                    }
+                                    attr:data-entity-page=(page + 1).to_string()
+                                    attr:data-entity-page-slot="true"
+                                    attr:aria-current=(page == current_page.get_untracked()).then_some("page")
+                                    attr:style=move || pagination_slot_style.get()
+                                    active=page == current_page.get()
+                                    disabled=page == current_page.get()
+                                    on_click=Callback::new(move |_| {
+                                        if !edit_locked.get_untracked() {
+                                            current_page.set(page);
+                                        }
+                                    })
+                                >
+                                    {(page + 1).to_string()}
+                                </Button>
+                            }.into_any(),
+                            PageSlot::Ellipsis => unreachable!("compact EntityTable pager never emits ellipses"),
+                        }).chain((0..placeholder_count).map(|_| view! {
+                            // Layout-only slots preserve the footer's wrapping
+                            // shape while a filter reduces the displayed page
+                            // count. They are not controls and stay out of the
+                            // accessibility tree.
+                            <span
+                                class="join-item btn btn-sm invisible pointer-events-none hidden flex-none @sm:inline-flex"
+                                style=move || pagination_slot_style.get()
+                                data-entity-page-slot="true"
+                                data-entity-page-placeholder="true"
+                                aria-hidden="true"
+                            />
+                        }.into_any()))
+                        .collect_view()}
+                    }
+                    <Button
+                        class="join-item btn-sm btn-square gap-0"
+                        attr:data-entity-page="next"
+                        attr:aria-label=move || texts.with(|texts| texts.next.clone())
+                        attr:title=move || texts.with(|texts| texts.next.clone())
+                        disabled=Signal::derive(move || {
+                            current_page.get() + 1 >= total_pages.get()
+                        })
+                        on_click=Callback::new(move |_| {
+                            if edit_locked.get_untracked() {
+                                return;
+                            }
+                            current_page.update(|page| {
+                                *page = page_plan.with_untracked(|plan| {
+                                    next_entity_page(*page, plan)
+                                });
+                            });
+                        })
+                    >
+                        <span aria-hidden="true">"›"</span>
+                    </Button>
+                </Pagination>
+                </div>
+                </div>
+                // The truthful range gets its own stable row, leaving the
+                // page-size selector and compact pager together above it.
+                <span class="grid max-w-full flex-none justify-end tabular-nums">
+                    <span
+                        data-entity-row-range="true"
+                        class="col-start-1 row-start-1 text-sm text-base-content/75"
+                    >
                         {move || {
                             let total = total_rows.get();
                             // Read off the plan, never multiplied out of the
@@ -3061,66 +3364,26 @@ where
                             })
                         }}
                     </span>
-                </div>
-                <Pagination class="max-w-full flex flex-wrap items-center justify-end gap-1">
-                    <Button
-                        class="join-item btn-sm"
-                        attr:data-entity-page="previous"
-                        disabled=Signal::derive(move || current_page.get() == 0)
-                        on_click=Callback::new(move |_| {
-                            if edit_locked.get_untracked() {
-                                return;
-                            }
-                            current_page.update(|page| *page = page.saturating_sub(1));
-                        })
-                    >
-                        {move || texts.with(|texts| texts.previous.clone())}
-                    </Button>
-                    {move || page_window(current_page.get(), total_pages.get(), MAX_VISIBLE_PAGES)
-                        .into_iter()
-                        .map(|slot| match slot {
-                            PageSlot::Page(page) => view! {
-                                <Button
-                                    class="join-item btn-sm"
-                                    attr:data-entity-page=(page + 1).to_string()
-                                    active=page == current_page.get()
-                                    disabled=page == current_page.get()
-                                    on_click=Callback::new(move |_| {
-                                        if !edit_locked.get_untracked() {
-                                            current_page.set(page);
-                                        }
-                                    })
-                                >
-                                    {(page + 1).to_string()}
-                                </Button>
-                            }.into_any(),
-                            PageSlot::Ellipsis => view! {
-                                <span class="join-item btn btn-sm btn-disabled" aria-hidden="true">"…"</span>
-                            }.into_any(),
-                        })
-                        .collect_view()}
-                    <Button
-                        class="join-item btn-sm"
-                        attr:data-entity-page="next"
-                        disabled=Signal::derive(move || {
-                            current_page.get() + 1 >= total_pages.get()
-                        })
-                        on_click=Callback::new(move |_| {
-                            if edit_locked.get_untracked() {
-                                return;
-                            }
-                            current_page.update(|page| {
-                                *page = clamp_page(
-                                    page.saturating_add(1),
-                                    page_size.get_untracked().rows(),
-                                    total_rows.get_untracked(),
-                                );
-                            });
-                        })
-                    >
-                        {move || texts.with(|texts| texts.next.clone())}
-                    </Button>
-                </Pagination>
+                    {move || {
+                        let empty_template = empty_row_range.get();
+                        let reservations = texts.with(|texts| {
+                            entity_row_range_reservations(
+                                texts,
+                                empty_template.as_deref(),
+                                source_data.with(|rows| rows.len()),
+                            )
+                        });
+                        reservations.into_iter().map(|reservation| view! {
+                            <span
+                                class="invisible col-start-1 row-start-1 text-sm text-base-content/75"
+                                data-entity-row-range-reservation="true"
+                                aria-hidden="true"
+                            >
+                                {reservation}
+                            </span>
+                        }).collect_view()
+                    }}
+                </span>
             </div>
             })}
         </section>

@@ -1,14 +1,15 @@
 # AiAssistantWorkspace: Office research and shared-component design
 
-Status: **Draft for the 4iiz-office agent's review and amendment. Not approved for implementation.**
+Status: **Office-reviewed; approved by the user for shared-library implementation on 2026-09-10.** Office adoption and the business-owner decisions in section 16.1 remain separately gated.
 
 Date: 2026-09-10. Proposed owner: `leptos-daisyui-rs` for the reusable UI;
 `4iiz-office` for its application adapter and services.
 
 The user requested research and this specification first, then review by the
-Office agent, **before Beads creation or implementation**. This document is not
-an implementation plan or a change to Office's approved backlog. No Beads,
-application code, provider sessions, or deployments were created for this research.
+Office agent, **before Beads creation or implementation**. Office's review was
+incorporated in `e738264`; the user subsequently approved proceeding. This
+document is not an implementation plan or a change to Office's approved backlog.
+The research itself created no application code, provider sessions, or deployments.
 
 ## 1. Recommendation
 
@@ -925,9 +926,9 @@ authorization and are proportional to the eventual changed surface.
 
 ## 15. Integration and compatibility constraints
 
-The proposed shared location is `src/components/ai_assistant_workspace/`, following
-the repository's component/type/text/test conventions. This is a proposed boundary,
-not authorization to create those source files now. Keep the public facade small;
+The shared location is `src/components/ai_assistant_workspace/`, following
+the repository's component/type/text/test conventions. Shared-library work is now
+authorized by the approval recorded above. Keep the public facade small;
 internal subviews are not automatically independent public APIs.
 
 Office's mapping belongs in shared satellite UI or a narrowly scoped adapter

@@ -112,10 +112,13 @@ pub fn format_softphone_duration(seconds: u64) -> String {
 }
 
 /// Controls the host supports; mute and keypad are enabled by default.
+/// Ending a call is opt-in because some managed bridges expose no hang-up route.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SoftphoneCapabilities {
     /// Supports mute requests.
     pub mute: bool,
+    /// Supports ending a live call.
+    pub end_call: bool,
     /// Supports hold and resume requests.
     pub hold: bool,
     /// Supports opaque voicemail routing requests.
@@ -132,6 +135,7 @@ impl Default for SoftphoneCapabilities {
     fn default() -> Self {
         Self {
             mute: true,
+            end_call: false,
             hold: false,
             voicemail: false,
             recording: false,
@@ -291,7 +295,9 @@ impl SoftphoneState {
             return false;
         }
         if matches!(action, SoftphoneAction::EndCall) {
-            return self.phase.is_live() && self.pending != Some(SoftphoneActionKind::EndCall);
+            return self.capabilities.end_call
+                && self.phase.is_live()
+                && self.pending != Some(SoftphoneActionKind::EndCall);
         }
         if self.pending.is_some() {
             return false;
@@ -428,6 +434,7 @@ mod tests {
             phone_id: "mobile".into()
         }));
         state.phase = SoftphonePhase::Active;
+        state.capabilities.end_call = true;
         assert_eq!(state.selected_number().unwrap().id, "mobile");
         assert!(state.can_dispatch(&SoftphoneAction::EndCall));
     }
@@ -435,6 +442,7 @@ mod tests {
     #[test]
     fn number_changes_and_calls_are_locked_during_live_phases() {
         let mut state = ready();
+        state.capabilities.end_call = true;
         for phase in [
             SoftphonePhase::Ready,
             SoftphonePhase::Dialing,
@@ -465,6 +473,7 @@ mod tests {
     fn pending_requests_preserve_end_escape_but_prevent_duplicate_end() {
         let mut state = ready();
         state.phase = SoftphonePhase::Active;
+        state.capabilities.end_call = true;
         state.pending = Some(SoftphoneActionKind::Mute);
         assert!(state.can_dispatch(&SoftphoneAction::EndCall));
         assert!(!state.can_dispatch(&SoftphoneAction::SetMuted(true)));
@@ -482,6 +491,7 @@ mod tests {
     fn commands_require_context_and_do_not_confirm_toggles() {
         let mut state = ready();
         state.phase = SoftphonePhase::Active;
+        state.capabilities.end_call = true;
         state.capabilities.recording = true;
         state.capabilities.transcription = true;
         let before = state.clone();
@@ -514,6 +524,7 @@ mod tests {
         let mut state = ready();
         state.capabilities = SoftphoneCapabilities {
             mute: true,
+            end_call: true,
             hold: true,
             voicemail: true,
             recording: true,
@@ -558,6 +569,7 @@ mod tests {
         state.phase = SoftphonePhase::Active;
         state.capabilities = SoftphoneCapabilities {
             mute: false,
+            end_call: false,
             hold: false,
             voicemail: false,
             recording: false,
@@ -573,6 +585,32 @@ mod tests {
             SoftphoneAction::SendDigit('1'),
         ] {
             assert!(!state.can_dispatch(&action));
+        }
+    }
+
+    #[test]
+    fn end_call_is_opt_in_and_required_in_every_live_phase() {
+        let mut state = ready();
+        assert!(!state.capabilities.end_call);
+
+        for phase in [
+            SoftphonePhase::Dialing,
+            SoftphonePhase::Ringing,
+            SoftphonePhase::Active,
+            SoftphonePhase::Held,
+            SoftphonePhase::Reconnecting,
+        ] {
+            state.phase = phase;
+            assert!(
+                !state.can_dispatch(&SoftphoneAction::EndCall),
+                "{phase:?} must not offer a command the host cannot perform"
+            );
+            state.capabilities.end_call = true;
+            assert!(
+                state.can_dispatch(&SoftphoneAction::EndCall),
+                "{phase:?} must retain the existing supported-host behavior"
+            );
+            state.capabilities.end_call = false;
         }
     }
 

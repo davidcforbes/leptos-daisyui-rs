@@ -9,6 +9,13 @@ performing an operation. The broader
 [workspace guide](client_call_workspace.md#api-migration) documents migration,
 typed refusal evidence, structured guidance and contact target selection.
 
+End-call capability (`ldui-qacu`): `SoftphoneCapabilities.end_call` is opt-in
+and defaults to `false`. Live calls still render the primary End call control,
+but it is disabled and uses `SoftphoneTexts.end_call_unavailable` as its
+accessible name until the host explicitly enables the operation. Add
+`end_call: true` only when the host can actually dispatch a hang-up request;
+`..Default::default()` keeps existing literals source-compatible and honest.
+
 For destination editing, contact-number writes, guidance and structured call
 records around this live console, use [ClientCallWorkspace](client_call_workspace.md).
 
@@ -86,7 +93,7 @@ Use a fresh `context_id` for every interaction, including a second call to the s
 | --- | --- |
 | Select number | Ready or Ended, valid unique nonblank ID and display number, no pending request. Emits `SelectNumber(id)`. |
 | Call | Ready or Ended, valid selected number, no pending request. Emits `Call { phone_id }`; host resolves the destination. |
-| End call | Any live phase. Remains available during another pending action; blocked while EndCall itself is pending. |
+| End call | Any live phase with `end_call` capability. Remains available during another pending action; blocked while EndCall itself is pending. Without capability, the primary control stays visible but disabled and announces `end_call_unavailable`. |
 | Mute / Unmute | Active or Held with mute capability; emits the desired boolean. |
 | Hold / Resume | Active to Held or Held to Active with hold capability; emits the desired boolean. |
 | Route to voicemail | Ringing, Active or Held with voicemail capability. The host defines the destination and routing semantics. |
@@ -94,7 +101,7 @@ Use a fresh `context_id` for every interaction, including a second call to the s
 | Transcribe / Stop transcribing | Active or Held with transcription capability; emits desired transcription state. |
 | Keypad | Active with keypad capability. Buttons emit only `0123456789*#`. No global keyboard interception. |
 
-Every command requires a nonblank context ID. Except End call, all commands are blocked while any request is pending. Unsupported optional actions are hidden; supported but currently unavailable actions are disabled. The callback guard repeats eligibility checks so synthetic events cannot bypass native disabled controls. Mute and keypad capabilities default to true; the other capabilities default to false. Enable only operations your host supports.
+Every command requires a nonblank context ID. Except a supported End call, all commands are blocked while any request is pending. Unsupported secondary actions are hidden; an unsupported End call remains visible but disabled so the live phase does not imply a hang-up route that does not exist. The callback guard repeats eligibility checks so synthetic events cannot bypass native disabled controls. Mute and keypad capabilities default to true; `end_call`, hold, voicemail, recording and transcription default to false. Enable only operations your host supports.
 
 `Ringing` describes lifecycle state; this version is an outgoing client call console and does not implement an incoming-call accept/reject workflow. Routing to voicemail does not imply that arbitrary providers support that operation. The host controls consent, authorization, errors and which controls it exposes.
 
@@ -110,7 +117,7 @@ On completion, the host explicitly supplies `Stopped { seconds }`; changing phas
 
 The console is full-width up to `max-w-md`, with a client header, contrasting duration band, two-column action grid and full-width primary call/end action. It fits an application sidebar, drawer or detail page. Keep it mounted above route changes if the application needs a persistent call surface. Client text wraps within the available width. Semantic colors respond to the host theme; labels accompany icons, and recording/transcription badges describe confirmed state.
 
-The dropdown has an accessible label. Toggle buttons expose `aria-pressed`, the keypad exposes expanded state and a named group, and each digit has a localized accessible label. Status and pending feedback are polite live regions; errors use an alert. The timer has an accessible name and `aria-live="off"` to avoid announcing every second. Normal Tab, Enter and Space behavior remains available, and typing notes elsewhere does not send DTMF.
+The dropdown has an accessible label. Toggle buttons expose `aria-pressed`, the keypad exposes expanded state and a named group, and each digit has a localized accessible label. An unsupported live End call is disabled before interaction and uses the localized `end_call_unavailable` copy as its accessible name; keep the visible End call text at the start of that copy. Status and pending feedback are polite live regions; errors use an alert. The timer has an accessible name and `aria-live="off"` to avoid announcing every second. Normal Tab, Enter and Space behavior remains available, and typing notes elsewhere does not send DTMF.
 
 Supply translated `SoftphoneTexts` reactively. The digit label is a template containing `{digit}`. Client data and host error messages are already display text and must be localized by the host. The showcase's Change labels control intentionally demonstrates partial translation, not a complete French locale.
 
@@ -118,7 +125,7 @@ Supply translated `SoftphoneTexts` reactively. The digit label is a template con
 
 Run `cargo test -p leptos-daisyui-rs --lib softphone` for pure state/eligibility and duration boundary tests. Run `cargo xtask test-softphone` for the self-hosted release browser suite. The lane is also included in `cargo xtask verify-full`.
 
-The [browser tests](../../tests/softphone_smoke.rs) interact with the real dropdown and buttons and read separate simulated host receipts. They exercise pending and rejected requests, duplicate guards, confirmed toggles, hold/resume, voicemail, elapsed/frozen duration, no-number and single-number states, capability omissions, label updates, keypad isolation, long text and compact layout. Scoped axe checks cover the console. Screenshots are written to `target/softphone-active.png` and `target/softphone-compact.png` for visual inspection.
+The [browser tests](../../tests/softphone_smoke.rs) interact with the real dropdown and buttons and read separate simulated host receipts. They exercise pending and rejected requests, duplicate guards, confirmed toggles, hold/resume, voicemail, elapsed/frozen duration, no-number and single-number states, capability omissions (including keyboard and forced-event rejection for unsupported End call), label updates, keypad isolation, long text and compact layout. Scoped axe checks cover the console. Screenshots are written to `target/softphone-active.png` and `target/softphone-compact.png` for visual inspection.
 
 In consuming applications, test the host's context and operation correlation, response rejection, end-call supersession and state projection independently. Then test the component with deterministic acknowledgments and clock updates. Actual audio, provider routing, microphone permissions and call reliability belong to the consuming application's integration tests; this library's simulation does not verify those behaviors.
 

@@ -1,6 +1,7 @@
 //! daisyUI components
 
 mod accordion;
+pub mod ai_assistant_workspace;
 mod ai_chat;
 mod alert;
 mod app_shell;

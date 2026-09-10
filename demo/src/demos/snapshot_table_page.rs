@@ -631,7 +631,7 @@ pub fn SnapshotTablePageControlsFixture() -> impl IntoView {
 
     view! {
         <section id="snapshot-controls-fixture" class="space-y-3">
-            <div class="h-[520px] min-h-0" data-testid="controls-height-budget">
+            <div class="flex h-[520px] min-h-0 flex-col" data-testid="controls-height-budget">
                 <SnapshotTablePage
                     contract_id="snapshot-controls"
                     state=state.into()
@@ -663,7 +663,6 @@ pub fn SnapshotTablePageControlsFixture() -> impl IntoView {
                     }.into_any())
                     entity_table=table
                     action_key_label=Rc::new(|key: &String| key.clone())
-                    class="h-full"
                 />
             </div>
             <div class="flex flex-wrap items-center gap-3 text-sm">
@@ -1283,6 +1282,11 @@ pub fn EntityTableViewportFitFixture() -> impl IntoView {
         ]
     });
     let texts = Signal::derive(move || EntityTableTexts {
+        rows_per_page_auto: if alternate_copy.get() {
+            "Automático ({rows})".to_owned()
+        } else {
+            EntityTableTexts::default().rows_per_page_auto
+        },
         rows_per_page: if alternate_copy.get() {
             "Rows per page used when the viewport is too short".to_owned()
         } else {
@@ -1307,6 +1311,12 @@ pub fn EntityTableViewportFitFixture() -> impl IntoView {
                 </Button>
                 <Button attr:data-testid="viewport-fit-tall" on_click=Callback::new(move |_| height.set(800))>
                     "Tall height"
+                </Button>
+                <Button attr:data-testid="viewport-fit-three-digits" on_click=Callback::new(move |_| {
+                    rows.set(build_rows(300));
+                    height.set(6000);
+                })>
+                    "Three-digit Auto capacity"
                 </Button>
                 <Button attr:data-testid="viewport-fit-short" on_click=Callback::new(move |_| height.set(180))>
                     "Short height"
@@ -2503,11 +2513,11 @@ fn group_paging_columns() -> Vec<EntityColumn<GroupPagingRow>> {
             row.measure.clone()
         })
         .required()
-        .with_min_width(240),
+        .with_width(240),
         EntityColumn::text("status", "Status", |row: &GroupPagingRow| {
             row.status.clone()
         })
-        .with_min_width(140),
+        .with_width(140),
         EntityColumn::new("value", "Value", |row: &GroupPagingRow| {
             row.value.to_string()
         })
@@ -2539,6 +2549,8 @@ struct NeighborRow {
 #[component]
 pub fn EntityTableGroupPagingFixture() -> impl IntoView {
     let source = RwSignal::new_local(group_paging_rows());
+    let resize_preferences = RwSignal::new(EntityTablePreferences::new(1));
+    let preference_proposals = RwSignal::new(0_u32);
     let status_filter = RwSignal::new(String::new());
     let empty_range_spanish = RwSignal::new(false);
     let accepted = RwSignal::new(BTreeSet::<String>::new());
@@ -2549,6 +2561,17 @@ pub fn EntityTableGroupPagingFixture() -> impl IntoView {
         let rows = source.get();
         if status.is_empty() {
             return rows;
+        }
+        if status == "Single" {
+            return Rc::new(rows.iter().take(1).cloned().collect::<Vec<_>>());
+        }
+        if status == "Adversarial" {
+            return Rc::new(
+                rows.iter()
+                    .filter(|row| row.value <= 14)
+                    .cloned()
+                    .collect::<Vec<_>>(),
+            );
         }
         Rc::new(
             rows.iter()
@@ -2583,21 +2606,27 @@ pub fn EntityTableGroupPagingFixture() -> impl IntoView {
         }
     });
 
-    let filters = vec![EntityColumnFilter::select(
-        "status",
-        "entity-group-paging-status-filter",
-        Signal::stored("Status".to_owned()),
-        Signal::derive(move || status_filter.get()),
-        Signal::stored("All statuses".to_owned()),
-        Signal::stored(vec![
-            EntityColumnFilterOption::new("Open", "Open"),
-            EntityColumnFilterOption::new("Closed", "Closed"),
-            // Matches nothing, so the projection empties while the provider
-            // stays full -- the only way to reach the filtered-empty copy.
-            EntityColumnFilterOption::new("Void", "Void"),
-        ]),
-        Callback::new(move |value: String| status_filter.set(value)),
-    )];
+    let group_filters = |control_id| {
+        vec![EntityColumnFilter::select(
+            "status",
+            control_id,
+            Signal::stored("Status".to_owned()),
+            Signal::derive(move || status_filter.get()),
+            Signal::stored("All statuses".to_owned()),
+            Signal::stored(vec![
+                EntityColumnFilterOption::new("Open", "Open"),
+                EntityColumnFilterOption::new("Closed", "Closed"),
+                EntityColumnFilterOption::new("Single", "Single row"),
+                EntityColumnFilterOption::new("Adversarial", "Four groups of fourteen"),
+                // Matches nothing, so the projection empties while the provider
+                // stays full -- the only way to reach the filtered-empty copy.
+                EntityColumnFilterOption::new("Void", "Void"),
+            ]),
+            Callback::new(move |value: String| status_filter.set(value)),
+        )]
+    };
+    let filters = group_filters("entity-group-paging-status-filter");
+    let min_rows_filters = group_filters("entity-group-paging-min-rows-status-filter");
 
     let neighbors = Signal::stored_local(Rc::new(
         (1..=3)
@@ -2614,6 +2643,12 @@ pub fn EntityTableGroupPagingFixture() -> impl IntoView {
             class="mx-auto max-w-4xl space-y-3 bg-base-100 p-4"
         >
             <h1 class="ld-text-display font-semibold">"Group-aware pagination"</h1>
+            <output hidden data-testid="group-paging-preferences">
+                {move || serde_json::to_string(&resize_preferences.get()).expect("fixture preferences")}
+            </output>
+            <output hidden data-testid="group-paging-preference-proposals">
+                {move || preference_proposals.get().to_string()}
+            </output>
             <p class="ld-text-body text-base-content/75">
                 "Three seventeen-row offices and one thirty-row office. A group that fits a page is never split to fill the previous page's remainder; one that cannot fit keeps its continuation heading."
             </p>
@@ -2657,9 +2692,17 @@ pub fn EntityTableGroupPagingFixture() -> impl IntoView {
                 columns=group_paging_columns()
                 row_key=Rc::new(|row: &GroupPagingRow| row.id.clone())
                 dataset_identity="entity-table-group-paging-fixture"
+                preference_ownership=EntityTablePreferenceOwnership::controlled(
+                    resize_preferences.into(),
+                    Callback::new(move |next| {
+                        preference_proposals.update(|count| *count += 1);
+                        resize_preferences.set(next);
+                    }),
+                )
                 page_reset_key=Signal::derive(move || status_filter.get())
-                viewport_fit=EntityTableViewportFit::max_height("22rem").with_min_rows(3)
+                viewport_fit=EntityTableViewportFit::max_height("23rem").with_min_rows(2)
                 column_filters=filters
+                column_chooser_trigger=EntityColumnChooserTrigger::Icon
                 texts=texts
                 empty_row_range=empty_row_range
                 control_id="group-paging-table"
@@ -2675,6 +2718,31 @@ pub fn EntityTableGroupPagingFixture() -> impl IntoView {
                 )
                 attr:id="entity-group-paging-table"
             />
+            // The same geometry with a three-row usability floor cannot call
+            // its two-row fit responsive. It keeps the configured 25-row page
+            // and scrolls, which is the documented viewport-fit fallback.
+            <div data-testid="entity-group-paging-min-rows-fallback" class="space-y-2">
+                <p class="text-sm text-base-content/75">
+                    "Minimum-three grouped fallback"
+                </p>
+                <EntityTable
+                    data=filtered
+                    source_data=source.into()
+                    columns=group_paging_columns()
+                    row_key=Rc::new(|row: &GroupPagingRow| row.id.clone())
+                    dataset_identity="entity-table-group-paging-min-rows"
+                    page_reset_key=Signal::derive(move || status_filter.get())
+                    viewport_fit=EntityTableViewportFit::max_height("23rem").with_min_rows(3)
+                    column_filters=min_rows_filters
+                    column_chooser_trigger=EntityColumnChooserTrigger::Icon
+                    control_id="group-paging-min-rows-table"
+                    row_grouping=EntityRowGrouping::controlled(
+                        Rc::new(|row: &GroupPagingRow| row.office.clone()),
+                        groups,
+                    )
+                    attr:id="entity-group-paging-min-rows-table"
+                />
+            </div>
             // A second mounted table with NO `control_id`: its minted prefix
             // must not collide with the one above, which is the "multiple
             // tables on one page" half of ldui-izkq.
@@ -2687,6 +2755,7 @@ pub fn EntityTableGroupPagingFixture() -> impl IntoView {
                 ]
                 row_key=Rc::new(|row: &NeighborRow| row.id.clone())
                 dataset_identity="entity-table-group-paging-neighbor"
+                column_chooser_trigger=EntityColumnChooserTrigger::Icon
                 multi_selection=EntityTableMultiSelection::controlled(
                     neighbor_accepted.into(),
                     Callback::new(move |proposal: EntityTableSelectionProposal| {

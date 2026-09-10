@@ -8,8 +8,8 @@ use super::types::{
     EntityTablePreferences,
 };
 use crate::components::data_table::{
-    ColumnVisibilityAction, MAX_COLUMN_WIDTH, clamp_page, column_visibility_action,
-    effective_min_width, page_bounds, resized_width,
+    ColumnVisibilityAction, MAX_COLUMN_WIDTH, PageSlot, clamp_page, column_visibility_action,
+    effective_min_width, page_bounds, page_window, resized_width,
 };
 use std::collections::BTreeSet;
 use std::ops::Range;
@@ -21,6 +21,52 @@ pub const ENTITY_PAGE_SIZE_CHOICES: [usize; 3] = [25, 50, 100];
 /// Returns whether a row count is one of the opinionated choices.
 pub fn valid_page_size(page_size: usize) -> bool {
     ENTITY_PAGE_SIZE_CHOICES.contains(&page_size)
+}
+
+/// Builds a compact consecutive page-number window containing the current
+/// page. It emits no ellipses and never exceeds `max_visible_pages`.
+pub(crate) fn stable_entity_page_window(
+    current: usize,
+    total: usize,
+    max_visible_pages: usize,
+) -> Vec<PageSlot> {
+    if total == 0 || max_visible_pages == 0 {
+        return Vec::new();
+    }
+    let visible = total.min(max_visible_pages);
+    if total <= visible {
+        return page_window(current, total, visible);
+    }
+    let current = current.min(total - 1);
+    let preferred_before = visible / 2;
+    let start = current
+        .saturating_sub(preferred_before)
+        .min(total - visible);
+    (start..start + visible).map(PageSlot::Page).collect()
+}
+
+/// Returns the slot count and page-number width an `EntityTable` pager must
+/// reserve to keep Auto measurement stable across local filtering.
+///
+/// `source_rows` is an intentionally conservative upper bound: a grouped page
+/// plan can hold as little as one source row per page, so deriving the reserve
+/// from `ceil(source_rows / capacity)` can still shrink when group boundaries
+/// change. Fixed page sizes do not participate in height measurement and keep
+/// their displayed-page geometry.
+pub(crate) fn entity_pagination_reservation(
+    displayed_pages: usize,
+    source_rows: usize,
+    auto_page_size: bool,
+    max_visible_pages: usize,
+) -> (usize, usize) {
+    let reserved_pages = if auto_page_size {
+        displayed_pages.max(source_rows)
+    } else {
+        displayed_pages
+    };
+    let slot_count = stable_entity_page_window(0, reserved_pages, max_visible_pages).len();
+    let digit_count = reserved_pages.max(1).to_string().len();
+    (slot_count, digit_count)
 }
 
 /// Resolves the one [`EntityPageSize`] a render is allowed to use.
@@ -513,6 +559,33 @@ pub fn set_preferred_width(
     preferences.column_widths.insert(column_id.into(), bounded);
 }
 
+/// Returns the declaration-owned default hidden set.
+///
+/// Required columns are excluded even when they were also marked
+/// [`EntityColumn::hidden_by_default`]. The same set seeds untouched
+/// preferences and defines the target of the Reset-columns affordance. If
+/// every declaration is optional and hidden by default, the first remains
+/// visible to preserve the table's last-visible-column invariant.
+pub fn default_hidden_columns<T>(columns: &[EntityColumn<T>]) -> BTreeSet<String> {
+    let mut hidden = columns
+        .iter()
+        .filter(|column| column.hidden_by_default && !column.required)
+        .map(|column| column.id.to_owned())
+        .collect::<BTreeSet<_>>();
+    if columns.iter().all(|column| hidden.contains(column.id))
+        && let Some(first) = columns.first()
+    {
+        hidden.remove(first.id);
+    }
+    hidden
+}
+
+fn preferences_are_untouched(preferences: &EntityTablePreferences) -> bool {
+    preferences.hidden_columns.is_empty()
+        && preferences.column_widths.is_empty()
+        && preferences.column_order.is_empty()
+}
+
 /// Toggles an optional column and refuses to hide required or last-visible columns.
 pub fn toggle_hidden_column<T>(
     preferences: &mut EntityTablePreferences,
@@ -591,6 +664,14 @@ fn normalize_preferences_in_place<T>(
             })
             .cloned(),
     );
+
+    // Normalization fills column_order below. An empty order therefore marks
+    // the one point at which declaration defaults may seed visibility; a
+    // normalized saved or controlled value (including explicit all-visible)
+    // keeps the user's choice.
+    if preferences_are_untouched(preferences) {
+        preferences.hidden_columns = default_hidden_columns(columns);
+    }
 
     let valid_column_ids = columns
         .iter()

@@ -105,7 +105,17 @@ fn managed_call_retains_end_during_pending_control_and_never_bypasses_dial_guard
     state.attempt = ClientCallAttempt::Managed;
     state.call.phase = SoftphonePhase::Active;
     state.call.pending = Some(SoftphoneActionKind::Record);
-    assert!(state.can_dispatch(&ClientCallAction::Session(SoftphoneAction::EndCall)));
+    let end_call = ClientCallAction::Session(SoftphoneAction::EndCall);
+    let end_command = ClientCallCommand {
+        context_id: state.call.context_id.clone(),
+        action: end_call.clone(),
+    };
+    assert!(!state.can_dispatch(&end_call));
+    assert!(!state.accepts(&end_command));
+
+    state.call.capabilities.end_call = true;
+    assert!(state.can_dispatch(&end_call));
+    assert!(state.accepts(&end_command));
     assert!(!state.can_dispatch(&ClientCallAction::Session(SoftphoneAction::SetMuted(true))));
     state.call.phase = SoftphonePhase::Ended;
     state.call.pending = None;

@@ -15,7 +15,7 @@ fn initial_state(context: &str) -> ClientCallWorkspaceState {
                 ],
             },
             selected_phone_id: Some("phone".into()),
-            capabilities: SoftphoneCapabilities { mute: true, hold: true, voicemail: true, recording: true, transcription: true, keypad: true },
+            capabilities: SoftphoneCapabilities { mute: true, end_call: true, hold: true, voicemail: true, recording: true, transcription: true, keypad: true },
             ..Default::default()
         },
         destination: "+1 (415) 555-0142".into(),

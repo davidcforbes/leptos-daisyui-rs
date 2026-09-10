@@ -1,7 +1,7 @@
 # Native select label overlaps its arrow
 
 **Status:** automated (browser geometry assertion, since 2026-09-09)
-**Seen in:** 4iiz-etl
+**Seen in:** 4iiz-etl, leptos-daisyui-rs, 4iiz-Office adoption
 
 ## What it looks like
 
@@ -29,3 +29,15 @@ measures rendered label text using the select's computed font, subtracts its
 computed inline padding from the actual control width, and requires a remaining
 gap. It covers one-, two-, and three-digit Auto counts, real keyboard selection,
 accepted state readback, and an 80px inject/catch/revert negative control.
+
+Include the actual localized three-digit option, not just a canvas estimate:
+`Automático (166)` needs more room than the English fixture. In the measured
+Windows Chromium font, the old 112px fixed width left -21.55px of clearance;
+intrinsic sizing with an 80px minimum left only 0.45px. The component now uses
+intrinsic sizing with a 144px minimum, which measured 10.45px for that label.
+These measurements explain the choice; the live computed-font assertion remains
+the authority for a different browser or locale.
+
+When injecting a narrow width, override `min-width` as well as `width` and restore
+both afterwards. Otherwise the production minimum defeats the injection and a
+failed negative control tells you nothing about the actual text detector.

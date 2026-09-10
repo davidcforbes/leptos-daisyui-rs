@@ -4,6 +4,8 @@ use leptos::{
     html::{Option_, Select as HtmlSelect},
     prelude::*,
 };
+use send_wrapper::SendWrapper;
+use wasm_bindgen::{JsCast, closure::Closure};
 
 /// # Select Component
 ///
@@ -91,11 +93,10 @@ pub fn Select(
 
     /// Opaque revision of the option set (`ldui-uxdw`).
     ///
-    /// Changing it re-asserts `value` against the DOM. Supply it whenever the
-    /// options can arrive or change **after** first render — otherwise the
-    /// browser's own choice (index 0) wins and the bound value is silently
-    /// lost. `children` is a `Children` closure, not a signal, so the
-    /// component cannot detect this by itself; the caller has to say.
+    /// Changing it re-asserts `value` against the DOM. Structural option changes
+    /// (including options nested in an optgroup) are also observed automatically,
+    /// because this effect can run before reactive children finish mounting.
+    /// Use this explicit hint for changes that do not replace child nodes.
     ///
     /// Any value that changes with the option set works: a length, a hash, a
     /// join of the option keys.
@@ -118,10 +119,10 @@ pub fn Select(
     // The selection was then silently wrong -- a real office name in the
     // caption, the alphabetically-first one in the control.
     //
-    // Tracking `options_revision` closes it: the caller names when the option
-    // set changed, and this effect re-asserts after the browser has rebuilt
-    // the list.
+    // A revision is only a hint: it can arrive before the child DOM is ready.
+    // The observer below reconciles against the actual structural change.
     if let Some(v) = value {
+        let wanted = StoredValue::new(String::new());
         Effect::new(move |_| {
             // Read FIRST and unconditionally, so it is a tracked dependency
             // even on the render where the value happens to be unchanged.
@@ -131,9 +132,46 @@ pub fn Select(
                 let _options_changed = revision.get();
             }
             let want = v.get();
+            wanted.set_value(want.clone());
             if let Some(el) = node_ref.get() {
                 el.set_value(&want);
             }
+        });
+        Effect::new(move |_| {
+            let Some(el) = node_ref.get() else {
+                return;
+            };
+            let target = el.clone();
+            let callback =
+                Closure::<dyn FnMut(js_sys::Array, web_sys::MutationObserver)>::new(move |_, _| {
+                    // A queued mutation can race owner disposal. Never read a
+                    // disposed reactive value or emit a synthetic user change.
+                    let Some(want) = wanted.try_get_value() else {
+                        return;
+                    };
+                    if target.value() != want {
+                        target.set_value(&want);
+                    }
+                });
+            let Ok(observer) = web_sys::MutationObserver::new(callback.as_ref().unchecked_ref())
+            else {
+                return;
+            };
+            let options = web_sys::MutationObserverInit::new();
+            options.set_child_list(true);
+            options.set_subtree(true);
+            if observer.observe_with_options(&el, &options).is_err() {
+                observer.disconnect();
+                return;
+            }
+            // The effect owns both resources. Disconnect before releasing the
+            // Rust closure; remounts must not accumulate leaked callbacks.
+            let guard = SendWrapper::new((observer, callback));
+            on_cleanup(move || {
+                let (observer, callback) = guard.take();
+                observer.disconnect();
+                drop(callback);
+            });
         });
     }
     // Wrapped in a `Field`? Pick up its association contract (id for the

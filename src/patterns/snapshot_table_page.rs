@@ -15,6 +15,19 @@ use leptos::prelude::*;
 use std::rc::Rc;
 use std::sync::Arc;
 
+fn snapshot_page_layout(
+    fit: Option<&EntityTableViewportFit>,
+) -> (&'static str, Option<&'static str>) {
+    if fit.is_some_and(|fit| fit.height().is_none()) {
+        (
+            "flex w-full min-w-0 flex-col gap-4 min-h-0 flex-1",
+            Some("flex min-h-0 flex-1 flex-col"),
+        )
+    } else {
+        ("flex w-full min-w-0 flex-col gap-4", None)
+    }
+}
+
 /// One typed dataset option used by the canonical selector config.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SnapshotDatasetOption<V> {
@@ -211,6 +224,9 @@ impl<R: 'static> SnapshotEntityTableConfig<R> {
     /// Opts the internally owned `EntityTable` into framework-measured
     /// viewport-fit paging. Presentation-only: the measured row capacity
     /// never changes persisted table preferences, rows, or dataset identity.
+    /// With `fill_parent`, mount the page in a definite-height flex column.
+    /// The page root and table slot then carry the remaining height budget;
+    /// natural and explicit `max_height` modes do not stretch the page.
     pub fn with_viewport_fit(mut self, viewport_fit: EntityTableViewportFit) -> Self {
         self.viewport_fit = Some(viewport_fit);
         self
@@ -601,11 +617,13 @@ where
     let filters_id = format!("{contract_id}-filters");
     let feedback_id = format!("{contract_id}-feedback");
     let table_id = format!("{contract_id}-table");
+    let (root_class, table_slot_class) =
+        entity_table.with_value(|config| snapshot_page_layout(config.viewport_fit.as_ref()));
 
     view! {
         <section
             id=contract_id
-            class=format!("flex w-full min-w-0 flex-col gap-4 {class}")
+            class=format!("{root_class} {class}")
             data-snapshot-table-page="true"
             data-snapshot-generation=move || generation_marker.get()
             data-snapshot-phase=move || state.with(|state| format!("{:?}", state.view(None).phase()))
@@ -685,7 +703,7 @@ where
             </div>
             <div
                 id=table_id
-                class="min-h-0 flex-1"
+                class=table_slot_class
                 data-snapshot-page-slot="table"
                 data-snapshot-generation=move || generation_marker.get()
             >
@@ -988,26 +1006,25 @@ mod tests {
         );
     }
 
-    /// The utility classes on a Leptos element are erased into macro output,
-    /// so this bounded source-topology check complements the real-browser
-    /// geometry and Auto-page-size assertions. The anchor is assembled to
-    /// prevent this test from satisfying its own search.
     #[test]
-    fn table_slot_carries_the_remaining_height_budget() {
-        let source = include_str!("snapshot_table_page.rs").replace("\r\n", "\n");
-        let production = source.split("#[cfg(test)]").next().unwrap_or(&source);
-        let anchor = ["<div\n", "                id=table_id"].concat();
-        let opening_tag = production
-            .split_once(&anchor)
-            .expect("SnapshotTablePage table-slot opening tag")
-            .1
-            .split_once('>')
-            .expect("SnapshotTablePage table-slot tag closes")
-            .0;
+    fn fill_parent_carries_the_budget_through_both_root_and_slot() {
+        let (root, slot) = snapshot_page_layout(Some(&EntityTableViewportFit::fill_parent()));
+        for classes in [root, slot.expect("filling table slot")] {
+            for required in ["flex", "flex-col", "min-h-0", "flex-1"] {
+                assert!(
+                    classes.split_whitespace().any(|class| class == required),
+                    "missing {required} in {classes}"
+                );
+            }
+        }
+    }
 
-        assert!(
-            opening_tag.contains("class=\"min-h-0 flex-1\""),
-            "the table slot must carry the flex column's remaining definite height: {opening_tag}"
-        );
+    #[test]
+    fn natural_and_explicit_height_do_not_stretch_the_page_or_slot() {
+        for fit in [None, Some(EntityTableViewportFit::max_height("24rem"))] {
+            let (root, slot) = snapshot_page_layout(fit.as_ref());
+            assert_eq!(root, "flex w-full min-w-0 flex-col gap-4");
+            assert!(slot.is_none());
+        }
     }
 }

@@ -631,6 +631,46 @@ pub async fn click_svg_fraction(h: &Harness, selector: &str, x_fraction: f64, y_
     tokio::time::sleep(std::time::Duration::from_millis(h.config().settle_ms)).await;
 }
 
+/// Drag `selector` horizontally with real CDP pointer input.
+pub async fn drag_horizontal(h: &Harness, selector: &str, delta_x: f64) {
+    let (start_x, y) = fraction_point(h, selector, 0.5, 0.5).await;
+    let end_x = start_x + delta_x;
+    let moved = DispatchMouseEventParams::builder()
+        .r#type(DispatchMouseEventType::MouseMoved)
+        .x(start_x)
+        .y(y)
+        .build()
+        .expect("drag mouse move params");
+    dispatch_mouse(h, moved, "drag MouseMoved").await;
+    let pressed = DispatchMouseEventParams::builder()
+        .r#type(DispatchMouseEventType::MousePressed)
+        .x(start_x)
+        .y(y)
+        .button(MouseButton::Left)
+        .click_count(1)
+        .build()
+        .expect("drag mouse press params");
+    dispatch_mouse(h, pressed, "drag MousePressed").await;
+    let dragged = DispatchMouseEventParams::builder()
+        .r#type(DispatchMouseEventType::MouseMoved)
+        .x(end_x)
+        .y(y)
+        .button(MouseButton::Left)
+        .build()
+        .expect("drag mouse drag params");
+    dispatch_mouse(h, dragged, "drag MouseMoved with button").await;
+    let released = DispatchMouseEventParams::builder()
+        .r#type(DispatchMouseEventType::MouseReleased)
+        .x(end_x)
+        .y(y)
+        .button(MouseButton::Left)
+        .click_count(1)
+        .build()
+        .expect("drag mouse release params");
+    dispatch_mouse(h, released, "drag MouseReleased").await;
+    tokio::time::sleep(std::time::Duration::from_millis(h.config().settle_ms)).await;
+}
+
 /// Install (or reset) one buffered `console.error` / `window.error` /
 /// `unhandledrejection` observer. Call once before a journey; read the
 /// buffer back with [`assert_no_browser_errors`] after it.

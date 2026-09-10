@@ -14,6 +14,11 @@ use leptos::{html::Div, prelude::*};
 ///
 /// ## Node References
 /// - `node_ref` - References the tooltip container `<div>` element ([HTMLDivElement](https://developer.mozilla.org/en-US/docs/Web/API/HTMLDivElement))
+///
+/// ## Spread attributes
+///
+/// Call-site `attr:`, `class:`, `style:`, and `on:` spread attributes land on
+/// the tooltip container `<div>`, which remains this component's single root.
 #[component]
 pub fn Tooltip(
     /// Tooltip text content (simple string tooltip)

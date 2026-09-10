@@ -147,9 +147,10 @@ Commands are requests; rendering does not optimistically confirm their effect.
 
 Contact saving blocks destination editing and launch, but does not block drafting
 notes. Pending/saved wrap-up freezes its fields and prevents launching another
-call against the completed record. End call remains possible while another live
-control is pending; a duplicate End request remains blocked. Application
-authorization still belongs in every host handler and server endpoint.
+call against the completed record. With the Softphone `end_call` capability,
+End call remains possible while another live control is pending; a duplicate
+End request remains blocked. Application authorization still belongs in every
+host handler and server endpoint.
 
 The Input, Textarea and Select callbacks restore the DOM value from host state
 after each proposal. A rejected edit therefore cannot leave the visible control
