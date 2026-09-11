@@ -65,6 +65,7 @@ following safe:
 | Prop | Purpose |
 |---|---|
 | `items: Signal<Vec<ResultListItem<T>>>` | Required. Keyed, typed results to display, top to bottom. |
+| `label: Signal<String>` | Required accessible name for the `role="listbox"` container; use the visible heading or an equivalent localized label. |
 | `empty_message: Signal<String>` | Message shown in place of the list when `items` is empty. Defaults to `"No results found."`. |
 | `on_select: Option<Callback<ResultListItem<T>>>` | Fired on activation (`Enter` or click) with the exact current `ResultListItem` for the activated key. Works identically whether selection is controlled or uncontrolled. |
 | `on_selection_change: Option<Callback<Option<String>>>` | **Uncontrolled only.** Fired whenever the highlighted **key** changes: keyboard nav, click, or the reconciliation that runs after `items` is replaced. Mutually exclusive with `selection`. |
