@@ -2730,7 +2730,7 @@ where
                                         {if sortable {
                                             Some(view! {
                                                 <Button
-                                                    class="btn-ghost btn-xs h-auto !min-h-0 w-full justify-start gap-1 rounded-sm px-0 py-1 text-left font-semibold text-table-header-content !shadow-none hover:bg-white/15 focus-visible:outline-white forced-colors:text-[CanvasText]"
+                                                    class="btn-ghost btn-xs h-auto !min-h-0 w-full justify-start gap-1 rounded-sm px-0 py-1 text-left font-semibold text-table-header-content !shadow-none hover:bg-white/15 focus-visible:!bg-table-header active:!bg-table-header focus-visible:!outline-table-header-content forced-colors:text-[CanvasText] forced-colors:focus-visible:!outline-[CanvasText]"
                                                     attr:data-entity-sort-column=column_id
                                                     attr:aria-label=sort_label
                                                     on:keydown=move |event: web_sys::KeyboardEvent| {

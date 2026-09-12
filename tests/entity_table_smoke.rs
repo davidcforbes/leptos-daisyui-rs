@@ -23,6 +23,84 @@ async fn eval_json(harness: &pixelproof_web::Harness, expression: &str) -> Value
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires release demo server (cargo xtask test-client-snapshot)"]
+async fn shared_entity_headers_keep_keyboard_focus_readable() {
+    let harness = harness_at("/components/client-snapshot-list").await;
+    begin_browser_error_capture(&harness).await;
+    let before = oracle(&harness).await;
+    common::table_header_focus::check(
+        &harness,
+        "[data-entity-sort-column='client']",
+        "entity-left",
+    )
+    .await;
+    assert_eq!(
+        oracle(&harness).await["state"],
+        before["state"],
+        "focus and hover must not change controlled state"
+    );
+    harness.press_key_sequence(&[Key::Enter]).await.unwrap();
+    common::table_header_focus::wait_sort(
+        &harness,
+        "[data-entity-sort-column='client']",
+        json!("ascending"),
+    )
+    .await;
+    assert_eq!(
+        common::table_header_focus::measure(&harness, "[data-entity-sort-column='client']").await["sort"],
+        "ascending"
+    );
+    common::table_header_focus::check(
+        &harness,
+        "[data-entity-sort-column='client']",
+        "entity-sorted",
+    )
+    .await;
+    assert_entity_projection_matches_wide_dom(&harness, "focused header sorted model").await;
+    harness.press_key_sequence(&[Key::Space]).await.unwrap();
+    common::table_header_focus::wait_sort(
+        &harness,
+        "[data-entity-sort-column='client']",
+        json!("descending"),
+    )
+    .await;
+    assert_eq!(
+        common::table_header_focus::measure(&harness, "[data-entity-sort-column='client']").await["sort"],
+        "descending",
+        "Space must cause exactly one sort transition"
+    );
+    assert_entity_projection_matches_wide_dom(&harness, "Space-sorted model").await;
+    click(&harness, "[data-entity-sort-column='client']").await;
+    assert_eq!(
+        common::table_header_focus::measure(&harness, "[data-entity-sort-column='client']").await["sort"],
+        Value::Null,
+        "click must restore system order exactly once"
+    );
+    harness
+        .navigate("/components/entity-table-presentation?pp-freeze=1")
+        .await
+        .unwrap();
+    wait_for_selector(&harness, "[data-entity-sort-column='number']").await;
+    common::table_header_focus::check(
+        &harness,
+        "[data-entity-sort-column='number']",
+        "entity-right",
+    )
+    .await;
+    harness
+        .set_viewport(ViewportSize::new(1440, 900))
+        .await
+        .unwrap();
+    common::table_header_focus::check(
+        &harness,
+        "[data-entity-sort-column='number']",
+        "entity-right-desktop-resize",
+    )
+    .await;
+    assert_no_browser_errors(&harness, "shared header focus").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
 async fn office_status_chip_and_wrapped_summary_remain_reactive() {
     let harness = harness_at("/components/office-select-regressions").await;

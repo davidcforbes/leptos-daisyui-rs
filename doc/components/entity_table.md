@@ -1520,6 +1520,13 @@ is an enforced consumer constraint. The default resize minimum is 48px.
 
 ### Interaction and accessibility release evidence
 
+Sortable headers must retain a coherent `table-header` / `table-header-content`
+color pair during keyboard focus and a held pointer press. Keep the focus ring
+visible; do not rely on a generic Ghost Button's base-theme focused background.
+The focused release-browser contract checks actual label and marker contrast,
+including opacity, real Tab/Enter/Space input, forced colors and desktop resize.
+See [the focus contrast rulebook](../visual-quality/sort-header-focus-contrast.md).
+
 A green screenshot, style audit, or layout audit is Layer A evidence; it does
 not prove that an interactive table is keyboard-operable or exposes accurate
 semantics. Before approving a table change, enumerate every supported operation

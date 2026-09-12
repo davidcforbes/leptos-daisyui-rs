@@ -182,7 +182,7 @@ pub fn DataTableHeader(
                                         <Button
                                             style=ButtonStyle::Ghost
                                             size=ButtonSize::Sm
-                                            class="h-auto !min-h-0 w-full justify-start gap-1 rounded-sm px-0 py-1 text-left font-semibold text-table-header-content !shadow-none hover:bg-white/15 focus-visible:outline-white forced-colors:text-[CanvasText]"
+                                            class="group/table-sort h-auto !min-h-0 w-full justify-start gap-1 rounded-sm px-0 py-1 text-left font-semibold text-table-header-content !shadow-none hover:bg-white/15 focus-visible:!bg-table-header active:!bg-table-header focus-visible:!outline-table-header-content forced-colors:text-[CanvasText] forced-colors:focus-visible:!outline-[CanvasText]"
                                             attr:data-table-sort-column=col_id
                                             attr:aria-label=sort_label
                                             on_click=Callback::new(move |_| on_sort.run(col_id))
@@ -202,7 +202,7 @@ pub fn DataTableHeader(
                                                     if sort_column.get() == Some(col_id) {
                                                         "inline-flex w-4 shrink-0 justify-center text-xs opacity-100"
                                                     } else {
-                                                        "inline-flex w-4 shrink-0 justify-center text-xs opacity-60 forced-colors:opacity-100"
+                                                        "inline-flex w-4 shrink-0 justify-center text-xs opacity-60 group-hover/table-sort:opacity-100 group-focus-visible/table-sort:opacity-100 group-active/table-sort:opacity-100 forced-colors:opacity-100"
                                                     }
                                                 }
                                             >

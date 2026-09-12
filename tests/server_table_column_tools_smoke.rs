@@ -44,6 +44,52 @@ async fn eval_json(harness: &pixelproof_web::Harness, expression: &str) -> Value
 
 const HISTORY_ROOT: &str = "#server-entity-history";
 
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires release demo server (cargo xtask test-server-table-column-tools)"]
+async fn shared_server_headers_keep_keyboard_focus_readable() {
+    let harness = harness_at("/components/data-table").await;
+    wait_for_selector(&harness, "#server-entity-history tbody tr[data-row-key]").await;
+    begin_browser_error_capture(&harness).await;
+    let before = history_snapshot(&harness).await;
+    common::table_header_focus::check(
+        &harness,
+        "#server-entity-history [data-table-sort-column='started_at']",
+        "server-history",
+    )
+    .await;
+    assert_eq!(
+        history_snapshot(&harness).await,
+        before,
+        "focus/hover must not propose, fetch, save preferences, or change accepted rows"
+    );
+    let mut token = before["proposals"].as_u64().unwrap();
+    for (key, direction) in [
+        (pixelproof_web::Key::Enter, "ascending"),
+        (pixelproof_web::Key::Space, "descending"),
+    ] {
+        harness.press_key_sequence(&[key]).await.unwrap();
+        token += 1;
+        let accepted = wait_for_history_query(&harness, token, |query| {
+            query["sort"]["column"] == "started_at" && query["sort"]["order"] == direction
+        })
+        .await;
+        assert_eq!(accepted["acceptedIds"], accepted["domIds"]);
+        assert_eq!(accepted["preferences"], before["preferences"]);
+        common::table_header_focus::check(
+            &harness,
+            "#server-entity-history [data-table-sort-column='started_at']",
+            &format!("server-history-{direction}"),
+        )
+        .await;
+        assert_eq!(
+            history_snapshot(&harness).await,
+            accepted,
+            "focused active header must not issue a second query"
+        );
+    }
+    assert_no_browser_errors(&harness, "shared server header focus").await;
+}
+
 async fn history_snapshot(harness: &pixelproof_web::Harness) -> Value {
     eval_json(
         harness,

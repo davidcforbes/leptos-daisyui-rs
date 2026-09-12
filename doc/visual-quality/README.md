@@ -59,6 +59,8 @@ Every file in this directory follows the same shape:
 
 Column resize geometry: [Resizing one column changes its neighbors](redistributed-table-resize.md).
 
+Keyboard focus: [Sortable header ink disappears on focus](sort-header-focus-contrast.md).
+
 | Entry | Status | Family | What it looks like |
 |---|---|---|---|
 | [`fallback-font.md`](./fallback-font.md) | automated | typography | Text renders in the platform default font instead of the declared one — looks "slightly off", nobody files it. Both failure modes caught since 2026-08-09 — but only if the profile pins a **real family name**, never a CSS generic |

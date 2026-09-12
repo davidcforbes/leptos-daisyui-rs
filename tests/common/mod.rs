@@ -22,6 +22,8 @@
 // helper unused by one binary would warn there.
 #![allow(dead_code)]
 
+pub mod table_header_focus;
+
 use pixelproof_web::{Harness, HarnessConfig, ViewportSize};
 use std::path::PathBuf;
 
