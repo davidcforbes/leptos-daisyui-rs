@@ -8,6 +8,7 @@ mod backend;
 mod memory;
 mod model;
 mod state;
+mod texts;
 
 pub use backend::{HelpdeskBackend, HelpdeskFuture};
 #[cfg(feature = "test-mode")]
@@ -21,3 +22,4 @@ pub use state::{
     Bucket, BucketCounts, NewTicketCaps, NewTicketError, RoleCapabilities, TicketFilter,
     bucket_counts, relative_age, validate_new_ticket,
 };
+pub use texts::HelpdeskTexts;
