@@ -3,9 +3,15 @@
 //! See `doc/plans/2026-09-14-helpdesk-composite-design.md` for the design
 //! and `doc/components/helpdesk.md` for the consumer guide.
 
+mod backend;
+#[cfg(feature = "test-mode")]
+mod memory;
 mod model;
 mod state;
 
+pub use backend::{HelpdeskBackend, HelpdeskFuture};
+#[cfg(feature = "test-mode")]
+pub use memory::{BackendCall, HelpdeskFault, InMemoryHelpdeskBackend, SEED_ME, SEED_NOW_MS};
 pub use model::{
     HelpdeskError, HelpdeskErrorKind, HelpdeskMeta, HelpdeskRole, HelpdeskTicket, ImageAttachment,
     NewTicket, Person, PriorityOption, RequestContext, StatusCategory, TicketAttachment,
