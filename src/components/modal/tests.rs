@@ -224,3 +224,47 @@ fn modal_builds_in_uncontrolled_and_controlled_modes() {
         children: ToChildren::to_children(|| view! { "controlled" }),
     });
 }
+
+/// Office op-v4yq1: the Large size carries the fill geometry the Account
+/// Notes edit dialog needs (most of the viewport, a flex column), and the
+/// default adds nothing to daisyUI's `.modal-box`.
+///
+/// BREAK: drop `flex-col` (or `h-[85vh]`) from `ModalSize::Large::as_class`;
+/// the class assertions fail.
+#[test]
+fn modal_size_large_emits_the_fill_classes_and_default_adds_none() {
+    assert_eq!(ModalSize::default(), ModalSize::Default);
+    assert_eq!(ModalSize::Default.as_class(), "");
+    let large = ModalSize::Large.as_class();
+    for class in [
+        "max-w-5xl",
+        "w-11/12",
+        "h-[85vh]",
+        "max-h-[85vh]",
+        "flex",
+        "flex-col",
+    ] {
+        assert!(
+            large.split_whitespace().any(|c| c == class),
+            "ModalSize::Large must carry {class}: {large}"
+        );
+    }
+    assert!(
+        !large.contains("max-w-2xl"),
+        "the page-local width this replaces must not come back: {large}"
+    );
+    assert_eq!(ModalSize::Large.as_str(), "large");
+    assert_eq!(ModalSize::Default.as_str(), "default");
+}
+
+/// The prop exists and the component builds with it (signature drift guard,
+/// same shape as the row smoke tests above).
+#[test]
+fn modal_box_builds_with_a_size() {
+    let _ = ModalBox(ModalBoxProps {
+        class: "",
+        size: ModalSize::Large,
+        node_ref: NodeRef::new(),
+        children: ToChildren::to_children(|| view! { "body" }),
+    });
+}

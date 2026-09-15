@@ -1,14 +1,19 @@
 //! Public types used to configure a typed entity table.
 
+use super::component::EntityRowAction;
 use super::date_filter::{EntityDateBound, EntityDateFilterCause, EntityDateFilterProposal};
 use super::draft_edit::{EntityCellEditor, EntityEditOutcome, EntityEditTarget};
 use crate::components::badge::{BadgeColor, BadgeStyle};
+use crate::components::button::Button;
+use crate::components::icon::{Icon, IconSize};
 use crate::components::input::{Input, InputSize, InputType};
 use crate::components::select::{Select, SelectSize};
+use leptos::ev::MouseEvent;
 use leptos::html::{Input as HtmlInput, Select as HtmlSelect};
 use leptos::prelude::{
-    AddAnyAttr, AnyView, Callable, Callback, ClassAttribute, CollectView, ElementChild, Get,
-    GetUntracked, GlobalAttributes, IntoAny, LocalStorage, NodeRef, Signal, view,
+    AddAnyAttr, AnyView, Callable, Callback, ClassAttribute, CollectView, CustomAttribute,
+    ElementChild, Get, GetUntracked, GetValue, GlobalAttributes, IntoAny, LocalStorage, NodeRef,
+    Signal, StoredValue, view,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::cmp::Ordering;
@@ -1409,6 +1414,181 @@ impl EntityColumnKind {
     }
 }
 
+/// How a column takes part in the framework-owned filter row (Office
+/// op-ulgfu: *the standard record-list page has the filter row on every
+/// column*).
+///
+/// This is a DECLARATION on the column; the controls, their values and the
+/// row predicate are built from it by
+/// [`EntityAutoFilters`](super::EntityAutoFilters), so a consumer that wants
+/// the standard behavior writes `.filterable()` per column and nothing else.
+/// A consumer that owns its own filter state keeps using
+/// [`EntityColumnFilter`] directly and leaves this at its default; the two
+/// paths never mix on one table.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum EntityColumnFilterMode {
+    /// No framework-built filter for this column. The default, so an
+    /// existing table gains no filter row until it asks.
+    #[default]
+    None,
+    /// Let the framework choose the control from the column's own
+    /// declaration: a column that renders its values as a semantic
+    /// [`EntityCellPresentation::Badge`] is categorical and gets an option
+    /// list of its distinct values; every other column gets a text box that
+    /// matches a case-insensitive substring of the cell text. See
+    /// [`EntityColumn::resolved_filter_kind`].
+    Auto,
+    /// A text box regardless of presentation.
+    Text,
+    /// An option list of the column's distinct cell texts regardless of
+    /// presentation -- a plain-text status column, for instance.
+    Options,
+}
+
+impl EntityColumnFilterMode {
+    /// Stable marker for tests and audits.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            EntityColumnFilterMode::None => "none",
+            EntityColumnFilterMode::Auto => "auto",
+            EntityColumnFilterMode::Text => "text",
+            EntityColumnFilterMode::Options => "options",
+        }
+    }
+}
+
+/// The control a column's [`EntityColumnFilterMode`] resolves to once its
+/// presentation is known -- the only two kinds a framework-built filter
+/// renders. Date filters stay explicit ([`EntityColumnFilter::date`]) because
+/// they need a typed accessor, not cell text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum EntityResolvedFilterKind {
+    /// Case-insensitive substring match on the cell text.
+    Text,
+    /// Exact match against one of the column's distinct cell texts.
+    Options,
+}
+
+impl EntityResolvedFilterKind {
+    /// Stable marker for tests and audits; matches the
+    /// `data-entity-filter-kind` the rendered control carries.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            EntityResolvedFilterKind::Text => "text",
+            EntityResolvedFilterKind::Options => "select",
+        }
+    }
+}
+
+/// The per-row Edit and Delete affordances of the standard record-list page
+/// (Office op-ulgfu, owner rule 2026-09-14), rendered by
+/// [`EntityColumn::row_actions`] as the table's LAST column.
+///
+/// Both callbacks receive a CLONE of the typed row. Delete is a plain
+/// callback: the framework does not confirm, because the confirmation copy
+/// ("Delete the note from 12 May?") is domain copy and the destructive
+/// action is the consumer's four-part mutation. The component owns the
+/// icons, the button shape, the `data-entity-row-actions` hooks, and the
+/// accessible-name grammar `"<verb label> <row label>"` -- e.g. `"Edit
+/// Acme Holdings"`, `"Eliminar Acme Holdings"` -- so a screen-reader user
+/// hears WHICH of thirty identical pencils this is. Labels are `Signal`s so
+/// a locale change re-reads them without rebuilding the column.
+pub struct EntityRowActions<T: 'static> {
+    /// Opens the record's edit dialog. `None` renders no pencil.
+    pub on_edit: Option<Callback<T>>,
+    /// Requests deletion of the record. `None` renders no trash can. The
+    /// CONSUMER confirms before it mutates.
+    pub on_delete: Option<Callback<T>>,
+    /// Names one row for the accessible names -- the record's own name,
+    /// never a generic "row 3".
+    pub row_label: Rc<dyn Fn(&T) -> String>,
+    /// The consumer-localized verb for the pencil, e.g. "Edit" / "Editar".
+    pub edit_label: Signal<String>,
+    /// The consumer-localized verb for the trash can, e.g. "Delete" /
+    /// "Eliminar".
+    pub delete_label: Signal<String>,
+}
+
+impl<T: 'static> Clone for EntityRowActions<T> {
+    fn clone(&self) -> Self {
+        Self {
+            on_edit: self.on_edit,
+            on_delete: self.on_delete,
+            row_label: Rc::clone(&self.row_label),
+            edit_label: self.edit_label,
+            delete_label: self.delete_label,
+        }
+    }
+}
+
+impl<T: 'static> fmt::Debug for EntityRowActions<T> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("EntityRowActions")
+            .field("has_edit", &self.on_edit.is_some())
+            .field("has_delete", &self.on_delete.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+impl<T: 'static> EntityRowActions<T> {
+    /// Actions with neither callback yet; add them with [`Self::edit`] and
+    /// [`Self::delete`]. `row_label` names the record in each button's
+    /// accessible name.
+    pub fn new(
+        row_label: impl Fn(&T) -> String + 'static,
+        edit_label: impl Into<Signal<String>>,
+        delete_label: impl Into<Signal<String>>,
+    ) -> Self {
+        Self {
+            on_edit: None,
+            on_delete: None,
+            row_label: Rc::new(row_label),
+            edit_label: edit_label.into(),
+            delete_label: delete_label.into(),
+        }
+    }
+
+    /// Renders the pencil and routes it to `on_edit`.
+    #[must_use]
+    pub fn edit(mut self, on_edit: Callback<T>) -> Self {
+        self.on_edit = Some(on_edit);
+        self
+    }
+
+    /// Renders the trash can and routes it to `on_delete`.
+    #[must_use]
+    pub fn delete(mut self, on_delete: Callback<T>) -> Self {
+        self.on_delete = Some(on_delete);
+        self
+    }
+
+    /// Whether at least one action would render.
+    pub const fn is_empty(&self) -> bool {
+        self.on_edit.is_none() && self.on_delete.is_none()
+    }
+
+    /// The accessible name of one action button: the verb label, a space,
+    /// the row's label. One grammar for both verbs and both locales.
+    pub fn accessible_name(verb: &str, row_label: &str) -> String {
+        let verb = verb.trim();
+        let row_label = row_label.trim();
+        match (verb.is_empty(), row_label.is_empty()) {
+            (true, true) => String::new(),
+            (false, true) => verb.to_owned(),
+            (true, false) => row_label.to_owned(),
+            (false, false) => format!("{verb} {row_label}"),
+        }
+    }
+}
+
+/// Stable `data-entity-row-actions` value on the cell wrapper.
+pub const ENTITY_ROW_ACTIONS_CELL_MARKER: &str = "true";
+/// The `action_id` the pencil registers with focus recovery.
+pub const ENTITY_ROW_ACTION_EDIT: &str = "edit";
+/// The `action_id` the trash can registers with focus recovery.
+pub const ENTITY_ROW_ACTION_DELETE: &str = "delete";
+
 /// Column behavior and borrowed-row callbacks for [`EntityTable`](super::EntityTable).
 pub struct EntityColumn<T> {
     /// Stable identifier used by sort and persisted preferences.
@@ -1455,6 +1635,13 @@ pub struct EntityColumn<T> {
     /// column stays read-only even in a live row, which is the right answer
     /// for a derived or action column.
     pub editor: Option<EntityCellEditor<T>>,
+    /// How this column joins the framework-built filter row (Office
+    /// op-ulgfu). Default [`EntityColumnFilterMode::None`]; set via
+    /// [`EntityColumn::filterable`], [`EntityColumn::filterable_text`],
+    /// [`EntityColumn::filterable_options`]. Read by
+    /// [`EntityAutoFilters`](super::EntityAutoFilters); the table itself
+    /// never reads it.
+    pub filter_mode: EntityColumnFilterMode,
 }
 
 pub(crate) fn entity_inline_edit_host_id<T>(
@@ -1648,6 +1835,7 @@ impl<T> Clone for EntityColumn<T> {
             comparator: self.comparator.as_ref().map(Rc::clone),
             sort_key: self.sort_key.as_ref().map(Rc::clone),
             editor: self.editor.clone(),
+            filter_mode: self.filter_mode,
         }
     }
 }
@@ -1670,6 +1858,7 @@ impl<T> fmt::Debug for EntityColumn<T> {
             .field("alignment", &self.alignment)
             .field("kind", &self.kind)
             .field("presentation", &self.presentation)
+            .field("filter_mode", &self.filter_mode)
             .finish_non_exhaustive()
     }
 }
@@ -1705,6 +1894,7 @@ impl<T: 'static> EntityColumn<T> {
                 comparator_text(row).to_lowercase()
             })),
             editor: None,
+            filter_mode: EntityColumnFilterMode::None,
         }
     }
 
@@ -1771,6 +1961,63 @@ impl<T: 'static> EntityColumn<T> {
     pub fn required(mut self) -> Self {
         self.required = true;
         self
+    }
+
+    /// Joins the framework-built filter row, letting the column's own
+    /// declaration pick the control ([`EntityColumnFilterMode::Auto`]): a
+    /// badge-presented column gets an option list, any other column a text
+    /// box. This is the one call the standard record-list page makes on
+    /// every column (Office op-ulgfu); build the controls with
+    /// [`EntityAutoFilters`](super::EntityAutoFilters).
+    ///
+    /// An action column (`is_action`) never filters, whatever this says.
+    #[must_use]
+    pub fn filterable(mut self) -> Self {
+        self.filter_mode = EntityColumnFilterMode::Auto;
+        self
+    }
+
+    /// Joins the framework-built filter row with a substring text box.
+    #[must_use]
+    pub fn filterable_text(mut self) -> Self {
+        self.filter_mode = EntityColumnFilterMode::Text;
+        self
+    }
+
+    /// Joins the framework-built filter row with an option list of the
+    /// column's distinct cell texts.
+    #[must_use]
+    pub fn filterable_options(mut self) -> Self {
+        self.filter_mode = EntityColumnFilterMode::Options;
+        self
+    }
+
+    /// Leaves this column out of the framework-built filter row.
+    #[must_use]
+    pub fn not_filterable(mut self) -> Self {
+        self.filter_mode = EntityColumnFilterMode::None;
+        self
+    }
+
+    /// The control this column's [`EntityColumn::filter_mode`] resolves to,
+    /// or `None` when it declares no framework-built filter or is an action
+    /// column. [`EntityColumnFilterMode::Auto`] reads the presentation: a
+    /// [`EntityCellPresentation::Badge`] is categorical by declaration and
+    /// resolves to [`EntityResolvedFilterKind::Options`]; everything else
+    /// resolves to [`EntityResolvedFilterKind::Text`].
+    pub fn resolved_filter_kind(&self) -> Option<EntityResolvedFilterKind> {
+        if self.is_action {
+            return None;
+        }
+        match self.filter_mode {
+            EntityColumnFilterMode::None => None,
+            EntityColumnFilterMode::Text => Some(EntityResolvedFilterKind::Text),
+            EntityColumnFilterMode::Options => Some(EntityResolvedFilterKind::Options),
+            EntityColumnFilterMode::Auto => Some(match self.presentation {
+                Some(EntityCellPresentation::Badge(_)) => EntityResolvedFilterKind::Options,
+                _ => EntityResolvedFilterKind::Text,
+            }),
+        }
     }
 
     /// Starts this column hidden until the user records a visibility choice.
@@ -2014,6 +2261,115 @@ impl<T: 'static> EntityColumn<T> {
     pub fn non_resizable(mut self) -> Self {
         self.resizable = false;
         self
+    }
+}
+
+impl<T: Clone + 'static> EntityColumn<T> {
+    /// The standard record-list page's Actions column (Office op-ulgfu):
+    /// a required, non-resizable, end-aligned action column rendered LAST,
+    /// carrying a pencil (`Edit`) and a trash can (`Delete`) per row.
+    ///
+    /// `header` is the consumer-localized column title ("Actions" /
+    /// "Acciones"), exactly like every other column's header: the consumer
+    /// rebuilds its columns on a locale change, which is how headers change
+    /// everywhere in this table. The verb labels inside `actions` are
+    /// `Signal`s and are re-read live.
+    ///
+    /// Row activation (`on_row_activate`) is suppressed inside this cell
+    /// because it is an action column; each button also stops its click
+    /// from propagating, so pressing Delete never also opens the record.
+    /// Both buttons register with focus recovery under the stable ids
+    /// [`ENTITY_ROW_ACTION_EDIT`] and [`ENTITY_ROW_ACTION_DELETE`], so
+    /// deleting a row lands focus on the same control of a neighbour.
+    ///
+    /// ```rust,ignore
+    /// EntityColumn::row_actions(
+    ///     "actions",
+    ///     t("actions"),
+    ///     EntityRowActions::new(|r: &Note| r.title.clone(), t_edit, t_delete)
+    ///         .edit(open_edit_dialog)
+    ///         .delete(confirm_then_delete),
+    /// )
+    /// ```
+    pub fn row_actions(
+        id: &'static str,
+        header: impl Into<String>,
+        actions: EntityRowActions<T>,
+    ) -> Self {
+        let EntityRowActions {
+            on_edit,
+            on_delete,
+            row_label,
+            edit_label,
+            delete_label,
+        } = actions;
+        let text_row_label = Rc::clone(&row_label);
+        let column = Self::action(id, header, move |row: &T| text_row_label(row))
+            .required()
+            .non_resizable()
+            .align_end();
+        column.render_with(move |row: &T| {
+            let name = row_label(row);
+            let edit = on_edit.map(|callback| {
+                // `Callback::new` requires Send + Sync; a `T` row is neither in
+                // general. A LocalStorage handle is, and the click reads it back
+                // (single-threaded in the browser; the same shape as auto_filters).
+                let row = StoredValue::new_local(row.clone());
+                let name = name.clone();
+                let label =
+                    move || EntityRowActions::<T>::accessible_name(&edit_label.get(), &name);
+                let title = label.clone();
+                view! {
+                    <EntityRowAction action_id=ENTITY_ROW_ACTION_EDIT>
+                        <Button
+                            class="btn-ghost btn-xs btn-square"
+                            attr:data-entity-row-action-kind=ENTITY_ROW_ACTION_EDIT
+                            attr:aria-label=label
+                            attr:title=title
+                            on_click=Callback::new(move |event: MouseEvent| {
+                                event.stop_propagation();
+                                callback.run(row.get_value());
+                            })
+                        >
+                            <Icon name="pencil" size=IconSize::XSmall />
+                        </Button>
+                    </EntityRowAction>
+                }
+            });
+            let delete = on_delete.map(|callback| {
+                let row = StoredValue::new_local(row.clone());
+                let name = name.clone();
+                let label =
+                    move || EntityRowActions::<T>::accessible_name(&delete_label.get(), &name);
+                let title = label.clone();
+                view! {
+                    <EntityRowAction action_id=ENTITY_ROW_ACTION_DELETE>
+                        <Button
+                            class="btn-ghost btn-xs btn-square text-error"
+                            attr:data-entity-row-action-kind=ENTITY_ROW_ACTION_DELETE
+                            attr:aria-label=label
+                            attr:title=title
+                            on_click=Callback::new(move |event: MouseEvent| {
+                                event.stop_propagation();
+                                callback.run(row.get_value());
+                            })
+                        >
+                            <Icon name="trash" size=IconSize::XSmall />
+                        </Button>
+                    </EntityRowAction>
+                }
+            });
+            view! {
+                <div
+                    class="flex items-center justify-end gap-1"
+                    data-entity-row-actions=ENTITY_ROW_ACTIONS_CELL_MARKER
+                >
+                    {edit}
+                    {delete}
+                </div>
+            }
+            .into_any()
+        })
     }
 }
 

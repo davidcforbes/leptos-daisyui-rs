@@ -1,6 +1,6 @@
 //! Dataset selection that is structurally separate from local filters.
 
-use crate::components::{Button, Select};
+use crate::components::{Button, Select, SelectSize};
 use leptos::prelude::*;
 
 /// Reactive framework-owned copy for dataset replacement presentation.
@@ -73,10 +73,39 @@ pub(super) const fn selector_disabled(disabled: bool, _loading: bool) -> bool {
     disabled
 }
 
+/// Whether the selector renders its framework-owned "Showing {dataset}" /
+/// "Loading {dataset}" caption (Office op-v7c5g).
+///
+/// The caption exists so a page whose select sits far from its table can
+/// still say which dataset the rows belong to. The `compact` variant is the
+/// portfolio rule for an office scope selector centred in the page header:
+/// the bare select IS the statement of which office is showing, so the
+/// caption would say it twice. A caller-supplied `status` child also
+/// replaces the caption, exactly as before.
+pub const fn dataset_selector_shows_caption(compact: bool, has_custom_status: bool) -> bool {
+    !compact && !has_custom_status
+}
+
 /// Selector whose value determines which complete dataset is downloaded.
 ///
 /// This component deliberately exposes `data-resettable-filter="false"` and
 /// lives in the page-header dataset slot, not in [`FilterBar`](super::FilterBar).
+///
+/// ## Two presentations
+///
+/// * **Default** -- a `bg-base-200` card with an uppercase eyebrow label, the
+///   select, a spinner while loading, and a "Showing {dataset}" caption
+///   (or the caller's `status` child in its place).
+/// * **`compact`** (Office op-v7c5g, the portfolio rule for the office
+///   dropdown centred in the page-header row) -- the bare `<select>` and
+///   nothing else: its accessible name is `label` (rendered as
+///   `aria-label`), there is no eyebrow, no card, no spinner and no
+///   caption. `aria-busy` still reports a pending replacement, and a
+///   retained load error still renders its alert row beneath, because an
+///   error the user cannot see is not a presentation choice. `status` is
+///   ignored in this mode. The `data-dataset-selector` and
+///   `data-resettable-filter` hooks move onto the select itself, and it
+///   additionally carries `data-dataset-selector-compact="true"`.
 #[component]
 pub fn DatasetSelector(
     /// Visible and accessible control label.
@@ -112,11 +141,68 @@ pub fn DatasetSelector(
     /// Optional live/freshness status beside the selector.
     #[prop(optional)]
     status: Option<Children>,
-    /// Additional outer classes.
+    /// Additional outer classes. In `compact` mode these land on the
+    /// select itself, which is the only element rendered.
     #[prop(optional, into)]
     class: &'static str,
+    /// Render the bare select only -- no card, eyebrow, spinner or caption
+    /// (Office op-v7c5g). See the component docs.
+    #[prop(optional)]
+    compact: bool,
 ) -> impl IntoView {
     let has_custom_status = status.is_some();
+    let shows_caption = dataset_selector_shows_caption(compact, has_custom_status);
+    let error_row = move || {
+        error.get().map(|message| {
+            view! {
+                <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-error" role="alert">
+                    <span>{move || texts.with(|texts| {
+                        format!("{}: {message}", texts.retained_error)
+                    })}</span>
+                    {on_retry.map(|callback| view! {
+                        <Button
+                            class="btn-ghost btn-xs"
+                            on_click=Callback::new(move |_| callback.run(()))
+                        >
+                            {move || texts.with(|texts| texts.retry.clone())}
+                        </Button>
+                    })}
+                </div>
+            }
+        })
+    };
+    if compact {
+        return view! {
+            <Select
+                size=SelectSize::Sm
+                class=class
+                id=control_id
+                label=Signal::derive(move || Some(label.get()))
+                value=selected
+                options_revision=Signal::derive(move || {
+                    options.with(|options| dataset_options_revision(options))
+                })
+                disabled=Signal::derive(move || {
+                    selector_disabled(disabled.get(), loading.get())
+                })
+                on_change=on_change
+                attr:data-dataset-selector="true"
+                attr:data-dataset-selector-compact="true"
+                attr:data-resettable-filter="false"
+                attr:aria-busy=move || loading.get().then_some("true")
+            >
+                <For
+                    each=move || options.get()
+                    key=|option| option.value.clone()
+                    children=move |option| view! {
+                        <option value=option.value disabled=option.disabled>{option.label}</option>
+                    }
+                />
+            </Select>
+            {error_row}
+        }
+        .into_any();
+    }
     view! {
         <div
             class=format!("rounded-box bg-base-200 px-3 py-2 {class}")
@@ -177,7 +263,7 @@ pub fn DatasetSelector(
                     ></span>
                 })}
                 {status.map(|status| status())}
-                {(!has_custom_status).then(|| view! {
+                {shows_caption.then(|| view! {
                     <span class="text-xs text-base-content/70" data-dataset-selector-status="true">
                         {move || {
                             let selected = selected.get();
@@ -197,23 +283,10 @@ pub fn DatasetSelector(
                     </span>
                 })}
             </label>
-            {move || error.get().map(|message| view! {
-                <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-error" role="alert">
-                    <span>{move || texts.with(|texts| {
-                        format!("{}: {message}", texts.retained_error)
-                    })}</span>
-                    {on_retry.map(|callback| view! {
-                        <Button
-                            class="btn-ghost btn-xs"
-                            on_click=Callback::new(move |_| callback.run(()))
-                        >
-                            {move || texts.with(|texts| texts.retry.clone())}
-                        </Button>
-                    })}
-                </div>
-            })}
+            {error_row}
         </div>
     }
+    .into_any()
 }
 
 /// An opaque revision of a dataset selector's option set (`ldui-uxdw`).
@@ -234,6 +307,57 @@ fn dataset_options_revision(options: &[DatasetOption]) -> String {
         revision.push('\u{1f}');
     }
     revision
+}
+
+#[cfg(test)]
+mod compact_tests {
+    use super::dataset_selector_shows_caption;
+
+    /// Office op-v7c5g: the compact variant renders no "Showing {dataset}"
+    /// caption -- the bare select is the statement. BREAK: make
+    /// `dataset_selector_shows_caption` ignore `compact`; the first assertion
+    /// fails.
+    #[test]
+    fn compact_renders_no_caption() {
+        assert!(!dataset_selector_shows_caption(true, false));
+        assert!(!dataset_selector_shows_caption(true, true));
+        assert!(
+            dataset_selector_shows_caption(false, false),
+            "the default keeps its caption"
+        );
+        assert!(
+            !dataset_selector_shows_caption(false, true),
+            "a caller status child replaces the caption, as before"
+        );
+    }
+
+    /// The compact branch must not grow an eyebrow, a card or a caption back:
+    /// the markup between `if compact {` and the default branch carries none
+    /// of the default presentation's hooks.
+    #[test]
+    fn the_compact_branch_is_the_bare_select() {
+        let source = include_str!("dataset_selector.rs");
+        let (_, after) = source
+            .split_once("    if compact {")
+            .expect("compact branch");
+        let (branch, _) = after
+            .split_once("rounded-box bg-base-200")
+            .expect("the default card follows the compact branch");
+        assert!(
+            !branch.contains("data-dataset-selector-status"),
+            "no caption: {branch}"
+        );
+        assert!(!branch.contains("texts.displayed"), "no caption text");
+        assert!(!branch.contains("loading-spinner"), "no spinner");
+        assert!(!branch.contains("<label"), "no eyebrow label element");
+        assert!(!branch.contains("uppercase"), "no eyebrow styling");
+        assert!(
+            branch.contains("label=Signal::derive(move || Some(label.get()))"),
+            "the select's accessible name is the label"
+        );
+        assert!(branch.contains(r#"attr:data-dataset-selector-compact="true""#));
+        assert!(branch.contains(r#"attr:data-resettable-filter="false""#));
+    }
 }
 
 #[cfg(test)]

@@ -42,7 +42,7 @@ pub fn ThemeShare() -> impl IntoView {
                 #[cfg(target_arch = "wasm32")]
                 {
                     if let Some(window) = web_sys::window() {
-                        if let Some(location) = window.location().href().ok() {
+                        if let Ok(location) = window.location().href() {
                             // Parse URL and add/update theme parameter
                             let separator = if location.contains('?') { "&" } else { "?" };
                             let url = format!("{}{}theme={}", location, separator, encoded);

@@ -77,6 +77,7 @@ pub struct SnapshotDatasetSelectorConfig<V: Send + Sync + 'static> {
     value_key: Arc<dyn Fn(&V) -> String + Send + Sync>,
     on_request: Callback<V>,
     disabled: Signal<bool>,
+    compact: bool,
 }
 
 impl<V: Send + Sync + 'static> SnapshotDatasetSelectorConfig<V> {
@@ -93,6 +94,7 @@ impl<V: Send + Sync + 'static> SnapshotDatasetSelectorConfig<V> {
             value_key,
             on_request,
             disabled: Signal::stored(false),
+            compact: false,
         }
     }
 
@@ -100,6 +102,20 @@ impl<V: Send + Sync + 'static> SnapshotDatasetSelectorConfig<V> {
     pub fn with_disabled(mut self, disabled: impl Into<Signal<bool>>) -> Self {
         self.disabled = disabled.into();
         self
+    }
+
+    /// Renders the bare select -- no card, eyebrow, spinner or "Showing"
+    /// caption -- the portfolio rule for an office selector centred in the
+    /// page header (Office op-v7c5g). See `DatasetSelector`'s `compact`.
+    #[must_use]
+    pub fn compact(mut self) -> Self {
+        self.compact = true;
+        self
+    }
+
+    /// Whether the selector renders compact.
+    pub const fn is_compact(&self) -> bool {
+        self.compact
     }
 }
 
@@ -464,6 +480,7 @@ where
         value_key,
         on_request,
         disabled,
+        compact,
     } = dataset_selector;
     let selected = RwSignal::new(String::new());
     let selector_options = RwSignal::new(Vec::<DatasetOption>::new());
@@ -644,6 +661,7 @@ where
                     disabled=disabled
                     error=load_error
                     texts=dataset_texts
+                    compact=compact
                     nostrip:on_retry=on_retry
                 />
             </div>

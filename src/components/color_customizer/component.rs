@@ -40,7 +40,7 @@ pub fn ColorCustomizer() -> impl IntoView {
     let theme_ctx = use_theme_context();
 
     // Color token definitions with labels
-    let color_tokens = vec![
+    let color_tokens = [
         // Brand colors
         ("Primary", "primary", "Main brand color"),
         ("Secondary", "secondary", "Secondary brand color"),

@@ -583,6 +583,19 @@ pub struct KpiAction {
     /// `disabled` attribute, so the control stays in the accessibility tree
     /// and out of the tab order.
     pub disabled: bool,
+    /// Render the label visually hidden (`sr-only`) and stretch the control
+    /// over the whole card (Office op-zp4af): one tab stop, one accessible
+    /// name, the card's whole area as the hit target, a focus ring drawn
+    /// just inside the card's edge. The words in `label` still form the
+    /// accessible name's prefix, so WCAG 2.5.3 holds with nothing visible.
+    ///
+    /// This is the production stat-card drill-down: the card IS the link
+    /// and no "Open detail" line is shown. It is still ONE real `<button>`
+    /// inside the card, not a click handler on the card, so the help
+    /// trigger stays a non-interactive sibling and the card keeps its
+    /// `role="group"` name -- the three reasons `KpiCard` refuses whole-card
+    /// activation are all preserved; only the control's geometry changes.
+    pub label_hidden: bool,
 }
 
 impl KpiAction {
@@ -592,6 +605,7 @@ impl KpiAction {
             label: label.into(),
             accessible_label: String::new(),
             disabled: false,
+            label_hidden: false,
         }
     }
 
@@ -604,6 +618,13 @@ impl KpiAction {
     /// Marks the action unavailable.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
+        self
+    }
+
+    /// Hides the visible label and stretches the control over the card.
+    /// See [`KpiAction::label_hidden`].
+    pub fn label_hidden(mut self, label_hidden: bool) -> Self {
+        self.label_hidden = label_hidden;
         self
     }
 }
@@ -1179,8 +1200,48 @@ fn kpi_card_body_class(compact: bool) -> &'static str {
 ///
 /// Deliberately not `ld-elevated`: that class lifts on hover and would make
 /// a read-only tile look interactive.
+///
+/// `overflow-visible`, not `overflow-hidden` (Office op-k0kt2): the help
+/// tooltip is daisyUI's `.tooltip:before`, an absolutely positioned
+/// pseudo-element that escapes the trigger's box by design, and a clipping
+/// shell cut it to the card. Nothing else in the card relied on the clip --
+/// the accent edge now rounds its own outer corners
+/// ([`kpi_card_accent_class`]) and the stretched hidden-label control
+/// inherits the shell's radius. `relative` positions the shell so that
+/// control ([`kpi_action_control_class`]) has a box to stretch over; a card
+/// without one is unaffected by it.
 fn kpi_card_shell_class() -> &'static str {
-    "flex rounded-box border border-base-300 bg-base-100 ld-card-depth h-full min-w-0 overflow-hidden forced-colors:border-[CanvasText]"
+    "relative flex rounded-box border border-base-300 bg-base-100 ld-card-depth h-full min-w-0 overflow-visible forced-colors:border-[CanvasText]"
+}
+
+/// The status accent edge's classes. `rounded-l-[calc(var(--radius-box)-1px)]`
+/// follows the shell's `rounded-box` inside its 1px border, so the edge's
+/// outer corners stay inside the rounded box now that the shell no longer
+/// clips (op-k0kt2). `forced-colors:bg-[CanvasText]` keeps a STRUCTURAL
+/// edge in forced-colors mode -- see the comment at the accent's render site.
+fn kpi_card_accent_class() -> &'static str {
+    "w-(--border-width-accent) shrink-0 self-stretch rounded-l-[calc(var(--radius-box)-1px)] forced-colors:bg-[CanvasText]"
+}
+
+/// The activation control's classes (Office op-zp4af).
+///
+/// Visible label: a small underlined text link sitting in the card body --
+/// `text-info` + a permanent underline, so the affordance is carried by the
+/// underline and the words, with colour third, and survives greyscale and
+/// forced-colors.
+///
+/// Hidden label: the control is stretched over the whole card (`absolute
+/// inset-0` inside the `relative` shell), paints nothing of its own, inherits
+/// the shell's radius so its focus ring follows the card's corners, and
+/// draws that ring 3px INSIDE the edge so it is never clipped by a parent.
+/// `z-1` lifts it above the card body; the help trigger sits at `z-2` so
+/// its hover tooltip still works over a stretched control.
+fn kpi_action_control_class(label_hidden: bool) -> &'static str {
+    if label_hidden {
+        "absolute inset-0 z-1 m-0 h-auto w-auto rounded-[inherit] border-0 bg-transparent p-0 no-underline cursor-pointer focus-visible:-outline-offset-3 forced-colors:bg-transparent"
+    } else {
+        "ld-text-small self-start text-left font-semibold text-info underline underline-offset-2 rounded-field"
+    }
 }
 
 /// Value type-ramp step: the large display size normally, stepping down
@@ -1290,15 +1351,16 @@ fn kpi_card_accessible_name(
 ///
 /// ### Add to `input.css`
 /// ```css
-/// @source inline("rounded-box border border-base-300 bg-base-100 h-full min-w-0 overflow-hidden");
+/// @source inline("relative rounded-box border border-base-300 bg-base-100 h-full min-w-0 overflow-visible");
 /// @source inline("forced-colors:border-[CanvasText]");
-/// @source inline("w-(--border-width-accent) shrink-0 self-stretch forced-colors:bg-[CanvasText]");
+/// @source inline("w-(--border-width-accent) shrink-0 self-stretch rounded-l-[calc(var(--radius-box)-1px)] forced-colors:bg-[CanvasText]");
+/// @source inline("absolute inset-0 z-1 z-2 m-0 h-auto w-auto rounded-[inherit] border-0 bg-transparent p-0 no-underline cursor-pointer focus-visible:-outline-offset-3 forced-colors:bg-transparent");
 /// @source inline("bg-status-blue bg-info bg-success bg-warning bg-error");
 /// @source inline("flex flex-col items-center gap-1 gap-2 p-3 p-4 min-w-0 shrink-0");
 /// @source inline("line-clamp-2 min-h-8");
 /// @source inline("font-semibold uppercase tracking-wide tabular-nums break-words italic");
 /// @source inline("text-base-content text-base-content/75 text-base-content/40 text-base-content/60 text-info text-success text-warning text-error");
-/// @source inline("tooltip tooltip-top inline-flex h-4 w-4 items-center justify-center rounded-full border sr-only");
+/// @source inline("tooltip tooltip-top relative inline-flex h-4 w-4 items-center justify-center rounded-full border sr-only");
 /// @source inline("self-start text-left underline underline-offset-2 rounded-field");
 /// @source inline("relative h-3 w-full overflow-hidden rounded-full bg-base-200");
 /// @source inline("absolute inset-y-0 left-0 top-0 h-full rounded-full w-0.5");
@@ -1559,7 +1621,10 @@ pub fn KpiCard(
 
     let help_button = help_id.clone().map(|_| {
         view! {
-            <Tooltip tip=help.clone() class="shrink-0">
+            // `relative z-2`: above a stretched hidden-label action control
+            // (`z-1`), so hovering the "?" still opens the tooltip (op-zp4af);
+            // the tooltip itself escapes the card unclipped (op-k0kt2).
+            <Tooltip tip=help.clone() class="relative z-2 shrink-0">
                 <span
                     class="inline-flex h-4 w-4 items-center justify-center rounded-full border border-base-content/40 text-base-content/75 ld-text-small"
                     aria-hidden="true"
@@ -1616,7 +1681,8 @@ pub fn KpiCard(
                 // between statuses is intentionally NOT preserved, because
                 // forced-colors exists precisely to replace author colour
                 // with the user's own palette.
-                "w-(--border-width-accent) shrink-0 self-stretch forced-colors:bg-[CanvasText] {}",
+                "{} {}",
+                kpi_card_accent_class(),
                 status.accent_bg_class(),
             )
             aria-hidden="true"
@@ -1645,31 +1711,39 @@ pub fn KpiCard(
     // a CSS-hover `Tooltip`, with the real text exposed through
     // `aria-describedby`), so an activatable card has exactly one focusable
     // element and one tab stop: this `Pressable`.
-    let action_node = activatable
-        .then(|| action.zip(on_activate))
-        .flatten()
-        .map(|(action, on_activate)| {
-            let activation_id = id.clone();
-            let action_label = action.label.clone();
-            let accessible_action_name = {
-                let name = accessible_name();
-                kpi_action_accessible_name(&action, &name)
-            };
-            view! {
-                <Pressable
-                    disabled=action.disabled
-                    // `text-info` + a permanent underline: the affordance is
-                    // carried by the underline and the label, with colour
-                    // third, so it survives greyscale and forced-colors.
-                    class="ld-text-small self-start text-left font-semibold text-info underline underline-offset-2 rounded-field"
-                    on_click=Callback::new(move |_| on_activate.run(activation_id.clone()))
-                    attr:aria-label=accessible_action_name
-                    attr:data-kpi-card-action="true"
-                >
-                    {action_label}
-                </Pressable>
-            }
-        });
+    let action_node =
+        activatable
+            .then(|| action.zip(on_activate))
+            .flatten()
+            .map(|(action, on_activate)| {
+                let activation_id = id.clone();
+                let action_label = action.label.clone();
+                let accessible_action_name = {
+                    let name = accessible_name();
+                    kpi_action_accessible_name(&action, &name)
+                };
+                // op-zp4af: a hidden label is still IN the button -- `sr-only`,
+                // never dropped -- so the accessible name's prefix is the words a
+                // sighted user would otherwise read, and the control stretches
+                // over the card instead of sitting in its body.
+                let label_node = if action.label_hidden {
+                    view! { <span class="sr-only">{action_label}</span> }.into_any()
+                } else {
+                    action_label.into_any()
+                };
+                view! {
+                    <Pressable
+                        disabled=action.disabled
+                        class=kpi_action_control_class(action.label_hidden)
+                        on_click=Callback::new(move |_| on_activate.run(activation_id.clone()))
+                        attr:aria-label=accessible_action_name
+                        attr:data-kpi-card-action="true"
+                        attr:data-kpi-card-action-label-hidden=action.label_hidden.then_some("true")
+                    >
+                        {label_node}
+                    </Pressable>
+                }
+            });
 
     view! {
         <div
@@ -2045,6 +2119,115 @@ mod tests {
                  (ldui-fg2h); they ship in styles/tokens.css: {t}"
             );
         }
+    }
+
+    /// Office op-k0kt2 (Conversations item 23.1): the help tooltip is
+    /// daisyUI's `.tooltip:before`, an absolutely positioned pseudo-element
+    /// that escapes the trigger's box by design; an `overflow-hidden` shell
+    /// clipped it to the card on every stat-card row in the portfolio. The
+    /// shell now clips nothing, the accent edge rounds its own corners, and
+    /// the help trigger paints above a stretched action control.
+    ///
+    /// BREAK: put `overflow-hidden` back on the shell; the first assertion
+    /// fails.
+    #[test]
+    fn the_card_shell_does_not_clip_its_help_tooltip() {
+        let shell = kpi_card_shell_class();
+        assert!(
+            !shell.split_whitespace().any(|c| c == "overflow-hidden"),
+            "the shell must not clip the tooltip: {shell}"
+        );
+        assert!(
+            shell.split_whitespace().any(|c| c == "overflow-visible"),
+            "{shell}"
+        );
+        assert!(
+            shell.split_whitespace().any(|c| c == "relative"),
+            "a stretched hidden-label control needs a positioned card: {shell}"
+        );
+        let accent = kpi_card_accent_class();
+        assert!(
+            accent.contains("rounded-l-[calc(var(--radius-box)-1px)]"),
+            "the accent edge rounds its own corners now that the shell does not clip: {accent}"
+        );
+        assert!(
+            accent.contains("forced-colors:bg-[CanvasText]"),
+            "the structural forced-colors edge survives the move: {accent}"
+        );
+        let component = kpi_card_source();
+        assert!(
+            component.contains(r#"<Tooltip tip=help.clone() class="relative z-2 shrink-0">"#),
+            "the help trigger paints above a stretched action control"
+        );
+        assert!(
+            !component.contains("overflow-hidden"),
+            "no branch of the card may clip: {component}"
+        );
+    }
+
+    /// Office op-zp4af: the production drill-down is the whole card with no
+    /// visible link. `label_hidden` keeps the words in the button (`sr-only`)
+    /// so the accessible name's prefix is unchanged, and stretches the ONE
+    /// control over the card; a visible-label action renders exactly as it
+    /// did before the field existed.
+    ///
+    /// BREAK: render `{action_label}` visibly in the hidden branch (drop the
+    /// `sr-only` span); the source assertion fails. Or make
+    /// `kpi_action_control_class(true)` return the visible-label classes;
+    /// the `absolute` assertion fails.
+    #[test]
+    fn a_hidden_label_action_is_sr_only_and_stretches_over_the_card() {
+        let visible = KpiAction::new("Open detail");
+        assert!(!visible.label_hidden, "opt-in, never the default");
+        let hidden = visible.clone().label_hidden(true);
+        assert!(hidden.label_hidden);
+        assert_eq!(hidden.label, "Open detail", "hiding keeps the words");
+        assert_eq!(
+            kpi_action_accessible_name(&hidden, "Hired"),
+            "Open detail, Hired",
+            "the hidden words still prefix the accessible name (WCAG 2.5.3)"
+        );
+        assert_ne!(visible, hidden, "the flag is part of the item fingerprint");
+
+        let stretched = kpi_action_control_class(true);
+        for class in [
+            "absolute",
+            "inset-0",
+            "z-1",
+            "rounded-[inherit]",
+            "focus-visible:-outline-offset-3",
+        ] {
+            assert!(
+                stretched.split_whitespace().any(|c| c == class),
+                "the hidden-label control needs {class}: {stretched}"
+            );
+        }
+        let inline = kpi_action_control_class(false);
+        assert!(
+            !inline.contains("absolute"),
+            "a visible label stays in the body: {inline}"
+        );
+        assert!(
+            inline.contains("underline"),
+            "the visible affordance is unchanged: {inline}"
+        );
+
+        let component = kpi_card_source();
+        assert!(
+            component.contains(r#"view! { <span class="sr-only">{action_label}</span> }"#),
+            "the hidden label is sr-only, never dropped"
+        );
+        assert!(
+            component.contains(
+                r#"attr:data-kpi-card-action-label-hidden=action.label_hidden.then_some("true")"#
+            ),
+            "the mode is readable from the DOM"
+        );
+        assert_eq!(
+            component.matches("<Pressable").count(),
+            1,
+            "still exactly one control per card, whatever the label mode"
+        );
     }
 
     #[test]
@@ -2682,8 +2865,11 @@ mod tests {
             !component.contains("tabindex"),
             "the card must never mint a synthetic tab stop: {component}"
         );
+        // Whitespace-normalised: rustfmt wraps this binding whenever the chain
+        // after it grows, and a layout change is not a behaviour change.
+        let flat = component.split_whitespace().collect::<Vec<_>>().join(" ");
         assert!(
-            component.contains("let action_node = activatable"),
+            flat.contains("let action_node = activatable"),
             "the action control must be gated on `activatable`"
         );
         assert!(

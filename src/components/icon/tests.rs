@@ -179,7 +179,7 @@ fn as_str_and_as_px_never_disagree() {
 // ---------------------------------------------------------------------------
 //
 // Each of these names resolves to a real symbol in the shared Office sprite
-// (verified against `crates/office-perf-web/assets/brand/icons.svg`) rather
+// (verified against the host's inlined sprite, 4iiz-Office `assets/icons.svg`) rather
 // than the blank fallback, so consumers can request them without shipping
 // their own SVG markup.
 
@@ -344,4 +344,27 @@ fn an_explicit_mapping_to_blank_is_not_an_unmapped_name() {
     // cannot distinguish them.
     assert_eq!(lucide_to_sprite("circle"), "blank");
     assert_eq!(lucide_to_sprite("not-a-real-icon-name"), "blank");
+}
+
+// ---------------------------------------------------------------------------
+// Notes quick action (op-bjpst)
+// ---------------------------------------------------------------------------
+
+/// The account family's Notes button asked for a notebook glyph and carried
+/// `pencil` while the sprite had none. The symbol now exists in the host
+/// sprite under the same name, so the mapping is same-concept-same-name.
+/// Deliberate break: delete the `"notebook" => "notebook"` arm; the lookup
+/// answers `None`, the fallback answers `blank`, and the alias assertion
+/// still holds, so the first two lines are the ones that fail.
+#[test]
+fn notebook_maps_to_notebook() {
+    use super::component::lucide_sprite_lookup;
+
+    assert_eq!(lucide_sprite_lookup("notebook"), Some("notebook"));
+    assert_eq!(lucide_to_sprite("notebook"), "notebook");
+    assert_ne!(
+        lucide_to_sprite("notebook"),
+        lucide_to_sprite("pencil"),
+        "notebook is its own glyph, not an alias onto the pencil"
+    );
 }

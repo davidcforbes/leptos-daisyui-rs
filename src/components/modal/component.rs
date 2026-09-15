@@ -350,10 +350,74 @@ pub fn Modal(
     }
 }
 
+/// How much of the viewport a [`ModalBox`] takes (Office op-v4yq1).
+///
+/// daisyUI's `.modal-box` is a content-sized box capped at `max-w-lg` (32rem)
+/// and `max-h-[calc(100vh-5em)]`. That is right for a confirmation and wrong
+/// for a dialog whose body is the work -- an editor whose text field should
+/// take the room the screen has. Pages used to widen the box with a page-local
+/// `max-w-2xl` and give the field a fixed `rows=10`; both are what this enum
+/// replaces, so the choice is a typed prop the framework owns.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ModalSize {
+    /// daisyUI's own `.modal-box` geometry: content-sized, `max-w-lg`.
+    #[default]
+    Default,
+    /// Most of the viewport, laid out as a column the body fills.
+    ///
+    /// `max-w-5xl` (64rem) at `w-11/12` of the viewport, `h-[85vh]` tall,
+    /// and `flex flex-col` so the children stack and ONE of them can grow.
+    /// The consumer marks that child -- typically a `Textarea` -- with
+    /// **`flex-1 min-h-0 w-full`** and gives it **no `rows` attribute**;
+    /// `flex-1` takes the remaining height, `min-h-0` lets it shrink below
+    /// its content so the field scrolls inside itself instead of pushing
+    /// the actions off the dialog, and `resize-none` keeps the browser's
+    /// corner grip from fighting the layout. Every other child (title
+    /// field, actions row) keeps its natural height (`shrink-0`).
+    ///
+    /// ```rust,ignore
+    /// <ModalBox size=ModalSize::Large>
+    ///     <Input class="shrink-0" ... />
+    ///     <Textarea class="flex-1 min-h-0 w-full resize-none" ... />
+    ///     <ModalAction class="shrink-0">...</ModalAction>
+    /// </ModalBox>
+    /// ```
+    Large,
+}
+
+impl ModalSize {
+    /// The classes this size adds to `.modal-box`; empty for [`Self::Default`].
+    ///
+    /// `max-h-[85vh]` restates the height as a cap because `.modal-box`
+    /// already sets its own `max-height` and the two must agree, or the
+    /// box would be told to be 85vh tall and then capped shorter.
+    pub const fn as_class(self) -> &'static str {
+        match self {
+            ModalSize::Default => "",
+            ModalSize::Large => "w-11/12 max-w-5xl h-[85vh] max-h-[85vh] flex flex-col",
+        }
+    }
+
+    /// Stable marker, emitted as `data-modal-size`.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            ModalSize::Default => "default",
+            ModalSize::Large => "large",
+        }
+    }
+}
+
 /// Content container for modal dialogs.
 ///
 /// Provides styled container for modal content with proper spacing, background,
 /// and responsive design. Should be used inside a Modal component.
+///
+/// `size` picks the geometry ([`ModalSize`]); the default is daisyUI's own.
+///
+/// ### Add to `input.css`
+/// ```css
+/// @source inline("w-11/12 max-w-5xl h-[85vh] max-h-[85vh] flex flex-col flex-1 min-h-0 shrink-0 resize-none");
+/// ```
 ///
 /// ## Node References
 /// - `node_ref` - References the div element ([HTMLDivElement](https://developer.mozilla.org/en-US/docs/Web/API/HTMLDivElement))
@@ -363,6 +427,10 @@ pub fn ModalBox(
     #[prop(optional, into)]
     class: &'static str,
 
+    /// Viewport geometry (Office op-v4yq1). Default: daisyUI's `.modal-box`.
+    #[prop(optional)]
+    size: ModalSize,
+
     /// Reference to the div element
     #[prop(optional)]
     node_ref: NodeRef<Div>,
@@ -370,8 +438,13 @@ pub fn ModalBox(
     /// Modal content
     children: Children,
 ) -> impl IntoView {
+    let size_class = size.as_class();
     view! {
-        <div node_ref=node_ref class=move || merge_classes!("modal-box", class)>
+        <div
+            node_ref=node_ref
+            class=move || merge_classes!("modal-box", size_class, class)
+            data-modal-size=size.as_str()
+        >
             {children()}
         </div>
     }

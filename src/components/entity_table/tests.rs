@@ -3890,3 +3890,145 @@ fn hidden_by_default_defaults_to_false_and_survives_clone_and_debug() {
     let plain = EntityColumn::text("office", "Office", |row: &Row| row.id.to_owned());
     assert!(!plain.hidden_by_default);
 }
+
+// ── Office op-ulgfu: the standard record-list page's framework half ──────
+
+#[test]
+fn row_actions_is_a_required_end_aligned_action_column() {
+    let owner = Owner::new();
+    owner.with(|| {
+        // `Callback::new` requires Send + Sync, so the sink is Arc<Mutex>, not
+        // Rc<RefCell> (the vendored copy never compiled this test module).
+        let edits: Arc<Mutex<Vec<Row>>> = Arc::new(Mutex::new(Vec::new()));
+        let edits_sink = Arc::clone(&edits);
+        let on_edit = Callback::new(move |row: Row| edits_sink.lock().unwrap().push(row));
+        let column = EntityColumn::row_actions(
+            "actions",
+            "Actions",
+            EntityRowActions::new(|row: &Row| row.name.to_owned(), "Edit", "Delete").edit(on_edit),
+        );
+        assert_eq!(column.id, "actions");
+        assert_eq!(column.header, "Actions");
+        assert!(column.is_action, "row activation is suppressed in the cell");
+        assert!(column.required, "the Actions column cannot be hidden");
+        assert!(!column.sortable);
+        assert!(!column.resizable);
+        assert_eq!(column.alignment, EntityColumnAlignment::End);
+        assert!(
+            column.renderer.is_some(),
+            "the framework renders the buttons"
+        );
+        assert_eq!(
+            column.resolved_filter_kind(),
+            None,
+            "an action column never joins the filter row"
+        );
+        // The canonical text of the cell names the record, so copy/export of
+        // the row carries something meaningful rather than an empty string.
+        assert_eq!((column.text)(&rows()[1]), "Alpha");
+        let _ = on_edit;
+        assert!(edits.lock().unwrap().is_empty());
+    });
+}
+
+#[test]
+fn row_action_accessible_names_are_verb_then_record() {
+    assert_eq!(
+        EntityRowActions::<Row>::accessible_name("Edit", "Acme Holdings"),
+        "Edit Acme Holdings"
+    );
+    assert_eq!(
+        EntityRowActions::<Row>::accessible_name("Eliminar", " Acme "),
+        "Eliminar Acme"
+    );
+    assert_eq!(EntityRowActions::<Row>::accessible_name("Edit", ""), "Edit");
+    assert_eq!(EntityRowActions::<Row>::accessible_name("", "Acme"), "Acme");
+    assert_eq!(EntityRowActions::<Row>::accessible_name("", ""), "");
+}
+
+#[test]
+fn row_actions_builder_tracks_which_verbs_render() {
+    let none = EntityRowActions::new(|row: &Row| row.name.to_owned(), "Edit", "Delete");
+    assert!(none.is_empty());
+    let edit_only = none.clone().edit(Callback::new(|_: Row| {}));
+    assert!(edit_only.on_edit.is_some());
+    assert!(edit_only.on_delete.is_none());
+    assert!(!edit_only.is_empty());
+    let both = edit_only.delete(Callback::new(|_: Row| {}));
+    assert!(both.on_delete.is_some());
+    assert!(format!("{both:?}").contains("has_delete: true"));
+}
+
+/// The two framework-owned hooks the row-actions cell renders, pinned so a
+/// page test or an audit can find every pencil and trash can by contract
+/// rather than by icon name. Each button is wrapped in `EntityRowAction`
+/// under a stable id, which is what lets focus recovery land on the same
+/// control of a neighbouring row after a delete.
+#[test]
+fn row_actions_markup_registers_both_verbs_with_focus_recovery() {
+    let source = include_str!("types.rs");
+    let (_, body) = source
+        .split_once("pub fn row_actions(")
+        .expect("row_actions constructor");
+    let (body, _) = body
+        .split_once("/// Framework-owned presentation for the column-chooser trigger.")
+        .expect("the constructor ends before the chooser enum");
+    assert_eq!(
+        body.matches("<EntityRowAction action_id=").count(),
+        2,
+        "one focus-recovery registration per verb"
+    );
+    assert!(body.contains("action_id=ENTITY_ROW_ACTION_EDIT"));
+    assert!(body.contains("action_id=ENTITY_ROW_ACTION_DELETE"));
+    assert_eq!(ENTITY_ROW_ACTION_EDIT, "edit");
+    assert_eq!(ENTITY_ROW_ACTION_DELETE, "delete");
+    assert!(body.contains(r#"<Icon name="pencil""#));
+    assert!(body.contains(r#"<Icon name="trash""#));
+    assert!(
+        body.contains("data-entity-row-actions=ENTITY_ROW_ACTIONS_CELL_MARKER"),
+        "the cell wrapper carries the stable hook"
+    );
+    assert_eq!(
+        body.matches("event.stop_propagation();").count(),
+        2,
+        "neither verb may also activate the row"
+    );
+    assert_eq!(
+        body.matches("attr:aria-label=label").count(),
+        2,
+        "every control needs an accessible name"
+    );
+}
+
+/// The `toolbar_actions` slot (the record-list page's `+ New`) renders inside
+/// the table toolbar immediately BEFORE the column chooser's dropdown, so the
+/// two sit side by side at the toolbar's end (Office op-ulgfu).
+#[test]
+fn the_toolbar_actions_slot_sits_beside_the_column_chooser() {
+    let source = include_str!("component.rs");
+    let toolbar_start = source
+        .find(r#"data-entity-table-toolbar="true""#)
+        .expect("the toolbar marker");
+    let toolbar = &source[toolbar_start..];
+    let slot = toolbar
+        .find(r#"data-entity-toolbar-actions="true""#)
+        .expect("the toolbar actions slot renders inside the toolbar");
+    let chooser = toolbar
+        .find(r#"data-entity-column-chooser="true""#)
+        .expect("the column chooser renders inside the toolbar");
+    assert!(
+        slot < chooser,
+        "the caller's actions come first, then the gear: slot at {slot}, chooser at {chooser}"
+    );
+}
+
+#[test]
+fn filter_mode_survives_clone_and_shows_in_debug() {
+    let column =
+        EntityColumn::text("office", "Office", |row: &Row| row.id.to_owned()).filterable_options();
+    assert_eq!(column.clone().filter_mode, EntityColumnFilterMode::Options);
+    assert!(format!("{column:?}").contains("filter_mode: Options"));
+    assert_eq!(EntityColumnFilterMode::Options.as_str(), "options");
+    assert_eq!(EntityResolvedFilterKind::Options.as_str(), "select");
+    assert_eq!(EntityResolvedFilterKind::Text.as_str(), "text");
+}

@@ -15,6 +15,7 @@ mod page_quick_actions;
 mod page_state_panel;
 mod record_header;
 mod search_picker_dialog;
+mod section_grid;
 mod section_heading;
 mod selectable_summary;
 mod server_cursor_history;
@@ -45,7 +46,8 @@ pub use contracts::{
     SortExecution, SourceOwnership, StateField, StateOwnership, TestLane,
 };
 pub use dataset_selector::{
-    DatasetOption, DatasetSelector, DatasetSelectorTexts, selected_dataset_label,
+    DatasetOption, DatasetSelector, DatasetSelectorTexts, dataset_selector_shows_caption,
+    selected_dataset_label,
 };
 pub use filter_bar::{
     FILTER_BAR_BASE_CLASS, FilterBar, FilterBarTexts, FilterResultSummary, SnapshotDefaultSave,
@@ -75,6 +77,9 @@ pub use search_picker_dialog::{
     SearchPickerDialog, SearchPickerDialogTexts, SearchPickerDismissCause,
     SearchPickerRenderDecision, SearchPickerStatus, resolve_search_picker_confirmation,
     resolve_search_picker_selection, search_picker_confirm_block, search_picker_render_decision,
+};
+pub use section_grid::{
+    SECTION_GRID_BASE_CLASS, SectionGrid, SectionGridColumns, section_grid_class,
 };
 pub use section_heading::{HeadingLevel, SectionHeading, SectionHeadingStatusPlacement};
 pub use selectable_summary::{

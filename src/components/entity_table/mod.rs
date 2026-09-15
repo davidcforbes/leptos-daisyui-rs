@@ -1,5 +1,6 @@
 //! Generic, typed client-side table for complete dataset snapshots.
 
+mod auto_filters;
 mod component;
 mod date_filter;
 mod draft_edit;
@@ -14,6 +15,10 @@ mod selection;
 mod storage;
 mod types;
 
+pub use auto_filters::{
+    EntityAutoFilterTexts, EntityAutoFilters, entity_auto_filter_matches,
+    entity_auto_filter_options,
+};
 pub use date_filter::{
     EntityDate, EntityDateBound, EntityDateFilter, EntityDateFilterCause, EntityDateFilterProposal,
     EntityDateFilterStatus, EntityDateParseError,
@@ -50,17 +55,20 @@ pub use paging::EntityPagePlan;
 pub use selection::EntityTableSelection;
 pub use storage::{decode_preferences, encode_preferences};
 pub use types::{
-    ENTITY_PAGE_SIZE_AUTO_VALUE, EntityBadgeCell, EntityBadgePresentation, EntityCellPresentation,
-    EntityCellRenderer, EntityColumn, EntityColumnAlignment, EntityColumnChooserTrigger,
-    EntityColumnFilter, EntityColumnFilterOption, EntityColumnFilterRenderer, EntityColumnFilters,
-    EntityColumnKind, EntityColumns, EntityCompactRow, EntityComparator, EntityEmptyState,
-    EntityIconCell, EntityIconColor, EntityIconPresentation, EntityNullOrder, EntityPageSize,
-    EntityPageSizeIntent, EntityPreparedSortComparator, EntityPrimaryTextCell, EntityRowKey,
-    EntityRowRenderer, EntitySecondaryTextCell, EntitySort, EntitySortColumn, EntitySortDirection,
-    EntitySortKey, EntitySortKeyFactory, EntityTableActionColumnPolicy, EntityTableDisplayColumn,
-    EntityTableDisplayProjection, EntityTableDisplayRow, EntityTablePreferenceOwnership,
-    EntityTablePreferencePersistence, EntityTablePreferences, EntityTableProjectionScope,
-    EntityTableTexts, EntityTableViewportFit, EntityTextOverflow,
+    ENTITY_PAGE_SIZE_AUTO_VALUE, ENTITY_ROW_ACTION_DELETE, ENTITY_ROW_ACTION_EDIT,
+    ENTITY_ROW_ACTIONS_CELL_MARKER, EntityBadgeCell, EntityBadgePresentation,
+    EntityCellPresentation, EntityCellRenderer, EntityColumn, EntityColumnAlignment,
+    EntityColumnChooserTrigger, EntityColumnFilter, EntityColumnFilterMode,
+    EntityColumnFilterOption, EntityColumnFilterRenderer, EntityColumnFilters, EntityColumnKind,
+    EntityColumns, EntityCompactRow, EntityComparator, EntityEmptyState, EntityIconCell,
+    EntityIconColor, EntityIconPresentation, EntityNullOrder, EntityPageSize, EntityPageSizeIntent,
+    EntityPreparedSortComparator, EntityPrimaryTextCell, EntityResolvedFilterKind,
+    EntityRowActions, EntityRowKey, EntityRowRenderer, EntitySecondaryTextCell, EntitySort,
+    EntitySortColumn, EntitySortDirection, EntitySortKey, EntitySortKeyFactory,
+    EntityTableActionColumnPolicy, EntityTableDisplayColumn, EntityTableDisplayProjection,
+    EntityTableDisplayRow, EntityTablePreferenceOwnership, EntityTablePreferencePersistence,
+    EntityTablePreferences, EntityTableProjectionScope, EntityTableTexts, EntityTableViewportFit,
+    EntityTextOverflow,
 };
 pub use types::{EntityDraftCommit, EntityDraftRow, EntityDraftTexts, EntityTablePagination};
 

@@ -119,54 +119,48 @@ pub fn ThemeExportImport() -> impl IntoView {
     // Import theme from file
     #[cfg(target_arch = "wasm32")]
     let handle_import = move |ev: Event| {
-        if let Some(target) = ev.target() {
-            if let Ok(input) = target.dyn_into::<HtmlInputElement>() {
-                if let Some(files) = input.files() {
-                    if let Some(file) = files.get(0) {
-                        let file_reader = match web_sys::FileReader::new() {
-                            Ok(reader) => reader,
-                            Err(_) => {
-                                set_import_status
-                                    .set(Some("Failed to create FileReader".to_string()));
-                                return;
-                            }
-                        };
+        if let Some(target) = ev.target()
+            && let Ok(input) = target.dyn_into::<HtmlInputElement>()
+            && let Some(files) = input.files()
+            && let Some(file) = files.get(0)
+        {
+            let file_reader = match web_sys::FileReader::new() {
+                Ok(reader) => reader,
+                Err(_) => {
+                    set_import_status.set(Some("Failed to create FileReader".to_string()));
+                    return;
+                }
+            };
 
-                        let fr_clone = file_reader.clone();
-                        let set_status_clone = set_import_status;
+            let fr_clone = file_reader.clone();
+            let set_status_clone = set_import_status;
 
-                        let onload = Closure::wrap(Box::new(move |_: Event| {
-                            if let Ok(result) = fr_clone.result() {
-                                if let Some(text) = result.as_string() {
-                                    match theme_ctx.import_theme(&text) {
-                                        Ok(_) => {
-                                            set_status_clone.set(Some(
-                                                "Theme imported successfully!".to_string(),
-                                            ));
-                                        }
-                                        Err(e) => {
-                                            set_status_clone
-                                                .set(Some(format!("Import failed: {}", e)));
-                                        }
-                                    }
-
-                                    // Clear status after 3 seconds
-                                    set_timeout(
-                                        move || set_status_clone.set(None),
-                                        std::time::Duration::from_secs(3),
-                                    );
-                                }
-                            }
-                        }) as Box<dyn FnMut(_)>);
-
-                        file_reader.set_onload(Some(onload.as_ref().unchecked_ref()));
-                        onload.forget();
-
-                        if let Err(e) = file_reader.read_as_text(&file) {
-                            set_import_status.set(Some(format!("Failed to read file: {:?}", e)));
+            let onload = Closure::wrap(Box::new(move |_: Event| {
+                if let Ok(result) = fr_clone.result()
+                    && let Some(text) = result.as_string()
+                {
+                    match theme_ctx.import_theme(&text) {
+                        Ok(_) => {
+                            set_status_clone.set(Some("Theme imported successfully!".to_string()));
+                        }
+                        Err(e) => {
+                            set_status_clone.set(Some(format!("Import failed: {}", e)));
                         }
                     }
+
+                    // Clear status after 3 seconds
+                    set_timeout(
+                        move || set_status_clone.set(None),
+                        std::time::Duration::from_secs(3),
+                    );
                 }
+            }) as Box<dyn FnMut(_)>);
+
+            file_reader.set_onload(Some(onload.as_ref().unchecked_ref()));
+            onload.forget();
+
+            if let Err(e) = file_reader.read_as_text(&file) {
+                set_import_status.set(Some(format!("Failed to read file: {:?}", e)));
             }
         }
     };

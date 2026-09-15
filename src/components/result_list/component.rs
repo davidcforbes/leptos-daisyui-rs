@@ -48,10 +48,10 @@ use leptos::{html::Div, prelude::*};
 /// @source inline("flex flex-col gap-2 max-h-80 overflow-y-auto rounded-box border border-base-300 bg-base-100");
 /// @source inline("outline-none focus:ring-2 focus:ring-primary/50");
 /// @source inline("px-3 py-2 cursor-pointer");
-/// @source inline("bg-primary/10 text-primary bg-base-200");
+/// @source inline("bg-primary/10 text-base-content bg-base-200");
 /// @source inline("font-semibold text-sm truncate");
-/// @source inline("text-xs opacity-60 whitespace-normal break-words");
-/// @source inline("p-4 text-sm text-center opacity-60");
+/// @source inline("text-xs text-base-content/75 whitespace-normal break-words");
+/// @source inline("p-4 text-sm text-center text-base-content/75");
 /// ```
 ///
 /// ## Node References

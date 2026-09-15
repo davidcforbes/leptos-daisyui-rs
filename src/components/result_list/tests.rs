@@ -401,3 +401,35 @@ fn keyboard_nav_sequence_matches_d2d_semantics() {
     sel = select_first(len);
     assert_eq!(sel, Some(0));
 }
+
+// ── muted text contract (op-q0slb) ──
+
+/// Guards against `opacity-*` creeping back for muted text and against the
+/// brand colour returning as body text on the selected row. `opacity-60` on
+/// the secondary line composited to 2.3-3.4:1 on 4iiz-Office's theme and
+/// axe-core reported it as serious on the real-data tier; the approved muted
+/// idiom in this crate is a `text-base-content/NN` alpha (see
+/// `kpi_strip.rs::muted_text_never_uses_the_opacity_utility`). Same shape as
+/// that test: `core.rs` has no test module, so the whole file is the subject
+/// and this doc comment (which names the forbidden class) lives in another
+/// file. Deliberate break: put `opacity-60` back on the secondary line, or
+/// `text-primary` back on the selected row; each assertion names its own.
+#[test]
+fn muted_result_text_uses_alpha_not_opacity_and_selection_keeps_body_ink() {
+    let source = include_str!("core.rs");
+    let module = source
+        .split_once("\n#[cfg(test)]")
+        .map_or(source, |(before, _)| before);
+    assert!(
+        !module.contains("opacity-"),
+        "result rows must mute text with a text-base-content/NN alpha, never opacity-*"
+    );
+    assert!(
+        module.contains("\"bg-primary/10 text-base-content\""),
+        "the selected row paints its text in base-content on the primary tint"
+    );
+    assert!(
+        !module.contains("text-primary\""),
+        "the selected row must not paint body text in the primary colour"
+    );
+}

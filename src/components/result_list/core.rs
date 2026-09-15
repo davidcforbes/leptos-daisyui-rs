@@ -63,8 +63,15 @@ where
                 let is_hovered = hover.get().as_deref() == Some(hover_key.as_str());
                 merge_classes!(
                     "flex flex-col gap-1 px-3 py-2 cursor-pointer rounded-box",
+                    // op-q0slb (2026-09-14): the selected row keeps its primary
+                    // tint but paints its text in base-content. `text-primary`
+                    // on `bg-primary/10` is the brand colour as BODY TEXT, which
+                    // axe-core reported as a serious color-contrast failure on
+                    // 4iiz-Office's real-data tier (2.65:1 on the cyan theme,
+                    // tint ~#ECF6FC); base-content on that tint is 9.6:1 and
+                    // `aria-selected` carries the state for assistive tech.
                     if is_selected {
-                        "bg-primary/10 text-primary"
+                        "bg-primary/10 text-base-content"
                     } else if is_hovered {
                         "bg-base-200"
                     } else {
@@ -101,7 +108,7 @@ where
                 }}
             </span>
             <span
-                class="text-xs opacity-60 whitespace-normal break-words"
+                class="text-xs text-base-content/75 whitespace-normal break-words"
                 style:display=move || {
                     if current_result_item(&items.get(), &has_secondary_key)
                         .is_some_and(|item| !item.row.secondary_line().is_empty())
@@ -345,7 +352,7 @@ where
                     when=move || !items.get().is_empty()
                     fallback=move || {
                         view! {
-                            <div role="presentation" class="p-4 text-sm text-center opacity-60">
+                            <div role="presentation" class="p-4 text-sm text-center text-base-content/75">
                                 {move || empty_message.get()}
                             </div>
                         }

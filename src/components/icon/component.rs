@@ -194,6 +194,7 @@ const SUPPORTED_ICON_NAMES: &[&str] = &[
     "minus",
     "more-horizontal",
     "more-vertical",
+    "notebook",
     "paperclip",
     "pause",
     "pencil",
@@ -297,6 +298,10 @@ fn lucide_to_sprite_inner(name: &str) -> Option<&'static str> {
         "ticket" => "ticket",
         "upload" => "upload",
         "file" => "file",
+        // op-bjpst (2026-09-14): the account family's Notes quick action asked
+        // for a notebook glyph and carried `pencil` while the host sprite had
+        // none; 4iiz-Office `assets/icons.svg` now defines the symbol.
+        "notebook" => "notebook",
         // Same concept under the sprite's naming.
         "triangle-alert" => "triangle-exclamation",
         "circle-alert" => "circle-exclamation-fill",

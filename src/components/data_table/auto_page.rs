@@ -123,7 +123,11 @@ pub type RowHeightEraKey = (u64, i32, &'static str);
 ///
 /// `auto_page_size` self-corrects across passes: applying a derived count
 /// re-renders the table, which re-triggers a measurement of what actually
-/// rendered. Undamped, that loop can fail to converge with ordinary data --
+/// rendered. This ratchet damps the ROW-HEIGHT half of that loop; the
+/// CONTAINER-HEIGHT half -- a scroll container whose own height follows the
+/// row count, so every applied count changes the very box it was derived
+/// from -- is damped separately by [`AutoPageSettle`] (Office op-32usx).
+/// Undamped, that loop can fail to converge with ordinary data --
 /// a short first render measures a small max and derives a large count; the
 /// larger render reveals a tall row further down the page, measures a large
 /// max, and derives a small (or `min_rows`-floored) count; the smaller
@@ -249,6 +253,150 @@ pub fn overflow_check_floor(measured_rows: usize, min_rows: usize, rows: usize) 
         rows
     } else {
         min_rows
+    }
+}
+
+/// Era identity for [`AutoPageSettle`]: the same `(data_revision,
+/// container_width_px, table_size_class)` triple as [`RowHeightEraKey`], for
+/// the same reason -- any of the three starts a genuinely new measurement
+/// problem, and a settled or frozen answer from the old one must not carry
+/// over.
+pub type AutoPageSettleKey = RowHeightEraKey;
+
+/// How many accepted counts one era remembers when looking for a cycle.
+///
+/// A real, user-driven vertical resize walks through DISTINCT counts (8, 9,
+/// 10, ...) and never trips the detector however long it runs; the bound only
+/// caps memory, and a value that fell off the front of the window is simply
+/// treated as new again.
+pub const AUTO_PAGE_SETTLE_HISTORY: usize = 8;
+
+/// Consecutive re-proposals of an already-applied count that turn "the
+/// container is following the row count" from a suspicion into a verdict.
+///
+/// Two, not one: a user who drags a window shorter and then back to exactly
+/// where it was produces ONE repeat (`10, 12, 10`), and that must still be
+/// honoured. A container whose height is a function of the row count
+/// produces them without end (`A, B, A, B, ...`), at observer speed, so the
+/// second consecutive repeat arrives within a frame or two of the first.
+pub const AUTO_PAGE_SETTLE_REPEATS_TO_FREEZE: u8 = 2;
+
+/// Settle guard for a responsive rows-per-page count that is fed back from
+/// the layout it produces (Office op-32usx, the Pending page's coordinators
+/// table: ~10,400 DOM mutations in six seconds with zero network requests).
+///
+/// The table measures its scroll container, derives a count, renders that
+/// many rows, and the `ResizeObserver` measures again. When the container's
+/// height is fixed by its parent that second measurement equals the first and
+/// the plain compare-before-set guard ends the exchange. When the container's
+/// height FOLLOWS the row count -- an `h-full`/`min-h-0` flex column whose
+/// parent has no definite height -- the second measurement differs, the
+/// count is re-derived, the container changes again, and the two (or more)
+/// values chase each other forever. The compare-before-set guard never sees
+/// a repeat because consecutive values genuinely differ.
+///
+/// This type owns three rules, all pure and all testable without a DOM:
+///
+/// 1. **Compare before set.** A proposal equal to the last accepted count is
+///    answered `None`; nothing is written and nothing re-renders.
+/// 2. **Cycle detection, bounded and era-keyed.** Every accepted count in the
+///    current era is remembered (at most [`AUTO_PAGE_SETTLE_HISTORY`]). A
+///    proposal that re-offers an already-applied count is a *repeat*; the
+///    first repeat is still applied (that is what a real resize back to a
+///    previous height looks like), the
+///    [`AUTO_PAGE_SETTLE_REPEATS_TO_FREEZE`]th consecutive repeat is the
+///    verdict: the era **freezes** at the SMALLEST count seen in the cycle --
+///    the one every row of which fits without overflow -- and answers `None`
+///    to everything until the key changes.
+/// 3. **A new key is a new problem.** A different data revision, container
+///    width or density resets history, the frozen flag and the accepted
+///    count, so a dataset that arrives after a freeze is measured afresh.
+///
+/// A frozen era does not refit on a pure vertical window resize until the
+/// key changes. That is deliberate: a container whose height tracks its own
+/// content has no viewport to fit, and the honest answer is to hold still.
+/// The page-side half of op-32usx (give the section a height independent of
+/// its row count) is what restores real fitting there; this guard is what
+/// stops the framework looping while it is missing.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AutoPageSettle {
+    key: AutoPageSettleKey,
+    accepted: Option<usize>,
+    history: Vec<usize>,
+    consecutive_repeats: u8,
+    frozen: bool,
+}
+
+impl AutoPageSettle {
+    /// A fresh, unfrozen era for `key` with nothing accepted yet.
+    #[must_use]
+    pub const fn empty(key: AutoPageSettleKey) -> Self {
+        Self {
+            key,
+            accepted: None,
+            history: Vec::new(),
+            consecutive_repeats: 0,
+            frozen: false,
+        }
+    }
+
+    /// The count the caller last applied in this era, if any.
+    #[must_use]
+    pub const fn accepted(&self) -> Option<usize> {
+        self.accepted
+    }
+
+    /// Whether this era has detected a feedback cycle and stopped moving.
+    #[must_use]
+    pub const fn is_frozen(&self) -> bool {
+        self.frozen
+    }
+
+    /// Offers one freshly derived count for `key`.
+    ///
+    /// Returns `Some(count)` exactly when the caller must WRITE `count` to
+    /// its rows signal, and `None` when it must write nothing -- because the
+    /// count is unchanged, because the era is frozen, or because a freeze
+    /// landed on the count already applied. A `rows` of 0 is clamped to 1,
+    /// matching [`rows_per_page_for_height`]'s own floor.
+    #[must_use]
+    pub fn propose(&mut self, key: AutoPageSettleKey, rows: usize) -> Option<usize> {
+        let rows = rows.max(1);
+        if key != self.key {
+            *self = Self::empty(key);
+        }
+        if self.frozen {
+            return None;
+        }
+        if self.accepted == Some(rows) {
+            return None;
+        }
+        if self.history.contains(&rows) {
+            self.consecutive_repeats = self.consecutive_repeats.saturating_add(1);
+            if self.consecutive_repeats >= AUTO_PAGE_SETTLE_REPEATS_TO_FREEZE {
+                self.frozen = true;
+                let floor = self
+                    .history
+                    .iter()
+                    .copied()
+                    .chain(std::iter::once(rows))
+                    .min()
+                    .unwrap_or(rows);
+                if self.accepted == Some(floor) {
+                    return None;
+                }
+                self.accepted = Some(floor);
+                return Some(floor);
+            }
+        } else {
+            self.consecutive_repeats = 0;
+            if self.history.len() == AUTO_PAGE_SETTLE_HISTORY {
+                self.history.remove(0);
+            }
+            self.history.push(rows);
+        }
+        self.accepted = Some(rows);
+        Some(rows)
     }
 }
 
@@ -623,5 +771,148 @@ mod tests {
             "settles at the min_rows fallback (the documented scroll case), not an \
              oscillation back up to 15: {history:?}"
         );
+    }
+
+    // ── AutoPageSettle (Office op-32usx: the container-height feedback loop) ──
+
+    /// A scroll container whose height FOLLOWS the row count: each applied
+    /// count moves the box the next count is derived from, so the plain
+    /// measurement alternates forever. Models the Pending coordinators table
+    /// (an `h-full`/`min-h-0` flex column under a content-sized parent).
+    fn coupled_container_measurement(applied_rows: usize) -> usize {
+        // Two values chase each other: a render of 8 rows makes a box that
+        // fits 11, a render of 11 rows makes a box that fits 8 (the taller
+        // page brings the pager's second line and a horizontal scrollbar
+        // into the same flex column and steals the difference back).
+        if applied_rows <= 8 { 11 } else { 8 }
+    }
+
+    #[test]
+    fn a_height_coupled_container_settles_within_a_bounded_number_of_updates() {
+        let key = (1_u64, 640_i32, "table-md");
+        let mut settle = AutoPageSettle::empty(key);
+        let mut applied = 10_usize; // the configured page size before any measurement
+        let mut writes = 0_usize;
+        for _ in 0..50 {
+            let measured = coupled_container_measurement(applied);
+            if let Some(next) = settle.propose(key, measured) {
+                writes += 1;
+                applied = next;
+            }
+        }
+        assert!(
+            writes <= 4,
+            "a two-value cycle must be caught within four writes, got {writes}"
+        );
+        assert!(
+            settle.is_frozen(),
+            "the era must end frozen, not merely quiet"
+        );
+        assert_eq!(
+            settle.accepted(),
+            Some(8),
+            "a freeze lands on the SMALLEST count in the cycle, the one whose rows all fit"
+        );
+        // And from then on the observer's re-measurements write nothing at all.
+        for _ in 0..50 {
+            let measured = coupled_container_measurement(applied);
+            assert_eq!(settle.propose(key, measured), None);
+        }
+    }
+
+    /// BREAK for op-32usx: strip the `self.accepted == Some(rows)` guard from
+    /// `propose` and this fails -- an equal re-measurement would be written
+    /// again, re-rendering the table and re-firing the observer forever.
+    #[test]
+    fn an_unchanged_count_is_never_written_again() {
+        let key = (1_u64, 640_i32, "table-md");
+        let mut settle = AutoPageSettle::empty(key);
+        assert_eq!(settle.propose(key, 12), Some(12));
+        for _ in 0..20 {
+            assert_eq!(
+                settle.propose(key, 12),
+                None,
+                "compare-before-set: an equal proposal must not write"
+            );
+        }
+        assert!(!settle.is_frozen(), "a steady value is settled, not frozen");
+    }
+
+    #[test]
+    fn a_real_resize_walks_through_distinct_counts_untouched() {
+        let key = (1_u64, 640_i32, "table-md");
+        let mut settle = AutoPageSettle::empty(key);
+        // The user drags the window taller over 12 observer callbacks.
+        for rows in 8..20_usize {
+            assert_eq!(settle.propose(key, rows), Some(rows));
+        }
+        assert!(!settle.is_frozen());
+        // ... and past the history bound, values that fell off the window
+        // are ordinary again rather than misread as a cycle.
+        assert_eq!(settle.propose(key, 8), Some(8));
+    }
+
+    #[test]
+    fn one_return_to_a_previous_height_is_honoured_and_two_are_a_cycle() {
+        let key = (1_u64, 640_i32, "table-md");
+        let mut settle = AutoPageSettle::empty(key);
+        assert_eq!(settle.propose(key, 10), Some(10));
+        assert_eq!(settle.propose(key, 12), Some(12));
+        // Shorter, then back to exactly where it was: one repeat, applied.
+        assert_eq!(settle.propose(key, 10), Some(10));
+        assert!(!settle.is_frozen());
+        // A second consecutive repeat is the container talking, not the user.
+        assert_eq!(
+            settle.propose(key, 12),
+            None,
+            "freezes at the floor already applied"
+        );
+        assert!(settle.is_frozen());
+        assert_eq!(settle.accepted(), Some(10));
+    }
+
+    #[test]
+    fn a_distinct_value_between_repeats_resets_the_repeat_count() {
+        let key = (1_u64, 640_i32, "table-md");
+        let mut settle = AutoPageSettle::empty(key);
+        assert_eq!(settle.propose(key, 10), Some(10));
+        assert_eq!(settle.propose(key, 12), Some(12));
+        assert_eq!(settle.propose(key, 10), Some(10)); // repeat 1
+        assert_eq!(settle.propose(key, 15), Some(15)); // new: resets
+        assert_eq!(settle.propose(key, 12), Some(12)); // repeat 1 again, still applied
+        assert!(!settle.is_frozen());
+    }
+
+    #[test]
+    fn a_new_key_thaws_a_frozen_era_and_forgets_its_history() {
+        let key = (1_u64, 640_i32, "table-md");
+        let mut settle = AutoPageSettle::empty(key);
+        let mut applied = 10_usize;
+        for _ in 0..10 {
+            if let Some(next) = settle.propose(key, coupled_container_measurement(applied)) {
+                applied = next;
+            }
+        }
+        assert!(settle.is_frozen());
+
+        // A dataset change, a width change and a density change each start over.
+        for new_key in [
+            (2_u64, 640_i32, "table-md"),
+            (1_u64, 320_i32, "table-md"),
+            (1_u64, 640_i32, "table-xs"),
+        ] {
+            let mut thawed = settle.clone();
+            assert_eq!(thawed.propose(new_key, 11), Some(11));
+            assert!(!thawed.is_frozen());
+            assert_eq!(thawed.accepted(), Some(11));
+        }
+    }
+
+    #[test]
+    fn a_zero_proposal_is_clamped_to_one_row() {
+        let key = (1_u64, 640_i32, "table-md");
+        let mut settle = AutoPageSettle::empty(key);
+        assert_eq!(settle.propose(key, 0), Some(1));
+        assert_eq!(settle.propose(key, 1), None);
     }
 }

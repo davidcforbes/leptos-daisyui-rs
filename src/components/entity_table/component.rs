@@ -61,9 +61,9 @@ use crate::components::badge::{Badge, BadgeSize};
 use crate::components::button::Button;
 use crate::components::checkbox::{Checkbox, CheckboxSize};
 use crate::components::data_table::{
-    FALLBACK_HEADER_HEIGHT, FALLBACK_ROW_HEIGHT, MAX_COLUMN_WIDTH, PageSlot, StableColumnTrack,
-    StableTableColGroup, auto_page_size_for_height, effective_min_width, keyboard_resized_width,
-    max_row_height, rows_per_page_for_height, stable_table_content_style,
+    AutoPageSettle, FALLBACK_HEADER_HEIGHT, FALLBACK_ROW_HEIGHT, MAX_COLUMN_WIDTH, PageSlot,
+    StableColumnTrack, StableTableColGroup, auto_page_size_for_height, effective_min_width,
+    keyboard_resized_width, max_row_height, rows_per_page_for_height, stable_table_content_style,
 };
 use crate::components::icon::{Icon, IconSize};
 use crate::components::menu::{Menu, MenuCheckItem};
@@ -335,6 +335,12 @@ pub(super) const fn entity_empty_state_colspan(
     };
     columns + if has_selection_column { 1 } else { 0 }
 }
+
+/// The density component of the viewport-fit settle key (op-32usx).
+/// `EntityTable` renders one row density, so the third component of the
+/// `(data revision, width, density)` era key is a constant here; `DataTable`
+/// feeds its live `table_size` class instead.
+const ENTITY_AUTO_PAGE_DENSITY: &str = "entity-table";
 
 /// Marks one stable, repeatable row action for framework-owned focus recovery.
 ///
@@ -1927,11 +1933,38 @@ where
         (rows.len(), group_count)
     });
 
+    // op-32usx: the viewport-fit measurement is fed back from the layout it
+    // produces (apply a count, the table re-renders, the observer fires, the
+    // scroll container is measured again). Three things keep that exchange
+    // finite:
+    //
+    //  * the measured box is the scroll REGION -- the flex item whose height
+    //    its parent allocates -- never the `<table>` element, whose height is
+    //    a function of the row count by construction and was previously a
+    //    second observed target (a pure self-trigger);
+    //  * measurements coalesce to one per animation frame, so a burst of
+    //    observer callbacks and reactive re-runs produces one derivation;
+    //  * every derived count passes through `AutoPageSettle`, which writes
+    //    the rows signal only when the count CHANGES and freezes an era that
+    //    keeps re-offering counts it has already applied -- the signature of a
+    //    container whose height follows its own row count.
+    //
+    // The era key is `(data revision, region width, density)`; a new dataset
+    // or a width change starts a fresh, unfrozen measurement.
+    let data_revision: StoredValue<u64> = StoredValue::new(0);
+    let auto_page_settle: StoredValue<AutoPageSettle> =
+        StoredValue::new(AutoPageSettle::empty((0, 0, ENTITY_AUTO_PAGE_DENSITY)));
+    if viewport_fit_enabled {
+        Effect::new(move |_| {
+            let _ = data.get();
+            data_revision.try_update_value(|revision| *revision = revision.wrapping_add(1));
+        });
+    }
     let measure_rows = move || {
         if !viewport_fit_enabled {
             return;
         }
-        let Some(region) = table_region.get_untracked() else {
+        let Some(region) = table_region.try_get_untracked().flatten() else {
             return;
         };
         let viewport_height = region.client_height() as f64;
@@ -1982,30 +2015,43 @@ where
                 viewport_fit_min_rows,
             )
         };
-        if measured_page_size.try_get_untracked() != Some(Some(rows)) {
-            let _ = measured_page_size.try_set(Some(rows));
+        let key = (
+            data_revision.try_get_value().unwrap_or(0),
+            region.client_width(),
+            ENTITY_AUTO_PAGE_DENSITY,
+        );
+        let Some(applied) = auto_page_settle
+            .try_update_value(|settle| settle.propose(key, rows))
+            .flatten()
+        else {
+            return;
+        };
+        if measured_page_size.try_get_untracked() != Some(Some(applied)) {
+            let _ = measured_page_size.try_set(Some(applied));
         }
     };
-    let measure_handle: StoredValue<Option<TimeoutHandle>> = StoredValue::new(None);
+    // One measurement per animation frame, however many observer callbacks
+    // and reactive re-runs ask for it in between. A disposed table (the
+    // `StoredValue` is gone) measures nothing.
+    let measure_pending: StoredValue<bool> = StoredValue::new(false);
     let schedule_measure = move || {
         if !viewport_fit_enabled {
             return;
         }
-        if let Some(handle) = measure_handle.try_get_value().flatten() {
-            handle.clear();
+        if measure_pending.try_get_value() != Some(false) {
+            return;
         }
-        match set_timeout_with_handle(measure_rows, std::time::Duration::ZERO) {
-            Ok(handle) => {
-                measure_handle.try_update_value(|slot| *slot = Some(handle));
+        measure_pending.try_set_value(true);
+        request_animation_frame(move || {
+            if measure_pending
+                .try_update_value(|pending| *pending = false)
+                .is_none()
+            {
+                return;
             }
-            Err(_) => measure_rows(),
-        }
+            measure_rows();
+        });
     };
-    on_cleanup(move || {
-        if let Some(handle) = measure_handle.try_get_value().flatten() {
-            handle.clear();
-        }
-    });
 
     if viewport_fit_enabled {
         Effect::new(move |_| {
@@ -2032,10 +2078,10 @@ where
                 as Box<dyn FnMut(js_sys::Array, web_sys::ResizeObserver)>);
             match web_sys::ResizeObserver::new(closure.as_ref().unchecked_ref()) {
                 Ok(observer) => {
+                    // Only the region. The `<table>` inside it resizes with
+                    // every page-size change by construction, so observing it
+                    // was a self-trigger (op-32usx).
                     observer.observe(region.unchecked_ref::<web_sys::Element>());
-                    if let Ok(Some(table)) = region.query_selector("table") {
-                        observer.observe(&table);
-                    }
                     let guard = send_wrapper::SendWrapper::new((closure, observer));
                     on_cleanup(move || {
                         let (closure, observer) = guard.take();

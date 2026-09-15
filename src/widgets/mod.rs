@@ -47,7 +47,9 @@ pub use property_list::{PropertyEntry, PropertyList};
 pub use quick_filter_row::{QuickFilterAction, QuickFilterDropdown, QuickFilterRow};
 pub use risk_assessment_matrix::{RiskAssessmentMatrix, RiskMatrixDatum};
 pub use tag_input::TagInput;
-pub use timeline_list::{TimelineList, TimelineListEntry};
+pub use timeline_list::{
+    TimelineList, TimelineListEntry, timeline_entry_action_name, timeline_entry_is_activatable,
+};
 pub use tree_view::{TreeNode, TreeView};
 pub use version_history_list::{VersionHistoryEntry, VersionHistoryList};
 pub use workflow_visualizer::{StepStatus, WorkflowStep, WorkflowVisualizer};

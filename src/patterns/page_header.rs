@@ -59,6 +59,18 @@ impl PageHeaderDivider {
     }
 }
 
+/// Whether [`PageHeader`] renders its subtitle paragraph at all.
+///
+/// op-bjpst (2026-09-14): the `<p>` used to render unconditionally in both
+/// navigation-layout branches, so a caller that passes no `subtitle` (the prop
+/// is optional and defaults to an empty string) shipped an empty `text-sm`
+/// line box under every title -- all seven account-family pages carried a
+/// blank line. Whitespace-only text counts as empty: it paints nothing but
+/// still reserves the line.
+pub fn page_header_renders_subtitle(subtitle: &str) -> bool {
+    !subtitle.trim().is_empty()
+}
+
 /// Page heading with explicit navigation, freshness, dataset, and action slots.
 ///
 /// `actions` wraps to a second (or later) row instead of overflowing the
@@ -128,9 +140,14 @@ pub fn PageHeader(
                             </h1>
                             {freshness}
                         </div>
-                        <p class="max-w-3xl text-sm text-base-content/75 sm:text-base">
-                            {move || subtitle.get()}
-                        </p>
+                        {move || {
+                            let subtitle = subtitle.get();
+                            page_header_renders_subtitle(&subtitle).then(|| view! {
+                                <p class="max-w-3xl text-sm text-base-content/75 sm:text-base" data-page-subtitle="true">
+                                    {subtitle}
+                                </p>
+                            })
+                        }}
                     </div>
                 </div>
                 <div class="flex flex-wrap items-end gap-2 lg:justify-end">
@@ -173,9 +190,14 @@ pub fn PageHeader(
                             </h1>
                             {freshness}
                         </div>
-                        <p class="max-w-3xl text-sm text-base-content/75 sm:text-base">
-                            {move || subtitle.get()}
-                        </p>
+                        {move || {
+                            let subtitle = subtitle.get();
+                            page_header_renders_subtitle(&subtitle).then(|| view! {
+                                <p class="max-w-3xl text-sm text-base-content/75 sm:text-base" data-page-subtitle="true">
+                                    {subtitle}
+                                </p>
+                            })
+                        }}
                     </div>
                     <div class="flex min-w-0 flex-wrap items-end gap-2 lg:justify-end">
                         {dataset.map(|dataset| view! {
@@ -256,6 +278,58 @@ mod tests {
                 .count(),
             2,
             "expected both navigation-layout branches to render a wrapping actions host: {component}"
+        );
+    }
+
+    /// op-bjpst: the subtitle paragraph is a policy decision, not a fixed slot.
+    /// Deliberate break: make `page_header_renders_subtitle` return
+    /// `!subtitle.is_empty()` and the whitespace row fails; return `true`
+    /// unconditionally and the empty row fails.
+    #[test]
+    fn page_header_renders_subtitle_only_when_it_has_visible_text() {
+        assert!(!page_header_renders_subtitle(""));
+        assert!(!page_header_renders_subtitle("   \n\t"));
+        assert!(page_header_renders_subtitle("Supporting page description"));
+        assert!(page_header_renders_subtitle("  x  "));
+    }
+
+    /// Source-level guard for the same rule at the render site: every subtitle
+    /// `<p>` in BOTH navigation-layout branches sits inside the
+    /// `page_header_renders_subtitle(..).then(..)` gate. A typed test cannot
+    /// own this (the view is erased at compile time and this crate has no DOM
+    /// harness), so the component source is the subject, split before
+    /// `#[cfg(test)]` so this test cannot match itself. Deliberate break:
+    /// restore the unconditional `<p>` in one branch; the paragraph count stays
+    /// two while the gated count drops to one.
+    #[test]
+    fn subtitle_paragraph_is_gated_in_both_navigation_layout_branches() {
+        let source = include_str!("page_header.rs");
+        let component = source
+            .split_once("pub fn PageHeader(")
+            .expect("PageHeader component source")
+            .1
+            .split_once("\n#[cfg(test)]")
+            .map_or(source, |(before, _)| before);
+        let paragraph = r#"<p class="max-w-3xl text-sm text-base-content/75 sm:text-base" data-page-subtitle="true">"#;
+        let gate = "page_header_renders_subtitle(&subtitle).then(|| view! {";
+        let paragraphs = component.matches(paragraph).count();
+        assert_eq!(
+            paragraphs, 2,
+            "expected one subtitle paragraph per navigation-layout branch: {component}"
+        );
+        let gated = component
+            .match_indices(paragraph)
+            .filter(|(index, _)| {
+                let mut start = index.saturating_sub(gate.len() + 96);
+                while !component.is_char_boundary(start) {
+                    start -= 1;
+                }
+                component[start..*index].contains(gate)
+            })
+            .count();
+        assert_eq!(
+            gated, paragraphs,
+            "every subtitle paragraph must sit inside the non-empty gate: {component}"
         );
     }
 }
