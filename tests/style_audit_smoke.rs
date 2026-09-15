@@ -84,12 +84,35 @@ fn demo_profile(font_family: String) -> StyleProfile {
     // Tailwind's `shadow-sm` first layer (`0 1px 3px rgba(0,0,0,0.1)`) —
     // inside the opacity epsilon — weakening a real check for no gain today.
     //
-    // daisyUI's own control shadows (`.select`, `.input`, `.checkbox`,
-    // `.alert`) are NOT declared here: they are authored in `oklch()`/
-    // `oklab()`, which the engine's shadow parser does not understand, so any
-    // spec written for them would encode a mis-parse (it reads the geometry
-    // out of the colour's coordinates — negative blur and all). They stay
-    // ratcheted until the engine can parse them: PixelProof-0il.
+    // daisyUI 5's resting control shadows ARE declared (ldui-k6nn). They used
+    // to be ratcheted on the grounds that the engine could not parse their
+    // `oklch()`/`oklab()` colours — true until PixelProof-0il was fixed in
+    // PixelProof 8a74b06 (2026-08-31), after which those ceilings rested on a
+    // false premise and blinded DEPTH on every control they covered. Each
+    // layer below is one measured computed layer, cited to daisyUI's shipped
+    // CSS (`node_modules/daisyui/components/*.css`), at the demo's default
+    // light theme where `base-content` is oklch(21% .006 285.885) =
+    // rgb(24, 24, 27):
+    //
+    //   .input / .select:  0 1px color-mix(in oklab, var(--input-color)
+    //                        calc(var(--depth)*10%), #0000) inset,
+    //                      0 -1px oklch(100% 0 0 / calc(var(--depth)*.1)) inset
+    //                      -> measured alpha 0.02 (dark) and 0.1 (white)
+    //   .toggle:           0 1px color-mix(in oklab, currentColor
+    //                        calc(var(--depth)*10%), #0000) inset
+    //                      -> measured alpha 0.05
+    //   .checkbox:         0 1px oklch(0% 0 0 / calc(var(--depth)*.1)) inset
+    //                      -> measured black, alpha 0.1
+    //
+    // NOT declared, and still ratcheted per page: `.alert` (its layers mix
+    // the variant's own colour, so each alert colour computes a different
+    // shadow), and stock Tailwind `shadow-sm`/`shadow-xl` on `.kanban-card`
+    // and `.card` -- off the `ui_tokens::elevation` ramp, so real undecided
+    // debt whose fix is the `.ld-card-depth` route ldui-k4fn took for KPI
+    // cards, not a declaration here.
+    //
+    // A coloured or state variant computes a different layer and still
+    // reports; that is a real, undeclared value, not noise.
     //
     // **Nothing is declared here for KPI cards (ldui-k4fn), on purpose.**
     // That bead replaced `KpiCard`'s stock Tailwind `shadow-sm` with
@@ -110,6 +133,17 @@ fn demo_profile(font_family: String) -> StyleProfile {
     shadows.extend([
         ShadowSpec::new(0.0, 6.0, 12.0, 0.15).with_spread(-2.0),
         ShadowSpec::new(0.0, 3.0, 6.0, 0.10).with_spread(-2.0),
+        // daisyUI resting control shadows (see above).
+        ShadowSpec::new(0.0, 1.0, 0.0, 0.02)
+            .with_color(24.0, 24.0, 27.0)
+            .with_inset(),
+        ShadowSpec::new(0.0, -1.0, 0.0, 0.10)
+            .with_color(255.0, 255.0, 255.0)
+            .with_inset(),
+        ShadowSpec::new(0.0, 1.0, 0.0, 0.05)
+            .with_color(24.0, 24.0, 27.0)
+            .with_inset(),
+        ShadowSpec::new(0.0, 1.0, 0.0, 0.10).with_inset(),
     ]);
 
     // --- typography -------------------------------------------------------
@@ -121,7 +155,15 @@ fn demo_profile(font_family: String) -> StyleProfile {
     let mut ramp = base.type_ramp.clone();
     ramp.push(18.0);
 
-    base.shadows(shadows).type_ramp(ramp)
+    // --- typography: intentional mono roles --------------------------------
+    // `EntityColumn::identifier()` renders its header and cells in a mono face
+    // on purpose (ldui-lrig). `data-entity-column-kind` is the stable audit
+    // hook EntityTable emits on both the `th` and the `td`; declaring the ROLE
+    // rather than `.font-mono` keeps an accidental mono element reportable
+    // (ldui-dpim). Only the family check is exempt: size still runs.
+    base.shadows(shadows)
+        .type_ramp(ramp)
+        .mono_selectors(["[data-entity-column-kind=\"identifier\"]"])
 }
 
 /// Pages swept, with their current per-family violation ceilings.
@@ -149,14 +191,17 @@ fn demo_profile(font_family: String) -> StyleProfile {
 ///   The remainder is daisyUI's `-xs` size step (10px on `.kbd-xs`,
 ///   `.badge-xs`), its `-xl` step (22px on `.btn-xl`), and Tailwind
 ///   `text-2xl` (24px) in the kanban demo's own headings — genuinely
-///   undecided, so ratcheted rather than declared.
-/// - **DEPTH.** Two distinct things. daisyUI's `oklch()`/`oklab()` control
-///   shadows (`.select`, `.input`, `.checkbox`, `.alert`) cannot be declared
-///   at all until the engine's shadow parser understands those colour
-///   functions (**PixelProof-0il**) — 18 of data-table's 18, 2 of kanban's 7.
-///   The rest is real ad-hoc-shadow debt: Tailwind `shadow-xl` on the card
-///   demo's cards (11) and `shadow-sm` on kanban cards (5), neither from
-///   `ui_tokens::elevation`. See `doc/visual-quality/ad-hoc-shadow.md`.
+///   undecided, so ratcheted rather than declared. `EntityColumn::identifier()`
+///   mono cells no longer report at all: [`demo_profile`] declares their role
+///   via `mono_selectors` (ldui-dpim).
+/// - **DEPTH.** daisyUI's resting control shadows (`.input`, `.select`,
+///   `.toggle`, `.checkbox`) are DECLARED in [`demo_profile`] (ldui-k6nn) now
+///   that PixelProof-0il is fixed and the engine reads `oklch()`. What remains
+///   is `.alert-info` (3 on data-table, 4 on search_picker_dialog, 1 on
+///   kanban: its layers mix the variant colour) and real ad-hoc-shadow debt,
+///   Tailwind `shadow-xl` on the card demo's cards (11) and `shadow-sm` on
+///   kanban cards (5), neither from `ui_tokens::elevation`. See
+///   `doc/visual-quality/ad-hoc-shadow.md`.
 /// - **COMPONENT-DRIFT / GRID / INTERNAL.** Unchanged by this pass.
 /// - **CHARTS (ldui-40g).** This page's numbers are a first measurement, not a
 ///   ratchet raise, and every one of them comes from inside the chart
@@ -207,25 +252,21 @@ const PAGES: &[(&str, &[(&str, usize)])] = &[
             // -xs/-xl size steps and Tailwind text-2xl, all genuinely
             // undecided debt. The 105 it replaces was raised for
             // Column::identifier() (ldui-lrig), whose mono face is deliberate;
-            // that reasoning held at the time but is moot now the upstream
-            // exemption covers the whole class of finding. Ceilings here carry
+            // that reasoning held at the time; identifier cells are now a
+            // declared mono role in demo_profile (ldui-dpim), so they never
+            // report. Ceilings here carry
             // no slack on purpose: the sweep pushes at most one violation per
             // element, so headroom is exactly where a real regression hides.
             (family::TYPOGRAPHY, 31),
             (family::SHAPE, 0),
-            // 36, was 32. The +4 is the selection checkboxes added by
-            // ldui-px06/ldui-nz6d, and it is the SAME already-declared
-            // class, not new debt: every one of the 36 is a daisyUI control
-            // shadow authored in oklch()/oklab(), which the engine's shadow
-            // parser cannot read (it decodes geometry out of the colour's
-            // coordinates), so a spec written for them would encode a
-            // mis-parse. Verified rather than assumed - the audit report
-            // caps at 20 findings per family, so 16 were elided; enumerating
-            // every non-none box-shadow on the page gives 23 select + 10
-            // checkbox + 3 alert = 36, with the 159 .btn shadows being the
-            // demo's DECLARED press affordance rather than violations.
-            // Stays ratcheted until PixelProof-0il teaches the parser oklch.
-            (family::DEPTH, 36),
+            // 3, was 36 (ldui-k6nn). The 33 select and checkbox resting
+            // shadows are now declared in demo_profile: the old "engine cannot
+            // parse oklch" premise stopped being true when PixelProof-0il was
+            // fixed (8a74b06). Measured by zeroing and reading the failure:
+            // the remaining 3 are `.alert-info`, whose layers mix the alert
+            // variant's colour. The 159 .btn shadows remain the demo's
+            // DECLARED press affordance rather than violations.
+            (family::DEPTH, 3),
             (family::GRID, 2),
             (family::COMPONENT_DRIFT, 10),
         ],
@@ -235,7 +276,7 @@ const PAGES: &[(&str, &[(&str, usize)])] = &[
         &[
             (family::TYPOGRAPHY, 7),
             (family::SHAPE, 0),
-            (family::DEPTH, 7),
+            (family::DEPTH, 6),
             (family::GRID, 34),
             (family::INTERNAL, 2),
             (family::COMPONENT_DRIFT, 1),
@@ -339,10 +380,11 @@ const PAGES: &[(&str, &[(&str, usize)])] = &[
         &[
             (family::TYPOGRAPHY, 0),
             (family::SHAPE, 0),
-            // 4, first measured under ldui-ddhr: daisyUI's `.alert` shadow,
-            // authored in oklch()/oklab() which the engine's shadow parser
-            // cannot read, so a declared spec would encode a mis-parse.
-            // Ratcheted until PixelProof-0il teaches the parser oklch.
+            // 4, first measured under ldui-ddhr, re-measured under ldui-k6nn:
+            // daisyUI `.alert-info` shadows. The engine reads them fine since
+            // PixelProof-0il; they stay ratcheted because each alert variant
+            // mixes its own colour into the layers, so one declaration would
+            // not describe the family.
             (family::DEPTH, 4),
             (family::GRID, 0),
             (family::INTERNAL, 0),
@@ -366,24 +408,17 @@ const PAGES: &[(&str, &[(&str, usize)])] = &[
     (
         "/components/helpdesk",
         &[
-            // 14, first measured under ldui-b5mu.12: the key column is
-            // `EntityColumn::identifier()`, whose monospace face is deliberate
-            // (ldui-lrig) -- 12 row cells plus the header's two spans. The
-            // upstream mono exemption (PixelProof 8a74b06) covers code/pre/kbd
-            // TAGS only, not a `font-mono` span, so this is the framework's
-            // identifier convention, not this page's debt. The page's own
+            // 0, was 14 at first measurement (ldui-b5mu.12). The 14 were the
+            // deliberately mono `EntityColumn::identifier()` key column; it is
+            // now a declared mono role in demo_profile (ldui-dpim, PixelProof
+            // 7a34745), and its font-size is still checked. The page's own
             // findings (12 off-ramp `badge-xs`, 3 unlabelled filter controls)
-            // were fixed rather than ratcheted. ldui-dpim tracks exempting identifier
-            // columns upstream, which should take this to 0.
-            (family::TYPOGRAPHY, 14),
+            // were fixed rather than ratcheted.
+            (family::TYPOGRAPHY, 0),
             (family::SHAPE, 0),
-            // 5, first measured under ldui-b5mu.12: daisyUI's own input,
-            // select (x3, one is EntityTable's page-size control) and toggle
-            // inset shadows, authored in oklch()/oklab(), which the engine's
-            // shadow parser cannot read -- the same class ratcheted on
-            // /components/search_picker_dialog and /components/data-table.
-            // Stays until PixelProof-0il teaches the parser oklch.
-            (family::DEPTH, 5),
+            // 0, was 5 at first measurement: daisyUI's resting input, select
+            // and toggle shadows, now declared in demo_profile (ldui-k6nn).
+            (family::DEPTH, 0),
             (family::GRID, 0),
             (family::INTERNAL, 0),
             (family::COMPONENT_DRIFT, 0),
