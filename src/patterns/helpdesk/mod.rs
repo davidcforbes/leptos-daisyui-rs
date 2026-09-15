@@ -4,6 +4,7 @@
 //! and `doc/components/helpdesk.md` for the consumer guide.
 
 mod backend;
+mod drawer;
 #[cfg(feature = "test-mode")]
 mod memory;
 mod model;
@@ -12,6 +13,7 @@ mod state;
 mod texts;
 
 pub use backend::{HelpdeskBackend, HelpdeskFuture};
+pub use drawer::{TicketDetailDrawer, TriageAction};
 #[cfg(feature = "test-mode")]
 pub use memory::{BackendCall, HelpdeskFault, InMemoryHelpdeskBackend, SEED_ME, SEED_NOW_MS};
 pub use model::{
