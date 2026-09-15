@@ -6,6 +6,7 @@ mod async_data_section;
 mod contracts;
 mod dataset_selector;
 mod filter_bar;
+mod helpdesk;
 mod kpi_strip;
 mod list_page;
 mod macros;
@@ -50,6 +51,7 @@ pub use filter_bar::{
     FILTER_BAR_BASE_CLASS, FilterBar, FilterBarTexts, FilterResultSummary, SnapshotDefaultSave,
     SnapshotDefaultSaveState, filter_active_summary, filter_bar_class, filter_result_summary,
 };
+pub use helpdesk::*;
 pub use kpi_strip::{
     KPI_BASELINE_TRACK_HEADROOM, KPI_CARD_HELP_FLOOR_PX, KPI_CARD_TWO_LINE_FLOOR_PX, KpiAction,
     KpiBaseline, KpiBaselineAvailability, KpiBaselineState, KpiCard, KpiComparison, KpiItem,
