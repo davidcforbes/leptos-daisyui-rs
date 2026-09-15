@@ -316,15 +316,10 @@ pub fn MarkdownEditor(
         let Some(data) = ev.clipboard_data() else {
             return;
         };
-        let Some(files) = data.files() else { return };
-        for i in 0..files.length() {
-            let Some(file) = files.get(i) else { continue };
-            if file.type_().starts_with("image/") {
-                ev.prevent_default();
-                let uploader = handle.get_value();
-                upload_and_insert_at_cursor(file, uploader, source, textarea, Some(error_toast));
-                return;
-            }
+        if let Some(file) = crate::utils::first_image_file(&data) {
+            ev.prevent_default();
+            let uploader = handle.get_value();
+            upload_and_insert_at_cursor(file, uploader, source, textarea, Some(error_toast));
         }
     };
 
@@ -353,17 +348,13 @@ pub fn MarkdownEditor(
         let Some(data) = ev.data_transfer() else {
             return;
         };
-        let files = data.files();
-        let Some(files) = files else { return };
-        for i in 0..files.length() {
-            let Some(file) = files.get(i) else { continue };
-            if file.type_().starts_with("image/") {
+        match crate::utils::first_image_file(&data) {
+            Some(file) => {
                 let uploader = handle.get_value();
                 upload_and_insert_at_cursor(file, uploader, source, textarea, Some(error_toast));
-                return;
             }
+            None => show_error_toast(error_toast, "Drop ignored: no image found."),
         }
-        show_error_toast(error_toast, "Drop ignored: no image found.");
     };
 
     let body_style = move || format!("height: {};", height.to_css());
