@@ -1,0 +1,420 @@
+//! Real-browser proof for `patterns::Helpdesk` (both roles on one document,
+//! in-memory backend). See doc/plans/2026-09-14-helpdesk-composite-design.md §8.
+
+mod common;
+
+use common::{
+    assert_no_browser_errors, begin_browser_error_capture, click, harness_at, wait_for_selector,
+};
+use serde_json::{Value, json};
+
+const PAGE: &str = "/helpdesk-fixture";
+const SUPPORT: &str = "#helpdesk-support";
+const REQUESTER: &str = "#helpdesk-requester";
+
+async fn eval_json(h: &pixelproof_web::Harness, expr: &str) -> Value {
+    h.page()
+        .evaluate(expr)
+        .await
+        .expect("evaluate helpdesk fixture")
+        .into_value()
+        .expect("helpdesk expression returns JSON")
+}
+
+/// Read the backend's call log via the shared `window.__APP_DEBUG__.state()`
+/// oracle (`demo/src/debug.rs`), where `helpdesk_calls` is registered.
+async fn backend_calls(h: &pixelproof_web::Harness) -> Value {
+    eval_json(
+        h,
+        r#"(() => {
+            const raw = window.__APP_DEBUG__ ? window.__APP_DEBUG__.state() : '{}';
+            const state = JSON.parse(raw);
+            return state.helpdesk_calls ?? [];
+        })()"#,
+    )
+    .await
+}
+
+async fn snapshot(h: &pixelproof_web::Harness, root: &str) -> Value {
+    eval_json(
+        h,
+        &format!(
+            r#"(() => {{
+                const root = document.querySelector('{root}');
+                const bucketCount = id => root
+                    .querySelector('[data-selectable-summary-card="' + id + '"] [data-selectable-summary-count]')
+                    ?.textContent?.trim() ?? null;
+                return {{
+                    role: root.querySelector('[data-helpdesk]').getAttribute('data-helpdesk-role'),
+                    open: bucketCount('open'),
+                    inProgress: bucketCount('in-progress'),
+                    done: bucketCount('done'),
+                    rows: root.querySelectorAll('[data-helpdesk-table] tbody tr').length,
+                    keys: Array.from(root.querySelectorAll('[data-helpdesk-table] tbody tr'))
+                        .map(r => r.textContent.match(/OF-\d+/)?.[0] ?? null),
+                    assigneeFilter: root.querySelector('[data-helpdesk-filter-assignee]') !== null,
+                    mineOnly: root.querySelector('[data-helpdesk-mine-only]') !== null,
+                    drawerOpen: root.querySelector('[data-helpdesk-drawer]')?.getAttribute('data-helpdesk-drawer-open') ?? null,
+                    drawerKey: root.querySelector('[data-helpdesk-drawer-header]')?.textContent?.match(/OF-\d+/)?.[0] ?? null,
+                    transition: root.querySelector('[data-helpdesk-transition]') !== null,
+                    feedbackState: root.querySelector('[data-helpdesk-action-feedback]')?.getAttribute('data-helpdesk-action-feedback-state') ?? null,
+                    comments: root.querySelectorAll('[data-helpdesk-comment]').length,
+                    notConfigured: root.querySelector('[data-helpdesk-not-configured]') !== null,
+                    submitPresent: root.querySelector('[data-helpdesk-submit]') !== null,
+                    submitDisabled: root.querySelector('[data-helpdesk-submit]')?.disabled ?? null,
+                    images: root.querySelectorAll('[data-image-attachment-item]').length,
+                    imageStatus: root.querySelector('[data-image-attachment-status]')?.textContent?.trim() ?? null,
+                }};
+            }})()"#
+        ),
+    )
+    .await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-helpdesk)"]
+async fn buckets_count_the_seed_and_filter_rows() {
+    let h = harness_at(PAGE).await;
+    begin_browser_error_capture(&h).await;
+    wait_for_selector(&h, &format!("{SUPPORT} [data-helpdesk-state=\"ready\"]")).await;
+    let s = snapshot(&h, SUPPORT).await;
+    assert_eq!(
+        (
+            s["open"].as_str(),
+            s["inProgress"].as_str(),
+            s["done"].as_str()
+        ),
+        (Some("5"), Some("4"), Some("3")),
+        "{s}"
+    );
+    assert_eq!(s["rows"], json!(12));
+    click(
+        &h,
+        &format!("{SUPPORT} [data-selectable-summary-card=\"open\"]"),
+    )
+    .await;
+    let s = snapshot(&h, SUPPORT).await;
+    assert_eq!(
+        s["rows"],
+        json!(5),
+        "open bucket filters to New-category rows: {s}"
+    );
+    click(
+        &h,
+        &format!("{SUPPORT} [data-selectable-summary-card=\"open\"]"),
+    )
+    .await;
+    assert_eq!(
+        snapshot(&h, SUPPORT).await["rows"],
+        json!(12),
+        "second click clears the bucket"
+    );
+    assert_no_browser_errors(&h, "buckets").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-helpdesk)"]
+async fn requester_sees_only_own_tickets_and_no_support_controls() {
+    let h = harness_at(PAGE).await;
+    wait_for_selector(&h, &format!("{REQUESTER} [data-helpdesk-state=\"ready\"]")).await;
+    let r = snapshot(&h, REQUESTER).await;
+    let s = snapshot(&h, SUPPORT).await;
+    assert_eq!(r["role"], json!("requester"));
+    assert_eq!(
+        r["rows"],
+        json!(6),
+        "seed has six tickets requested by SEED_ME: {r}"
+    );
+    assert!(
+        !r["assigneeFilter"].as_bool().unwrap() && !r["mineOnly"].as_bool().unwrap(),
+        "{r}"
+    );
+    assert!(
+        s["assigneeFilter"].as_bool().unwrap() && s["mineOnly"].as_bool().unwrap(),
+        "negative control: {s}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-helpdesk)"]
+async fn row_activation_opens_the_drawer_and_escape_closes_it() {
+    let h = harness_at(PAGE).await;
+    begin_browser_error_capture(&h).await;
+    wait_for_selector(&h, &format!("{SUPPORT} [data-helpdesk-state=\"ready\"]")).await;
+    click(
+        &h,
+        &format!("{SUPPORT} [data-helpdesk-table] tbody tr:first-child"),
+    )
+    .await;
+    wait_for_selector(&h, &format!("{SUPPORT} [data-helpdesk-drawer-header]")).await;
+    let s = snapshot(&h, SUPPORT).await;
+    assert_eq!(s["drawerOpen"], json!("true"));
+    assert!(s["drawerKey"].as_str().unwrap().starts_with("OF-"), "{s}");
+    assert_eq!(
+        snapshot(&h, REQUESTER).await["drawerOpen"],
+        json!("false"),
+        "negative control"
+    );
+    eval_json(
+        &h,
+        &format!(
+            "(() => {{ const a = document.querySelector('{SUPPORT} [data-helpdesk-drawer] aside'); \
+             a.dispatchEvent(new KeyboardEvent('keydown', {{ key: 'Escape', bubbles: true }})); return true; }})()"
+        ),
+    )
+    .await;
+    assert_eq!(snapshot(&h, SUPPORT).await["drawerOpen"], json!("false"));
+    assert_no_browser_errors(&h, "drawer").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-helpdesk)"]
+async fn support_transition_writes_and_requester_has_no_selects() {
+    let h = harness_at(PAGE).await;
+    wait_for_selector(&h, &format!("{SUPPORT} [data-helpdesk-state=\"ready\"]")).await;
+    click(
+        &h,
+        &format!("{SUPPORT} [data-helpdesk-table] tbody tr:first-child"),
+    )
+    .await;
+    wait_for_selector(&h, &format!("{SUPPORT} [data-helpdesk-transition]")).await;
+    eval_json(
+        &h,
+        &format!(
+            "(() => {{ const s = document.querySelector('{SUPPORT} [data-helpdesk-transition]'); \
+             s.value = '10003'; s.dispatchEvent(new Event('change', {{ bubbles: true }})); return true; }})()"
+        ),
+    )
+    .await;
+    wait_for_selector(
+        &h,
+        &format!("{SUPPORT} [data-helpdesk-action-feedback-state=\"success\"]"),
+    )
+    .await;
+    let calls = backend_calls(&h).await;
+    let calls_str = calls.to_string();
+    assert!(
+        calls_str.contains("Transition"),
+        "backend saw the transition: {calls_str}"
+    );
+    let s = snapshot(&h, SUPPORT).await;
+    assert_eq!(s["done"], json!("4"), "Done bucket grew by one: {s}");
+
+    click(
+        &h,
+        &format!("{REQUESTER} [data-helpdesk-table] tbody tr:first-child"),
+    )
+    .await;
+    wait_for_selector(&h, &format!("{REQUESTER} [data-helpdesk-drawer-header]")).await;
+    assert_eq!(
+        snapshot(&h, REQUESTER).await["transition"],
+        json!(false),
+        "requester drawer has no status select"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-helpdesk)"]
+async fn failed_write_reverts_and_reports() {
+    let h = harness_at(&format!("{PAGE}-fail-writes")).await;
+    wait_for_selector(&h, &format!("{SUPPORT} [data-helpdesk-state=\"ready\"]")).await;
+    click(
+        &h,
+        &format!("{SUPPORT} [data-helpdesk-table] tbody tr:first-child"),
+    )
+    .await;
+    wait_for_selector(&h, &format!("{SUPPORT} [data-helpdesk-transition]")).await;
+    let before = snapshot(&h, SUPPORT).await;
+    eval_json(
+        &h,
+        &format!(
+            "(() => {{ const s = document.querySelector('{SUPPORT} [data-helpdesk-transition]'); \
+             s.value = '10003'; s.dispatchEvent(new Event('change', {{ bubbles: true }})); return true; }})()"
+        ),
+    )
+    .await;
+    wait_for_selector(
+        &h,
+        &format!("{SUPPORT} [data-helpdesk-action-feedback-state=\"error\"]"),
+    )
+    .await;
+    let after = snapshot(&h, SUPPORT).await;
+    assert_eq!(
+        after["done"], before["done"],
+        "bucket counts unchanged after a refused write"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-helpdesk)"]
+async fn comments_append_in_both_roles() {
+    let h = harness_at(PAGE).await;
+    for root in [SUPPORT, REQUESTER] {
+        wait_for_selector(&h, &format!("{root} [data-helpdesk-state=\"ready\"]")).await;
+        click(
+            &h,
+            &format!("{root} [data-helpdesk-table] tbody tr:first-child"),
+        )
+        .await;
+        wait_for_selector(&h, &format!("{root} [data-helpdesk-comment-input]")).await;
+        let before = snapshot(&h, root).await["comments"].as_u64().unwrap();
+        eval_json(
+            &h,
+            &format!(
+                "(() => {{ const t = document.querySelector('{root} [data-helpdesk-comment-input]'); \
+                 t.value = 'hello from {root}'; t.dispatchEvent(new Event('input', {{ bubbles: true }})); return true; }})()"
+            ),
+        )
+        .await;
+        click(&h, &format!("{root} [data-helpdesk-comment-submit]")).await;
+        wait_for_selector(
+            &h,
+            &format!("{root} [data-helpdesk-action-feedback-state=\"success\"]"),
+        )
+        .await;
+        assert_eq!(
+            snapshot(&h, root).await["comments"].as_u64().unwrap(),
+            before + 1,
+            "{root}"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-helpdesk)"]
+async fn new_request_validates_pastes_and_files() {
+    let h = harness_at(PAGE).await;
+    begin_browser_error_capture(&h).await;
+    wait_for_selector(&h, &format!("{SUPPORT} [data-helpdesk-state=\"ready\"]")).await;
+    click(&h, &format!("{SUPPORT} [data-helpdesk-new-request]")).await;
+    wait_for_selector(&h, &format!("{SUPPORT} [data-helpdesk-summary]")).await;
+    let s = snapshot(&h, SUPPORT).await;
+    assert_eq!(
+        s["submitDisabled"],
+        json!(true),
+        "blank summary disables submit: {s}"
+    );
+
+    let paste = |root: &str, name: &str, bytes: &str, mime: &str| {
+        format!(
+            r#"(() => {{
+                const bytes = new Uint8Array([{bytes}]);
+                const file = new File([bytes], '{name}', {{ type: '{mime}' }});
+                const dt = new DataTransfer(); dt.items.add(file);
+                const zone = document.querySelector('{root} [data-image-attachment-dropzone]');
+                zone.dispatchEvent(new ClipboardEvent('paste', {{ clipboardData: dt, bubbles: true }}));
+                return true;
+            }})()"#
+        )
+    };
+    const PNG: &str = "0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A,0,0,0,0";
+    const JPEG: &str = "0xFF,0xD8,0xFF,0xE0,0,0,0,0,0,0,0,0";
+    eval_json(&h, &paste(SUPPORT, "shot.png", PNG, "image/png")).await;
+    wait_for_selector(&h, &format!("{SUPPORT} [data-image-attachment-item]")).await;
+    assert_eq!(snapshot(&h, SUPPORT).await["images"], json!(1));
+    // Declared type is image/png, but the bytes are plain text: sniffing rejects it.
+    // Polled rather than a fixed sleep: `read_file_bytes` round-trips through a
+    // FileReader promise, whose latency isn't bounded under a loaded browser.
+    eval_json(&h, &paste(SUPPORT, "notes.txt", "104,105", "image/png")).await;
+    wait_for_selector(
+        &h,
+        &format!("{SUPPORT} [data-image-attachment-status]:not(:empty)"),
+    )
+    .await;
+    let s = snapshot(&h, SUPPORT).await;
+    assert_eq!(
+        s["images"],
+        json!(1),
+        "sniffing rejects non-image bytes: {s}"
+    );
+    assert!(
+        s["imageStatus"].as_str().unwrap().contains("notes.txt"),
+        "{s}"
+    );
+    // A .png name over JPEG magic bytes is admitted as image/jpeg (sniffed, not declared).
+    eval_json(&h, &paste(SUPPORT, "photo.png", JPEG, "image/png")).await;
+    wait_for_selector(
+        &h,
+        &format!(
+            "{SUPPORT} [data-image-attachment-list] [data-image-attachment-item]:nth-of-type(2)"
+        ),
+    )
+    .await;
+    assert_eq!(
+        snapshot(&h, SUPPORT).await["images"],
+        json!(2),
+        "JPEG bytes under a .png name are admitted"
+    );
+
+    eval_json(
+        &h,
+        &format!(
+            "(() => {{ const i = document.querySelector('{SUPPORT} [data-helpdesk-summary]'); \
+             i.value = 'Board is blank'; i.dispatchEvent(new Event('input', {{ bubbles: true }})); return true; }})()"
+        ),
+    )
+    .await;
+    assert_eq!(snapshot(&h, SUPPORT).await["submitDisabled"], json!(false));
+    click(&h, &format!("{SUPPORT} [data-helpdesk-submit]")).await;
+    wait_for_selector(&h, &format!("{SUPPORT} [data-helpdesk-toast]")).await;
+    let s = snapshot(&h, SUPPORT).await;
+    assert_eq!(s["keys"][0], json!("OF-13"), "new ticket is first: {s}");
+    let calls = backend_calls(&h).await.to_string();
+    assert!(
+        calls.contains("images: 2"),
+        "create carried both images: {calls}"
+    );
+    assert_no_browser_errors(&h, "new request").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-helpdesk)"]
+async fn not_configured_shows_panel_and_no_submit() {
+    let h = harness_at(&format!("{PAGE}-not-configured")).await;
+    wait_for_selector(&h, &format!("{SUPPORT} [data-helpdesk-new-request]")).await;
+    click(&h, &format!("{SUPPORT} [data-helpdesk-new-request]")).await;
+    wait_for_selector(&h, &format!("{SUPPORT} [data-helpdesk-not-configured]")).await;
+    let s = snapshot(&h, SUPPORT).await;
+    assert!(
+        s["notConfigured"].as_bool().unwrap() && !s["submitPresent"].as_bool().unwrap(),
+        "{s}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-helpdesk)"]
+async fn axe_clean_with_drawer_and_dialog_open() {
+    let h = harness_at(PAGE).await;
+    wait_for_selector(&h, &format!("{SUPPORT} [data-helpdesk-state=\"ready\"]")).await;
+    click(
+        &h,
+        &format!("{SUPPORT} [data-helpdesk-table] tbody tr:first-child"),
+    )
+    .await;
+    wait_for_selector(&h, &format!("{SUPPORT} [data-helpdesk-drawer-header]")).await;
+    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
+        .expect("load vendored axe-core");
+    let report = axe.run(h.page()).await.expect("run axe-core");
+    report
+        .assert_no_blocking("helpdesk drawer open")
+        .unwrap_or_else(|e| {
+            panic!(
+                "{e}; {}\nviolations: {:#?}",
+                report.summary(),
+                report.violations
+            )
+        });
+    click(&h, &format!("{SUPPORT} [data-helpdesk-drawer-close]")).await;
+    click(&h, &format!("{SUPPORT} [data-helpdesk-new-request]")).await;
+    wait_for_selector(&h, &format!("{SUPPORT} [data-helpdesk-summary]")).await;
+    let report = axe.run(h.page()).await.expect("run axe-core");
+    report
+        .assert_no_blocking("helpdesk dialog open")
+        .unwrap_or_else(|e| {
+            panic!(
+                "{e}; {}\nviolations: {:#?}",
+                report.summary(),
+                report.violations
+            )
+        });
+}

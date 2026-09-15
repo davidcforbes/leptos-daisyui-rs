@@ -10,12 +10,16 @@ use super::model::{
 /// are a column and a drawer select, never a bucket.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Bucket {
+    /// Not started ([`StatusCategory::New`]).
     Open,
+    /// Underway ([`StatusCategory::InProgress`]).
     InProgress,
+    /// Complete ([`StatusCategory::Done`]).
     Done,
 }
 
 impl Bucket {
+    /// Which bucket a status category falls into.
     pub fn of(category: StatusCategory) -> Self {
         match category {
             StatusCategory::New => Self::Open,
@@ -33,6 +37,7 @@ impl Bucket {
         }
     }
 
+    /// Parse a bucket back from its stable id.
     pub fn from_id(id: &str) -> Option<Self> {
         match id {
             "open" => Some(Self::Open),
@@ -43,19 +48,25 @@ impl Bucket {
     }
 }
 
+/// How many tickets fall into each bucket.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct BucketCounts {
+    /// Count in [`Bucket::Open`].
     pub open: u64,
+    /// Count in [`Bucket::InProgress`].
     pub in_progress: u64,
+    /// Count in [`Bucket::Done`].
     pub done: u64,
 }
 
 impl BucketCounts {
+    /// The sum across all three buckets.
     pub fn total(self) -> u64 {
         self.open + self.in_progress + self.done
     }
 }
 
+/// Count how many tickets fall into each bucket.
 pub fn bucket_counts(tickets: &[HelpdeskTicket]) -> BucketCounts {
     tickets.iter().fold(BucketCounts::default(), |mut c, t| {
         match Bucket::of(t.status.category) {
@@ -70,14 +81,20 @@ pub fn bucket_counts(tickets: &[HelpdeskTicket]) -> BucketCounts {
 /// The local filter state. `mine_only` means assigned to the current user.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TicketFilter {
+    /// Restrict to one bucket, if any.
     pub bucket: Option<Bucket>,
+    /// Free-text search over key and summary.
     pub search: String,
+    /// Restrict to one priority, if any.
     pub priority: Option<TicketPriority>,
+    /// Restrict to one assignee, if any.
     pub assignee_id: Option<String>,
+    /// Restrict to tickets assigned to the current user.
     pub mine_only: bool,
 }
 
 impl TicketFilter {
+    /// Whether every field is at its default (no filtering applied).
     pub fn is_empty(&self) -> bool {
         self.bucket.is_none()
             && self.search.trim().is_empty()
@@ -136,11 +153,16 @@ pub fn relative_age(now_ms: i64, then_ms: i64) -> String {
     }
 }
 
+/// Limits on a [`NewTicket`] before it may be submitted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NewTicketCaps {
+    /// Maximum summary length, in characters.
     pub summary_max: usize,
+    /// Maximum description length, in characters.
     pub description_max: usize,
+    /// Maximum number of attached images.
     pub max_images: usize,
+    /// Maximum size of one attached image, in bytes.
     pub max_image_bytes: usize,
 }
 
@@ -155,13 +177,33 @@ impl Default for NewTicketCaps {
     }
 }
 
+/// One problem with a [`NewTicket`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NewTicketError {
+    /// The summary is empty or whitespace-only.
     SummaryBlank,
-    SummaryTooLong { max: usize },
-    DescriptionTooLong { max: usize },
-    TooManyImages { max: usize },
-    ImageTooLarge { filename: String, max: usize },
+    /// The summary exceeds `max` characters.
+    SummaryTooLong {
+        /// The cap that was exceeded.
+        max: usize,
+    },
+    /// The description exceeds `max` characters.
+    DescriptionTooLong {
+        /// The cap that was exceeded.
+        max: usize,
+    },
+    /// More than `max` images were attached.
+    TooManyImages {
+        /// The cap that was exceeded.
+        max: usize,
+    },
+    /// One image exceeds `max` bytes.
+    ImageTooLarge {
+        /// The offending file's name.
+        filename: String,
+        /// The cap that was exceeded.
+        max: usize,
+    },
 }
 
 /// Every problem at once, so a form can mark each field.
@@ -199,14 +241,20 @@ pub fn validate_new_ticket(t: &NewTicket, caps: &NewTicketCaps) -> Result<(), Ve
 /// the proof's negative controls read the same table.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RoleCapabilities {
+    /// Mine or All.
     pub scope: TicketScope,
+    /// Whether the assignee filter is shown.
     pub assignee_filter: bool,
+    /// Whether the "mine only" toggle is shown.
     pub mine_only_toggle: bool,
+    /// Whether the drawer's status/assignee/priority selects are shown.
     pub triage: bool,
+    /// Whether the drawer's comment box is shown.
     pub comment: bool,
 }
 
 impl RoleCapabilities {
+    /// The capability table for one role.
     pub fn for_role(role: HelpdeskRole) -> Self {
         match role {
             HelpdeskRole::Requester => Self {

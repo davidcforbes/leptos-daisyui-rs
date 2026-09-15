@@ -409,6 +409,19 @@ fn snapshot_table_page_filter_actions_step() -> Step {
     }
 }
 
+/// Browser proof for the `Helpdesk` composite (ldui-b5mu): both roles on one
+/// document against the in-memory backend, so every positive assertion
+/// (buckets, triage selects, paste intake, filing) has its negative control.
+fn helpdesk_step() -> Step {
+    Step {
+        name: "test-helpdesk",
+        run: Run::BrowserSuite {
+            test: "helpdesk_smoke",
+            html_target: Some("client-snapshot-test-host.html"),
+        },
+    }
+}
+
 fn pattern_steps(pattern: &str, lane: PatternLane) -> Result<Vec<Step>, String> {
     pattern_checks::checks_for(pattern, lane)?
         .iter()
@@ -696,6 +709,7 @@ fn full_steps() -> Vec<Step> {
     steps.push(snapshot_table_delta_step());
     steps.push(snapshot_table_page_controls_step());
     steps.push(snapshot_table_page_filter_actions_step());
+    steps.push(helpdesk_step());
     steps.push(entity_draft_row_step());
     steps.push(reactivity_step());
     steps.push(layout_step());
@@ -788,6 +802,7 @@ const CLIENT_SNAPSHOT_SOURCE_INPUTS: &[&str] = &[
     "src",
     "demo/src/demos/client_snapshot_list.rs",
     "demo/src/demos/snapshot_table_page.rs",
+    "demo/src/demos/helpdesk_fixture.rs",
     "demo/src/client_snapshot_test_host.rs",
     "demo/client-snapshot-test-host.html",
     "demo/Cargo.toml",
@@ -2343,6 +2358,7 @@ fn main() -> ExitCode {
         "test-snapshot-table-page-filter-actions" => {
             run_steps(&[snapshot_table_page_filter_actions_step()])
         }
+        "test-helpdesk" => run_steps(&[helpdesk_step()]),
         "test-server-table-column-tools" => run_steps(&[server_table_column_tools_step()]),
         "test-collapse-naming" => run_steps(&[collapse_naming_step()]),
         "test-data-table-fit" => run_steps(&[data_table_fit_step()]),
@@ -2361,7 +2377,7 @@ fn main() -> ExitCode {
         other => {
             eprintln!("xtask: unknown subcommand {other:?}");
             eprintln!(
-                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-selectable-summary|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-snapshot-table-page-filter-actions|test-server-table-column-tools|test-collapse-naming|test-data-table-fit|test-app-shell|test-field-context-scoping|test-entity-draft-row|test-softphone|test-help-hint|gen-tokens|check-sibling-tokens|bump>"
+                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-selectable-summary|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-snapshot-table-page-filter-actions|test-helpdesk|test-server-table-column-tools|test-collapse-naming|test-data-table-fit|test-app-shell|test-field-context-scoping|test-entity-draft-row|test-softphone|test-help-hint|gen-tokens|check-sibling-tokens|bump>"
             );
             ExitCode::from(2)
         }

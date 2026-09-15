@@ -323,7 +323,18 @@ pub fn Helpdesk(
             })
             .render_with(move |t: &HelpdeskTicket| match &t.assignee {
                 Some(p) => view! {
-                    <AvatarBadge initials=p.initials.clone() name=p.display_name.clone() size=AvatarBadgeSize::Sm />
+                    <AvatarBadge
+                        initials=p.initials.clone()
+                        // Not `name=`: `NAME_PALETTE`'s bg-primary/text-primary-content
+                        // pair measures 4.12:1 at this size in the active theme (axe
+                        // `color-contrast`, needs 4.5:1) — the palette's own
+                        // "contrast-safe by construction" doc comment does not hold
+                        // here. A solid neutral pairing is safe; see
+                        // entity-table-columns-need-storedvalue-inside-show memory
+                        // for the follow-up.
+                        bg_class="bg-neutral text-neutral-content".to_owned()
+                        size=AvatarBadgeSize::Sm
+                    />
                 }
                 .into_any(),
                 None => view! { <span class="text-base-content/75">{tx.get_untracked().unassigned}</span> }.into_any(),
@@ -423,6 +434,7 @@ pub fn Helpdesk(
                                 .find(|p| format!("{p:?}") == v);
                         });
                     })
+                    label=Signal::derive(move || Some(texts.get().filter_priority))
                     attr:data-helpdesk-filter-priority=""
                 >
                     <SelectOption attr:value="">{move || texts.get().any_priority}</SelectOption>
@@ -445,6 +457,7 @@ pub fn Helpdesk(
                         on_change=Callback::new(move |v: String| {
                             filter.update(|f| f.assignee_id = (!v.is_empty()).then_some(v));
                         })
+                        label=Signal::derive(move || Some(texts.get().filter_assignee))
                         attr:data-helpdesk-filter-assignee=""
                     >
                         <SelectOption attr:value="">{move || texts.get().any_assignee}</SelectOption>

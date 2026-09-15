@@ -14,8 +14,9 @@ use crate::markdown::file_io::read_file_bytes;
 use crate::patterns::ImageAttachment;
 use crate::utils::image_files_in;
 use leptos::ev;
-use leptos::html::Input;
+use leptos::html::{Button, Input};
 use leptos::prelude::*;
+use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
 
 /// One preview row: the admitted filename and its object URL.
@@ -46,6 +47,7 @@ pub fn ImageAttachmentField(
     class: &'static str,
 ) -> impl IntoView {
     let input_ref = NodeRef::<Input>::new();
+    let dropzone_ref = NodeRef::<Button>::new();
     let dragging = RwSignal::new(0i32);
     let is_dragging = move || dragging.get() > 0;
     let dragging_label = move || (dragging.get() > 0).to_string();
@@ -126,6 +128,23 @@ pub fn ImageAttachmentField(
 
     if capture_document_paste {
         let handle = window_event_listener(ev::paste, move |ev| {
+            // A paste aimed at the drop zone is taken by its own `on:paste` and
+            // still bubbles here; without this guard it is ingested TWICE (one
+            // screenshot, two attachments on the filed ticket). Decide by where
+            // the event landed, not only by `default_prevented`: an event
+            // dispatched with `cancelable: false` ignores `prevent_default()`,
+            // so that flag alone cannot tell us the zone already handled it.
+            // Neither check stops propagation, so a host's own paste listeners
+            // are left undisturbed.
+            let landed_in_zone = match (dropzone_ref.get_untracked(), ev.target()) {
+                (Some(zone), Some(target)) => target
+                    .dyn_ref::<web_sys::Node>()
+                    .is_some_and(|node| zone.contains(Some(node))),
+                _ => false,
+            };
+            if landed_in_zone || ev.default_prevented() {
+                return;
+            }
             let Some(data) = ev.clipboard_data() else {
                 return;
             };
@@ -192,6 +211,7 @@ pub fn ImageAttachmentField(
                 type="button"
                 class="btn btn-ghost h-auto min-h-24 w-full flex-col gap-2 rounded-box border border-dashed border-base-content/30 bg-base-200 p-4 font-normal"
                 class:border-primary=is_dragging
+                node_ref=dropzone_ref
                 data-image-attachment-dropzone=""
                 data-dragging=dragging_label
                 aria-label=move || texts.get().label

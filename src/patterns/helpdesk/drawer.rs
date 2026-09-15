@@ -137,8 +137,13 @@ pub fn TicketDetailDrawer(
                 metadata=meta_items(&t, &tx, now_ms.get())
                 status=Some(RecordStatus::new(t.status.name.clone()).tone(status_tone(t.status.category)))
                 badges=vec![
-                    RecordBadge::new("key", t.key.0.clone()),
-                    RecordBadge::new("kind", tx.kind_name(&t.kind)).tone(RecordStatusTone::Neutral),
+                    // `.tone(Info)` on both, never the default/`Neutral` tone: `Badge`'s
+                    // `Soft` style paired with `Neutral` measures 1.22:1 in the active
+                    // theme (axe `color-contrast`, needs 4.5:1) -- near-invisible, and
+                    // pre-existing in `RecordHeader::render_badge`, not new here. Info
+                    // is the contained fix; see the composite's design doc for the note.
+                    RecordBadge::new("key", t.key.0.clone()).tone(RecordStatusTone::Info),
+                    RecordBadge::new("kind", tx.kind_name(&t.kind)).tone(RecordStatusTone::Info),
                 ]
                 actions=actions
                 attr:data-helpdesk-drawer-header=""
@@ -162,7 +167,17 @@ pub fn TicketDetailDrawer(
             attr:data-helpdesk-drawer=""
             attr:data-helpdesk-drawer-open=move || open.get().to_string()
         >
-            <DrawerToggle id="helpdesk-drawer-toggle" checked=open />
+            // Pure CSS plumbing (daisyUI's checkbox-driven drawer visibility
+            // mechanism) -- zero-size, never meant to be perceived directly.
+            // Without this it is an unlabelled, focusable checkbox (axe
+            // `label`, critical); the real controls are the row activation
+            // and the Close button.
+            <DrawerToggle
+                id="helpdesk-drawer-toggle"
+                checked=open
+                attr:aria-hidden="true"
+                attr:tabindex="-1"
+            />
             <DrawerContent>""</DrawerContent>
             <DrawerSide class="z-40">
                 <DrawerOverlay on:click=move |_| on_close.run(()) />
