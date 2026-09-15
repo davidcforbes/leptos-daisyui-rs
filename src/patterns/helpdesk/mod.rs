@@ -4,9 +4,14 @@
 //! and `doc/components/helpdesk.md` for the consumer guide.
 
 mod model;
+mod state;
 
 pub use model::{
     HelpdeskError, HelpdeskErrorKind, HelpdeskMeta, HelpdeskRole, HelpdeskTicket, ImageAttachment,
     NewTicket, Person, PriorityOption, RequestContext, StatusCategory, TicketAttachment,
     TicketComment, TicketDetail, TicketKey, TicketKind, TicketPriority, TicketScope, TicketStatus,
+};
+pub use state::{
+    Bucket, BucketCounts, NewTicketCaps, NewTicketError, RoleCapabilities, TicketFilter,
+    bucket_counts, relative_age, validate_new_ticket,
 };
