@@ -12,36 +12,59 @@ const SEED_YOU: &str = "w-dana";
 /// A fixed "now" so ages are deterministic in proofs.
 pub const SEED_NOW_MS: i64 = 1_800_000_000_000;
 
+/// An error condition to inject into an [`InMemoryHelpdeskBackend`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HelpdeskFault {
+    /// Every call reports the helpdesk as unconfigured.
     NotConfigured,
+    /// Writes report a rate limit, with the given retry-after seconds.
     RateLimited(u32),
+    /// Every write fails with an upstream error; reads still work.
     FailWrites,
 }
 
+/// One call the backend recorded, for proofs to assert on.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BackendCall {
+    /// A call to [`HelpdeskBackend::meta`].
     Meta,
+    /// A call to [`HelpdeskBackend::list`].
     List(TicketScope),
+    /// A call to [`HelpdeskBackend::detail`].
     Detail(String),
+    /// A call to [`HelpdeskBackend::create`].
     Create {
+        /// The submitted summary.
         summary: String,
+        /// How many images were attached.
         images: usize,
     },
+    /// A call to [`HelpdeskBackend::transition`].
     Transition {
+        /// The ticket key.
         key: String,
+        /// The requested status id.
         to_status_id: String,
     },
+    /// A call to [`HelpdeskBackend::assign`].
     Assign {
+        /// The ticket key.
         key: String,
+        /// The requested assignee, or `None` to unassign.
         assignee_id: Option<String>,
     },
+    /// A call to [`HelpdeskBackend::set_priority`].
     SetPriority {
+        /// The ticket key.
         key: String,
+        /// The requested priority id.
         priority_id: String,
     },
+    /// A call to [`HelpdeskBackend::comment`].
     Comment {
+        /// The ticket key.
         key: String,
+        /// The comment body.
         body: String,
     },
 }
@@ -56,6 +79,8 @@ struct Inner {
     next_comment: u32,
 }
 
+/// A `HelpdeskBackend` backed by seeded, in-process state. Powers the demo
+/// page and the browser proof; ships only under `test-mode`.
 #[derive(Clone)]
 pub struct InMemoryHelpdeskBackend {
     inner: Rc<RefCell<Inner>>,
@@ -128,7 +153,7 @@ fn seed_detail(
         created_at_ms: SEED_NOW_MS - hours_ago * 3_600_000,
         updated_at_ms: SEED_NOW_MS - hours_ago * 1_800_000,
         comment_count: 1,
-        attachment_count: u32::from(n % 3 == 0),
+        attachment_count: u32::from(n.is_multiple_of(3)),
         url: Some(format!("https://example.atlassian.net/browse/OF-{n}")),
     };
     let comments = vec![TicketComment {
@@ -137,7 +162,7 @@ fn seed_detail(
         body: "Thanks, looking into it.".into(),
         created_at_ms: ticket.created_at_ms + 600_000,
     }];
-    let attachments = if n % 3 == 0 {
+    let attachments = if n.is_multiple_of(3) {
         vec![TicketAttachment {
             id: format!("a-{n}"),
             filename: "screenshot.png".into(),
@@ -261,20 +286,24 @@ impl InMemoryHelpdeskBackend {
         }
     }
 
+    /// Inject a fault: every subsequent call is shaped by it.
     pub fn with_fault(self, fault: HelpdeskFault) -> Self {
         self.inner.borrow_mut().fault = Some(fault);
         self
     }
 
+    /// Set the "current user" whose tickets `TicketScope::Mine` returns.
     pub fn with_current_user(self, id: impl Into<String>) -> Self {
         self.inner.borrow_mut().me = id.into();
         self
     }
 
+    /// The current "current user" id.
     pub fn current_user(&self) -> String {
         self.inner.borrow().me.clone()
     }
 
+    /// Every call made so far, in order.
     pub fn calls(&self) -> Vec<BackendCall> {
         self.inner.borrow().calls.clone()
     }
