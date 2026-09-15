@@ -539,6 +539,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     value: "gauge",
                 },
                 ComponentItem {
+                    name: "Helpdesk",
+                    href: "/components/helpdesk",
+                    value: "helpdesk",
+                },
+                ComponentItem {
                     name: "Loading",
                     href: "/components/loading",
                     value: "loading",

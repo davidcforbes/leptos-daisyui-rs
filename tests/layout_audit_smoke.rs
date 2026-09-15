@@ -124,6 +124,7 @@ const PAGES: &[(&str, usize, usize)] = &[
     ("/components/section_heading", 0, 0),
     ("/components/search_picker_dialog", 0, 0),
     ("/components/day-scheduler", 0, 0),
+    ("/components/helpdesk", 0, 0),
 ];
 
 async fn audit_page(path: &str, max_grid: usize, max_internal: usize) {
@@ -193,6 +194,7 @@ audit_test!(selectable_summary_layout_is_clean, 9);
 audit_test!(section_heading_layout_is_clean, 10);
 audit_test!(search_picker_dialog_layout_is_clean, 11);
 audit_test!(day_scheduler_layout_is_clean, 12);
+audit_test!(helpdesk_layout_is_clean, 13);
 
 /// Negative control: prove the sweep actually detects things.
 ///

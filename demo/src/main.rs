@@ -150,6 +150,7 @@ fn AppInner() -> impl IntoView {
                     <Route path=path!("/join") view=JoinDemo />
                     <Route path=path!("/gantt") view=GanttDemo />
                     <Route path=path!("/gauge") view=GaugeDemo />
+                    <Route path=path!("/helpdesk") view=HelpdeskDemo />
                     <Route path=path!("/kanban") view=KanbanDemo />
                     <Route path=path!("/kbd") view=KbdDemo />
                     <Route path=path!("/kpi_strip") view=KpiStripDemo />

@@ -363,6 +363,17 @@ const PAGES: &[(&str, &[(&str, usize)])] = &[
             (family::COMPONENT_DRIFT, 0),
         ],
     ),
+    (
+        "/components/helpdesk",
+        &[
+            (family::TYPOGRAPHY, 0),
+            (family::SHAPE, 0),
+            (family::DEPTH, 0),
+            (family::GRID, 0),
+            (family::INTERNAL, 0),
+            (family::COMPONENT_DRIFT, 0),
+        ],
+    ),
 ];
 
 async fn audit_page(path: &str, ceilings: &[(&str, usize)]) {
@@ -414,6 +425,7 @@ style_audit_test!(selectable_summary_style_is_within_ceiling, 7);
 style_audit_test!(section_heading_style_is_within_ceiling, 8);
 style_audit_test!(search_picker_dialog_style_is_within_ceiling, 9);
 style_audit_test!(day_scheduler_style_is_within_ceiling, 10);
+style_audit_test!(helpdesk_style_is_within_ceiling, 11);
 
 /// Negative control: prove the sweep + merge actually detects things, across
 /// both the engine's style families and the daisyUI drift heuristics.
