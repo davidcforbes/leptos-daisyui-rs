@@ -292,6 +292,35 @@ validates generation/revision, keeps the complete snapshot in
 page contract. Standalone `DatasetSelector`/`EntityTable` calls supply
 `control_id`/`page_size_control_id`; do not patch IDs into the DOM.
 
+### Recent additions (2026-09-15, Helpdesk composite)
+
+`patterns::Helpdesk` (ldui-b5mu) is the Jira-backed support desk: buckets,
+filtered table, triage drawer, and a New Request dialog built on the new
+`ImageAttachmentField`. **It owns no transport** -- every call goes through a
+host-implemented `HelpdeskBackend` trait, and a `configured: false` meta renders
+a panel with the submit button *absent*, not disabled. Roles are the pure
+`RoleCapabilities::for_role` table; a requester's list asks the backend for
+`Mine` and is never a hidden `All`, but the role is a rendering contract, not a
+security boundary. `SegmentedBar` is a proportion bar, not a picker -- the kind
+selector is radio-as-button. See
+[`doc/components/helpdesk.md`](./doc/components/helpdesk.md).
+
+Proven by `cargo xtask test-helpdesk` (9 tests, both roles on one document).
+Test-host fixtures are selected by **pathname suffix**
+(`/helpdesk-fixture-fail-writes`), never `?query`: `harness_at` appends its
+own `?pp-freeze=1`, and a `/helpdesk-fixture?fault=…` navigation never mounted
+the freeze stylesheet (60 s timeout). Follow the existing host's pathname idiom. Its first real execution found a product
+defect no native test could: `capture_document_paste` ingested a paste inside
+the drop zone **twice** (zone handler, then the bubbled window listener). The
+guard checks event-target containment, not only `defaultPrevented` -- a
+`cancelable: false` event ignores `preventDefault()`, so a flag-only guard
+passed review and still failed the lane. It also surfaced two contrast traps
+worth knowing: `NAME_PALETTE`'s `bg-primary` avatar pair measures 4.12:1 at
+`Sm`, and a `RecordBadge` left at the default/`Neutral` soft tone measures
+1.22:1 -- both are axe blockers wherever they appear. And an `aria-label` that
+satisfies axe still fails the style audit's `input-outside-field` drift rule:
+a filter control needs a real `<label>` (visually hidden text is fine).
+
 ### Recent additions (2026-09-02, later: SnapshotTablePage filter actions)
 
 `SnapshotTablePage` grows an optional `filter_actions:

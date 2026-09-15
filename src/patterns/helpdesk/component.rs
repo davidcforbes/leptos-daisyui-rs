@@ -274,7 +274,9 @@ pub fn Helpdesk(
                     let k = tx.get_untracked().kind_name(&t.kind);
                     view! {
                         <span class="flex items-center gap-2">
-                            <Badge size=BadgeSize::Xs color=BadgeColor::Neutral>
+                            // `Sm`, not `Xs`: daisyUI's `badge-xs` is 10px, off the type
+                            // ramp (style audit TYPOGRAPHY, one per row).
+                            <Badge size=BadgeSize::Sm color=BadgeColor::Neutral>
                                 {k}
                             </Badge>
                             <span class="truncate">{t.summary.clone()}</span>
@@ -406,17 +408,27 @@ pub fn Helpdesk(
                 result=result
                 on_reset=Callback::new(move |_| filter.set(TicketFilter::default()))
                 search=Box::new(move || {
+                    // Every filter control sits inside a real `<label>` with
+                    // visually hidden text: an `aria-label` alone satisfies axe
+                    // but is still an input outside any field (component-drift
+                    // `input-outside-field`), and a visible label is only a
+                    // placeholder's worth of words here.
                     view! {
-                        <Input
-                            value=Signal::derive(move || filter.get().search)
-                            placeholder=Signal::derive(move || texts.get().search_placeholder)
-                            on_input=Callback::new(move |v: String| filter.update(|f| f.search = v))
-                            attr:data-helpdesk-search=""
-                        />
+                        <label class="flex min-w-0 flex-1">
+                            <span class="sr-only">{move || texts.get().search_placeholder}</span>
+                            <Input
+                                value=Signal::derive(move || filter.get().search)
+                                placeholder=Signal::derive(move || texts.get().search_placeholder)
+                                on_input=Callback::new(move |v: String| filter.update(|f| f.search = v))
+                                attr:data-helpdesk-search=""
+                            />
+                        </label>
                     }
                         .into_any()
                 })
             >
+                <label class="flex min-w-0">
+                <span class="sr-only">{move || texts.get().filter_priority}</span>
                 <Select
                     value=Signal::derive(move || {
                         filter.get().priority.map(|p| format!("{p:?}")).unwrap_or_default()
@@ -434,7 +446,6 @@ pub fn Helpdesk(
                                 .find(|p| format!("{p:?}") == v);
                         });
                     })
-                    label=Signal::derive(move || Some(texts.get().filter_priority))
                     attr:data-helpdesk-filter-priority=""
                 >
                     <SelectOption attr:value="">{move || texts.get().any_priority}</SelectOption>
@@ -451,13 +462,15 @@ pub fn Helpdesk(
                         })
                         .collect_view()}
                 </Select>
+                </label>
                 <Show when=move || caps.get().assignee_filter>
+                    <label class="flex min-w-0">
+                    <span class="sr-only">{move || texts.get().filter_assignee}</span>
                     <Select
                         value=Signal::derive(move || filter.get().assignee_id.unwrap_or_default())
                         on_change=Callback::new(move |v: String| {
                             filter.update(|f| f.assignee_id = (!v.is_empty()).then_some(v));
                         })
-                        label=Signal::derive(move || Some(texts.get().filter_assignee))
                         attr:data-helpdesk-filter-assignee=""
                     >
                         <SelectOption attr:value="">{move || texts.get().any_assignee}</SelectOption>
@@ -465,6 +478,7 @@ pub fn Helpdesk(
                             <SelectOption attr:value=p.id.clone()>{p.display_name.clone()}</SelectOption>
                         </For>
                     </Select>
+                    </label>
                 </Show>
                 <Show when=move || caps.get().mine_only_toggle>
                     <label class="flex items-center gap-2 text-sm">

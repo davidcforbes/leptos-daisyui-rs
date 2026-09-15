@@ -366,9 +366,24 @@ const PAGES: &[(&str, &[(&str, usize)])] = &[
     (
         "/components/helpdesk",
         &[
-            (family::TYPOGRAPHY, 0),
+            // 14, first measured under ldui-b5mu.12: the key column is
+            // `EntityColumn::identifier()`, whose monospace face is deliberate
+            // (ldui-lrig) -- 12 row cells plus the header's two spans. The
+            // upstream mono exemption (PixelProof 8a74b06) covers code/pre/kbd
+            // TAGS only, not a `font-mono` span, so this is the framework's
+            // identifier convention, not this page's debt. The page's own
+            // findings (12 off-ramp `badge-xs`, 3 unlabelled filter controls)
+            // were fixed rather than ratcheted. ldui-dpim tracks exempting identifier
+            // columns upstream, which should take this to 0.
+            (family::TYPOGRAPHY, 14),
             (family::SHAPE, 0),
-            (family::DEPTH, 0),
+            // 5, first measured under ldui-b5mu.12: daisyUI's own input,
+            // select (x3, one is EntityTable's page-size control) and toggle
+            // inset shadows, authored in oklch()/oklab(), which the engine's
+            // shadow parser cannot read -- the same class ratcheted on
+            // /components/search_picker_dialog and /components/data-table.
+            // Stays until PixelProof-0il teaches the parser oklch.
+            (family::DEPTH, 5),
             (family::GRID, 0),
             (family::INTERNAL, 0),
             (family::COMPONENT_DRIFT, 0),
