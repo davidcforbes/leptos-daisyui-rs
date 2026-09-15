@@ -7,6 +7,7 @@ mod backend;
 #[cfg(feature = "test-mode")]
 mod memory;
 mod model;
+mod request_dialog;
 mod state;
 mod texts;
 
@@ -18,6 +19,7 @@ pub use model::{
     NewTicket, Person, PriorityOption, RequestContext, StatusCategory, TicketAttachment,
     TicketComment, TicketDetail, TicketKey, TicketKind, TicketPriority, TicketScope, TicketStatus,
 };
+pub use request_dialog::NewRequestDialog;
 pub use state::{
     Bucket, BucketCounts, NewTicketCaps, NewTicketError, RoleCapabilities, TicketFilter,
     bucket_counts, relative_age, validate_new_ticket,
