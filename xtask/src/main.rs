@@ -124,6 +124,30 @@ fn gate_steps() -> Vec<Step> {
             ],
             None,
         ),
+        // The wasm target, because clippy only lints the code its target
+        // compiles: `#[cfg(target_arch = "wasm32")]` blocks are invisible to
+        // every host-target run. Six real lints sat in `theme_share`,
+        // `theme_export_import` and `color_customizer` until 4iiz-Office --
+        // whose lint stage targets wasm -- would have hit them first (2026-09-15).
+        // `--lib` because only the library compiles to wasm.
+        cmd(
+            "clippy-lib-wasm",
+            "cargo",
+            &[
+                "clippy",
+                "-p",
+                "leptos-daisyui-rs",
+                "--lib",
+                "--target",
+                "wasm32-unknown-unknown",
+                "--features",
+                "test-mode",
+                "--",
+                "-D",
+                "warnings",
+            ],
+            None,
+        ),
         cmd(
             "clippy-demo",
             "cargo",
@@ -2411,8 +2435,17 @@ mod tests {
         let names: Vec<&str> = steps_for("clippy").iter().map(|s| s.name).collect();
         assert_eq!(
             names,
-            vec!["clippy-lib", "clippy-demo", "clippy-audit", "clippy-xtask"],
-            "every workspace crate must be lint-gated, including xtask itself"
+            vec![
+                "clippy-lib",
+                "clippy-lib-wasm",
+                "clippy-demo",
+                "clippy-audit",
+                "clippy-xtask",
+            ],
+            "every workspace crate must be lint-gated, including xtask itself, \
+             and the library on BOTH targets -- clippy only lints the code its \
+             target compiles, so dropping the wasm run un-lints every \
+             cfg(target_arch = \"wasm32\") block"
         );
     }
 

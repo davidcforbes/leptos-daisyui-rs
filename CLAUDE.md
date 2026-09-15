@@ -292,6 +292,39 @@ validates generation/revision, keeps the complete snapshot in
 page contract. Standalone `DatasetSelector`/`EntityTable` calls supply
 `control_id`/`page_size_control_id`; do not patch IDs into the DOM.
 
+### Recent additions (2026-09-15, later: Office deltas upstreamed)
+
+4iiz-Office carried 22 files of vendor-only changes to this crate, which
+blocked its re-vendor (and so blocked it adopting `Helpdesk`). All of them are
+now upstream: **`EntityAutoFilters`** (the framework-built filter row) with
+`EntityColumn::filterable*()`, **`EntityRowActions`** + `row_actions`,
+**`SectionGrid`**, `DatasetSelector`/`SnapshotDatasetSelectorConfig` `compact`,
+**`AutoPageSettle`**, `KpiStrip` card-shell overflow, `PageHeader` subtitle
+gating, the `notebook` icon, `ResultList` `text-base-content/75`,
+**`ModalSize::Large`**, and `TimelineList` `id`/`action_label`/`on_activate`.
+
+**Upstream a consumer's deltas by three-way merge against THAT CONSUMER'S
+re-vendor base, never by copying its files.** The base is the vendored tree as
+it stood when it last synced (here 4iiz-Office `e9c0f6e7`), not the ldui commit
+it synced from: merging against the latter replays deltas this repo has since
+re-implemented differently, which turned 2 conflicts into 11. Five of the
+declared deltas needed nothing at all.
+
+Two traps the wave exposed, both invisible to every gate here:
+
+- **A consumer checking a surface with `--all-targets` never compiles this
+  crate's `cfg(test)` module**, so a vendored test can be broken for weeks. One
+  captured `Rc<RefCell<_>>` in a `Callback::new`, which needs `Send + Sync`.
+- **Clippy only lints what its target compiles.** `#[cfg(target_arch =
+  "wasm32")]` code was never linted here, hiding six real lints. `verify` now
+  carries a `clippy-lib-wasm` step.
+
+Also: the style audit declares `EntityColumn::identifier()`'s mono role
+(`mono_selectors`, PixelProof 7a34745) and daisyUI's resting control shadows,
+instead of ratcheting them — see `tests/style_audit_smoke.rs` and note that a
+ceiling's *justification* expires silently (those DEPTH ceilings cited a
+PixelProof bug fixed two weeks earlier).
+
 ### Recent additions (2026-09-15, Helpdesk composite)
 
 `patterns::Helpdesk` (ldui-b5mu) is the Jira-backed support desk: buckets,

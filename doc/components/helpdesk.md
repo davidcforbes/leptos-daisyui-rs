@@ -157,6 +157,25 @@ app's `input.css` must scan this crate's source and import the generated tokens:
 @source inline("join join-item btn btn-active drawer drawer-end drawer-side drawer-overlay alert alert-success");
 ```
 
+## Consuming it from a vendored copy (4iiz-Office)
+
+Office consumes this crate by vendoring `src/`, not by a path dependency, so
+`Helpdesk` only exists there after a re-vendor. Three things follow:
+
+- **No new crate dependency.** The composite and `ImageAttachmentField` add
+  nothing to `Cargo.toml`; the image intake uses `web_sys` types already
+  enabled by the existing feature list, so a consumer's lockfiles do not move.
+- **`test-mode` stays off in production.** `InMemoryHelpdeskBackend`,
+  `HelpdeskFault`, `SEED_ME` and `SEED_NOW_MS` are behind that feature. A
+  production surface gets the composite and must implement `HelpdeskBackend`
+  over its own transport; the in-memory backend is for fixtures and the demo.
+- **The vendor relationship is two-way.** A consumer that carries declared
+  deltas against this crate cannot re-vendor until those deltas land here, so
+  upstream them first. Merge them three-way against **the consumer's own
+  re-vendor base** (the vendored tree as it stood when it last synced), never
+  by copying files: upstream moves too, and copying silently reverts it. Using
+  the wrong base turned 2 conflicts into 11 on 2026-09-15.
+
 ## Proof
 
 `cargo xtask test-helpdesk` mounts both roles on one document over one shared
