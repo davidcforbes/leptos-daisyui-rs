@@ -16,6 +16,22 @@ addresses = ["127.0.0.1"]
 port = 3010
 open = false
 
+# Live mode (demos/ai_chat_live.rs) talks to a local editmark-server at
+# http://127.0.0.1:8099 DIRECTLY, and needs no proxy: that server's
+# localhost CORS accepts any localhost/127.0.0.1 origin for GET/POST/PUT/
+# DELETE with a content-type header, so the demo's own origin passes
+# preflight and reads its SSE over fetch.
+#
+# The one case that WOULD need the block below is serving this demo over
+# https: a page on https may not fetch http, so the requests would be
+# blocked as mixed content and a same-origin proxy is the way through.
+# Uncomment it then, and point Live mode's base URL at the demo's own
+# origin.
+#
+# [[proxy]]
+# backend = "http://127.0.0.1:8099/api/chat"
+# rewrite = "/api/chat"
+
 # Tailwind, wrapped so a FAILED stylesheet build cannot pass unnoticed.
 # Trunk SWALLOWS a pre_build hook's non-zero exit and carries on serving the
 # previous `output.css`, so `build-css.mjs` also stamps a run-unique marker

@@ -98,6 +98,69 @@ async fn eval_json(h: &pixelproof_web::Harness, expr: &str) -> Value {
         .expect("ai-chat expression returns JSON")
 }
 
+/// Installs a NETWORK-BOUNDARY request recorder and returns how many
+/// requests it observed while proving to itself that it can observe one.
+///
+/// The fixture's own call log cannot see a second transport: a live backend
+/// issuing requests would leave no trace in it, so a "nothing happened"
+/// built on that log would pass in exactly the scenario it exists to rule
+/// out. This wraps `fetch`, `XMLHttpRequest.open` and `EventSource` instead
+/// — every way this page could reach a server — and records the URL
+/// SYNCHRONOUSLY, before the real call is made.
+///
+/// The positive control is the point: it issues one same-origin request of
+/// its own and asserts the recorder saw it. A recorder that cannot fail is
+/// not a recorder, and a wrapper installed on the wrong global would
+/// otherwise report a comfortable zero forever.
+async fn begin_request_capture(h: &pixelproof_web::Harness) {
+    let installed = eval_json(
+        h,
+        r#"(() => {
+            if (!window.__lduiNet) {
+                window.__lduiNet = [];
+                const seen = window.__lduiNet;
+                const realFetch = window.fetch.bind(window);
+                window.fetch = (input, init) => {
+                    seen.push(String(input && input.url ? input.url : input));
+                    return realFetch(input, init);
+                };
+                const realOpen = XMLHttpRequest.prototype.open;
+                XMLHttpRequest.prototype.open = function (method, url, ...rest) {
+                    seen.push(String(url));
+                    return realOpen.call(this, method, url, ...rest);
+                };
+                if (window.EventSource) {
+                    const RealES = window.EventSource;
+                    window.EventSource = function (url, ...rest) {
+                        seen.push(String(url));
+                        return new RealES(url, ...rest);
+                    };
+                }
+            }
+            // Positive control: one request the recorder MUST see. The URL is
+            // pushed synchronously by the wrapper, so no await is needed and
+            // the promise itself is discarded.
+            window.__lduiNet.length = 0;
+            window.fetch(window.location.pathname).catch(() => {});
+            const observed = window.__lduiNet.length;
+            window.__lduiNet.length = 0;
+            return observed;
+        })()"#,
+    )
+    .await;
+    assert_eq!(
+        installed,
+        json!(1),
+        "the request recorder did not see a request it made itself, so it \
+         could not see one it did not make either"
+    );
+}
+
+/// Every request URL the recorder has seen since it was last cleared.
+async fn captured_requests(h: &pixelproof_web::Harness) -> Vec<String> {
+    strings(&eval_json(h, "window.__lduiNet || []").await)
+}
+
 /// The whole `window.__APP_DEBUG__.state()` map.
 async fn oracle_state(h: &pixelproof_web::Harness) -> Value {
     eval_json(
@@ -2227,10 +2290,18 @@ async fn wait_for_locale(h: &pixelproof_web::Harness, root: &str, locale: &str) 
 /// is added, and the workspace the fixture backs is still mounted and still
 /// answering afterwards.
 ///
+/// The call log alone is not enough, and P9 is why. It is the FIXTURE's log:
+/// a second transport issuing its own requests would leave no trace in it,
+/// so a proof built on it could not fail in the one scenario it exists to
+/// rule out. `begin_request_capture` adds the oracle that can — a recorder
+/// at the network boundary (`fetch`, `XMLHttpRequest`, `EventSource`) which
+/// demonstrates it can see a request before it is trusted to report none.
+///
 /// Its companion is the native `no_lane_touches_the_live_server`, which
-/// scans this whole directory for the live bridge's port and transport. That
-/// one can fail before such a lane is even written; this one proves the
-/// control that would trigger it does not.
+/// scans `tests/` AND `demo/src/` — where the pages a lane drives actually
+/// live — for the live bridge's port and transport. That one can fail
+/// before such a lane is even written; this one proves the control that
+/// would trigger it does not.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires demo dev server (cargo xtask test-ai-chat)"]
 async fn live_mode_switch_is_present_but_never_exercised() {
@@ -2266,16 +2337,44 @@ async fn live_mode_switch_is_present_but_never_exercised() {
         "the fixture really did open a session, so a count that stays put \
          afterwards means something: {before:?}"
     );
+    // The oracle that can see what the fixture's call log cannot: ANY
+    // request, by any transport, including one this page's own code did not
+    // route through the fixture. It proves it can observe a request before
+    // it is trusted to report none.
+    begin_request_capture(&h).await;
 
     click(&h, "[data-ai-chat-live-mode]").await;
     // The explanation appearing IS the click landing — nothing is timed.
     wait_for_selector(&h, "[data-ai-chat-live-mode-reason]").await;
 
+    let requests = captured_requests(&h).await;
+    assert!(
+        requests.is_empty(),
+        "selecting Live issued {} request(s) at the network boundary, and \
+         it must issue NONE — connecting is a separate, explicit action: \
+         {requests:?}",
+        requests.len()
+    );
     let after = backend_calls(&h).await;
     assert_eq!(
         open_sessions(&after),
         opened_before,
         "selecting Live opened no session: {after:?}"
+    );
+    // Belt and braces: THIS page cannot connect at all. The showcase page
+    // carries a Connect button (`data-ai-chat-live-connect`) and the live
+    // backend behind it; a lane-driven fixture document deliberately carries
+    // neither, which is what the native `no_lane_touches_the_live_server`
+    // scan enforces at the source level. The recorder above is what would
+    // catch a regression that reintroduced one.
+    assert_eq!(
+        eval_json(
+            &h,
+            "document.querySelector('[data-ai-chat-live-connect]') !== null"
+        )
+        .await,
+        json!(false),
+        "a lane-driven fixture document offers no Connect control at all"
     );
 
     let shape = workspace_shape(&h, ROOT).await;
@@ -2298,6 +2397,12 @@ async fn live_mode_switch_is_present_but_never_exercised() {
         open_sessions(&backend_calls(&h).await),
         opened_before,
         "and that turn still went through the session Live never replaced"
+    );
+    let after_turn = captured_requests(&h).await;
+    assert!(
+        after_turn.is_empty(),
+        "and asking a question in Live mode still reached no server: \
+         {after_turn:?}"
     );
 
     assert_no_browser_errors(&h, "live mode").await;

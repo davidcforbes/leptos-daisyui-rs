@@ -1032,46 +1032,166 @@ fn quick_actions_prompts_localize() {
     }
 }
 
+/// The one file in the whole repo that is allowed to reach a live server,
+/// named here so the exception is auditable rather than a hole.
+///
+/// P9 wired Live mode, so `demo/src/` can now reach `127.0.0.1:8099` where
+/// before nothing could. Everything the exception buys is that the scan
+/// below still fails for every OTHER page — including every page a browser
+/// lane drives.
+const LIVE_BACKEND_FILE: &str = "ai_chat_live.rs";
+
+/// Markers that mean "this source can talk to the live server".
+const LIVE_MARKERS: [&str; 4] = [
+    "8099",
+    "SseBridgeTransport",
+    "use_event_source_fetch",
+    "/api/chat",
+];
+
+/// Markers that mean "this source can REACH the live backend", even without
+/// naming a URL itself.
+///
+/// [`LIVE_MARKERS`] catches a source that talks to the server directly; these
+/// catch one that only has to mount the module that does. The showcase page
+/// (`ai_chat.rs`) legitimately carries them — it owns the Connect button —
+/// which is why they are checked against the LANE-DRIVEN sources only.
+const LIVE_WIRE_MARKERS: [&str; 3] = [
+    "ai_chat_live",
+    "LiveChatWorkspaceBackend",
+    "data-ai-chat-live-connect",
+];
+
+/// Whether this source is one a browser lane actually loads: the fixture
+/// host binary itself, or one of the `*_fixture.rs` documents it mounts.
+///
+/// Deliberately a NAME rule rather than a computed module closure, so it is
+/// readable and cannot quietly stop matching. Its limit is worth stating: a
+/// fixture that mounted some third module which in turn reached live mode
+/// would slip past this particular check — [`LIVE_MARKERS`], which covers
+/// every demo source, is what catches that one.
+fn is_lane_driven(name: &str) -> bool {
+    name == "client_snapshot_test_host.rs" || name.ends_with("_fixture.rs")
+}
+
+/// Every `.rs` file under one directory, recursively.
+fn rust_sources(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut found = Vec::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return found;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            found.extend(rust_sources(&path));
+        } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+            found.push(path);
+        }
+    }
+    found
+}
+
 /// No browser lane in this repo may talk to the live SSE bridge.
 ///
 /// Live mode is PRESENT in the showcase and the fixture — a choice an actor
-/// can see and select — and it is deliberately inert. The risk is that a
-/// later phase wires it and a lane starts reaching a real server on
-/// `127.0.0.1:8099`, at which point the suite stops being reproducible and
-/// starts failing for whoever does not happen to be running one. A source
-/// scan is the only check that can fail BEFORE such a lane is written; a
-/// network assertion inside the harness could only fail after.
+/// can see and select — and reaching it takes a separate, explicit Connect.
+/// The risk is that an edit wires a live call into a page a lane drives, at
+/// which point the suite stops being reproducible and starts failing for
+/// whoever does not happen to be running a server. A source scan is the only
+/// check that can fail BEFORE such a lane is written; a network assertion
+/// inside the harness could only fail after.
+///
+/// TWO trees are scanned, and the second is the one that matters now. The
+/// lanes drive PAGES, and every page lives in `demo/src/` — a tree this
+/// scan did not cover until P9, so wiring live mode into a lane-driven page
+/// would have evaded it entirely. The single exception is
+/// [`LIVE_BACKEND_FILE`], which IS the live backend.
 #[test]
 fn no_lane_touches_the_live_server() {
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
-    let mut scanned = 0usize;
-    let entries = std::fs::read_dir(&dir).expect("the integration-test directory exists");
-    for entry in entries {
-        let path = entry.expect("readable dir entry").path();
-        if path.extension().and_then(|e| e.to_str()) != Some("rs") {
-            continue;
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut scanned_tests = 0usize;
+    let mut scanned_demo = 0usize;
+    let mut lane_driven: Vec<String> = Vec::new();
+    let mut exception_seen = false;
+
+    for (dir, counter) in [
+        (root.join("tests"), &mut scanned_tests),
+        (root.join("demo").join("src"), &mut scanned_demo),
+    ] {
+        let sources = rust_sources(&dir);
+        assert!(
+            !sources.is_empty(),
+            "{} matched no Rust sources, so the scan is reading nothing",
+            dir.display()
+        );
+        for path in sources {
+            let source = std::fs::read_to_string(&path).expect("readable source");
+            *counter += 1;
+            let name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default()
+                .to_owned();
+            if name == LIVE_BACKEND_FILE {
+                // The exception must stay REAL: a file that no longer
+                // reaches the live server is a stale exception, and a stale
+                // exception is how a hole survives a rename.
+                exception_seen = true;
+                assert!(
+                    LIVE_MARKERS.iter().any(|m| source.contains(m)),
+                    "{name} is the named live-server exception but names none \
+                     of {LIVE_MARKERS:?}; remove the exception or the file"
+                );
+                continue;
+            }
+            for marker in LIVE_MARKERS {
+                assert!(
+                    !source.contains(marker),
+                    "{name} names {marker:?}, so it can reach the live server. \
+                     Only {LIVE_BACKEND_FILE} may; a lane drives pages in \
+                     demo/src, and those must drive the fixture"
+                );
+            }
+            // A lane-driven document may not even MOUNT the live backend:
+            // the showcase page owns Live mode, and a fixture the suite
+            // loads must offer no way to reach a server at all.
+            if is_lane_driven(&name) {
+                lane_driven.push(name.clone());
+                for marker in LIVE_WIRE_MARKERS {
+                    assert!(
+                        !source.contains(marker),
+                        "{name} is loaded by a browser lane and names \
+                         {marker:?}, so the lane could reach a live server"
+                    );
+                }
+            }
         }
-        let source = std::fs::read_to_string(&path).expect("readable test source");
-        scanned += 1;
-        let name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or_default();
-        assert!(
-            !source.contains("8099"),
-            "{name} names the live SSE bridge's port; a lane must drive the \
-             fixture, never a live server"
-        );
-        assert!(
-            !source.contains("SseBridgeTransport"),
-            "{name} names the live transport; a lane must drive the fixture"
-        );
     }
-    // The scan's own positive control: a glob that silently matched nothing
+
+    // The scan's own positive controls: a walk that silently matched nothing
     // would pass this test forever while checking nothing at all.
     assert!(
-        scanned > 20,
-        "only {scanned} integration-test sources were scanned, so the scan \
-         is not reading the suite it claims to cover"
+        scanned_tests > 20,
+        "only {scanned_tests} integration-test sources were scanned, so the \
+         scan is not reading the suite it claims to cover"
+    );
+    assert!(
+        scanned_demo > 100,
+        "only {scanned_demo} demo sources were scanned, so the scan is not \
+         reading the pages the lanes actually drive"
+    );
+    // The two sources that carry the ai-chat lanes, by name: a rename that
+    // stopped matching would otherwise leave this rule checking nothing.
+    for required in ["client_snapshot_test_host.rs", "ai_chat_fixture.rs"] {
+        assert!(
+            lane_driven.iter().any(|n| n == required),
+            "{required} was not recognised as lane-driven, so the \
+             fixture-host rule is reading the wrong files: {lane_driven:?}"
+        );
+    }
+    assert!(
+        exception_seen,
+        "the named exception {LIVE_BACKEND_FILE} was never found, so the \
+         scan is not covering the tree the live backend lives in"
     );
 }

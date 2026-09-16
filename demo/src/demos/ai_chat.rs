@@ -9,8 +9,14 @@
 //! reliably longer than English, and a row that only just fits in EN is the
 //! kind of defect no English-only page can show.
 
+use super::ai_chat_live::{
+    LiveChatWorkspaceBackend, LivePrefs, LiveRequest, LiveStatus, WorkspaceMode, fetch_backends,
+    load_prefs, request_intent, store_prefs,
+};
 use crate::core::{ContentLayout, Section};
 use leptos::prelude::*;
+use leptos::reactive::owner::Owner;
+use leptos::task::spawn_local;
 use leptos_daisyui_rs::components::AiChatTexts;
 use leptos_daisyui_rs::patterns::{
     AiChatWorkspace, AiChatWorkspaceTexts, AvailabilityReasonCode, ChatWorkspaceBackend,
@@ -147,17 +153,6 @@ fn outcome_rows() -> Vec<(&'static str, &'static str)> {
     ]
 }
 
-/// Which backend the page is driving.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum WorkspaceMode {
-    /// The seeded in-process fixture.
-    Fixture,
-    /// A live host backend. Present so the choice is visible, inert until
-    /// P9 wires it: selecting it explains itself and leaves the fixture
-    /// running, rather than mounting a workspace with nothing behind it.
-    Live,
-}
-
 /// Which text table both the workspace and the chat panel render.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Language {
@@ -232,6 +227,28 @@ fn billing_row(card: &ProviderCard) -> (&'static str, &'static str, &'static str
     }
 }
 
+/// The sentence the live banner shows for one status. Demo copy: these
+/// strings belong to this page, not to `AiChatWorkspaceTexts`, which is the
+/// composite's own table.
+fn live_status_line(status: &LiveStatus) -> String {
+    match status {
+        LiveStatus::Idle => "Not connected. Nothing has been asked of any server.".to_owned(),
+        LiveStatus::FetchingBackends => "Asking the server which backends it offers.".to_owned(),
+        LiveStatus::Opening => "Opening a session.".to_owned(),
+        LiveStatus::Ready {
+            session_id,
+            backend,
+        } => format!("Connected to {backend}, session {session_id}."),
+        LiveStatus::Unreachable { base, detail } => {
+            format!("No answer from {base}: {detail}. The transcript carries the error too.")
+        }
+        LiveStatus::NoBackends => "The server answered, and offers no backends at all.".to_owned(),
+        LiveStatus::SessionLost => {
+            "The session no longer exists on the server. Connect again to open another.".to_owned()
+        }
+    }
+}
+
 /// The showcase page for the AI-chat workspace, in English.
 #[component]
 pub fn AiChatDemo() -> impl IntoView {
@@ -268,6 +285,71 @@ fn AiChatPage(
     let backend = StoredValue::new_local(
         Rc::new(InMemoryChatWorkspaceBackend::seeded()) as Rc<dyn ChatWorkspaceBackend>
     );
+
+    // Live mode.
+    // The base URL and the last backend id are remembered; the MODE never
+    // is, so this page always opens on the fixture. Selecting Live below
+    // issues nothing: `request_intent` is what separates "selected" from
+    // "connect requested", and the Connect button is its only caller.
+    let remembered = load_prefs();
+    let base = RwSignal::new(remembered.base.clone());
+    let status = RwSignal::new(LiveStatus::Idle);
+    let notice = RwSignal::new(None::<String>);
+    let connected = RwSignal::new(false);
+    // The CONCRETE live backend: a demo page may hold one (it owns the
+    // Connect/Disconnect actions); the composite only ever sees the `dyn`.
+    let live = StoredValue::new_local(None::<Rc<LiveChatWorkspaceBackend>>);
+    // Stored, so the Connect handler captures only `Copy` state and stays
+    // an `Fn` closure the view can call more than once.
+    let page_owner = StoredValue::new_local(Owner::current());
+
+    let connect = move |_| {
+        // The single gate. Anything that is not (Live, pressed) requests
+        // nothing at all, which is why selecting Live cannot connect.
+        let Some(LiveRequest::FetchBackends) = request_intent(mode.get_untracked(), true) else {
+            return;
+        };
+        let Some(owner) = page_owner.get_value() else {
+            return;
+        };
+        let url = base.get_untracked();
+        notice.set(None);
+        status.set(LiveStatus::FetchingBackends);
+        spawn_local(async move {
+            match fetch_backends(&url).await {
+                Err(failure) => status.set(LiveStatus::Unreachable {
+                    base: url,
+                    detail: failure.detail(),
+                }),
+                Ok(list) if list.is_empty() => status.set(LiveStatus::NoBackends),
+                Ok(list) => {
+                    store_prefs(&LivePrefs {
+                        base: url.clone(),
+                        backend: list.first().map(|c| c.id.clone()),
+                    });
+                    status.set(LiveStatus::Opening);
+                    live.set_value(Some(Rc::new(LiveChatWorkspaceBackend::new(
+                        &url, list, status, notice, owner,
+                    ))));
+                    // Mounting the workspace over the live backend is what
+                    // opens the session: the composite asks for settings,
+                    // providers and knowledge, then opens. Until this flips,
+                    // the fixture is what the page is driving.
+                    connected.set(true);
+                }
+            }
+        });
+    };
+
+    let disconnect = move |_| {
+        if let Some(b) = live.get_value() {
+            b.disconnect();
+        }
+        live.set_value(None);
+        connected.set(false);
+        notice.set(None);
+        status.set(LiveStatus::Idle);
+    };
 
     let mode_radio = move |value: WorkspaceMode, label: &'static str| {
         // Only the Live option carries `data-ai-chat-live-mode`; `None`
@@ -346,15 +428,66 @@ fn AiChatPage(
             description="The opinionated chat workspace: an engine header, the knowledge rail, the generic AiChat panel and the evidence rail, all over one ChatWorkspaceBackend. This page drives the seeded in-memory fixture, so every engine, document and turn below is reproducible."
         >
             <Section title="Backend" col=true>
-                <div class="flex flex-wrap items-center gap-4" data-testid="ai-chat-mode">
+                <div
+                    class="flex flex-wrap items-center gap-4"
+                    data-testid="ai-chat-mode"
+                    data-ai-chat-mode=move || mode.get().as_id()
+                >
                     {mode_radio(WorkspaceMode::Fixture, "Fixture")}
                     {mode_radio(WorkspaceMode::Live, "Live")}
                 </div>
                 <Show when=move || mode.get() == WorkspaceMode::Live>
                     <p class="text-sm opacity-70" data-ai-chat-live-mode-reason="">
-                        "A live backend is not wired up on this page yet, so the fixture keeps \
-                         running. Nothing below changes until it is."
+                        "Choosing Live connects to nothing. It only says where a connection \
+                         would go: the fixture keeps driving this page until Connect is \
+                         pressed, and a failed Connect leaves it driving too."
                     </p>
+                    <div class="flex flex-wrap items-end gap-3">
+                        <label class="flex flex-col gap-1 text-sm">
+                            <span class="opacity-70">"editmark-server base URL"</span>
+                            <input
+                                type="text"
+                                class="input input-sm input-bordered w-72"
+                                data-ai-chat-live-base-input=""
+                                disabled=move || connected.get()
+                                prop:value=move || base.get()
+                                on:input=move |ev| base.set(event_target_value(&ev))
+                            />
+                        </label>
+                        <button
+                            type="button"
+                            class="btn btn-sm btn-primary"
+                            data-ai-chat-live-connect=""
+                            disabled=move || mode.get() != WorkspaceMode::Live || connected.get()
+                            on:click=connect
+                        >
+                            "Connect"
+                        </button>
+                        <button
+                            type="button"
+                            class="btn btn-sm"
+                            data-ai-chat-live-disconnect=""
+                            disabled=move || !connected.get()
+                            on:click=disconnect
+                        >
+                            "Disconnect"
+                        </button>
+                    </div>
+                    <p
+                        class="text-sm opacity-70"
+                        data-ai-chat-live-status=move || status.get().as_id()
+                        data-ai-chat-live-base=move || base.get()
+                        data-ai-chat-live-session=move || {
+                            status.get().session_id().map(str::to_owned)
+                        }
+                    >
+                        {move || live_status_line(&status.get())}
+                    </p>
+                    <Show when=move || notice.get().is_some()>
+                        <p class="text-sm opacity-70" data-ai-chat-live-notice="">
+                            {move || notice.get().unwrap_or_default()}
+                        </p>
+                    </Show>
                 </Show>
             </Section>
 
@@ -382,12 +515,20 @@ fn AiChatPage(
                 </p>
                 <div class="w-full" data-testid="ai-chat-workspace">
                     {move || {
+                        // One composite, two backends, and the swap is a
+                        // remount: the live one only ever replaces the
+                        // fixture after an explicit Connect SUCCEEDED, and a
+                        // Disconnect puts the fixture back. The composite is
+                        // handed `Rc<dyn ChatWorkspaceBackend>` either way,
+                        // so it never sees which one it has.
+                        let live_backend: Option<Rc<dyn ChatWorkspaceBackend>> = connected
+                            .get()
+                            .then(|| live.get_value())
+                            .flatten()
+                            .map(|b| b as Rc<dyn ChatWorkspaceBackend>);
+                        let active = live_backend.unwrap_or_else(|| backend.get_value());
                         view! {
-                            <AiChatWorkspace
-                                backend=backend.get_value()
-                                texts=texts
-                                chat_texts=chat_texts
-                            />
+                            <AiChatWorkspace backend=active texts=texts chat_texts=chat_texts />
                         }
                     }}
                 </div>
