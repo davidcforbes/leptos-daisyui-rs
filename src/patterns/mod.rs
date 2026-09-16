@@ -2,6 +2,7 @@
 
 mod action_feedback;
 mod active_filter_chips;
+mod ai_chat_workspace;
 mod async_data_section;
 mod contracts;
 mod dataset_selector;
@@ -30,6 +31,15 @@ pub use action_feedback::{
 pub use active_filter_chips::{
     ActiveFilterChip, ActiveFilterChips, ActiveFilterTexts, active_filter_summary,
     active_filter_summary_with,
+};
+pub use ai_chat_workspace::{
+    AiChatWorkspaceTexts, AvailabilityReasonCode, ChatPosture, ChatWorkspaceBackend,
+    ChatWorkspaceError, ChatWorkspaceErrorKind, CodexLevers, CorpusQueryMode, CorpusScope,
+    GroqTuning, GroundingVerdict, IngestPhase, IngestStatus, KnowledgeSelection, KnowledgeSource,
+    MemoryDraft, MemoryRefusal, ModelSource, OfficeKnowledgeScope, ProviderCard, ProviderTuning,
+    QuickAction, ReasoningEffort, RecallCorpus, RecallHit, RecallReceipt, TuningSchema,
+    TurnEvidence, TurnRecord, UsageTotals, WorkspaceFuture, desktop_provider_catalogue,
+    guardrail_refusal, lifecycle_id,
 };
 pub use async_data_section::{AsyncDataSection, AsyncDataTexts, state_shows_content};
 pub use contracts::{
