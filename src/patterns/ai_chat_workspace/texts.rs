@@ -315,7 +315,7 @@ impl AiChatWorkspaceTexts {
     /// `en_and_es_texts_are_complete_and_differ` in `tests.rs`.
     pub const FIELD_COUNT: usize = 93;
 
-    /// Spanish copy.
+    /// Spanish copy, with full orthographic accents (not a transliteration).
     pub fn es() -> Self {
         Self {
             engine: "Motor".into(),
@@ -323,8 +323,8 @@ impl AiChatWorkspaceTexts {
             assistant: "Asistente".into(),
             not_enabled: "No habilitado".into(),
             unavailable: "No disponible".into(),
-            sign_in: "Iniciar sesion".into(),
-            sign_out: "Cerrar sesion".into(),
+            sign_in: "Iniciar sesión".into(),
+            sign_out: "Cerrar sesión".into(),
             budget_remaining: "Presupuesto restante".into(),
             usage_plan: "Uso del plan".into(),
             usage_metered: "Uso medido".into(),
@@ -332,7 +332,7 @@ impl AiChatWorkspaceTexts {
             cost_absent: "Costo no disponible".into(),
             state_admitted: "Admitido".into(),
             state_queued: "En cola".into(),
-            state_running: "En ejecucion".into(),
+            state_running: "En ejecución".into(),
             state_validating: "Validando".into(),
             state_completed: "Completado".into(),
             state_declined: "Respuesta declinada".into(),
@@ -343,34 +343,34 @@ impl AiChatWorkspaceTexts {
             state_canceled_discarded: "Cancelado (resultado descartado)".into(),
             state_interrupted: "Interrumpido".into(),
             reason_tier_effects_disabled:
-                "Este efecto no esta disponible en el nivel actual de la cuenta.".into(),
-            reason_not_armed: "Este motor aun no se ha activado para su uso.".into(),
+                "Este efecto no está disponible en el nivel actual de la cuenta.".into(),
+            reason_not_armed: "Este motor aún no se ha activado para su uso.".into(),
             reason_cli_missing:
-                "No esta instalada la herramienta de linea de comandos para este motor.".into(),
+                "No está instalada la herramienta de línea de comandos para este motor.".into(),
             reason_cli_version_unsupported:
-                "La version instalada de la CLI es demasiado antigua para este espacio de trabajo."
+                "La versión instalada de la CLI es demasiado antigua para este espacio de trabajo."
                     .into(),
             reason_cli_version_untested:
-                "Esta version de la CLI aun no se ha verificado para este espacio de trabajo."
+                "Esta versión de la CLI aún no se ha verificado para este espacio de trabajo."
                     .into(),
             reason_cli_protocol_unsupported:
                 "La CLI utiliza un protocolo que este espacio de trabajo no admite.".into(),
             reason_credential_key_unavailable:
                 "No hay una clave de credencial disponible para este motor.".into(),
-            reason_not_signed_in: "No has iniciado sesion en este motor.".into(),
-            reason_sign_in_expired: "Tu sesion en este motor ha caducado.".into(),
+            reason_not_signed_in: "No has iniciado sesión en este motor.".into(),
+            reason_sign_in_expired: "Tu sesión en este motor ha caducado.".into(),
             reason_budget_exhausted: "El presupuesto de este motor se ha agotado.".into(),
-            reason_engine_busy: "Este motor esta ocupado con otra solicitud.".into(),
+            reason_engine_busy: "Este motor está ocupado con otra solicitud.".into(),
             reason_sign_in_shape_unavailable:
-                "El metodo de inicio de sesion de este motor no esta disponible en este momento."
+                "El método de inicio de sesión de este motor no está disponible en este momento."
                     .into(),
-            action_retry_later: "Intentalo mas tarde".into(),
-            action_open_settings: "Abrir configuracion".into(),
-            action_new_conversation: "Iniciar una conversacion nueva".into(),
+            action_retry_later: "Inténtalo más tarde".into(),
+            action_open_settings: "Abrir configuración".into(),
+            action_new_conversation: "Iniciar una conversación nueva".into(),
             scope_file: "Este archivo".into(),
             scope_folder: "Esta carpeta".into(),
             scope_all: "Todo".into(),
-            scope_custom: "Seleccion personalizada".into(),
+            scope_custom: "Selección personalizada".into(),
             reindex: "Reindexar".into(),
             ingest_idle: "Inactivo".into(),
             ingest_walking: "Explorando archivos".into(),
@@ -388,43 +388,43 @@ impl AiChatWorkspaceTexts {
             kind_language: "Idioma".into(),
             kind_tone: "Tono".into(),
             kind_verbosity: "Nivel de detalle".into(),
-            kind_working_method: "Metodo de trabajo".into(),
+            kind_working_method: "Método de trabajo".into(),
             state_candidate: "Candidato".into(),
             state_confirmed: "Confirmado".into(),
             state_withdrawn: "Retirado".into(),
             memory_use: "Usar memoria".into(),
             memory_capture: "Capturar memoria".into(),
             remember: "Recordar esto".into(),
-            refused_matter: "Esto parece incluir un numero de asunto, por lo que no se guardo."
+            refused_matter: "Esto parece incluir un número de asunto, por lo que no se guardó."
                 .into(),
             refused_email:
-                "Esto parece incluir una direccion de correo electronico, por lo que no se guardo."
+                "Esto parece incluir una dirección de correo electrónico, por lo que no se guardó."
                     .into(),
-            refused_phone: "Esto parece incluir un numero de telefono, por lo que no se guardo."
+            refused_phone: "Esto parece incluir un número de teléfono, por lo que no se guardó."
                 .into(),
-            recall_words: "Busqueda por palabras clave".into(),
-            recall_meaning: "Busqueda por significado".into(),
-            recall_graph: "Busqueda por grafo".into(),
-            recall_thread: "Busqueda en la conversacion".into(),
+            recall_words: "Búsqueda por palabras clave".into(),
+            recall_meaning: "Búsqueda por significado".into(),
+            recall_graph: "Búsqueda por grafo".into(),
+            recall_thread: "Búsqueda en la conversación".into(),
             receipt: "Comprobante".into(),
             kb_scope_group_important: "Importante del grupo".into(),
             kb_scope_foundation: "Fundamento".into(),
             qa_summarize: "Resumir esto".into(),
             qa_rewrite: "Reescribir esto".into(),
             qa_expand: "Ampliar esto".into(),
-            qa_fix_grammar: "Corregir la gramatica".into(),
+            qa_fix_grammar: "Corregir la gramática".into(),
             qa_simplify: "Simplificar esto".into(),
-            qa_add_details: "Agregar mas detalles".into(),
+            qa_add_details: "Agregar más detalles".into(),
             qa_convert_to_table: "Convertir esto en una tabla".into(),
             qa_translate: "Traducir esto a {language}".into(),
-            switched_engine: "Se cambio a {engine}".into(),
-            conversation_reset: "Conversacion reiniciada".into(),
+            switched_engine: "Se cambió a {engine}".into(),
+            conversation_reset: "Conversación reiniciada".into(),
             stopped: "Detenido".into(),
             escalated: "Escalado de {from} a {to}".into(),
             truncated: "Respuesta truncada".into(),
-            turn_timed_out: "El turno supero el tiempo de espera".into(),
-            settings_reopened: "Configuracion reabierta".into(),
-            live_not_available: "Las actualizaciones en vivo no estan disponibles en este momento"
+            turn_timed_out: "El turno superó el tiempo de espera".into(),
+            settings_reopened: "Configuración reabierta".into(),
+            live_not_available: "Las actualizaciones en vivo no están disponibles en este momento"
                 .into(),
         }
     }

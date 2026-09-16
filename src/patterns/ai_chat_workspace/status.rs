@@ -27,10 +27,21 @@ pub struct UsageTotals {
     pub plan: Usage,
     /// Usage billed separately (pay-as-you-go).
     pub metered: Usage,
-    /// The metered cost, when the backend reported one. `None` means the
-    /// backend did not report a cost for this usage — never that the cost
-    /// was zero.
+    /// The sum of every metered cost actually reported so far. `None` until
+    /// the first contribution that reports one. Once at least one
+    /// contribution lacked a cost, this number is a floor, not a total —
+    /// see [`Self::cost_incomplete`], which a renderer MUST check before
+    /// presenting this as "the cost" rather than "at least this much".
     pub metered_cost: Option<f64>,
+    /// True once at least one call to [`Self::add_metered`] reported `cost:
+    /// None`. Deliberately sticky (never clears back to `false`): a later
+    /// contribution that DOES report a cost does not retroactively make the
+    /// earlier unknown one known, so a partial total must keep reading as
+    /// partial for the rest of this turn's life. Absent this flag, `(None,
+    /// Some(a))` and `(Some(a), Some(a))` would both resolve to `Some(a)`
+    /// and be indistinguishable — a complete total and an accidental floor
+    /// would render identically.
+    pub cost_incomplete: bool,
 }
 
 impl UsageTotals {
@@ -39,16 +50,21 @@ impl UsageTotals {
         self.plan = add_usage(self.plan, u);
     }
 
-    /// Accumulates a turn's metered usage and its cost. An absent `cost`
-    /// stays absent unless a prior call already reported one; two reported
-    /// costs are summed, exactly like the usage counters they describe.
+    /// Accumulates a turn's metered usage and its cost. A reported cost is
+    /// added into the running [`Self::metered_cost`]; an absent one leaves
+    /// the running sum untouched but permanently sets
+    /// [`Self::cost_incomplete`], so the accumulated number is never
+    /// mistaken for a complete total once any contribution was unpriced.
     pub fn add_metered(&mut self, u: &Usage, cost: Option<f64>) {
         self.metered = add_usage(self.metered, u);
-        self.metered_cost = match (self.metered_cost, cost) {
-            (None, None) => None,
-            (Some(a), None) | (None, Some(a)) => Some(a),
-            (Some(a), Some(b)) => Some(a + b),
-        };
+        match cost {
+            Some(reported) => {
+                self.metered_cost = Some(self.metered_cost.unwrap_or(0.0) + reported);
+            }
+            None => {
+                self.cost_incomplete = true;
+            }
+        }
     }
 
     /// Output tokens per second of wall time, or `None` when the elapsed

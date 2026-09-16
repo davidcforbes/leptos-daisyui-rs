@@ -1,8 +1,9 @@
 use super::*;
 
 use crate::components::ai_assistant_workspace::{
-    AssistantContractError, AssistantFact, AssistantReason, KnowledgeState, MemoryClass,
-    RefusalNextAction,
+    AssistantAccess, AssistantCapabilities, AssistantCapability, AssistantContractError,
+    AssistantFact, AssistantPreferences, AssistantReason, AssistantSettings, KnowledgeState,
+    MemoryClass, RefusalNextAction, engine_ready_for_ask,
 };
 use crate::components::ai_chat::{Capabilities, Usage};
 
@@ -93,6 +94,45 @@ fn desktop_catalogue_matches_engine_truth() {
         spark.model_source,
         ModelSource::Pinned("gpt-5.3-codex-spark".into())
     );
+
+    // Every fixture engine must actually be selectable through the real
+    // `engine_ready_for_ask` gate, not merely carry plausible-looking
+    // fields: a card with no `Ask` grant fails readiness silently, which
+    // `AssistantCapabilities::allows` never surfaces as an error.
+    for card in &cards {
+        let settings = permissive_settings_for(card);
+        let ready = engine_ready_for_ask(&settings, "actor-1");
+        assert_eq!(
+            ready.map(|e| e.id.as_str()),
+            Some(card.engine.id.as_str()),
+            "{} must be ready for Ask under a permissive, matching settings projection",
+            card.engine.id
+        );
+    }
+}
+
+/// A minimal but fully valid `AssistantSettings` selecting exactly this
+/// card's engine, granting `Ask` at both the settings and engine level, so
+/// `engine_ready_for_ask` exercises the real gate rather than a stub.
+fn permissive_settings_for(card: &ProviderCard) -> AssistantSettings {
+    AssistantSettings {
+        owner_actor_id: "actor-1".into(),
+        accepted_revision: 1,
+        proposed_revision: 1,
+        accepted: AssistantPreferences {
+            engine_id: Some(card.engine.id.clone()),
+            memory_use: false,
+            memory_capture: false,
+        },
+        proposed: AssistantPreferences::default(),
+        reasoning_tier: AssistantAccess::Granted,
+        engines: vec![card.engine.clone()],
+        budget: None,
+        capabilities: AssistantCapabilities {
+            granted: vec![AssistantCapability::Ask],
+            details: vec![],
+        },
+    }
 }
 
 fn capabilities_fixture(models: Vec<String>) -> Capabilities {
@@ -194,12 +234,14 @@ fn usage_totals_never_sum_plan_and_metered() {
 fn absent_cost_is_none_not_zero() {
     let mut totals = UsageTotals::default();
     assert_eq!(totals.metered_cost, None);
+    assert!(!totals.cost_incomplete);
 
     totals.add_metered(&Usage::default(), None);
     assert_eq!(
         totals.metered_cost, None,
         "an absent cost stays None, never gets promoted to a reported zero"
     );
+    assert!(totals.cost_incomplete);
 
     totals.add_metered(&Usage::default(), Some(2.5));
     assert_eq!(totals.metered_cost, Some(2.5));
@@ -209,6 +251,33 @@ fn absent_cost_is_none_not_zero() {
         totals.metered_cost,
         Some(3.0),
         "two reported costs are summed"
+    );
+
+    // absent then reported: the flag stays set even though a real number is
+    // now showing — that number is a floor, not the whole story, because an
+    // earlier contribution's cost was never learned.
+    assert!(
+        totals.cost_incomplete,
+        "one unreported contribution makes the running total incomplete forever, \
+         even once later contributions do report a cost"
+    );
+
+    // reported then absent: a total that STARTS complete must not stay
+    // looking complete once a later contribution comes in unpriced.
+    let mut totals = UsageTotals::default();
+    totals.add_metered(&Usage::default(), Some(5.0));
+    assert_eq!(totals.metered_cost, Some(5.0));
+    assert!(!totals.cost_incomplete);
+
+    totals.add_metered(&Usage::default(), None);
+    assert_eq!(
+        totals.metered_cost,
+        Some(5.0),
+        "the known partial sum is kept, not discarded"
+    );
+    assert!(
+        totals.cost_incomplete,
+        "a later unpriced contribution must flip an already-complete total to incomplete"
     );
 }
 
@@ -283,6 +352,62 @@ fn en_and_es_texts_are_complete_and_differ() {
     assert_eq!(
         en.grounded_not_found, "I couldn't find that in this folder.",
         "grounded_not_found's EN copy is pinned exactly"
+    );
+}
+
+/// Guards against an unaccented-ASCII regression in the Spanish table (fix
+/// round 1 of the P1 review): a prior draft translated every string but
+/// dropped every diacritic (`sesion` instead of `sesion` with an accent,
+/// etc.), which reads as a typo-riddled machine transliteration rather than
+/// real Spanish. Checks both a structural floor (a real count of non-ASCII
+/// characters across the table) and specific words that are simply wrong
+/// without their accent.
+#[test]
+fn es_texts_carry_real_spanish_diacritics() {
+    let es = AiChatWorkspaceTexts::es();
+
+    let non_ascii_total: usize = es
+        .fields()
+        .iter()
+        .map(|(_, value)| value.chars().filter(|c| !c.is_ascii()).count())
+        .sum();
+    assert!(
+        non_ascii_total >= 40,
+        "expected real Spanish diacritics across the table, found only \
+         {non_ascii_total} non-ASCII characters"
+    );
+
+    assert!(es.sign_in.contains("sesión"), "{:?}", es.sign_in);
+    assert!(es.sign_out.contains("sesión"), "{:?}", es.sign_out);
+    assert!(
+        es.reason_not_armed.contains("aún"),
+        "{:?}",
+        es.reason_not_armed
+    );
+    assert!(
+        es.reason_cli_version_untested.contains("versión"),
+        "{:?}",
+        es.reason_cli_version_untested
+    );
+    assert!(
+        es.switched_engine.contains("cambió"),
+        "{:?}",
+        es.switched_engine
+    );
+    assert!(
+        es.action_retry_later.contains("Inténtalo"),
+        "{:?}",
+        es.action_retry_later
+    );
+    assert!(
+        es.recall_words.contains("Búsqueda"),
+        "{:?}",
+        es.recall_words
+    );
+    assert!(
+        es.refused_matter.contains("número") && es.refused_matter.contains("guardó"),
+        "{:?}",
+        es.refused_matter
     );
 }
 

@@ -4,8 +4,8 @@
 //! vocabulary a refused engine reports.
 
 use crate::components::ai_assistant_workspace::{
-    AssistantCapabilities, AssistantConnection, AssistantEngine, ConnectionState,
-    EngineAvailability, RefusalNextAction, SignInShape,
+    AssistantCapabilities, AssistantCapability, AssistantConnection, AssistantEngine,
+    ConnectionState, EngineAvailability, RefusalNextAction, SignInShape,
 };
 use crate::components::ai_chat::Capabilities;
 
@@ -306,6 +306,24 @@ fn fixture_connection(needs_api_key: bool) -> AssistantConnection {
     }
 }
 
+/// The engine-level grants every fixture card carries: asking a question,
+/// canceling admitted work, starting a fresh conversation, and copying
+/// visible output. Without at least `Ask` granted here,
+/// `engine_ready_for_ask` refuses every one of these engines regardless of
+/// sign-in or availability — `AssistantCapabilities::allows` requires an
+/// explicit grant, never inferring one from an engine merely existing.
+fn engine_grants() -> AssistantCapabilities {
+    AssistantCapabilities {
+        granted: vec![
+            AssistantCapability::Ask,
+            AssistantCapability::Cancel,
+            AssistantCapability::NewConversation,
+            AssistantCapability::Copy,
+        ],
+        details: vec![],
+    }
+}
+
 fn card(
     picker_label: &str,
     capabilities: Capabilities,
@@ -320,7 +338,7 @@ fn card(
         label: capabilities.label.clone(),
         availability: EngineAvailability::Enabled,
         connection: fixture_connection(capabilities.needs_api_key),
-        capabilities: AssistantCapabilities::default(),
+        capabilities: engine_grants(),
     };
     ProviderCard {
         engine,
