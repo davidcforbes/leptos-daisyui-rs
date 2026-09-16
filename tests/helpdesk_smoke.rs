@@ -418,3 +418,134 @@ async fn axe_clean_with_drawer_and_dialog_open() {
             )
         });
 }
+
+/// Poll until the rendered row count of `root`'s table satisfies `pred`
+/// (the same 60 s budget as `wait_for_selector`; the harness exposes no
+/// `wait_for_function`).
+async fn wait_for_row_count(
+    h: &pixelproof_web::Harness,
+    root: &str,
+    mut pred: impl FnMut(u64) -> bool,
+) -> u64 {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    loop {
+        let n = snapshot(h, root).await["rows"]
+            .as_u64()
+            .expect("rows is a count");
+        if pred(n) {
+            return n;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "{root} row count never satisfied the predicate (last {n})"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+}
+/// The ticket table carries the standard record-list affordances on BOTH
+/// roles (ldui-ei8v; Office op-ulgfu): the framework filter row beneath the
+/// header row, the gear-glyph column-chooser trigger, and the `+` toolbar
+/// action. Control ids are namespaced per role so the two composites on one
+/// document never collide.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-helpdesk)"]
+async fn table_has_filter_row_gear_chooser_and_add_row_action() {
+    let h = harness_at(PAGE).await;
+    begin_browser_error_capture(&h).await;
+    for (root, prefix) in [
+        (SUPPORT, "helpdesk-support"),
+        (REQUESTER, "helpdesk-requester"),
+    ] {
+        wait_for_selector(&h, &format!("{root} [data-helpdesk-state=\"ready\"]")).await;
+        // The filter row renders one option filter (status, namespaced id)
+        // and one text filter (summary) beneath the header row.
+        wait_for_selector(
+            &h,
+            &format!(
+                "{root} [data-entity-column-filter-row=\"true\"] select#{prefix}-status-filter"
+            ),
+        )
+        .await;
+        wait_for_selector(&h, &format!("{root} input#{prefix}-summary-filter")).await;
+        // The chooser trigger renders as the compact gear glyph, not text.
+        assert_eq!(
+            eval_json(
+                &h,
+                &format!(
+                    "document.querySelector('{root} [data-entity-column-chooser-presentation]')\
+                     ?.getAttribute('data-entity-column-chooser-presentation')"
+                )
+            )
+            .await,
+            json!("icon"),
+            "{root} chooser renders the gear glyph"
+        );
+        // The `+` action lives in the table's toolbar slot.
+        wait_for_selector(&h, &format!("{root} [data-helpdesk-add-row]")).await;
+    }
+    assert_no_browser_errors(&h, "standard table features").await;
+}
+
+/// The filter row actually narrows rows, and the `+` action opens the New
+/// Request dialog (ldui-ei8v).
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-helpdesk)"]
+async fn filter_row_narrows_rows_and_add_row_opens_the_dialog() {
+    let h = harness_at(PAGE).await;
+    begin_browser_error_capture(&h).await;
+    wait_for_selector(&h, &format!("{SUPPORT} [data-helpdesk-state=\"ready\"]")).await;
+    let before = snapshot(&h, SUPPORT).await["rows"]
+        .as_u64()
+        .expect("rows is a count");
+    assert!(before > 1, "seed renders several rows");
+
+    // Pick the first concrete status option, apply it, and require every
+    // visible row to carry that status's label with fewer rows than before.
+    let label = eval_json(
+        &h,
+        &format!(
+            "(() => {{ const s = document.querySelector('{SUPPORT} select#helpdesk-support-status-filter'); \
+             const opt = Array.from(s.options).find(o => o.value !== ''); \
+             s.value = opt.value; s.dispatchEvent(new Event('change', {{ bubbles: true }})); return opt.textContent; }})()"
+        ),
+    )
+    .await;
+    let label = label.as_str().expect("a concrete status option").to_owned();
+    let shown = wait_for_row_count(&h, SUPPORT, |n| n < before).await;
+    let s = snapshot(&h, SUPPORT).await;
+    assert!(shown > 0, "status filter kept some rows: {s}");
+    let all_match = eval_json(
+        &h,
+        &format!(
+            "(() => Array.from(document.querySelectorAll('{SUPPORT} [data-helpdesk-table] tbody tr'))\
+             .every(r => r.textContent.includes({:?})))()",
+            label
+        ),
+    )
+    .await;
+    assert_eq!(
+        all_match,
+        json!(true),
+        "every visible row is status {label:?}"
+    );
+
+    // Clearing the filter restores the full list.
+    eval_json(
+        &h,
+        &format!(
+            "(() => {{ const s = document.querySelector('{SUPPORT} select#helpdesk-support-status-filter'); \
+             s.value = ''; s.dispatchEvent(new Event('change', {{ bubbles: true }})); return true; }})()"
+        ),
+    )
+    .await;
+    let restored = wait_for_row_count(&h, SUPPORT, |n| n == before).await;
+    assert_eq!(restored, before, "clearing the filter restores every row");
+
+    // The `+` toolbar action opens the New Request dialog in BOTH roles.
+    for root in [SUPPORT, REQUESTER] {
+        click(&h, &format!("{root} [data-helpdesk-add-row]")).await;
+        wait_for_selector(&h, &format!("{root} [data-helpdesk-summary]")).await;
+        click(&h, &format!("{root} [data-helpdesk-cancel]")).await;
+    }
+    assert_no_browser_errors(&h, "filter row + add row").await;
+}

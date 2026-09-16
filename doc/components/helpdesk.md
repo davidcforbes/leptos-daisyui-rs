@@ -7,6 +7,15 @@ component renders both sides of the desk — the person filing a request and the
 person working the queue — and the difference between them is a role, not a
 second page.
 
+The ticket table is an `EntityTable` carrying the full standard record-list
+affordance set (Office op-ulgfu), always on: the framework-built filter row
+beneath the header row (`EntityAutoFilters`; categorical columns get option
+lists, the rest substring text filters — these compose with, not replace, the
+`FilterBar` above), the gear-glyph column chooser trigger, and a primary `+`
+toolbar action that opens the New Request dialog (filing a ticket needs the
+whole dialog, not an inline draft row, so it uses the table's
+`toolbar_actions` slot rather than `EntityDraftRow`).
+
 It owns no transport. Everything it needs comes through a host-implemented
 [`HelpdeskBackend`](#the-backend-trait), so the same composite backs a real
 Jira deployment, an in-memory fixture, and a host that has never configured a
@@ -135,6 +144,7 @@ changes, it silently starts describing something else.
 | `data-helpdesk-buckets`, `data-helpdesk-bucket` | The bucket strip and each card. |
 | `data-helpdesk-table` | The ticket table (rows are `tbody tr`). |
 | `data-helpdesk-search`, `data-helpdesk-filter-priority`, `data-helpdesk-filter-assignee`, `data-helpdesk-mine-only`, `data-helpdesk-refresh` | Filter row. |
+| `data-helpdesk-add-row` | The table toolbar's `+` action (opens the New Request dialog; distinct from the header's `data-helpdesk-new-request`). |
 | `data-helpdesk-drawer`, `-drawer-open`, `-drawer-header`, `-drawer-close` | Detail drawer. |
 | `data-helpdesk-triage`, `-transition`, `-assign`, `-priority` | Support-only triage controls. |
 | `data-helpdesk-comments`, `-comment`, `-comment-input`, `-comment-submit` | Comment thread. |

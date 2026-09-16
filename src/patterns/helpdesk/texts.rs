@@ -48,6 +48,13 @@ pub struct HelpdeskTexts {
     pub col_assignee: String,
     /// Age column header.
     pub col_age: String,
+    /// Accessible name of one column-filter control in the table's filter
+    /// row; `{column}` is replaced by the column header.
+    pub filter_label: String,
+    /// Placeholder inside a column text filter in the filter row.
+    pub filter_placeholder: String,
+    /// The reset option of a column's option-list filter.
+    pub filter_all: String,
     /// Shown in place of an unset assignee or priority.
     pub unassigned: String,
     /// Display name for `TicketKind::Bug`.
@@ -154,6 +161,9 @@ impl Default for HelpdeskTexts {
             col_status: "Status".into(),
             col_assignee: "Assignee".into(),
             col_age: "Age".into(),
+            filter_label: "Filter {column}".into(),
+            filter_placeholder: "Filter…".into(),
+            filter_all: "All".into(),
             unassigned: "—".into(),
             kind_bug: "Bug".into(),
             kind_request: "Request".into(),

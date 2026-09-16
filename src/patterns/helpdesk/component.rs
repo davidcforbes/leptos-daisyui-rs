@@ -8,7 +8,8 @@ use super::request_dialog::NewRequestDialog;
 use super::state::{Bucket, RoleCapabilities, TicketFilter, bucket_counts, relative_age};
 use super::texts::HelpdeskTexts;
 use crate::components::{
-    Badge, BadgeColor, BadgeSize, Button, ButtonColor, ButtonSize, EntityColumn, EntityTable,
+    Badge, BadgeColor, BadgeSize, Button, ButtonColor, ButtonSize, EntityAutoFilterTexts,
+    EntityAutoFilters, EntityColumn, EntityColumnChooserTrigger, EntityTable, Icon, IconSize,
     Input, Select, SelectOption, Toast, Toggle,
 };
 use crate::patterns::{
@@ -267,6 +268,7 @@ pub fn Helpdesk(
         vec![
             EntityColumn::<HelpdeskTicket>::new("key", tx.get_untracked().col_key, |t| t.key.0.clone())
                 .identifier()
+                .filterable()
                 .with_width(96)
                 .required(),
             EntityColumn::new("summary", tx.get_untracked().col_summary, |t: &HelpdeskTicket| t.summary.clone())
@@ -285,6 +287,7 @@ pub fn Helpdesk(
                     .into_any()
                 })
                 .ellipsis()
+                .filterable()
                 .required(),
             EntityColumn::new("priority", tx.get_untracked().col_priority, move |t: &HelpdeskTicket| {
                 tx.get_untracked().priority_name(t.priority)
@@ -300,6 +303,7 @@ pub fn Helpdesk(
                 .into_any()
             })
             .sortable_by_key(|t: &HelpdeskTicket| t.priority.rank())
+            .filterable_options()
             .with_width(112),
             EntityColumn::new("status", tx.get_untracked().col_status, |t: &HelpdeskTicket| t.status.name.clone())
                 .render_with(move |t: &HelpdeskTicket| {
@@ -316,6 +320,7 @@ pub fn Helpdesk(
                     }
                     .into_any()
                 })
+                .filterable_options()
                 .with_width(160),
             EntityColumn::new("assignee", tx.get_untracked().col_assignee, move |t: &HelpdeskTicket| {
                 t.assignee
@@ -341,6 +346,7 @@ pub fn Helpdesk(
                 .into_any(),
                 None => view! { <span class="text-base-content/75">{tx.get_untracked().unassigned}</span> }.into_any(),
             })
+            .filterable_options()
             .with_width(96),
             EntityColumn::new("age", tx.get_untracked().col_age, move |t: &HelpdeskTicket| relative_age(now.get_untracked(), t.created_at_ms))
                 .render_with(move |t: &HelpdeskTicket| {
@@ -353,9 +359,46 @@ pub fn Helpdesk(
                     .into_any()
                 })
                 .sortable_by_key(|t: &HelpdeskTicket| std::cmp::Reverse(t.created_at_ms))
+                .filterable()
                 .with_width(72),
         ]
     });
+
+    // The framework-built filter row (ldui-ei8v; Office op-ulgfu's
+    // "standard record-list" features). Every column but the (absent) action
+    // column joins it: categorical columns (priority/status/assignee) get an
+    // option list derived from their distinct cell texts, the rest a
+    // case-insensitive substring box. It composes ON TOP of the FilterBar
+    // above (`visible` -> `table_data` is the auto filters' SOURCE, so an
+    // over-narrow column filter still classifies as "no matching rows" via
+    // `source_data`).
+    let auto_filter_texts = Signal::derive(move || {
+        let t = texts.get();
+        EntityAutoFilterTexts {
+            label: t.filter_label.clone(),
+            placeholder: t.filter_placeholder.clone(),
+            all: t.filter_all.clone(),
+        }
+    });
+    // The control-id prefix namespaces the generated `<label for>`/`input id`
+    // pairs; the test fixture mounts BOTH roles on one document, so the
+    // mount-time role keeps the two tables' ids distinct.
+    let auto_filter_prefix = format!(
+        "helpdesk-{}",
+        match role.get_untracked() {
+            HelpdeskRole::Requester => "requester",
+            HelpdeskRole::Support => "support",
+        }
+    );
+    // Same `StoredValue` rationale as `columns` above: `EntityAutoFilters`
+    // carries the per-column value signals' `Rc`-based predicates, so only
+    // its Send+Sync handle can cross into `Show`'s children closure.
+    let auto_filters = StoredValue::new_local(EntityAutoFilters::new(
+        &columns.get_value(),
+        table_data,
+        auto_filter_prefix,
+        auto_filter_texts,
+    ));
 
     let on_bucket = Callback::new(move |id: String| {
         filter.update(|f| {
@@ -526,11 +569,43 @@ pub fn Helpdesk(
             >
                 <div data-helpdesk-state="ready" data-helpdesk-table="">
                     <EntityTable
-                        data=table_data
+                        data=auto_filters.get_value().rows()
+                        source_data=table_data
+                        column_filters=auto_filters.get_value().filters()
                         columns=columns.get_value()
                         row_key=Rc::new(|t: &HelpdeskTicket| t.key.0.clone())
                         dataset_identity=Signal::derive(move || format!("helpdesk-{}", generation.get()))
                         on_row_activate=Callback::new(move |k: String| open_detail(TicketKey(k)))
+                        // The gear-glyph chooser trigger: the compact presentation of
+                        // the standard record-list table (Office op-ulgfu).
+                        column_chooser_trigger=Signal::stored(EntityColumnChooserTrigger::Icon)
+                        // The "add a record" affordance of the same standard table.
+                        // A Helpdesk ticket is filed through the whole New Request
+                        // dialog (kind picker, attachment capture, rate-limit
+                        // handling), not an inline draft row, so the `+` lives in the
+                        // caller-rendered toolbar slot rather than in
+                        // `EntityDraftRow`'s built-in inline `+`.
+                        toolbar_actions=Box::new(move || {
+                            view! {
+                                <Button
+                                    color=ButtonColor::Primary
+                                    size=ButtonSize::Sm
+                                    // `gap-2` (8px) replaces daisyUI's stock
+                                    // `.btn` `gap: .375rem` (6px, off the
+                                    // canonical spacing scale): this button has
+                                    // an icon AND a label, so the gap is live
+                                    // spacing, not the dead CSS the toolbar
+                                    // chooser pins `gap-0` against.
+                                    class="gap-2"
+                                    on_click=Callback::new(move |_| dialog_open.set(true))
+                                    attr:data-helpdesk-add-row=""
+                                >
+                                    <Icon name="plus".to_owned() size=IconSize::XSmall />
+                                    {move || texts.get().new_request}
+                                </Button>
+                            }
+                            .into_any()
+                        })
                     />
                 </div>
             </Show>

@@ -29,7 +29,7 @@ pub fn HelpdeskDemo() -> impl IntoView {
     view! {
         <ContentLayout
             title="Helpdesk"
-            description="Role-switched Jira ticket board with a New Request dialog, driven by a HelpdeskBackend"
+            description="Role-switched Jira ticket board: the table carries the standard record-list affordances (filter row under the headers, gear column chooser, '+' that opens the New Request dialog), driven by a HelpdeskBackend"
         >
             <Section title="Role">
                 <div class="join" data-testid="helpdesk-role-switch">
