@@ -33,14 +33,14 @@ pub struct UsageTotals {
     /// see [`Self::cost_incomplete`], which a renderer MUST check before
     /// presenting this as "the cost" rather than "at least this much".
     pub metered_cost: Option<f64>,
-    /// True once at least one call to [`Self::add_metered`] reported `cost:
-    /// None`. Deliberately sticky (never clears back to `false`): a later
-    /// contribution that DOES report a cost does not retroactively make the
-    /// earlier unknown one known, so a partial total must keep reading as
-    /// partial for the rest of this turn's life. Absent this flag, `(None,
-    /// Some(a))` and `(Some(a), Some(a))` would both resolve to `Some(a)`
-    /// and be indistinguishable — a complete total and an accidental floor
-    /// would render identically.
+    /// True once at least one call to [`Self::add_metered`] reported
+    /// `cost: None`. Deliberately sticky (never clears back to `false`): a
+    /// later contribution that DOES report a cost does not retroactively make
+    /// the earlier unknown one known, so a partial total must keep reading as
+    /// partial for the rest of this turn's life. Absent this flag,
+    /// `(None, Some(a))` and `(Some(a), Some(a))` would both resolve to
+    /// `Some(a)` and be indistinguishable — a complete total and an
+    /// accidental floor would render identically.
     pub cost_incomplete: bool,
 }
 
