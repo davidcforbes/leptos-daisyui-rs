@@ -46,6 +46,25 @@ const TURN_POLL_MS: u64 = 200;
 /// watchdog fails it, in milliseconds.
 pub const WATCHDOG_MS: i64 = 120_000;
 
+/// The turn whose record the composite reads on this tick.
+///
+/// [`ChatWorkspaceBackend::current_turn_id`] reports the turn currently IN
+/// FLIGHT, so it drops to `None` in the very call that writes the terminal
+/// lifecycle onto the record — `Completed`, `Failed`, `Unavailable` and
+/// `Canceled` all mark the turn finished at the same instant they are
+/// recorded. A tick that reads only the live id therefore never observes a
+/// terminal record at all: the header latches on the last thing it managed to
+/// read, which is `validating`, and `outcome`, `usage`, `limitations` and the
+/// failure kind stay dark on a perfectly healthy turn.
+///
+/// Falling back to the turn already being watched keeps the finished turn
+/// readable until a new `send` replaces it, which is the contract the rest of
+/// this tick is written against (the cancel notice is announced once per turn
+/// *id* precisely because the terminal record is re-read every tick).
+pub fn tick_turn_id(live: Option<String>, watched: Option<&str>) -> Option<String> {
+    live.or_else(|| watched.map(str::to_owned))
+}
+
 /// Whether the watchdog should fail the turn on this tick.
 ///
 /// Pure so the threshold is provable without a browser: the composite's own
@@ -467,7 +486,12 @@ pub fn AiChatWorkspace(
 
     // The live turn's record, the notices it has grown, and the watchdog.
     let tick = move || {
-        let Some(id) = backend.with_value(|b| b.current_turn_id()) else {
+        // A turn goes terminal and stops being "in flight" in the same call,
+        // so the live id alone can never resolve to a finished record: fall
+        // back to the turn already being watched. See `tick_turn_id`.
+        let live = backend.with_value(|b| b.current_turn_id());
+        let watching = watched.get_untracked().map(|(id, _, _)| id);
+        let Some(id) = tick_turn_id(live, watching.as_deref()) else {
             return;
         };
         let (started, already_fired) = match watched.get_untracked() {

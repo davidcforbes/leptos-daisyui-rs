@@ -314,6 +314,130 @@ fn a_completed_turn_is_the_negative_control_for_the_cancel_gate() {
     );
 }
 
+/// The composite's tick, reduced to the two things that decide what the
+/// header shows: which turn id it resolves, and the record it reads for it.
+/// Returns the last record the tick managed to read, exactly as the header's
+/// `turn` signal would hold it.
+#[cfg(feature = "test-mode")]
+fn drive_ticks(
+    backend: &InMemoryChatWorkspaceBackend,
+    session: &mut crate::components::ai_chat::ChatSession,
+    watched: &mut Option<String>,
+    ticks: usize,
+) -> Option<TurnRecord> {
+    let mut seen: Option<TurnRecord> = None;
+    for _ in 0..ticks {
+        // The panel's transport poll and the composite's record tick are
+        // independent intervals; one beat of each is the tightest interleave
+        // the browser can produce, and the slowest to hide a latch.
+        session.poll();
+        let Some(id) = tick_turn_id(backend.current_turn_id(), watched.as_deref()) else {
+            continue;
+        };
+        *watched = Some(id.clone());
+        if let Ok(record) = now(backend.turn(&id)) {
+            seen = Some(record);
+        }
+    }
+    seen
+}
+
+/// A turn that FINISHES must still be readable by the composite's tick.
+///
+/// The bug this pins: `current_turn_id()` stops reporting a turn the instant
+/// it goes terminal, in the same locked call that writes `Completed` onto the
+/// record — so there is no window in which the live id and the terminal
+/// record coexist, and a tick keyed only on the live id can NEVER see a
+/// finished turn. The header latched at `validating` forever, with no usage,
+/// no outcome and no evidence, on a turn that had answered correctly.
+#[test]
+#[cfg(feature = "test-mode")]
+fn the_tick_still_reads_a_turn_that_has_just_gone_terminal() {
+    use crate::components::ai_chat::{ChatRequest, ChatSession};
+
+    let backend = InMemoryChatWorkspaceBackend::seeded();
+    let transport = now(backend.open_session(
+        "codex-spark",
+        &KnowledgeSelection {
+            posture: ChatPosture::Assistant,
+            ..KnowledgeSelection::default()
+        },
+        Default::default(),
+        ProviderTuning::default(),
+    ))
+    .expect("open");
+    let mut session = ChatSession::new(transport);
+    session
+        .send(ChatRequest {
+            prompt: "hello".to_owned(),
+            attachments: Vec::new(),
+            page_context: None,
+        })
+        .expect("send");
+
+    let record =
+        drive_ticks(&backend, &mut session, &mut None, 40).expect("the tick read some record");
+    assert!(
+        matches!(record.lifecycle, AttemptLifecycle::Completed(_)),
+        "the last record the tick could read is {:?}, not Completed — the \
+         header latches there and the honesty surface never lights up",
+        record.lifecycle
+    );
+    assert!(
+        record.outcome.is_some(),
+        "a completed turn's outcome must reach the header: {record:?}"
+    );
+    assert!(
+        record.usage.is_some(),
+        "a completed turn's usage must reach the header: {record:?}"
+    );
+    assert!(
+        record.evidence.is_some(),
+        "a completed turn's evidence must reach the header: {record:?}"
+    );
+}
+
+/// The same latch, on the cancel path: `cancel()` marks the turn terminal in
+/// the call that records `Canceled`, so the notice the composite announces
+/// once per turn id was unreachable too.
+#[test]
+#[cfg(feature = "test-mode")]
+fn the_tick_still_reads_a_turn_that_has_just_been_canceled() {
+    use crate::components::ai_chat::{ChatRequest, ChatSession};
+
+    let backend = InMemoryChatWorkspaceBackend::seeded();
+    let transport = now(backend.open_session(
+        "codex-spark",
+        &KnowledgeSelection {
+            posture: ChatPosture::Assistant,
+            ..KnowledgeSelection::default()
+        },
+        Default::default(),
+        ProviderTuning::default(),
+    ))
+    .expect("open");
+    let mut session = ChatSession::new(transport);
+    session
+        .send(ChatRequest {
+            prompt: "hello".to_owned(),
+            attachments: Vec::new(),
+            page_context: None,
+        })
+        .expect("send");
+    // Enough ticks for a real prefix to stream, then stop it mid-answer.
+    let mut watched: Option<String> = None;
+    let _ = drive_ticks(&backend, &mut session, &mut watched, 6);
+    session.cancel().expect("cancel");
+
+    let record =
+        drive_ticks(&backend, &mut session, &mut watched, 4).expect("the tick read some record");
+    assert!(
+        matches!(record.lifecycle, AttemptLifecycle::Canceled { .. }),
+        "the last record the tick could read is {:?}, not Canceled",
+        record.lifecycle
+    );
+}
+
 // ── Schema gating, metering, notices, session settings ──────────────────────
 
 #[test]

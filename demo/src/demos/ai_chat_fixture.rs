@@ -230,15 +230,25 @@ pub fn AiChatFixture(
     // outcome ids into the oracle, from the RECORD rather than from the DOM.
     let clock_backend = backend.clone();
     let clock = RwSignal::new(clock_backend.now_ms());
+    // The last turn the oracle read, so a finished turn stays readable.
+    let watched_turn: RwSignal<Option<String>> = RwSignal::new(None);
     if let Ok(handle) = leptos::leptos_dom::helpers::set_interval_with_handle(
         move || {
             let _ = clock.try_set(clock_backend.now_ms());
             if !oracle {
                 return;
             }
-            let Some(id) = clock_backend.current_turn_id() else {
+            // The same latch the composite's tick has: a turn stops being
+            // "in flight" in the very call that records its terminal
+            // lifecycle, so an oracle keyed on the live id alone freezes at
+            // `validating` and never publishes an outcome.
+            let Some(id) = leptos_daisyui_rs::patterns::tick_turn_id(
+                clock_backend.current_turn_id(),
+                watched_turn.get_untracked().as_deref(),
+            ) else {
                 return;
             };
+            let _ = watched_turn.try_set(Some(id.clone()));
             let fut = clock_backend.turn(&id);
             spawn_local(async move {
                 if let Ok(record) = fut.await {

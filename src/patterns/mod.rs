@@ -44,8 +44,8 @@ pub use ai_chat_workspace::{
     card_ready_for_ask, card_unready_reason, citations_of, completed_answer, corpus_choices,
     cost_line, declined_limitations, desktop_provider_catalogue, effort_selection,
     engine_is_metered, guardrail_refusal, label_is_distinct_from_options, lifecycle_id,
-    notice_text, outcome_id, published_capabilities, reopen_announces_switch, usage_figures,
-    usage_line,
+    notice_text, outcome_id, published_capabilities, reopen_announces_switch, tick_turn_id,
+    usage_figures, usage_line,
 };
 // Aliased: these are generic enough that a bare re-export would read as the
 // whole `patterns` module's vocabulary rather than the chat workspace's.

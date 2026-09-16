@@ -1069,6 +1069,15 @@ async fn ask(h: &pixelproof_web::Harness, root: &str, prompt: &str) {
 }
 
 /// Poll until one workspace's panel leaves `waiting`/`streaming`.
+///
+/// `error` counts as left, and this is not a relaxation: `chat_state_attr`
+/// ranks `error` ABOVE `streaming` and `waiting`, and `AiChat` holds
+/// `last_turn_error` until the actor's next send or retry — deliberately, so
+/// the only signal that the turn broke is not deleted the instant it stops.
+/// A turn that ends in `StreamEvent::Error` therefore NEVER reports `idle`,
+/// and a proof that asks a deliberately-failing prompt (tests 11, 12, 13 and
+/// the retry test all do) could only ever time out here. The header
+/// assertions those tests exist for are untouched.
 async fn wait_for_idle_at(h: &pixelproof_web::Harness, root: &str, budget_ms: u64) {
     let step = 200;
     let mut waited = 0;
@@ -1077,12 +1086,12 @@ async fn wait_for_idle_at(h: &pixelproof_web::Harness, root: &str, budget_ms: u6
             .as_str()
             .unwrap_or_default()
             .to_owned();
-        if state == "idle" {
+        if state == "idle" || state == "error" {
             return;
         }
         assert!(
             waited < budget_ms,
-            "the panel never returned to idle (last state {state:?})"
+            "the panel never stopped working (last state {state:?})"
         );
         tokio::time::sleep(std::time::Duration::from_millis(step)).await;
         waited += step;
@@ -1704,17 +1713,54 @@ async fn retry_failed_turn_resends_the_same_prompt_once() {
         .count();
     assert_eq!(user_bubbles, 1, "{failed}");
 
-    click(&h, &format!("{ROOT} [data-ai-chat-retry]")).await;
     // While the retry is in flight the strip — and its button — are gone, so
-    // a second press cannot produce a third turn.
-    let in_flight = workspace_shape(&h, ROOT).await;
-    assert_eq!(
-        in_flight["retryButton"],
-        json!(false),
-        "the retry button must not be pressable twice for one failure: \
-         {in_flight}"
-    );
+    // a second press cannot produce a third turn. WATCH for that rather than
+    // sampling once after the click: the scripted failure takes about three
+    // panel polls, and a harness round trip can land after the RETRY has
+    // itself failed, where the second failure's own strip reads exactly like
+    // the first one never having cleared. The observer below sees every
+    // intermediate state, so this still fails if the button is never
+    // withdrawn.
+    let _ = eval_json(
+        &h,
+        &format!(
+            r#"(() => {{
+                const root = document.querySelector('{ROOT}');
+                window.__lduiRetryGone = false;
+                const check = () => {{
+                    if (!root.querySelector('[data-ai-chat-retry]')) {{
+                        window.__lduiRetryGone = true;
+                    }}
+                }};
+                check();
+                if (window.__lduiRetryObs) {{ window.__lduiRetryObs.disconnect(); }}
+                window.__lduiRetryObs = new MutationObserver(check);
+                window.__lduiRetryObs.observe(root, {{
+                    subtree: true,
+                    childList: true,
+                    attributes: true,
+                }});
+                return true;
+            }})()"#
+        ),
+    )
+    .await;
+    click(&h, &format!("{ROOT} [data-ai-chat-retry]")).await;
     wait_for_idle_at(&h, ROOT, 30_000).await;
+    let withdrawn = eval_json(
+        &h,
+        r#"(() => {
+            if (window.__lduiRetryObs) { window.__lduiRetryObs.disconnect(); }
+            return window.__lduiRetryGone === true;
+        })()"#,
+    )
+    .await;
+    assert_eq!(
+        withdrawn,
+        json!(true),
+        "the retry button must not be pressable twice for one failure: {}",
+        workspace_shape(&h, ROOT).await
+    );
     tokio::time::sleep(std::time::Duration::from_millis(400)).await;
 
     let after = distinct_turn_ids(&backend_calls(&h).await);
