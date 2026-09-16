@@ -16,6 +16,14 @@
 //!   backed it. `not_found` is the honest middle — a search ran and found
 //!   nothing — and it is rendered as its own value, not as an empty
 //!   citations list that looks identical to "no search ran".
+//! * An ASSISTANT-ONLY VERDICT IS A STRUCTURAL GATE, not a courtesy. A turn
+//!   whose verdict reads "General assistance, no documents" must never show
+//!   grounded citations or qualified facts, so [`citations_of`] and
+//!   [`facts_of`] return empty lists for `GroundingVerdict::AssistantOnly`
+//!   even when the `TurnEvidence` itself carries them — a host that reports
+//!   both sides of that contradiction is claiming sources it said it did not
+//!   read. The fixture transport additionally declines to produce such a
+//!   pair, but that fixture-side courtesy is a second layer, not the gate.
 
 use leptos::prelude::*;
 
@@ -25,15 +33,20 @@ use super::texts::AiChatWorkspaceTexts;
 use crate::components::ai_assistant_workspace::AssistantFact;
 use crate::components::ai_chat::Citation;
 
-use super::evidence::TurnEvidence;
+use super::evidence::{GroundingVerdict, TurnEvidence};
 
 /// The citations backing one turn, or an empty list when the turn produced
 /// none (or has not finished).
+///
+/// Gated on the turn's own grounding verdict rather than read verbatim: an
+/// `AssistantOnly` turn is one that consulted no corpus, so rendering the
+/// citations a host attached anyway would present sources the verdict says
+/// were never read.
 pub fn citations_of(record: Option<&TurnRecord>) -> Vec<Citation> {
-    record
-        .and_then(|r| r.evidence.as_ref())
-        .map(|e| e.citations.clone())
-        .unwrap_or_default()
+    match record.and_then(|r| r.evidence.as_ref()) {
+        Some(e) if e.grounding != GroundingVerdict::AssistantOnly => e.citations.clone(),
+        _ => Vec::new(),
+    }
 }
 
 /// The evidence one turn carries, or `None` when the turn has not produced
@@ -43,8 +56,15 @@ pub fn evidence_of(record: Option<&TurnRecord>) -> Option<TurnEvidence> {
 }
 
 /// The qualified facts backing one turn.
+///
+/// Gated on the turn's own grounding verdict for the same reason
+/// [`citations_of`] is: a fact beside an `AssistantOnly` verdict is a
+/// qualified claim about a source the turn never consulted.
 pub fn facts_of(record: Option<&TurnRecord>) -> Vec<AssistantFact> {
-    evidence_of(record).map(|e| e.facts).unwrap_or_default()
+    match record.and_then(|r| r.evidence.as_ref()) {
+        Some(e) if e.grounding != GroundingVerdict::AssistantOnly => e.facts.clone(),
+        _ => Vec::new(),
+    }
 }
 
 /// The evidence rail.

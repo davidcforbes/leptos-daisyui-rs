@@ -314,6 +314,111 @@ fn a_completed_turn_is_the_negative_control_for_the_cancel_gate() {
     );
 }
 
+// ── An assistant-only verdict gates the evidence beside it ──────────────────
+
+#[test]
+#[cfg(feature = "test-mode")]
+fn assistant_only_turn_with_contradictory_evidence_renders_no_citations_or_facts() {
+    use crate::components::ai_assistant_workspace::AssistantFact;
+    use crate::components::ai_chat::{ChatRequest, ChatSession, Citation};
+
+    // A host can hand the rail the CONTRADICTORY pair: an assistant-only
+    // verdict — "General assistance, no documents" — beside citations and
+    // qualified facts as though the turn had read the corpus. The fixture
+    // never produces this pair itself (its transport consults no corpus for
+    // an assistant turn), so this script writes it onto the turn directly.
+    let backend = InMemoryChatWorkspaceBackend::seeded().with_script(
+        "claude-code",
+        PromptMatcher::Contains("contradiction".into()),
+        TurnScript::new()
+            .text_words("answered from general knowledge")
+            .evidence(TurnEvidence {
+                citations: vec![Citation {
+                    label: "Intake checklist".into(),
+                    href: Some("kb/intake/checklist.md".into()),
+                }],
+                recall: None,
+                facts: vec![
+                    AssistantFact::new(
+                        "Reminder lead time",
+                        Some("Two days ahead".into()),
+                        None,
+                        "Quoted from kb/intake/checklist.md; the memo itself is the only source.",
+                        None,
+                    )
+                    .expect("a well-formed fact"),
+                ],
+                limitations: vec![],
+                as_of: None,
+                grounding: GroundingVerdict::AssistantOnly,
+            }),
+    );
+    let transport = now(backend.open_session(
+        "claude-code",
+        &KnowledgeSelection {
+            posture: ChatPosture::Assistant,
+            ..KnowledgeSelection::default()
+        },
+        Default::default(),
+        ProviderTuning::default(),
+    ))
+    .expect("open");
+    let mut session = ChatSession::new(transport);
+    session
+        .send(ChatRequest {
+            prompt: "a contradiction for the rail".to_owned(),
+            attachments: Vec::new(),
+            page_context: None,
+        })
+        .expect("send");
+    let id = backend.current_turn_id().expect("a live turn");
+    for _ in 0..20 {
+        session.poll();
+    }
+    let record = now(backend.turn(&id)).expect("record");
+
+    // Positive control: the contradictory evidence really did reach the
+    // record — an empty fixture would pass the gate assertions vacuously.
+    let evidence = record
+        .evidence
+        .clone()
+        .expect("the script attached evidence");
+    assert_eq!(evidence.grounding, GroundingVerdict::AssistantOnly);
+    assert!(!evidence.citations.is_empty(), "{evidence:?}");
+    assert!(!evidence.facts.is_empty(), "{evidence:?}");
+
+    // The rail-side gate: an assistant-only verdict means NO corpus was
+    // consulted, so neither citations nor qualified facts may be rendered
+    // no matter what the evidence carries. `evidence_of` deliberately stays
+    // verbatim — the grounding badge itself is read from it.
+    assert_eq!(citations_of(Some(&record)), vec![]);
+    assert_eq!(facts_of(Some(&record)), vec![]);
+    assert!(
+        evidence_of(Some(&record)).is_some(),
+        "the verdict itself must still reach the grounding hook"
+    );
+
+    // The other verdicts are NOT empty, so the rail keeps showing grounded
+    // evidence — the gate narrows on the assistant-only verdict only.
+    for grounded in [
+        GroundingVerdict::Grounded { sources: 1 },
+        GroundingVerdict::NotFound,
+    ] {
+        let grounded_record = TurnRecord {
+            evidence: Some(TurnEvidence {
+                grounding: grounded.clone(),
+                ..record.evidence.clone().expect("evidence")
+            }),
+            ..record.clone()
+        };
+        assert!(
+            !citations_of(Some(&grounded_record)).is_empty(),
+            "{grounded:?}"
+        );
+        assert!(!facts_of(Some(&grounded_record)).is_empty(), "{grounded:?}");
+    }
+}
+
 /// The composite's tick, reduced to the two things that decide what the
 /// header shows: which turn id it resolves, and the record it reads for it.
 /// Returns the last record the tick managed to read, exactly as the header's
