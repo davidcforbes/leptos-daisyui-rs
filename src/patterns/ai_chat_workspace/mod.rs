@@ -42,5 +42,5 @@ pub use provider::{
     ReasoningEffort, TuningSchema, desktop_provider_catalogue,
 };
 pub use quick_actions::QuickAction;
-pub use status::{TurnRecord, UsageTotals, lifecycle_id};
+pub use status::{TurnNotice, TurnRecord, UsageTotals, lifecycle_id};
 pub use texts::AiChatWorkspaceTexts;

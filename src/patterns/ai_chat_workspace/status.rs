@@ -5,6 +5,7 @@ use crate::components::ai_assistant_workspace::{AnswerOutcome, AttemptLifecycle}
 use crate::components::ai_chat::Usage;
 
 use super::evidence::TurnEvidence;
+use super::provider::ReasoningEffort;
 
 fn add_usage(a: Usage, b: &Usage) -> Usage {
     Usage {
@@ -78,6 +79,39 @@ impl UsageTotals {
     }
 }
 
+/// Something that happened to a turn which the stream itself has no
+/// vocabulary for: the engine silently changed its reasoning effort, or the
+/// answer was cut short. `ai_chat`'s `StreamEvent` carries neither, so a
+/// backend reports them on the turn record and the composite renders them
+/// beside the transcript.
+///
+/// This is the data, not the wording. A renderer turns each notice into a
+/// localized `TranscriptAnnotation` through `AiChatWorkspaceTexts`; the
+/// backend never mints presentation text.
+///
+/// `#[non_exhaustive]`, because a host can learn of a new kind of notice
+/// before this vocabulary does — that one arrives as [`Self::Unknown`]
+/// carrying the host's own code, so it is rendered generically rather than
+/// dropped.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub enum TurnNotice {
+    /// The engine ran the turn at a different reasoning effort than the one
+    /// that was asked for.
+    Escalated {
+        /// The effort the turn was submitted at.
+        from: ReasoningEffort,
+        /// The effort the engine actually ran.
+        to: ReasoningEffort,
+    },
+    /// The answer stopped short of finishing — a token budget or a context
+    /// limit ended it, not the model.
+    Truncated,
+    /// A notice this vocabulary does not name, carried by the host's own
+    /// code so a renderer can show it generically.
+    Unknown(String),
+}
+
 /// One turn's accepted lifecycle, usage and evidence, keyed by the host's
 /// turn id.
 #[derive(Clone, Debug, PartialEq)]
@@ -99,6 +133,11 @@ pub struct TurnRecord {
     /// The completed outcome, mirrored out of `lifecycle` for convenience
     /// when a consumer only cares about outcome, not the full lifecycle.
     pub outcome: Option<AnswerOutcome>,
+    /// What happened to this turn that the stream could not say, in the
+    /// order it happened. Empty for an ordinary turn. A composite holding a
+    /// `dyn ChatWorkspaceBackend` reads these off the record — they are the
+    /// only route escalation and truncation have to the transcript.
+    pub notices: Vec<TurnNotice>,
 }
 
 /// Stable id for one lifecycle state, for `data-*` hooks and telemetry.

@@ -19,6 +19,16 @@
 //!   [`InMemoryChatWorkspaceBackend::recall`] does not return candidates. A
 //!   curator (here, `set_memory_state`) closes that gap.
 //!
+//! Two of this module's names collide with `crate::patterns::helpdesk`'s
+//! fixture, which the `patterns` module re-exports by glob, so at the
+//! `patterns` level they are aliased: [`BackendCall`] is
+//! `patterns::ChatWorkspaceCall` and [`SEED_NOW_MS`] is
+//! `patterns::SEED_CHAT_NOW_MS`. Plain `patterns::BackendCall` and
+//! `patterns::SEED_NOW_MS` are helpdesk's, and are a different type
+//! entirely — reaching for the brief's name gets the wrong type with no
+//! error until a match arm fails to compile. The module itself is private,
+//! so the aliases are the only path to these two.
+//!
 //! State is shared between the backend and the transport through one
 //! `Arc<Mutex<FixtureCore>>`. The backend's own futures are `!Send` (wasm is
 //! single-threaded), but [`ChatTransport`] is `Send`, so the shared core is
@@ -55,7 +65,7 @@ use super::provider::{
     AvailabilityReasonCode, ProviderCard, ProviderTuning, ReasoningEffort,
     desktop_provider_catalogue,
 };
-use super::status::{TurnRecord, UsageTotals};
+use super::status::{TurnNotice, TurnRecord, UsageTotals};
 use super::texts::AiChatWorkspaceTexts;
 
 /// The fixed "now" every fixture timestamp derives from, so ages and
@@ -723,7 +733,7 @@ fn seed_office_knowledge(scope: &OfficeKnowledgeScope) -> Vec<AssistantKnowledge
                 "Only the attorney of record or a named paralegal contacts the clerk.",
             ),
         ],
-        _ => vec![
+        OfficeKnowledgeScope::GroupImportant => vec![
             knowledge_entry(
                 "kn-g-001",
                 "Reminder email wording",
@@ -739,6 +749,9 @@ fn seed_office_knowledge(scope: &OfficeKnowledgeScope) -> Vec<AssistantKnowledge
                 "Work pauses; the matter is not closed.",
             ),
         ],
+        // A scope this seed does not know is empty, not silently the
+        // group-important set.
+        _ => vec![],
     }
 }
 
@@ -794,7 +807,14 @@ struct FixtureCore {
     engine_id: String,
     selection: KnowledgeSelection,
     chat_settings: ChatSettings,
-    tuning: ProviderTuning,
+    /// The settings last handed to [`ChatTransport::configure`], which is
+    /// a different event from the ones `open_session` was opened with.
+    configured_settings: Option<ChatSettings>,
+    /// The tuning last applied for each engine id, keyed per engine. One
+    /// slot would answer "what was applied last" but not "what is codex's
+    /// tuning now that groq's temperature was changed", which is the
+    /// question a tuning panel has to get right.
+    tuning: BTreeMap<String, ProviderTuning>,
     connections: BTreeMap<String, AssistantConnection>,
     ingest: BTreeMap<String, IngestStatus>,
     memory: AssistantMemory,
@@ -805,11 +825,9 @@ struct FixtureCore {
     written_at_seq: BTreeMap<String, u32>,
     turn: Option<TurnState>,
     records: BTreeMap<String, TurnRecord>,
-    annotations: BTreeMap<String, Vec<TranscriptAnnotation>>,
     wake: Option<WakeFn>,
     released_in_poll: u32,
     next_turn: u32,
-    next_receipt: u32,
     next_memory: u32,
     recall_seq: u32,
 }
@@ -839,18 +857,17 @@ impl FixtureCore {
             engine_id: "claude-code".to_owned(),
             selection: KnowledgeSelection::default(),
             chat_settings: ChatSettings::default(),
-            tuning: ProviderTuning::default(),
+            configured_settings: None,
+            tuning: BTreeMap::new(),
             connections: BTreeMap::new(),
             ingest,
             memory: seed_memory(),
             written_at_seq: BTreeMap::new(),
             turn: None,
             records: BTreeMap::new(),
-            annotations: BTreeMap::new(),
             wake: None,
             released_in_poll: 0,
             next_turn: 1,
-            next_receipt: 1,
             next_memory: 4,
             recall_seq: 0,
         }
@@ -1067,6 +1084,25 @@ fn fixture_provenance(engine_id: &str, model: Option<String>, as_of: &str) -> As
     }
 }
 
+/// Renders one [`TurnNotice`] as the transcript annotation a composite would
+/// interleave, localized through the fixture's texts. The notice is the
+/// record; this is only its wording.
+fn notice_annotation(notice: &TurnNotice, texts: &AiChatWorkspaceTexts) -> TranscriptAnnotation {
+    let body = match notice {
+        TurnNotice::Escalated { from, to } => texts
+            .escalated
+            .replace("{from}", from.as_str())
+            .replace("{to}", to.as_str()),
+        TurnNotice::Truncated => texts.truncated.clone(),
+        TurnNotice::Unknown(code) => code.clone(),
+    };
+    TranscriptAnnotation {
+        anchor: AnnotationAnchor::AtEnd,
+        kind: AnnotationKind::Warning,
+        body: AnnotationBody::Text(body),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Transport
 // ---------------------------------------------------------------------------
@@ -1127,35 +1163,25 @@ impl ScriptedChatTransport {
         stalled
     }
 
-    fn annotations_for(
-        script: &TurnScript,
-        texts: &AiChatWorkspaceTexts,
-    ) -> Vec<TranscriptAnnotation> {
+    /// The turn notices a script mints, in script order. These are the
+    /// data — [`InMemoryChatWorkspaceBackend::annotations`] is the
+    /// presentation derived from them.
+    fn notices_for(script: &TurnScript) -> Vec<TurnNotice> {
         script
             .ops
             .iter()
             .filter_map(|op| match op {
-                ScriptOp::Escalate(from, to) => Some(TranscriptAnnotation {
-                    anchor: AnnotationAnchor::AtEnd,
-                    kind: AnnotationKind::Warning,
-                    body: AnnotationBody::Text(
-                        texts
-                            .escalated
-                            .replace("{from}", from.as_str())
-                            .replace("{to}", to.as_str()),
-                    ),
+                ScriptOp::Escalate(from, to) => Some(TurnNotice::Escalated {
+                    from: from.clone(),
+                    to: to.clone(),
                 }),
-                ScriptOp::Truncated => Some(TranscriptAnnotation {
-                    anchor: AnnotationAnchor::AtEnd,
-                    kind: AnnotationKind::Warning,
-                    body: AnnotationBody::Text(texts.truncated.clone()),
-                }),
+                ScriptOp::Truncated => Some(TurnNotice::Truncated),
                 _ => None,
             })
             .collect()
     }
 
-    fn base_record(id: &str, engine_id: &str) -> TurnRecord {
+    fn base_record(id: &str, engine_id: &str, notices: Vec<TurnNotice>) -> TurnRecord {
         TurnRecord {
             id: id.to_owned(),
             engine_id: engine_id.to_owned(),
@@ -1164,6 +1190,7 @@ impl ScriptedChatTransport {
             tokens_per_sec: None,
             evidence: None,
             outcome: None,
+            notices,
         }
     }
 
@@ -1290,10 +1317,9 @@ impl ChatTransport for ScriptedChatTransport {
                 grounding,
             });
         }
-        let annotations = Self::annotations_for(&script, &core.texts);
-        core.annotations.insert(id.clone(), annotations);
+        let notices = Self::notices_for(&script);
         core.records
-            .insert(id.clone(), Self::base_record(&id, &engine_id));
+            .insert(id.clone(), Self::base_record(&id, &engine_id, notices));
         core.turn = Some(turn);
         core.released_in_poll = 0;
         if let Some(wake) = core.wake.clone() {
@@ -1399,6 +1425,16 @@ impl ChatTransport for ScriptedChatTransport {
         if discarded {
             turn.partial.clear();
         }
+        // A cancelled turn never reaches `complete`, so the streamed prefix
+        // would otherwise leave no trace anywhere a consumer can read: the
+        // lifecycle's `Canceled` carries only a boolean. Write the partial
+        // onto the record's outcome, AFTER the discard, so "kept" and
+        // "discarded" are two observably different records rather than the
+        // same record with a different flag.
+        let partial = turn.partial.clone();
+        if let Some(record) = core.records.get_mut(&id) {
+            record.outcome = Some(AnswerOutcome::Answered { text: partial });
+        }
         core.log(BackendCall::Cancel {
             turn_id: id.clone(),
             discarded,
@@ -1410,7 +1446,8 @@ impl ChatTransport for ScriptedChatTransport {
 
     fn configure(&mut self, settings: ChatSettings) {
         let mut core = self.core.lock().expect("fixture core poisoned");
-        core.chat_settings = settings;
+        core.chat_settings = settings.clone();
+        core.configured_settings = Some(settings);
     }
 
     fn set_wake(&mut self, wake: WakeFn) {
@@ -1478,15 +1515,37 @@ impl InMemoryChatWorkspaceBackend {
         self.lock().calls.clone()
     }
 
-    /// The transcript annotations minted for one turn by
-    /// [`TurnScript::escalate`] and [`TurnScript::truncated`]. The composite
-    /// interleaves these; `ChatSession` has no vocabulary for them.
+    /// The transcript annotations for one turn, rendered from that turn's
+    /// `TurnRecord::notices` through this fixture's texts. Purely a
+    /// convenience: the notices themselves are on the record, which is what
+    /// a composite holding a `dyn ChatWorkspaceBackend` can actually reach.
     pub fn annotations(&self, turn_id: &str) -> Vec<TranscriptAnnotation> {
-        self.lock()
-            .annotations
-            .get(turn_id)
-            .cloned()
-            .unwrap_or_default()
+        let core = self.lock();
+        let Some(record) = core.records.get(turn_id) else {
+            return vec![];
+        };
+        record
+            .notices
+            .iter()
+            .map(|notice| notice_annotation(notice, &core.texts))
+            .collect()
+    }
+
+    /// The [`ProviderTuning`] most recently applied for one engine — by
+    /// `set_tuning`, or by the `open_session` that selected it — and `None`
+    /// for an engine neither tuned nor opened. Per engine, not one slot: a
+    /// proof has to be able to show that tuning groq left codex's own
+    /// tuning alone.
+    pub fn applied_tuning(&self, engine_id: &str) -> Option<ProviderTuning> {
+        self.lock().tuning.get(engine_id).cloned()
+    }
+
+    /// The [`ChatSettings`] most recently handed to
+    /// [`ChatTransport::configure`], and `None` before the first one. This
+    /// is the payload that actually crossed the transport seam, which is a
+    /// stronger claim than "a configure call happened".
+    pub fn applied_chat_settings(&self) -> Option<ChatSettings> {
+        self.lock().configured_settings.clone()
     }
 
     /// The current fixture time in epoch milliseconds, for a host watchdog.
@@ -1679,7 +1738,7 @@ impl ChatWorkspaceBackend for InMemoryChatWorkspaceBackend {
         core.engine_id = engine_id.to_owned();
         core.selection = knowledge.clone();
         core.chat_settings = settings;
-        core.tuning = tuning;
+        core.tuning.insert(engine_id.to_owned(), tuning);
         let transport: Box<dyn ChatTransport> =
             Box::new(ScriptedChatTransport::new(Arc::clone(&self.core)));
         Self::ready(Ok(transport))
@@ -1688,7 +1747,7 @@ impl ChatWorkspaceBackend for InMemoryChatWorkspaceBackend {
     fn set_tuning(&self, engine_id: &str, tuning: ProviderTuning) -> WorkspaceFuture<()> {
         let mut core = self.lock();
         core.log(BackendCall::SetTuning(engine_id.to_owned()));
-        core.tuning = tuning;
+        core.tuning.insert(engine_id.to_owned(), tuning);
         Self::ready(Ok(()))
     }
 
@@ -1721,9 +1780,11 @@ impl ChatWorkspaceBackend for InMemoryChatWorkspaceBackend {
                 "The memory store did not answer.",
             )));
         }
+        // One counter, not two: the receipt number and the recall sequence
+        // the meaning-vector delay is keyed to are the same count, and a
+        // second counter is only an opportunity to bump one of them.
         core.recall_seq += 1;
-        let seq = core.next_receipt;
-        core.next_receipt += 1;
+        let seq = core.recall_seq;
         let receipt = RecallReceipt {
             receipt_id: format!("rcpt-{seq:04}"),
             as_of: core.as_of(),
@@ -1797,13 +1858,13 @@ impl ChatWorkspaceBackend for InMemoryChatWorkspaceBackend {
                 entry.revision += 1;
                 Ok(entry.clone())
             }
-            // Confirmation is the moment an entry becomes eligible for
-            // recall, so it restarts the meaning-vector delay below.
             None => Err(workspace_error(
                 ChatWorkspaceErrorKind::NotFound,
                 format!("No memory entry {id}"),
             )),
         };
+        // Confirmation is the moment an entry becomes eligible for recall, so
+        // it restarts the meaning-vector delay.
         if let Ok(entry) = &result {
             core.memory.revision += 1;
             if entry.state == MemoryState::Confirmed {
@@ -2228,8 +2289,19 @@ mod tests {
         // BudgetExhausted: a budget with nothing left, every session refused.
         let b =
             InMemoryChatWorkspaceBackend::seeded().with_fault(ChatWorkspaceFault::BudgetExhausted);
-        let budget = now(b.settings()).expect("settings").budget.expect("budget");
+        let settings = now(b.settings()).expect("settings");
+        let budget = settings.budget.clone().expect("budget");
         assert_eq!(budget.remaining_display.as_deref(), Some("$0.00"));
+        // Deliberate, and beyond the brief's letter: an exhausted budget is
+        // not one engine's problem, so every engine reads disabled rather
+        // than enabled-but-refusing.
+        assert!(
+            settings.engines.iter().all(|e| matches!(
+                &e.availability,
+                EngineAvailability::Disabled { reason_code, .. } if reason_code == "budget_exhausted"
+            )),
+            "an exhausted budget disables all five engines"
+        );
         assert!(
             now(b.open_session(
                 "claude-code",
@@ -2284,20 +2356,166 @@ mod tests {
             ChatWorkspaceErrorKind::Network
         );
 
-        // SlowStream: a poll releases at most the configured event count.
+        // SlowStream: a poll releases EXACTLY the configured event count. The
+        // unfaulted run on the identical script is the control — an upper
+        // bound alone is satisfied by the default, so it would pass against a
+        // fixture that ignored the fault entirely.
+        const SEVEN_EVENTS: &str = "one two three four five six";
+        fn events_per_poll_sequence(b: &InMemoryChatWorkspaceBackend, polls: usize) -> Vec<usize> {
+            let mut s = session(b, "codex-spark");
+            ask(&mut s, "hello");
+            (0..polls)
+                .map(|_| {
+                    s.poll();
+                    s.drain_events().len()
+                })
+                .collect()
+        }
         let b = InMemoryChatWorkspaceBackend::seeded()
-            .with_fault(ChatWorkspaceFault::SlowStream { events_per_poll: 2 });
-        let mut s = session(&b, "codex-spark");
-        ask(&mut s, "hello");
-        s.poll();
-        s.poll();
-        s.poll();
-        assert!(
-            s.drain_events().len() <= 2,
-            "one poll's worth after the ladder"
+            .with_fault(ChatWorkspaceFault::SlowStream { events_per_poll: 3 })
+            .with_script(
+                "codex-spark",
+                PromptMatcher::Any,
+                TurnScript::new().text_words(SEVEN_EVENTS),
+            );
+        assert_eq!(
+            events_per_poll_sequence(&b, 5),
+            vec![0, 0, 3, 3, 1],
+            "two ladder polls, then six deltas and a Done three at a time"
+        );
+        let b = InMemoryChatWorkspaceBackend::seeded().with_script(
+            "codex-spark",
+            PromptMatcher::Any,
+            TurnScript::new().text_words(SEVEN_EVENTS),
+        );
+        assert_eq!(
+            events_per_poll_sequence(&b, 5),
+            vec![0, 0, 1, 1, 1],
+            "the unfaulted control releases exactly one per poll"
         );
 
-        // CancelDiscards is covered by its own test.
+        // CancelDiscards: the discard reaches the log. Which text survives is
+        // proven by `cancel_discards_when_faulted_and_keeps_partial_otherwise`.
+        let b =
+            InMemoryChatWorkspaceBackend::seeded().with_fault(ChatWorkspaceFault::CancelDiscards);
+        let mut s = session(&b, "claude-code");
+        ask(&mut s, "hello");
+        for _ in 0..4 {
+            s.poll();
+        }
+        s.cancel().expect("cancel");
+        assert!(
+            b.calls().iter().any(|c| matches!(
+                c,
+                BackendCall::Cancel {
+                    discarded: true,
+                    ..
+                }
+            )),
+            "the fault makes the cancel a discarding one"
+        );
+    }
+
+    #[test]
+    fn restart_clears_the_live_turn_and_leaves_the_fixture_usable() {
+        let b = InMemoryChatWorkspaceBackend::seeded().with_script(
+            "claude-code",
+            PromptMatcher::Any,
+            TurnScript::new().text_words("one two three four five"),
+        );
+        let mut s = session(&b, "claude-code");
+        ask(&mut s, "start over in a moment");
+        let first = b.current_turn_id().expect("a turn is live");
+        for _ in 0..4 {
+            s.poll();
+        }
+        now(b.turn(&first)).expect("record");
+
+        s.restart().expect("restart");
+        assert!(!s.poll(), "nothing is left to drain after a restart");
+        assert_eq!(b.current_turn_id(), None, "no turn is live after a restart");
+        let calls = b.calls();
+        assert_eq!(
+            calls.last(),
+            Some(&BackendCall::Restart),
+            "the transport's restart shares the backend's ordered log"
+        );
+        let turn_at = calls
+            .iter()
+            .position(|c| matches!(c, BackendCall::Turn(id) if id == &first))
+            .expect("the turn lookup was logged");
+        assert_eq!(
+            turn_at,
+            calls.len() - 2,
+            "Restart lands immediately after the Turn lookup"
+        );
+
+        // And the fixture still works: a second turn gets a fresh id and
+        // completes.
+        ask(&mut s, "and again");
+        let second = b.current_turn_id().expect("a second turn is live");
+        assert_ne!(second, first, "a restart does not reuse the turn id");
+        drain(&mut s, 40);
+        assert!(matches!(
+            now(b.turn(&second)).expect("record").lifecycle,
+            AttemptLifecycle::Completed(_)
+        ));
+    }
+
+    #[test]
+    fn applied_tuning_is_per_engine_and_configure_is_observable() {
+        let b = InMemoryChatWorkspaceBackend::seeded();
+        assert_eq!(
+            b.applied_chat_settings(),
+            None,
+            "nothing was configured yet"
+        );
+        assert_eq!(
+            b.applied_tuning("ollama"),
+            None,
+            "never tuned, never opened"
+        );
+
+        let groq = ProviderTuning {
+            groq: Some(crate::patterns::GroqTuning { temperature: 0.2 }),
+            ..ProviderTuning::default()
+        };
+        now(b.set_tuning("groq-gpt-oss-120b", groq.clone())).expect("tuned");
+        let codex = ProviderTuning {
+            codex: Some(crate::patterns::CodexLevers {
+                web_search: true,
+                ..crate::patterns::CodexLevers::default()
+            }),
+            ..ProviderTuning::default()
+        };
+        now(b.set_tuning("codex-cli", codex.clone())).expect("tuned");
+
+        // Per engine, not one slot: tuning groq did not give codex a
+        // temperature, and the later call did not overwrite the earlier one.
+        assert_eq!(b.applied_tuning("groq-gpt-oss-120b"), Some(groq));
+        assert_eq!(b.applied_tuning("codex-cli"), Some(codex));
+        assert!(
+            b.applied_tuning("codex-cli")
+                .expect("codex tuning")
+                .groq
+                .is_none(),
+            "codex carries no groq sampling"
+        );
+        assert_eq!(b.applied_tuning("ollama"), None);
+
+        // `configure` is the seam the composite's toggles cross, and the
+        // payload is readable rather than merely counted.
+        let mut s = session(&b, "claude-code");
+        s.configure(ChatSettings {
+            show_thinking: false,
+            show_tool_calls: true,
+            model: Some("claude-sonnet-4-6".into()),
+            ..ChatSettings::default()
+        });
+        let applied = b.applied_chat_settings().expect("configured");
+        assert!(!applied.show_thinking);
+        assert!(applied.show_tool_calls);
+        assert_eq!(applied.model.as_deref(), Some("claude-sonnet-4-6"));
     }
 
     #[test]
@@ -2317,8 +2535,13 @@ mod tests {
 
     #[test]
     fn cancel_discards_when_faulted_and_keeps_partial_otherwise() {
+        const ANSWER: &str = "the fee agreement template lives in the intake folder";
         for discards in [false, true] {
-            let b = InMemoryChatWorkspaceBackend::seeded();
+            let b = InMemoryChatWorkspaceBackend::seeded().with_script(
+                "claude-code",
+                PromptMatcher::Any,
+                TurnScript::new().text_words(ANSWER),
+            );
             let b = if discards {
                 b.with_fault(ChatWorkspaceFault::CancelDiscards)
             } else {
@@ -2327,6 +2550,7 @@ mod tests {
             let mut s = session(&b, "claude-code");
             ask(&mut s, "tell me about the fee agreement");
             let id = b.current_turn_id().expect("turn");
+            // Two ladder polls, then one word per poll: four words streamed.
             for _ in 0..6 {
                 s.poll();
             }
@@ -2347,6 +2571,21 @@ mod tests {
                     discarded: discards
                 }
             );
+            // The partial TEXT, not just the flag that claims to govern it.
+            // The two legs are each other's negative control, so neither can
+            // pass while `cancel` ignores the fault.
+            let Some(AnswerOutcome::Answered { text, .. }) = record.outcome else {
+                panic!("a cancelled turn carries the partial it kept, if any");
+            };
+            if discards {
+                assert_eq!(text, "", "a discarding cancel keeps nothing");
+            } else {
+                assert_eq!(
+                    text, "the fee agreement template",
+                    "four words streamed in six polls"
+                );
+                assert!(ANSWER.starts_with(&text), "and they are the script's own");
+            }
         }
     }
 
@@ -2581,6 +2820,7 @@ mod tests {
     #[test]
     fn default_scripts_differ_per_engine() {
         let mut transcripts: Vec<String> = Vec::new();
+        let mut records: Vec<TurnRecord> = Vec::new();
         for engine in [
             "claude-code",
             "codex-cli",
@@ -2604,6 +2844,7 @@ mod tests {
                 record.usage,
                 annotations
             ));
+            records.push(record);
         }
         for i in 0..transcripts.len() {
             for j in (i + 1)..transcripts.len() {
@@ -2612,19 +2853,80 @@ mod tests {
         }
         // Claude alone reports a cache read and a metered cost.
         assert!(transcripts[0].contains("cache_read_tokens: 6144"));
+        assert_eq!(
+            records[0].usage.expect("claude usage").metered_cost,
+            Some(0.0143)
+        );
+        // Spark answers from its pinned model, whatever the session selected.
+        assert!(transcripts[2].contains("gpt-5.3-codex-spark"));
+        // Ollama is local: plan-covered, unpriced, and no reasoning tokens.
+        let ollama = records[4].usage.expect("ollama usage");
+        assert_eq!(ollama.metered_cost, None, "a local engine bills nothing");
+        assert_eq!(ollama.plan.reasoning_tokens, 0);
         // Groq alone carries the escalation and truncation annotations.
         assert!(transcripts[3].contains("Escalated from medium to low"));
         assert!(transcripts[3].contains("Response truncated"));
+        // The notices themselves are on the record, which is what a composite
+        // holding a `dyn ChatWorkspaceBackend` can reach; the annotations
+        // above are only their wording.
+        assert_eq!(
+            records[3].notices,
+            vec![
+                TurnNotice::Escalated {
+                    from: ReasoningEffort::Medium,
+                    to: ReasoningEffort::Low
+                },
+                TurnNotice::Truncated
+            ],
+            "groq's default script escalates, then truncates, in that order"
+        );
+        assert!(
+            records[0].notices.is_empty(),
+            "an ordinary turn carries no notices"
+        );
+
+        // codex-cli echoes the model the SESSION selected, not a fallback.
+        let b = InMemoryChatWorkspaceBackend::seeded();
+        let transport = now(b.open_session(
+            "codex-cli",
+            &KnowledgeSelection {
+                posture: ChatPosture::Assistant,
+                ..KnowledgeSelection::default()
+            },
+            ChatSettings {
+                model: Some("gpt-5.7-codex".into()),
+                ..ChatSettings::default()
+            },
+            ProviderTuning::default(),
+        ))
+        .expect("session opens");
+        let mut s = ChatSession::new(transport);
+        ask(&mut s, "hello");
+        drain(&mut s, 80);
+        assert!(
+            s.messages()
+                .iter()
+                .any(|m| m.content.contains("gpt-5.7-codex")),
+            "codex-cli names the selected model: {:?}",
+            s.messages()
+        );
     }
 
     #[test]
     fn clock_advances_per_poll_and_stall_never_completes() {
-        let b = InMemoryChatWorkspaceBackend::seeded().with_script(
-            "claude-code",
-            PromptMatcher::Any,
-            TurnScript::new().text_words("thinking about it").stall(),
-        );
+        // The clock is cloned rather than only reached through the backend,
+        // so `FixtureClock::elapsed_ms` — the accessor a host watchdog owns —
+        // is exercised by the same run.
+        let clock = FixtureClock::default();
+        let b = InMemoryChatWorkspaceBackend::seeded()
+            .with_clock(clock.clone())
+            .with_script(
+                "claude-code",
+                PromptMatcher::Any,
+                TurnScript::new().text_words("thinking about it").stall(),
+            );
         assert_eq!(b.now_ms(), SEED_NOW_MS);
+        assert_eq!(clock.elapsed_ms(), 0);
         let mut s = session(&b, "claude-code");
         ask(&mut s, "wait for me");
         let id = b.current_turn_id().expect("turn");
@@ -2633,9 +2935,13 @@ mod tests {
         for _ in 0..1200 {
             s.poll();
         }
-        // Each poll spends one `try_recv` on the ladder or the single event it
-        // releases, plus one that returns None and ends the burst.
-        assert!(b.now_ms() >= SEED_NOW_MS + 120_000, "{}", b.now_ms());
+        // Exactly, not `>=`: two ladder polls at one `try_recv` each, three
+        // streaming polls that spend a second `try_recv` ending the burst,
+        // then 1195 empty polls at one each. A `>=` would hide a change to
+        // the burst accounting, and the brief's "1200 × 100 ms" arithmetic
+        // holds only for the ladder and stalled polls.
+        assert_eq!(b.now_ms(), SEED_NOW_MS + 120_300);
+        assert_eq!(clock.elapsed_ms(), 120_300);
         let record = now(b.turn(&id)).expect("record");
         assert_eq!(record.lifecycle, AttemptLifecycle::Running);
         assert_eq!(b.current_turn_id().as_deref(), Some(id.as_str()));
@@ -2649,6 +2955,8 @@ mod tests {
         for _ in 0..120 {
             s.poll();
         }
-        assert!(b.now_ms() >= SEED_NOW_MS + 120_000);
+        // A script with no events at all: every poll is one empty `try_recv`,
+        // so this one IS exactly 120 × 1000 ms.
+        assert_eq!(b.now_ms(), SEED_NOW_MS + 120_000);
     }
 }

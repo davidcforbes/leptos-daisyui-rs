@@ -38,7 +38,7 @@ pub use ai_chat_workspace::{
     GroqTuning, GroundingVerdict, IngestPhase, IngestStatus, KnowledgeSelection, KnowledgeSource,
     MemoryDraft, MemoryRefusal, ModelSource, OfficeKnowledgeScope, ProviderCard, ProviderTuning,
     QuickAction, ReasoningEffort, RecallCorpus, RecallHit, RecallReceipt, TuningSchema,
-    TurnEvidence, TurnRecord, UsageTotals, WorkspaceFuture, desktop_provider_catalogue,
+    TurnEvidence, TurnNotice, TurnRecord, UsageTotals, WorkspaceFuture, desktop_provider_catalogue,
     guardrail_refusal, lifecycle_id,
 };
 // `BackendCall` and `SEED_NOW_MS` are also the names `helpdesk` uses for its
