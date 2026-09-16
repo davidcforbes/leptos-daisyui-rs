@@ -5,7 +5,8 @@
 //! classes — mirrors `data_table::types`' data-model role. No view code, so
 //! it's unit-testable headlessly (see `tests.rs`).
 
-use ai_chat_core::{Capabilities, ChatSettings, Citation, Usage};
+use super::texts::AiChatTexts;
+use ai_chat_core::{Capabilities, ChatError, ChatSettings, Citation, Usage};
 
 /// Render a turn's [`Usage`] for the caption line, e.g.
 /// `"$0.0021 · 1,234 in · 567 out"`. Returns `None` when there is no usage
@@ -81,6 +82,83 @@ pub fn model_field_mode(caps: Option<&Capabilities>) -> ModelFieldMode {
         Some(c) if c.models.len() == 1 => ModelFieldMode::Pinned(c.models[0].clone()),
         Some(c) if !c.models.is_empty() => ModelFieldMode::Select(c.models.clone()),
         _ => ModelFieldMode::FreeText,
+    }
+}
+
+/// The value `settings_model` must be snapped to so that the rendered Model
+/// control and the form state agree, or `None` when they already agree.
+///
+/// `Select` is a CLOSED list: the backend published exactly these model ids,
+/// so a form value from a previously selected backend names nothing the
+/// control can display. Without a snap, no `option` carries `selected`, the
+/// browser shows the FIRST one, and Apply ships the hidden stale id — and the
+/// user cannot even correct it by picking the option they can see, because
+/// selecting an already-displayed option fires no `change` event.
+///
+/// Snapping to `models[0]` is chosen over a selected-empty placeholder
+/// because the popover then states one model per backend under a single rule
+/// shared with `Pinned`, and because an empty value would mean "transport
+/// default" — which a backend publishing a closed list is precisely saying it
+/// does not have. `FreeText` never reconciles: there is no list to disagree
+/// with, and the host's typed value is the whole point of that shape.
+pub fn reconcile_model_for(mode: &ModelFieldMode, current: &str) -> Option<String> {
+    match mode {
+        ModelFieldMode::FreeText => None,
+        ModelFieldMode::Pinned(m) => (m != current).then(|| m.clone()),
+        ModelFieldMode::Select(models) => models
+            .iter()
+            .all(|m| m != current)
+            .then(|| models.first().cloned())
+            .flatten(),
+    }
+}
+
+/// Which published permission mode the select should mark `selected`, or
+/// `None` when nothing is chosen and the placeholder must show instead.
+///
+/// `None` covers two cases that must look the same and must NOT look like
+/// "the first mode is chosen": the host has not chosen a mode yet, and the
+/// host's value names a mode this backend does not publish (the instant after
+/// a backend switch). On a control describing what the agent may do WITHOUT
+/// asking, displaying an unchosen first option as though it were chosen is a
+/// lie the host is never told about, since no `change` event fires.
+pub fn permission_selection(active: Option<&str>, options: &[String]) -> Option<usize> {
+    let active = active?;
+    options.iter().position(|m| m == active)
+}
+
+/// What pressing Retry actually achieved, and therefore what the error strip
+/// must do next.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum RetryOutcome {
+    /// The turn was re-sent: clear the strip and notify the host.
+    Sent,
+    /// The re-send failed: keep the strip, showing this text instead.
+    Failed(String),
+    /// There was nothing to re-send. Keep the strip exactly as it was; the
+    /// user's only signal that something is wrong must not be removed by the
+    /// act of trying to fix it.
+    NothingToRetry,
+}
+
+/// Decide what a Retry press achieved from `ChatSession::retry`'s result.
+///
+/// `now_waiting` is `session.is_waiting()` read immediately after the call,
+/// which is the only way to tell a real re-send from the documented no-op:
+/// `retry` returns `Ok(())` **without sending anything** when the session has
+/// no `last_sent`, and a real re-send sets `waiting`. The strip is only ever
+/// shown after a terminal error has ended the turn, so `waiting` is false
+/// going in and this reading is unambiguous there.
+pub fn retry_outcome(
+    result: Result<(), ChatError>,
+    now_waiting: bool,
+    texts: &AiChatTexts,
+) -> RetryOutcome {
+    match result {
+        Err(e) => RetryOutcome::Failed(format!("{}: {e}", texts.retry_failed)),
+        Ok(()) if now_waiting => RetryOutcome::Sent,
+        Ok(()) => RetryOutcome::NothingToRetry,
     }
 }
 

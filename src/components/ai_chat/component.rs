@@ -1,13 +1,14 @@
 use super::style::{
     ComposerAction, annotation_bubble_class, chat_state_attr, clamp_composer_height,
-    composer_hint_for, composer_key_action, composer_placeholder_for, is_markdown, is_thinking,
-    role_avatar_bg, role_avatar_initial_with, role_classes, role_data_attr, role_label_for,
-    should_stick_to_bottom, show_welcome_chips,
+    composer_hint_for, composer_key_action, composer_placeholder_for, effective_assistant_label,
+    is_markdown, is_thinking, role_avatar_bg, role_avatar_initial_with, role_classes,
+    role_data_attr, role_label_for, should_stick_to_bottom, show_welcome_chips,
 };
 use super::texts::AiChatTexts;
 use super::types::{
-    AnnotationBody, ModelFieldMode, TranscriptAnnotation, annotation_slots, format_allowed_tools,
-    format_usage, model_field_mode, settings_from_form_fields, settings_rows_for,
+    AnnotationBody, ModelFieldMode, RetryOutcome, TranscriptAnnotation, annotation_slots,
+    format_allowed_tools, format_usage, model_field_mode, permission_selection,
+    reconcile_model_for, retry_outcome, settings_from_form_fields, settings_rows_for,
 };
 use crate::components::{Dropdown, DropdownAlignment, DropdownContent, Input, Textarea, Toggle};
 use crate::markdown::MarkdownView;
@@ -188,6 +189,12 @@ pub fn AiChat(
     /// The panel only displays this value and reports changes through
     /// `on_permission_mode_change`; the host decides what a mode means and
     /// how it reaches the backend.
+    ///
+    /// **A host that renders this row should seed it.** `None`, and a value
+    /// this backend does not publish, both render a disabled "not set"
+    /// placeholder rather than silently displaying the first mode as though it
+    /// were chosen — a permission control must never claim a setting the host
+    /// never made.
     #[prop(optional, into)]
     permission_mode: Signal<Option<String>>,
     /// Fired with the chosen permission mode; see `permission_mode`.
@@ -357,13 +364,31 @@ pub fn AiChat(
 
     // Re-send the failed turn without echoing a new user message
     // (`ChatSession::retry` replays `last_sent`).
+    //
+    // The retry is attempted FIRST and its outcome decides the strip: clearing
+    // the error up front would delete the user's only signal that anything is
+    // wrong the moment the retry itself fails, flip the panel to `idle`, and
+    // remove the very button they would press again.
     let do_retry = move || {
-        last_turn_error.set(None);
-        let _ = session.try_update_value(|s| s.retry());
-        stick.set(true);
-        version.update(|n| *n += 1);
-        if let Some(cb) = on_retry {
-            cb.run(());
+        let outcome = session
+            .try_update_value(|s| retry_outcome(s.retry(), s.is_waiting(), &texts.get()))
+            .unwrap_or(RetryOutcome::NothingToRetry);
+        match outcome {
+            RetryOutcome::Sent => {
+                last_turn_error.set(None);
+                stick.set(true);
+                version.update(|n| *n += 1);
+                if let Some(cb) = on_retry {
+                    cb.run(());
+                }
+            }
+            RetryOutcome::Failed(message) => {
+                last_turn_error.set(Some(message));
+                version.update(|n| *n += 1);
+            }
+            // Nothing was re-sent, so nothing changed: leave the strip, its
+            // text and the host exactly as they were.
+            RetryOutcome::NothingToRetry => {}
         }
     };
 
@@ -384,15 +409,10 @@ pub fn AiChat(
         }
     };
 
-    // Effective assistant attribution (empty prop = historical "Claude").
-    let assistant = Signal::derive(move || {
-        let l = assistant_label.get();
-        if l.is_empty() {
-            "Claude".to_string()
-        } else {
-            l
-        }
-    });
+    // Effective assistant attribution: the configured backend's label, or the
+    // localized `AiChatTexts::role_assistant` when the host supplied none.
+    let assistant =
+        Signal::derive(move || effective_assistant_label(&assistant_label.get(), &texts.get()));
 
     // The transcript, with the host's annotations interleaved at their
     // anchors. Bubbles and annotation rows share one list so an annotation
@@ -509,7 +529,7 @@ pub fn AiChat(
             .into_iter()
             .find(|o| o.id == id)
             .map(|o| o.label)
-            .unwrap_or_else(|| "Scope".to_string())
+            .unwrap_or_else(|| texts.get().scope_unknown)
     };
 
     // Backend picker selection, seeded from the first capability like scopes.
@@ -549,12 +569,14 @@ pub fn AiChat(
     let unsupported_tool_calls_title =
         move || (!rows().tool_calls).then(|| texts.get().unsupported_here);
 
-    // A backend that publishes exactly one model pins the form field to it,
-    // so Apply cannot send the previous backend's model id.
+    // Keep the form state and the rendered Model control in agreement: a
+    // backend that publishes a closed model list (`Pinned` or `Select`) snaps
+    // `settings_model` onto that list, so Apply can never ship the previous
+    // backend's model id while the popover displays one of the new backend's.
     Effect::new(move |_| {
-        if let ModelFieldMode::Pinned(m) = model_field_mode(selected_caps().as_ref())
-            && settings_model.with_untracked(|cur| cur != &m)
-        {
+        let mode = model_field_mode(selected_caps().as_ref());
+        let reconciled = settings_model.with_untracked(|cur| reconcile_model_for(&mode, cur));
+        if let Some(m) = reconciled {
             settings_model.set(m);
         }
     });
@@ -633,8 +655,8 @@ pub fn AiChat(
                             <button
                                 type="button"
                                 class="btn btn-ghost btn-xs"
-                                title="Chat scope"
-                                aria-label="Chat scope"
+                                title=move || texts.get().scope
+                                aria-label=move || texts.get().scope
                             >
                                 {scope_label}
                                 " \u{25be}"
@@ -723,19 +745,43 @@ pub fn AiChat(
                                             data-ai-chat-permission-select=""
                                             class="select select-sm select-bordered w-full"
                                             on:change=move |e| {
-                                                if let Some(cb) = on_permission_mode_change {
-                                                    cb.run(event_target_value(&e));
+                                                let picked = event_target_value(&e);
+                                                // The placeholder carries an
+                                                // empty value and is disabled;
+                                                // never report it as a choice.
+                                                if !picked.is_empty()
+                                                    && let Some(cb) = on_permission_mode_change
+                                                {
+                                                    cb.run(picked);
                                                 }
                                             }
                                         >
                                             {move || {
+                                                let options = permission_options();
                                                 let active = permission_mode.get();
-                                                permission_options()
+                                                let chosen = permission_selection(
+                                                    active.as_deref(),
+                                                    &options,
+                                                );
+                                                // Nothing chosen, or a value
+                                                // this backend does not
+                                                // publish: show "not set"
+                                                // rather than letting the
+                                                // browser display the first
+                                                // mode as if it were chosen.
+                                                let placeholder = chosen.is_none().then(|| {
+                                                    let label = texts.get().permission_mode_unset;
+                                                    view! {
+                                                        <option value="" disabled selected=true>
+                                                            {label}
+                                                        </option>
+                                                    }
+                                                });
+                                                let items = options
                                                     .into_iter()
-                                                    .map(|m| {
-                                                        let is_selected = active
-                                                            .as_deref()
-                                                            .is_some_and(|a| a == m);
+                                                    .enumerate()
+                                                    .map(|(i, m)| {
+                                                        let is_selected = chosen == Some(i);
                                                         let value = m.clone();
                                                         view! {
                                                             <option value=value selected=is_selected>
@@ -743,7 +789,8 @@ pub fn AiChat(
                                                             </option>
                                                         }
                                                     })
-                                                    .collect_view()
+                                                    .collect_view();
+                                                view! { {placeholder} {items} }
                                             }}
                                         </select>
                                     </label>
@@ -772,7 +819,9 @@ pub fn AiChat(
                                         size=crate::components::InputSize::Sm
                                         value=Signal::derive(move || settings_tools_text.get())
                                         on_input=move |v| settings_tools_text.set(v)
-                                        placeholder="read, write"
+                                        placeholder=Signal::derive(move || {
+                                            texts.get().allowed_tools_hint
+                                        })
                                     />
                                 </label>
                                 <label
@@ -1005,6 +1054,8 @@ fn MessageBubble(
     let (side, bubble) = role_classes(&msg.role);
     let role_attr = role_data_attr(&msg.role);
     let label = role_label_for(&msg.role, &assistant_label, &texts);
+    let copy_label = texts.copy.clone();
+    let copy_title = texts.copy_message.clone();
     let avatar_bg = role_avatar_bg(&msg.role);
     let avatar_initial = role_avatar_initial_with(&msg.role, &assistant_label);
     let md = is_markdown(&msg.role);
@@ -1048,10 +1099,10 @@ fn MessageBubble(
                 <button
                     type="button"
                     class="btn btn-ghost btn-xs opacity-50"
-                    title="Copy message"
+                    title=copy_title
                     on:click=copy
                 >
-                    "Copy"
+                    {copy_label}
                 </button>
             </div>
             <div class=move || merge_classes!("chat-bubble", bubble)>

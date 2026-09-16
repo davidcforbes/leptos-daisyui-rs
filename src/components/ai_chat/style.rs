@@ -56,6 +56,24 @@ pub fn role_label_for(role: &ChatRole, assistant_label: &str, texts: &AiChatText
     }
 }
 
+/// The assistant attribution the panel should use everywhere: the configured
+/// backend's own label, or — when the host supplied none — the localized
+/// `AiChatTexts::role_assistant`.
+///
+/// This is the ONE place the fallback is decided. It used to be an inline
+/// `"Claude"` literal in the component, which made `role_assistant`
+/// unreachable: the derived signal was the only value ever passed as
+/// `assistant_label`, so it was never empty at any call site and every
+/// texts-aware branch below was dead in the render path. A host that
+/// translated the field saw no effect and had no way to discover why.
+pub fn effective_assistant_label(assistant_label: &str, texts: &AiChatTexts) -> String {
+    if assistant_label.is_empty() {
+        texts.role_assistant.clone()
+    } else {
+        assistant_label.to_string()
+    }
+}
+
 /// The `data-chat-role` hook for a message role, mirroring the attribute
 /// 4iiz-Office's own chat surfaces expose so a single browser assertion
 /// reads both.

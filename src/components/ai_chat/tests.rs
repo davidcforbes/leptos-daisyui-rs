@@ -1,17 +1,21 @@
 use super::style::{
     ComposerAction, chat_state_attr, clamp_composer_height, composer_hint, composer_hint_for,
-    composer_key_action, composer_placeholder_for, default_composer_placeholder, is_markdown,
-    is_thinking, role_avatar_bg, role_avatar_initial, role_avatar_initial_with, role_classes,
-    role_data_attr, role_label, role_label_for, role_label_with, should_stick_to_bottom,
-    show_welcome_chips,
+    composer_key_action, composer_placeholder_for, default_composer_placeholder,
+    effective_assistant_label, is_markdown, is_thinking, role_avatar_bg, role_avatar_initial,
+    role_avatar_initial_with, role_classes, role_data_attr, role_label, role_label_for,
+    role_label_with, should_stick_to_bottom, show_welcome_chips,
 };
 use super::texts::AiChatTexts;
 use super::types::{
-    AnnotationAnchor, AnnotationBody, AnnotationKind, ModelFieldMode, TranscriptAnnotation,
-    annotation_slots, format_allowed_tools, format_usage, format_usage_subtitle, model_field_mode,
-    parse_allowed_tools, settings_from_form_fields, settings_rows_for,
+    AnnotationAnchor, AnnotationBody, AnnotationKind, ModelFieldMode, RetryOutcome,
+    TranscriptAnnotation, annotation_slots, format_allowed_tools, format_usage,
+    format_usage_subtitle, model_field_mode, parse_allowed_tools, permission_selection,
+    reconcile_model_for, retry_outcome, settings_from_form_fields, settings_rows_for,
 };
-use ai_chat_core::{Capabilities, ChatRole, Usage};
+use ai_chat_core::{
+    Capabilities, ChatError, ChatRequest, ChatRole, ChatSession, ChatSettings, ChatTransport,
+    StreamEvent, Usage,
+};
 
 #[test]
 fn every_role_sits_start_for_full_width_rows() {
@@ -674,8 +678,13 @@ fn ai_chat_texts_en_and_es_complete_and_differ() {
     assert_eq!(es_fields.len(), AiChatTexts::FIELD_COUNT);
 
     // "Claude" is the assistant's proper name, not a translatable noun: it is
-    // the historical fallback shown when the host supplies no
-    // `assistant_label`, and translating it would rename the product.
+    // the fallback shown when the host supplies no `assistant_label`, and
+    // translating it would rename the product. Keeping it on the allow-list
+    // means this test cannot prove the field is READ, which is exactly how the
+    // hard-coded "Claude" literal survived fix round 0 — so
+    // `the_assistant_fallback_comes_from_the_texts_table` exercises the field
+    // with a table whose value is not "Claude". That test, not this one, is
+    // the coverage for `role_assistant`.
     let allowed_identical: &[&str] = &["role_assistant"];
 
     for ((name, en_value), (es_name, es_value)) in en_fields.iter().zip(es_fields.iter()) {
@@ -722,6 +731,236 @@ fn the_legacy_text_helpers_match_the_default_table() {
     ] {
         assert_eq!(role_label_with(&r, ""), role_label_for(&r, "", &en));
         assert_eq!(role_label(&r), role_label_with(&r, ""));
+    }
+}
+
+// --- Fix round 1 ---
+
+/// C1: `Select` is a closed list, so a form value carried over from another
+/// backend names nothing the control can display. Without a snap, no option
+/// is `selected`, the browser shows the FIRST one, and Apply ships the hidden
+/// stale id — which the user cannot even correct by choosing the option they
+/// can already see, because that fires no `change` event.
+#[test]
+fn a_model_absent_from_the_new_backends_list_is_reconciled_onto_it() {
+    let models = vec!["a".to_string(), "b".to_string()];
+    assert_eq!(
+        reconcile_model_for(&ModelFieldMode::Select(models.clone()), "z"),
+        Some("a".to_string()),
+        "a carried-over model must snap onto the closed list"
+    );
+    assert_eq!(
+        reconcile_model_for(&ModelFieldMode::Select(models.clone()), "b"),
+        None,
+        "a listed model is already displayable: no churn"
+    );
+    assert_eq!(
+        reconcile_model_for(&ModelFieldMode::Select(models), "a"),
+        None,
+        "the first model is not a special case"
+    );
+    assert_eq!(
+        reconcile_model_for(&ModelFieldMode::Pinned("x".to_string()), "y"),
+        Some("x".to_string())
+    );
+    assert_eq!(
+        reconcile_model_for(&ModelFieldMode::Pinned("x".to_string()), "x"),
+        None
+    );
+    for current in ["", "anything", "a"] {
+        assert_eq!(
+            reconcile_model_for(&ModelFieldMode::FreeText, current),
+            None,
+            "free text has no list to disagree with"
+        );
+    }
+    // An empty list cannot be snapped onto, and must not panic.
+    assert_eq!(
+        reconcile_model_for(&ModelFieldMode::Select(Vec::new()), "z"),
+        None
+    );
+}
+
+/// I1: the fallback attribution must come from the texts table. It used to be
+/// an inline `"Claude"` literal, which made `role_assistant` unreachable —
+/// the derived signal was the only value ever passed as `assistant_label`, so
+/// it was never empty and every texts-aware branch was dead.
+#[test]
+fn the_assistant_fallback_comes_from_the_texts_table() {
+    let en = AiChatTexts::default();
+    let es = AiChatTexts::es();
+    let custom = AiChatTexts {
+        role_assistant: "Asistente".into(),
+        ..AiChatTexts::es()
+    };
+
+    assert_eq!(effective_assistant_label("", &en), "Claude");
+    assert_eq!(effective_assistant_label("", &es), "Claude");
+    assert_eq!(
+        effective_assistant_label("", &custom),
+        "Asistente",
+        "a host that translates role_assistant must see it"
+    );
+    // A configured backend label always wins: it is the backend's own name.
+    assert_eq!(
+        effective_assistant_label("Codex CLI (OpenAI)", &custom),
+        "Codex CLI (OpenAI)"
+    );
+
+    // And the branch the component used to bypass entirely.
+    assert_eq!(
+        role_label_for(&ChatRole::Assistant, "", &custom),
+        "Asistente"
+    );
+    assert_eq!(
+        composer_placeholder_for("", &custom),
+        "Pregúntale a Asistente sobre este documento…",
+        "the composer placeholder takes the same fallback"
+    );
+}
+
+/// I2: on a control describing what the agent may do WITHOUT asking, an
+/// unchosen first option displayed as chosen is a lie the host is never told
+/// about — no `change` event fires.
+#[test]
+fn an_unchosen_permission_mode_selects_nothing_rather_than_the_first_option() {
+    let modes = [
+        "default".to_string(),
+        "acceptEdits".to_string(),
+        "plan".to_string(),
+        "bypassPermissions".to_string(),
+    ];
+    assert_eq!(
+        permission_selection(None, &modes),
+        None,
+        "nothing chosen must not read as 'default'"
+    );
+    assert_eq!(permission_selection(Some("default"), &modes), Some(0));
+    assert_eq!(permission_selection(Some("plan"), &modes), Some(2));
+    assert_eq!(
+        permission_selection(Some("sandbox-write"), &modes),
+        None,
+        "a mode this backend does not publish is also 'nothing chosen'"
+    );
+    assert_eq!(permission_selection(Some("default"), &[]), None);
+}
+
+/// A transport whose `send` fails after `fails_after` successful sends, so a
+/// test can let the first turn through and fail the retry.
+struct FlakyTransport {
+    sends: usize,
+    fails_after: usize,
+    queue: std::collections::VecDeque<StreamEvent>,
+}
+
+impl ChatTransport for FlakyTransport {
+    fn send(&mut self, _req: ChatRequest) -> Result<(), ChatError> {
+        self.sends += 1;
+        if self.sends > self.fails_after {
+            return Err(ChatError::Transport("connection lost".into()));
+        }
+        Ok(())
+    }
+    fn try_recv(&mut self) -> Option<StreamEvent> {
+        self.queue.pop_front()
+    }
+    fn restart(&mut self) -> Result<(), ChatError> {
+        Ok(())
+    }
+    fn cancel(&mut self) -> Result<(), ChatError> {
+        Ok(())
+    }
+    fn configure(&mut self, _settings: ChatSettings) {}
+}
+
+fn flaky_session(fails_after: usize, queue: Vec<StreamEvent>) -> ChatSession {
+    ChatSession::new(Box::new(FlakyTransport {
+        sends: 0,
+        fails_after,
+        queue: queue.into(),
+    }))
+}
+
+/// I3: clearing the strip before attempting the retry deleted the user's only
+/// signal that anything was wrong the moment the retry itself failed — the
+/// panel went back to `idle`, `on_retry` still fired, and the button they
+/// would press again was gone.
+#[test]
+fn a_failed_retry_keeps_the_error_strip_and_does_not_notify_the_host() {
+    let en = AiChatTexts::default();
+    // First send succeeds, then the transport reports the error that raised
+    // the strip; the retry's send is the one that fails.
+    let mut session = flaky_session(1, vec![StreamEvent::Error("stream dropped".into())]);
+    session
+        .send(ChatRequest {
+            prompt: "hello".into(),
+            attachments: Vec::new(),
+            page_context: None,
+        })
+        .expect("first send succeeds");
+    assert!(session.poll(), "the error event lands");
+    assert!(!session.is_waiting(), "a terminal error ends the turn");
+
+    let outcome = retry_outcome(session.retry(), session.is_waiting(), &en);
+    match outcome {
+        RetryOutcome::Failed(message) => {
+            assert!(
+                message.starts_with("Retry failed"),
+                "the strip must be texts-prefixed: {message}"
+            );
+            assert!(
+                message.contains("connection lost"),
+                "and must name the retry's own error: {message}"
+            );
+        }
+        other => panic!("a failed re-send must keep the strip up, got {other:?}"),
+    }
+    assert!(
+        !session.is_waiting(),
+        "nothing is in flight after a failed retry"
+    );
+}
+
+#[test]
+fn a_successful_retry_clears_the_strip_and_notifies_the_host() {
+    let en = AiChatTexts::default();
+    let mut session = flaky_session(99, vec![StreamEvent::Error("stream dropped".into())]);
+    session
+        .send(ChatRequest {
+            prompt: "hello".into(),
+            attachments: Vec::new(),
+            page_context: None,
+        })
+        .expect("first send succeeds");
+    assert!(session.poll());
+
+    assert_eq!(
+        retry_outcome(session.retry(), session.is_waiting(), &en),
+        RetryOutcome::Sent
+    );
+    assert!(session.is_waiting(), "the turn is back in flight");
+}
+
+#[test]
+fn retrying_with_nothing_to_resend_leaves_the_strip_exactly_as_it_was() {
+    // `ChatSession::retry` returns Ok(()) WITHOUT sending anything when there
+    // is no `last_sent`. Treating that as success would clear the strip while
+    // achieving nothing at all.
+    let en = AiChatTexts::default();
+    let mut session = flaky_session(99, Vec::new());
+    assert_eq!(
+        retry_outcome(session.retry(), session.is_waiting(), &en),
+        RetryOutcome::NothingToRetry
+    );
+
+    // And a Spanish table prefixes the failure in Spanish.
+    let es = AiChatTexts::es();
+    let failed = retry_outcome(Err(ChatError::NotConnected), false, &es);
+    match failed {
+        RetryOutcome::Failed(message) => {
+            assert!(message.starts_with("El reintento falló"), "got {message}")
+        }
+        other => panic!("expected Failed, got {other:?}"),
     }
 }
 

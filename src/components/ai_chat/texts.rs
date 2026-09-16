@@ -23,6 +23,10 @@ pub struct AiChatTexts {
     pub model_free_text_hint: String,
     /// Label for the CLI permission-mode picker.
     pub permission_mode: String,
+    /// The permission picker's disabled placeholder option, shown whenever the
+    /// host has chosen no mode — or has chosen one this backend does not
+    /// publish. It must read as "nothing chosen", never as a mode.
+    pub permission_mode_unset: String,
     /// Label for the system-prompt textarea.
     pub system_prompt: String,
     /// Label for the comma-separated allowed-tools field.
@@ -49,6 +53,22 @@ pub struct AiChatTexts {
     pub thinking: String,
     /// The error strip's retry button.
     pub retry: String,
+    /// Prefix for the message shown when the retry itself failed. The strip
+    /// stays up carrying this instead of the original error, so the only
+    /// signal that something is wrong is never removed by trying to fix it.
+    pub retry_failed: String,
+    /// The per-message copy button.
+    pub copy: String,
+    /// `title` on the per-message copy button.
+    pub copy_message: String,
+    /// Accessible name for the header's chat-scope picker.
+    pub scope: String,
+    /// Fallback shown on the scope picker when the active scope id matches no
+    /// supplied option.
+    pub scope_unknown: String,
+    /// Placeholder example in the allowed-tools field. A value example rather
+    /// than a label, but it is still visible English text.
+    pub allowed_tools_hint: String,
     /// Composer placeholder used when the host supplied none. `{assistant}`
     /// is replaced with the configured assistant label.
     pub composer_placeholder: String,
@@ -81,6 +101,7 @@ impl Default for AiChatTexts {
             model: "Model".into(),
             model_free_text_hint: "(transport default)".into(),
             permission_mode: "Permission mode".into(),
+            permission_mode_unset: "Not set".into(),
             system_prompt: "System prompt".into(),
             allowed_tools: "Allowed tools (comma-separated)".into(),
             show_thinking: "Show thinking".into(),
@@ -93,6 +114,12 @@ impl Default for AiChatTexts {
             stop: "Stop".into(),
             thinking: "Thinking\u{2026}".into(),
             retry: "Retry".into(),
+            retry_failed: "Retry failed".into(),
+            copy: "Copy".into(),
+            copy_message: "Copy message".into(),
+            scope: "Chat scope".into(),
+            scope_unknown: "Scope".into(),
+            allowed_tools_hint: "read, write".into(),
             composer_placeholder: "Ask {assistant} about this document\u{2026}".into(),
             composer_hint: "Enter to send \u{b7} Shift+Enter for newline".into(),
             composer_hint_busy: "Generating\u{2026} \u{b7} Esc to stop".into(),
@@ -109,7 +136,7 @@ impl AiChatTexts {
     /// The number of fields on this struct; kept in sync with the struct and
     /// [`Self::fields`] by hand, and asserted equal to both by
     /// `ai_chat_texts_en_and_es_complete_and_differ` in `tests.rs`.
-    pub const FIELD_COUNT: usize = 24;
+    pub const FIELD_COUNT: usize = 31;
 
     /// Spanish copy, with full orthographic accents (not a transliteration).
     pub fn es() -> Self {
@@ -118,6 +145,7 @@ impl AiChatTexts {
             model: "Modelo".into(),
             model_free_text_hint: "(predeterminado del transporte)".into(),
             permission_mode: "Modo de permisos".into(),
+            permission_mode_unset: "Sin definir".into(),
             system_prompt: "Instrucci\u{f3}n del sistema".into(),
             allowed_tools: "Herramientas permitidas (separadas por comas)".into(),
             show_thinking: "Mostrar razonamiento".into(),
@@ -130,6 +158,12 @@ impl AiChatTexts {
             stop: "Detener".into(),
             thinking: "Pensando\u{2026}".into(),
             retry: "Reintentar".into(),
+            retry_failed: "El reintento fall\u{f3}".into(),
+            copy: "Copiar".into(),
+            copy_message: "Copiar el mensaje".into(),
+            scope: "\u{c1}mbito del chat".into(),
+            scope_unknown: "\u{c1}mbito".into(),
+            allowed_tools_hint: "leer, escribir".into(),
             composer_placeholder: "Preg\u{fa}ntale a {assistant} sobre este documento\u{2026}"
                 .into(),
             composer_hint: "Intro para enviar \u{b7} May\u{fa}s+Intro para salto de l\u{ed}nea"
@@ -152,6 +186,7 @@ impl AiChatTexts {
             ("model", self.model.as_str()),
             ("model_free_text_hint", self.model_free_text_hint.as_str()),
             ("permission_mode", self.permission_mode.as_str()),
+            ("permission_mode_unset", self.permission_mode_unset.as_str()),
             ("system_prompt", self.system_prompt.as_str()),
             ("allowed_tools", self.allowed_tools.as_str()),
             ("show_thinking", self.show_thinking.as_str()),
@@ -164,6 +199,12 @@ impl AiChatTexts {
             ("stop", self.stop.as_str()),
             ("thinking", self.thinking.as_str()),
             ("retry", self.retry.as_str()),
+            ("retry_failed", self.retry_failed.as_str()),
+            ("copy", self.copy.as_str()),
+            ("copy_message", self.copy_message.as_str()),
+            ("scope", self.scope.as_str()),
+            ("scope_unknown", self.scope_unknown.as_str()),
+            ("allowed_tools_hint", self.allowed_tools_hint.as_str()),
             ("composer_placeholder", self.composer_placeholder.as_str()),
             ("composer_hint", self.composer_hint.as_str()),
             ("composer_hint_busy", self.composer_hint_busy.as_str()),
