@@ -22,6 +22,21 @@ pub enum GroundingVerdict {
     AssistantOnly,
 }
 
+impl GroundingVerdict {
+    /// Stable id for the evidence rail's `data-ai-chat-grounding` hook.
+    ///
+    /// Never `{:?}`: `Grounded { sources }` would print its payload, so the
+    /// hook would change value with the number of sources and no proof could
+    /// assert on the verdict itself. The source COUNT is a separate hook.
+    pub fn as_id(&self) -> &'static str {
+        match self {
+            Self::Grounded { .. } => "grounded",
+            Self::NotFound => "not_found",
+            Self::AssistantOnly => "assistant_only",
+        }
+    }
+}
+
 /// Everything backing one turn's answer, assembled independently of the
 /// answer text itself so a consumer can render "why" separately from
 /// "what".

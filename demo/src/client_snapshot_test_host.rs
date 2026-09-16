@@ -107,6 +107,7 @@ fn main() {
         let ai_chat_watchdog = ai_chat_path().ends_with("/ai-chat-fixture-watchdog");
         let ai_chat_budget = ai_chat_path().ends_with("/ai-chat-fixture-budget-exhausted");
         let ai_chat_cancel = ai_chat_path().ends_with("/ai-chat-fixture-cancel");
+        let ai_chat_knowledge = ai_chat_path().ends_with("/ai-chat-fixture-knowledge");
         let ai_chat_fixture = ai_chat_path().ends_with("/ai-chat-fixture");
         let helpdesk_fixture = web_sys::window()
             .and_then(|window| window.location().pathname().ok())
@@ -218,6 +219,28 @@ fn main() {
                             oracle=false
                             scripted=true
                             fault=ChatWorkspaceFault::CancelDiscards
+                        />
+                    }
+                        .into_any()
+                } else if ai_chat_knowledge {
+                    // TWO workspaces. A healthy memory store and an offline
+                    // one are each other's negative control: "a receipt with
+                    // four attribution lanes" is only evidence of a real
+                    // search if an unreachable store on the same document
+                    // renders a typed honesty row and NO receipt at all.
+                    //
+                    // Neither instance is `scripted`, so both keep
+                    // `KnowledgeSelection::default()`'s GROUNDED posture --
+                    // which is what test 4 measures and what a scripted
+                    // document cannot have (a grounded prompt matching no
+                    // seeded document has its script replaced by the
+                    // not-found sentence).
+                    view! {
+                        <ai_chat_fixture::AiChatFixture case="knowledge" />
+                        <ai_chat_fixture::AiChatFixture
+                            case="offline"
+                            oracle=false
+                            fault=ChatWorkspaceFault::MemoryStoreOffline
                         />
                     }
                         .into_any()

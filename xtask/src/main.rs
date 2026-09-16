@@ -478,6 +478,26 @@ fn ai_chat_step() -> Step {
     }
 }
 
+/// Browser proof for the knowledge sources the `AiChatWorkspace` composite
+/// mixes into a turn (ldui-iilm.7): corpus ingest phases and reindex, the
+/// typed query modes, grounded vs assistant posture, the AI-memory recall
+/// receipt and its four attribution lanes, the remember guardrail, and the
+/// curation gap between a written entry and a findable one.
+///
+/// Its own lane rather than more cases in `test-ai-chat`: the knowledge
+/// document mounts TWO workspaces (a healthy one and a memory-store-offline
+/// negative control) and keeps the GROUNDED default posture, which the
+/// failure-ladder document deliberately does not.
+fn ai_chat_knowledge_step() -> Step {
+    Step {
+        name: "test-ai-chat-knowledge",
+        run: Run::BrowserSuite {
+            test: "ai_chat_knowledge_smoke",
+            html_target: Some("client-snapshot-test-host.html"),
+        },
+    }
+}
+
 fn pattern_steps(pattern: &str, lane: PatternLane) -> Result<Vec<Step>, String> {
     pattern_checks::checks_for(pattern, lane)?
         .iter()
@@ -767,6 +787,7 @@ fn full_steps() -> Vec<Step> {
     steps.push(snapshot_table_page_filter_actions_step());
     steps.push(helpdesk_step());
     steps.push(ai_chat_step());
+    steps.push(ai_chat_knowledge_step());
     steps.push(entity_draft_row_step());
     steps.push(reactivity_step());
     steps.push(layout_step());
@@ -2418,6 +2439,7 @@ fn main() -> ExitCode {
         }
         "test-helpdesk" => run_steps(&[helpdesk_step()]),
         "test-ai-chat" => run_steps(&[ai_chat_step()]),
+        "test-ai-chat-knowledge" => run_steps(&[ai_chat_knowledge_step()]),
         "test-server-table-column-tools" => run_steps(&[server_table_column_tools_step()]),
         "test-collapse-naming" => run_steps(&[collapse_naming_step()]),
         "test-data-table-fit" => run_steps(&[data_table_fit_step()]),
@@ -2436,7 +2458,7 @@ fn main() -> ExitCode {
         other => {
             eprintln!("xtask: unknown subcommand {other:?}");
             eprintln!(
-                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-selectable-summary|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-snapshot-table-page-filter-actions|test-helpdesk|test-ai-chat|test-server-table-column-tools|test-collapse-naming|test-data-table-fit|test-app-shell|test-field-context-scoping|test-entity-draft-row|test-softphone|test-help-hint|gen-tokens|check-sibling-tokens|bump>"
+                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-selectable-summary|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-snapshot-table-page-filter-actions|test-helpdesk|test-ai-chat|test-ai-chat-knowledge|test-server-table-column-tools|test-collapse-naming|test-data-table-fit|test-app-shell|test-field-context-scoping|test-entity-draft-row|test-softphone|test-help-hint|gen-tokens|check-sibling-tokens|bump>"
             );
             ExitCode::from(2)
         }
@@ -2883,6 +2905,41 @@ pub fn r() -> f32 { radius::CARD }
             .position(|n| *n == "test-helpdesk")
             .expect("the helpdesk suite is in the full gate");
         assert_eq!(names[helpdesk + 1], "test-ai-chat");
+    }
+
+    #[test]
+    fn ai_chat_knowledge_step_is_in_process_and_full_only() {
+        let step = ai_chat_knowledge_step();
+        assert_eq!(step.name, "test-ai-chat-knowledge");
+        assert!(matches!(
+            step.run,
+            Run::BrowserSuite {
+                test: "ai_chat_knowledge_smoke",
+                html_target: Some("client-snapshot-test-host.html")
+            }
+        ));
+        assert!(
+            !gate_steps()
+                .iter()
+                .any(|s| s.name == "test-ai-chat-knowledge")
+        );
+        assert!(
+            full_steps()
+                .iter()
+                .any(|s| s.name == "test-ai-chat-knowledge")
+        );
+        // Directly after `test-ai-chat`: all three of helpdesk, ai-chat and
+        // ai-chat-knowledge target the same HTML entry point, and `run_steps`
+        // only reuses one verified release server across ADJACENT suites that
+        // share a target. A suite inserted anywhere else here costs a third
+        // server build, which `verify_full_browser_steps_need_only_two_server_builds`
+        // would catch — this assertion says WHY.
+        let names: Vec<&str> = full_steps().iter().map(|s| s.name).collect();
+        let ai_chat = names
+            .iter()
+            .position(|n| *n == "test-ai-chat")
+            .expect("the ai-chat suite is in the full gate");
+        assert_eq!(names[ai_chat + 1], "test-ai-chat-knowledge");
     }
 
     #[test]

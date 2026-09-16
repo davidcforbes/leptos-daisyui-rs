@@ -275,7 +275,7 @@ pub fn AiChatFixture(
     // grounded turn whose prompt matches no seeded document has its script
     // REPLACED by the localized not-found sentence (`memory.rs`'s `send`),
     // whatever was registered for that prompt. Every failure shape this
-    // phase renders would silently become "I couldn't find that in this
+    // phase renders would silently become "I could not find that in this
     // folder" — which is the fixture behaving correctly and the proof
     // measuring nothing. The base document keeps the grounded default, so
     // P4's grounded assertions are untouched.

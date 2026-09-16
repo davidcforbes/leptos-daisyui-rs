@@ -5,8 +5,12 @@
 //! host overrides individual fields by struct-update syntax, exactly like
 //! `crate::patterns::helpdesk::HelpdeskTexts`.
 
+use super::evidence::GroundingVerdict;
+use super::knowledge::{CorpusQueryMode, IngestPhase, IngestStatus, MemoryRefusal, RecallCorpus};
 use super::provider::AvailabilityReasonCode;
-use crate::components::ai_assistant_workspace::{AnswerOutcome, AttemptLifecycle};
+use crate::components::ai_assistant_workspace::{
+    AnswerOutcome, AttemptLifecycle, MemoryClass, MemoryState,
+};
 
 /// Every string the workspace composite renders. See the module doc for the
 /// `Default`/[`Self::es`] convention.
@@ -130,6 +134,16 @@ pub struct AiChatWorkspaceTexts {
     /// Label for `ChatPosture::Assistant`.
     pub posture_assistant: String,
     /// Shown when a grounded turn found no supporting evidence. The EN copy is pinned exactly (not just non-empty) because it is the visible proof that a grounded posture withheld an ungrounded guess rather than making one up.
+    ///
+    /// It carries NO apostrophe, and that is load-bearing rather than a style
+    /// choice. The transcript renders an assistant message through
+    /// `editmark_core`'s markdown pipeline, which typographically substitutes
+    /// a straight `'` for a right single quotation mark — so a sentence
+    /// pinned for BYTE-EXACT comparison against what the actor reads cannot
+    /// contain one. The first run of the knowledge browser lane caught this:
+    /// the model held one character and the DOM held another, and only the
+    /// exact comparison could see it. Pinned by
+    /// `grounded_not_found_survives_the_markdown_renderer` in `tests.rs`.
     pub grounded_not_found: String,
     /// Display name for `MemoryClass::Language`.
     pub kind_language: String,
@@ -256,6 +270,69 @@ pub struct AiChatWorkspaceTexts {
     pub canceled_discarded_notice: String,
     /// Heading for the list of a declined answer's material limitations.
     pub limitations_label: String,
+    /// Heading for the knowledge rail's per-corpus ingest list.
+    pub corpus_label: String,
+    /// Template for one corpus's ingest counts. `{indexed}`, `{seen}` and
+    /// `{clusters}` are substituted.
+    pub ingest_counts: String,
+    /// Heading for the memory-store block (flags and recall).
+    pub memory_store_label: String,
+    /// Honesty row shown when the memory store did not answer. It must say
+    /// that nothing was recalled AND nothing was written, because a store
+    /// that is merely unreadable and one that dropped a write leave the
+    /// actor in different positions.
+    pub memory_offline: String,
+    /// Field label for the recall query input.
+    pub recall_label: String,
+    /// The run-a-recall button.
+    pub recall: String,
+    /// Shown when a recall ran and matched nothing. Distinct from
+    /// [`Self::memory_offline`]: a search that found nothing is an answer.
+    pub recall_no_hits: String,
+    /// Field label for the proposed memory's class select.
+    pub remember_kind_label: String,
+    /// Field label for the proposed memory's text.
+    pub remember_label: String,
+    /// Option label for the curated `lesson` class, offered so an actor can
+    /// see the refusal it earns rather than being quietly prevented from
+    /// asking.
+    pub kind_lesson: String,
+    /// Option label for the curated `principle` class.
+    pub kind_principle: String,
+    /// Shown when the host refuses a class only a curator may create.
+    pub refused_curated_kind: String,
+    /// Shown for a host refusal reason this vocabulary does not name; the
+    /// host's own sentence is rendered beside it.
+    pub refused_unknown: String,
+    /// The curation-gap honesty line carried by every candidate entry. It
+    /// says the entry is written and NOT yet findable by recall — the one
+    /// property a write-then-read-back would otherwise hide.
+    pub awaiting_curation: String,
+    /// Heading for the actor's own memory entries.
+    pub personal_memory_label: String,
+    /// Heading for the curated organizational-knowledge collections.
+    pub office_knowledge_label: String,
+    /// The confirm-this-entry button.
+    pub confirm: String,
+    /// The withdraw-this-entry button.
+    pub withdraw: String,
+    /// Transcript notice for a reopen caused by a KNOWLEDGE change. The
+    /// session really is rebuilt, so silence would hide a reset transcript;
+    /// the engine did not change, so the switch wording would be false.
+    pub knowledge_changed: String,
+    /// Label for `GroundingVerdict::Grounded`.
+    pub grounding_grounded: String,
+    /// Label for `GroundingVerdict::NotFound`. A short verdict label, NOT
+    /// [`Self::grounded_not_found`], which is the answer sentence itself.
+    pub grounding_not_found: String,
+    /// Label for `GroundingVerdict::AssistantOnly`.
+    pub grounding_assistant_only: String,
+    /// Heading for the evidence rail's qualified facts.
+    pub facts_label: String,
+    /// Label in front of the evidence's freshness stamp.
+    pub as_of_label: String,
+    /// Field label in front of the evidence rail's query-mode attribution.
+    pub query_attribution_label: String,
 }
 
 impl Default for AiChatWorkspaceTexts {
@@ -325,7 +402,7 @@ impl Default for AiChatWorkspaceTexts {
             query_fused: "Fused".into(),
             posture_grounded: "Grounded in this folder".into(),
             posture_assistant: "General assistant".into(),
-            grounded_not_found: "I couldn't find that in this folder.".into(),
+            grounded_not_found: "I could not find that in this folder.".into(),
             kind_language: "Language".into(),
             kind_tone: "Tone".into(),
             kind_verbosity: "Verbosity".into(),
@@ -386,6 +463,31 @@ impl Default for AiChatWorkspaceTexts {
             canceled_kept_notice: "You stopped this answer. What had already arrived is kept.".into(),
             canceled_discarded_notice: "You stopped this answer, and the partial output was discarded.".into(),
             limitations_label: "What this answer could not cover".into(),
+            corpus_label: "Documents".into(),
+            ingest_counts: "{indexed}/{seen} files \u{b7} {clusters} clusters".into(),
+            memory_store_label: "Memory store".into(),
+            memory_offline: "The memory store did not answer. Nothing was recalled and nothing was written.".into(),
+            recall_label: "Search your memory".into(),
+            recall: "Recall".into(),
+            recall_no_hits: "That search matched nothing.".into(),
+            remember_kind_label: "Kind".into(),
+            remember_label: "Remember this".into(),
+            kind_lesson: "Lesson".into(),
+            kind_principle: "Principle".into(),
+            refused_curated_kind: "Lessons and principles are written by curators, not saved directly.".into(),
+            refused_unknown: "The memory store refused this.".into(),
+            awaiting_curation: "Written, awaiting curation. A curator has to confirm it before recall can find it.".into(),
+            personal_memory_label: "Your memory".into(),
+            office_knowledge_label: "Office knowledge".into(),
+            confirm: "Confirm".into(),
+            withdraw: "Withdraw".into(),
+            knowledge_changed: "Knowledge sources changed, so this conversation started over.".into(),
+            grounding_grounded: "Grounded in the documents".into(),
+            grounding_not_found: "Nothing found in the documents".into(),
+            grounding_assistant_only: "General assistance, no documents".into(),
+            facts_label: "Facts behind this answer".into(),
+            as_of_label: "As of".into(),
+            query_attribution_label: "Queried by".into(),
         }
     }
 }
@@ -394,7 +496,7 @@ impl AiChatWorkspaceTexts {
     /// The number of fields on this struct; kept in sync with the struct and
     /// [`Self::fields`] by hand, and asserted equal to both by
     /// `en_and_es_texts_are_complete_and_differ` in `tests.rs`.
-    pub const FIELD_COUNT: usize = 112;
+    pub const FIELD_COUNT: usize = 137;
 
     /// Spanish copy, with full orthographic accents (not a transliteration).
     pub fn es() -> Self {
@@ -530,6 +632,31 @@ impl AiChatWorkspaceTexts {
             canceled_kept_notice: "Detuviste esta respuesta. Se conserva lo que ya había llegado.".into(),
             canceled_discarded_notice: "Detuviste esta respuesta y se descartó el resultado parcial.".into(),
             limitations_label: "Lo que esta respuesta no pudo cubrir".into(),
+            corpus_label: "Documentos".into(),
+            ingest_counts: "{indexed}/{seen} archivos \u{b7} {clusters} gr\u{fa}pos".into(),
+            memory_store_label: "Almac\u{e9}n de memoria".into(),
+            memory_offline: "El almac\u{e9}n de memoria no respondi\u{f3}. No se recuper\u{f3} ni se guard\u{f3} nada.".into(),
+            recall_label: "Buscar en tu memoria".into(),
+            recall: "Recuperar".into(),
+            recall_no_hits: "Esa b\u{fa}squeda no coincidi\u{f3} con nada.".into(),
+            remember_kind_label: "Tipo".into(),
+            remember_label: "Recordar esto".into(),
+            kind_lesson: "Lecci\u{f3}n".into(),
+            kind_principle: "Principio".into(),
+            refused_curated_kind: "Las lecciones y los principios los escriben los curadores, no se guardan directamente.".into(),
+            refused_unknown: "El almac\u{e9}n de memoria rechaz\u{f3} esto.".into(),
+            awaiting_curation: "Guardado, pendiente de curaci\u{f3}n. Un curador debe confirmarlo antes de que la b\u{fa}squeda pueda encontrarlo.".into(),
+            personal_memory_label: "Tu memoria".into(),
+            office_knowledge_label: "Conocimiento del despacho".into(),
+            confirm: "Confirmar".into(),
+            withdraw: "Retirar".into(),
+            knowledge_changed: "Las fuentes de conocimiento cambiaron, as\u{ed} que esta conversaci\u{f3}n empez\u{f3} de nuevo.".into(),
+            grounding_grounded: "Fundamentado en los documentos".into(),
+            grounding_not_found: "No se encontr\u{f3} nada en los documentos".into(),
+            grounding_assistant_only: "Asistencia general, sin documentos".into(),
+            facts_label: "Datos detr\u{e1}s de esta respuesta".into(),
+            as_of_label: "Al d\u{ed}a".into(),
+            query_attribution_label: "Consultado por".into(),
         }
     }
 
@@ -591,6 +718,98 @@ impl AiChatWorkspaceTexts {
             AttemptLifecycle::Interrupted { .. } => self.state_interrupted.clone(),
             AttemptLifecycle::Unknown(code) => code.clone(),
         }
+    }
+
+    /// Human copy for one ingest phase. `Failed` carries the host's own
+    /// reason SEPARATELY (the rail renders it on
+    /// `data-ai-chat-ingest-error`), so this is the phase name only.
+    pub fn ingest_phase_label(&self, phase: &IngestPhase) -> String {
+        match phase {
+            IngestPhase::Idle => self.ingest_idle.clone(),
+            IngestPhase::Walking => self.ingest_walking.clone(),
+            IngestPhase::Indexing => self.ingest_indexing.clone(),
+            IngestPhase::Clustering => self.ingest_clustering.clone(),
+            IngestPhase::Ready => self.ingest_ready.clone(),
+            IngestPhase::Failed(_) => self.ingest_failed.clone(),
+        }
+    }
+
+    /// Human copy for one corpus query mode.
+    pub fn query_mode_name(&self, mode: CorpusQueryMode) -> String {
+        match mode {
+            CorpusQueryMode::FullText => self.query_full_text.clone(),
+            CorpusQueryMode::Similarity => self.query_similarity.clone(),
+            CorpusQueryMode::Llm => self.query_llm.clone(),
+            CorpusQueryMode::Fused => self.query_fused.clone(),
+        }
+    }
+
+    /// Human copy for one recall corpus. An `Unknown` lane shows the host's
+    /// own id rather than being narrated as one of the four named lanes —
+    /// claiming a hit "matched by meaning" when the service never said so is
+    /// precisely the overreach the attribution exists to prevent.
+    pub fn recall_corpus_label(&self, corpus: &RecallCorpus) -> String {
+        match corpus {
+            RecallCorpus::Words => self.recall_words.clone(),
+            RecallCorpus::Meaning => self.recall_meaning.clone(),
+            RecallCorpus::Graph => self.recall_graph.clone(),
+            RecallCorpus::Thread => self.recall_thread.clone(),
+            RecallCorpus::Unknown(id) => id.clone(),
+        }
+    }
+
+    /// Human copy for one memory class; an unnamed host class shows its own
+    /// id, except for the two curated classes this table does name.
+    pub fn memory_class_label(&self, class: &MemoryClass) -> String {
+        match class {
+            MemoryClass::Language => self.kind_language.clone(),
+            MemoryClass::Tone => self.kind_tone.clone(),
+            MemoryClass::Verbosity => self.kind_verbosity.clone(),
+            MemoryClass::WorkingMethod => self.kind_working_method.clone(),
+            MemoryClass::Unknown(id) if id == "lesson" => self.kind_lesson.clone(),
+            MemoryClass::Unknown(id) if id == "principle" => self.kind_principle.clone(),
+            MemoryClass::Unknown(id) => id.clone(),
+        }
+    }
+
+    /// Human copy for one memory state.
+    pub fn memory_state_label(&self, state: &MemoryState) -> String {
+        match state {
+            MemoryState::Candidate => self.state_candidate.clone(),
+            MemoryState::Confirmed => self.state_confirmed.clone(),
+            MemoryState::Withdrawn => self.state_withdrawn.clone(),
+            MemoryState::Unknown(id) => id.clone(),
+        }
+    }
+
+    /// Human copy for one memory refusal. `Unknown` shows this table's
+    /// generic sentence; the host's own reason is rendered beside it by the
+    /// rail, never in place of it.
+    pub fn memory_refusal_label(&self, refusal: &MemoryRefusal) -> String {
+        match refusal {
+            MemoryRefusal::ContainsMatterNumber => self.refused_matter.clone(),
+            MemoryRefusal::ContainsEmail => self.refused_email.clone(),
+            MemoryRefusal::ContainsPhone => self.refused_phone.clone(),
+            MemoryRefusal::CuratedKindOnly => self.refused_curated_kind.clone(),
+            MemoryRefusal::Unknown(_) => self.refused_unknown.clone(),
+        }
+    }
+
+    /// Human copy for one grounding verdict.
+    pub fn grounding_label(&self, verdict: &GroundingVerdict) -> String {
+        match verdict {
+            GroundingVerdict::Grounded { .. } => self.grounding_grounded.clone(),
+            GroundingVerdict::NotFound => self.grounding_not_found.clone(),
+            GroundingVerdict::AssistantOnly => self.grounding_assistant_only.clone(),
+        }
+    }
+
+    /// One corpus's ingest counts, substituted into [`Self::ingest_counts`].
+    pub fn ingest_counts_line(&self, status: &IngestStatus) -> String {
+        self.ingest_counts
+            .replace("{indexed}", &status.files_indexed.to_string())
+            .replace("{seen}", &status.files_seen.to_string())
+            .replace("{clusters}", &status.clusters.to_string())
     }
 
     /// Every field, in declaration order, for the completeness test. Keep in
@@ -757,6 +976,40 @@ impl AiChatWorkspaceTexts {
                 self.canceled_discarded_notice.as_str(),
             ),
             ("limitations_label", self.limitations_label.as_str()),
+            ("corpus_label", self.corpus_label.as_str()),
+            ("ingest_counts", self.ingest_counts.as_str()),
+            ("memory_store_label", self.memory_store_label.as_str()),
+            ("memory_offline", self.memory_offline.as_str()),
+            ("recall_label", self.recall_label.as_str()),
+            ("recall", self.recall.as_str()),
+            ("recall_no_hits", self.recall_no_hits.as_str()),
+            ("remember_kind_label", self.remember_kind_label.as_str()),
+            ("remember_label", self.remember_label.as_str()),
+            ("kind_lesson", self.kind_lesson.as_str()),
+            ("kind_principle", self.kind_principle.as_str()),
+            ("refused_curated_kind", self.refused_curated_kind.as_str()),
+            ("refused_unknown", self.refused_unknown.as_str()),
+            ("awaiting_curation", self.awaiting_curation.as_str()),
+            ("personal_memory_label", self.personal_memory_label.as_str()),
+            (
+                "office_knowledge_label",
+                self.office_knowledge_label.as_str(),
+            ),
+            ("confirm", self.confirm.as_str()),
+            ("withdraw", self.withdraw.as_str()),
+            ("knowledge_changed", self.knowledge_changed.as_str()),
+            ("grounding_grounded", self.grounding_grounded.as_str()),
+            ("grounding_not_found", self.grounding_not_found.as_str()),
+            (
+                "grounding_assistant_only",
+                self.grounding_assistant_only.as_str(),
+            ),
+            ("facts_label", self.facts_label.as_str()),
+            ("as_of_label", self.as_of_label.as_str()),
+            (
+                "query_attribution_label",
+                self.query_attribution_label.as_str(),
+            ),
         ]
     }
 }

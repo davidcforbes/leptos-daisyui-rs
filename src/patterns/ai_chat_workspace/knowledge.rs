@@ -268,6 +268,37 @@ pub enum RecallCorpus {
     Unknown(String),
 }
 
+impl RecallCorpus {
+    /// The stable wire string this corpus round-trips to, rendered on a
+    /// hit's `data-ai-chat-memory-attribution` hook.
+    ///
+    /// Never `{:?}`: `Debug` prints a Rust variant name a rename is free to
+    /// change. `Unknown` returns the host's own lane id verbatim, because a
+    /// hit attributed to a lane this vocabulary has not learned yet must
+    /// still say WHICH lane — narrating "by meaning" for a lane the service
+    /// never named is exactly the claim this attribution exists to prevent.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Words => "words",
+            Self::Meaning => "meaning",
+            Self::Graph => "graph",
+            Self::Thread => "thread",
+            Self::Unknown(s) => s.as_str(),
+        }
+    }
+
+    /// Parses the host's wire id, preserving an unrecognized one verbatim.
+    pub fn parse(id: &str) -> Self {
+        match id {
+            "words" => Self::Words,
+            "meaning" => Self::Meaning,
+            "graph" => Self::Graph,
+            "thread" => Self::Thread,
+            other => Self::Unknown(other.to_owned()),
+        }
+    }
+}
+
 /// One recall result.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RecallHit {
@@ -335,6 +366,47 @@ pub enum MemoryRefusal {
     CuratedKindOnly,
     /// A host refusal reason this vocabulary does not name.
     Unknown(String),
+}
+
+impl MemoryRefusal {
+    /// The stable wire string this refusal round-trips to, rendered on the
+    /// rail's `data-ai-chat-guardrail` hook.
+    ///
+    /// The id set is CLOSED at five, and `Unknown` collapses to `"unknown"`
+    /// rather than leaking the host's reason string — unlike
+    /// [`RecallCorpus::as_str`] and
+    /// [`crate::components::ai_assistant_workspace::MemoryClass::as_str`],
+    /// which preserve theirs. The difference is what the hook is for: a
+    /// proof asserts that a specific guardrail fired, so an open id set
+    /// would let an unrecognized host reason pass an assertion written for a
+    /// typed one. The host's own sentence is still rendered, as the row's
+    /// TEXT.
+    ///
+    /// The match is exhaustive on purpose even though the enum is
+    /// `#[non_exhaustive]`: inside this crate a new refusal must break THIS
+    /// function rather than quietly inherit `"unknown"`.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::ContainsMatterNumber => "contains_matter_number",
+            Self::ContainsEmail => "contains_email",
+            Self::ContainsPhone => "contains_phone",
+            Self::CuratedKindOnly => "curated_kind_only",
+            Self::Unknown(_) => "unknown",
+        }
+    }
+
+    /// Parses a wire string produced by [`Self::as_str`]; anything else —
+    /// including `"unknown"` itself, which names no reason — is carried as
+    /// [`Self::Unknown`] rather than guessed at.
+    pub fn parse(id: &str) -> Self {
+        match id {
+            "contains_matter_number" => Self::ContainsMatterNumber,
+            "contains_email" => Self::ContainsEmail,
+            "contains_phone" => Self::ContainsPhone,
+            "curated_kind_only" => Self::CuratedKindOnly,
+            other => Self::Unknown(other.to_owned()),
+        }
+    }
 }
 
 fn contains_matter_number(text: &str) -> bool {

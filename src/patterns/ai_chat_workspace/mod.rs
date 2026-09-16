@@ -34,7 +34,7 @@ pub use backend::{
 };
 pub use component::{
     AiChatWorkspace, ReopenReason, WATCHDOG_MS, cancel_notice, is_terminal, notice_text,
-    published_capabilities, reopen_announces_switch, settings_for, tick_turn_id,
+    published_capabilities, reopen_announces_switch, reopen_notice, settings_for, tick_turn_id,
     watchdog_should_fire,
 };
 pub use engine_header::{
@@ -43,14 +43,16 @@ pub use engine_header::{
     honesty_state_for_code, honesty_tone, usage_figures, usage_line,
 };
 pub use evidence::{GroundingVerdict, TurnEvidence};
-pub use evidence_rail::{EvidenceRail, citations_of};
+pub use evidence_rail::{EvidenceRail, citations_of, evidence_of, facts_of};
 pub use knowledge::{
     ChatPosture, CorpusQueryMode, CorpusScope, IngestPhase, IngestStatus, KnowledgeSelection,
     KnowledgeSource, MemoryDraft, MemoryRefusal, OfficeKnowledgeScope, RecallCorpus, RecallHit,
     RecallReceipt, guardrail_refusal,
 };
 pub use knowledge_rail::{
-    KnowledgeSourceRail, corpus_choices, label_is_distinct_from_options, scope_label, scope_value,
+    KnowledgeDraft, KnowledgeSourceRail, any_ingest_in_flight, awaits_curation, corpus_choices,
+    corpus_ingests, label_is_distinct_from_options, memory_class_choices, memory_flags,
+    office_collections, personal_memory, scope_label, scope_value, with_ingest,
 };
 #[cfg(feature = "test-mode")]
 pub use memory::{

@@ -2,16 +2,17 @@
 //! over the seeded in-memory backend, with the language and mode switches
 //! that later phases of this epic extend.
 //!
-//! Sections knowledge / usage / quick actions arrive in P6-P7; this page
-//! deliberately ships only what it can demonstrate today.
+//! Sections usage / quick actions arrive in P7; this page deliberately ships
+//! only what it can demonstrate today.
 
 use crate::core::{ContentLayout, Section};
 use leptos::prelude::*;
 use leptos_daisyui_rs::components::AiChatTexts;
 use leptos_daisyui_rs::patterns::{
     AiChatWorkspace, AiChatWorkspaceTexts, AvailabilityReasonCode, ChatWorkspaceBackend,
-    InMemoryChatWorkspaceBackend, ModelSource, ProviderCard, ai_chat_honesty_state_for_code,
-    ai_chat_honesty_tone, desktop_provider_catalogue,
+    CorpusQueryMode, GroundingVerdict, InMemoryChatWorkspaceBackend, IngestPhase, MemoryRefusal,
+    ModelSource, ProviderCard, RecallCorpus, ai_chat_honesty_state_for_code, ai_chat_honesty_tone,
+    desktop_provider_catalogue,
 };
 use std::rc::Rc;
 
@@ -60,6 +61,71 @@ fn lifecycle_rows(texts: &AiChatWorkspaceTexts) -> Vec<(&'static str, String)> {
 
 /// What a finished turn PRODUCED, which is a different question from what
 /// state it is in — and the reason the workspace publishes two hooks.
+/// Every typed knowledge id the rail renders, with its localized label, so
+/// the page shows the vocabulary rather than describing it.
+fn knowledge_rows(texts: &AiChatWorkspaceTexts) -> Vec<(&'static str, String)> {
+    let mut rows: Vec<(&'static str, String)> = vec![];
+    for phase in [
+        IngestPhase::Idle,
+        IngestPhase::Walking,
+        IngestPhase::Indexing,
+        IngestPhase::Clustering,
+        IngestPhase::Ready,
+    ] {
+        rows.push((phase.as_id(), texts.ingest_phase_label(&phase)));
+    }
+    for mode in [
+        CorpusQueryMode::FullText,
+        CorpusQueryMode::Similarity,
+        CorpusQueryMode::Llm,
+        CorpusQueryMode::Fused,
+    ] {
+        rows.push((mode.as_id(), texts.query_mode_name(mode)));
+    }
+    for corpus in [
+        RecallCorpus::Words,
+        RecallCorpus::Meaning,
+        RecallCorpus::Graph,
+        RecallCorpus::Thread,
+    ] {
+        let id: &'static str = match corpus {
+            RecallCorpus::Words => "words",
+            RecallCorpus::Meaning => "meaning",
+            RecallCorpus::Graph => "graph",
+            _ => "thread",
+        };
+        rows.push((id, texts.recall_corpus_label(&corpus)));
+    }
+    rows
+}
+
+/// The curation gap and the guardrail, in the words the rail uses. Nothing
+/// here may imply that anything extracts a memory: every entry in this
+/// workspace was written by an explicit action.
+fn curation_rows(texts: &AiChatWorkspaceTexts) -> Vec<(&'static str, String)> {
+    let mut rows = vec![
+        ("candidate", texts.awaiting_curation.clone()),
+        ("confirmed", texts.state_confirmed.clone()),
+        ("withdrawn", texts.state_withdrawn.clone()),
+    ];
+    for refusal in [
+        MemoryRefusal::ContainsMatterNumber,
+        MemoryRefusal::ContainsEmail,
+        MemoryRefusal::ContainsPhone,
+        MemoryRefusal::CuratedKindOnly,
+    ] {
+        rows.push((refusal.as_str(), texts.memory_refusal_label(&refusal)));
+    }
+    for verdict in [
+        GroundingVerdict::Grounded { sources: 1 },
+        GroundingVerdict::NotFound,
+        GroundingVerdict::AssistantOnly,
+    ] {
+        rows.push((verdict.as_id(), texts.grounding_label(&verdict)));
+    }
+    rows
+}
+
 fn outcome_rows() -> Vec<(&'static str, &'static str)> {
     vec![
         ("completed", "The engine answered the question."),
@@ -257,6 +323,59 @@ pub fn AiChatDemo() -> impl IntoView {
                             />
                         }
                     }}
+                </div>
+            </Section>
+
+            <Section title="Knowledge sources" col=true>
+                <p class="text-sm opacity-70">
+                    "Four knowledge sources mix into a turn, and each one is typed rather \
+                     than a string. A corpus carries an ingest phase (idle, walking, \
+                     indexing, clustering, ready, failed) and is queried one of four ways. \
+                     A grounded turn that matches nothing answers that it found nothing, \
+                     rather than guessing. Personal memory is recalled through a receipt \
+                     that names the lane every hit came from, and an entry an actor writes \
+                     is a candidate until a curator confirms it \u{2014} written, and not \
+                     yet findable."
+                </p>
+                <div class="grid w-full grid-cols-1 gap-4 lg:grid-cols-2">
+                    <ul class="flex flex-col gap-2" data-testid="ai-chat-knowledge">
+                        {move || {
+                            let t = texts.get();
+                            knowledge_rows(&t)
+                                .into_iter()
+                                .map(|(id, label)| {
+                                    view! {
+                                        <li
+                                            class="flex items-center justify-between gap-3 rounded-box border border-base-300 bg-base-100 p-3 text-sm"
+                                            data-ai-chat-knowledge-row=id
+                                        >
+                                            <span class="font-mono text-xs opacity-60">{id}</span>
+                                            <span>{label}</span>
+                                        </li>
+                                    }
+                                })
+                                .collect_view()
+                        }}
+                    </ul>
+                    <ul class="flex flex-col gap-2" data-testid="ai-chat-curation">
+                        {move || {
+                            let t = texts.get();
+                            curation_rows(&t)
+                                .into_iter()
+                                .map(|(id, meaning)| {
+                                    view! {
+                                        <li
+                                            class="flex flex-col gap-1 rounded-box border border-base-300 bg-base-100 p-3 text-sm"
+                                            data-ai-chat-curation-row=id
+                                        >
+                                            <span class="font-mono text-xs opacity-60">{id}</span>
+                                            <span class="text-xs opacity-70">{meaning}</span>
+                                        </li>
+                                    }
+                                })
+                                .collect_view()
+                        }}
+                    </ul>
                 </div>
             </Section>
 

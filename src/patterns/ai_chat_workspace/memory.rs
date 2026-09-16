@@ -40,11 +40,11 @@ use std::sync::{Arc, Mutex};
 
 use crate::components::ai_assistant_workspace::{
     AnswerOutcome, AssistantAccess, AssistantAnswer, AssistantBudget, AssistantCapabilities,
-    AssistantCapability, AssistantConnection, AssistantEngine, AssistantKnowledgeEntry,
-    AssistantMemory, AssistantMemoryDraft, AssistantMemoryEntry, AssistantPreferences,
-    AssistantProvenance, AssistantReason, AssistantScope, AssistantSettings, AttemptLifecycle,
-    ConnectionState, EngineAvailability, KnowledgeReviewState, KnowledgeState, MemoryClass,
-    MemoryState, ProvenanceMode, ScopeBasis, SignInShape,
+    AssistantCapability, AssistantConnection, AssistantEngine, AssistantFact,
+    AssistantKnowledgeEntry, AssistantMemory, AssistantMemoryDraft, AssistantMemoryEntry,
+    AssistantPreferences, AssistantProvenance, AssistantReason, AssistantScope, AssistantSettings,
+    AttemptLifecycle, ConnectionState, EngineAvailability, KnowledgeReviewState, KnowledgeState,
+    MemoryClass, MemoryState, ProvenanceMode, ScopeBasis, SignInShape,
 };
 use crate::components::ai_chat::{
     AnnotationAnchor, AnnotationBody, AnnotationKind, ChatError, ChatRequest, ChatSettings,
@@ -531,6 +531,42 @@ fn grounded_hits(prompt: &str) -> Vec<SeedDoc> {
             asked.iter().filter(|w| doc.contains(w)).count() >= 2
         })
         .collect()
+}
+
+/// One qualified fact per grounded document, so a grounded turn carries
+/// evidence the rail can render rather than an empty list.
+///
+/// Every fact is built through `AssistantFact::new`, which REFUSES an empty
+/// qualification, and any refusal is dropped rather than downgraded: a fact
+/// whose caveat failed to build must not reach a rail as a bare value. That
+/// is the same fail-closed rule `TurnEvidence::with_facts` applies to a whole
+/// list, applied one document at a time so a single malformed seed cannot
+/// blank the evidence for the others.
+fn grounded_facts(hits: &[SeedDoc]) -> Vec<AssistantFact> {
+    hits.iter()
+        .filter_map(|doc| {
+            AssistantFact::new(
+                doc.title.to_owned(),
+                Some(first_sentence(doc.body)),
+                None,
+                format!(
+                    "Quoted from {}; the memo itself is the only source.",
+                    doc.path
+                ),
+                None,
+            )
+            .ok()
+        })
+        .collect()
+}
+
+/// A document's first sentence, which is what the fixture quotes as a fact's
+/// current value.
+fn first_sentence(body: &str) -> String {
+    match body.find(". ") {
+        Some(end) => body[..=end].trim().to_owned(),
+        None => body.trim().to_owned(),
+    }
 }
 
 struct SeedRecallItem {
@@ -1311,7 +1347,7 @@ impl ChatTransport for ScriptedChatTransport {
                     })
                     .collect(),
                 recall: None,
-                facts: vec![],
+                facts: grounded_facts(&hits),
                 limitations: vec![],
                 as_of: Some(fixture_as_of(core.clock.now_ms())),
                 grounding,

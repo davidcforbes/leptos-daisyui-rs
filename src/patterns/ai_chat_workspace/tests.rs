@@ -2,8 +2,8 @@ use super::*;
 
 use crate::components::ai_assistant_workspace::{
     AssistantAccess, AssistantCapabilities, AssistantCapability, AssistantContractError,
-    AssistantFact, AssistantPreferences, AssistantReason, AssistantSettings, KnowledgeState,
-    MemoryClass, RefusalNextAction, engine_ready_for_ask,
+    AssistantFact, AssistantMemoryEntry, AssistantPreferences, AssistantReason, AssistantSettings,
+    KnowledgeState, MemoryClass, MemoryState, RefusalNextAction, engine_ready_for_ask,
 };
 use crate::components::ai_chat::{Capabilities, Usage};
 
@@ -350,7 +350,7 @@ fn en_and_es_texts_are_complete_and_differ() {
     }
 
     assert_eq!(
-        en.grounded_not_found, "I couldn't find that in this folder.",
+        en.grounded_not_found, "I could not find that in this folder.",
         "grounded_not_found's EN copy is pinned exactly"
     );
 }
@@ -506,5 +506,340 @@ fn memory_rs_never_references_the_live_bridge() {
             !source.contains(needle),
             "memory.rs must not reference {needle}"
         );
+    }
+}
+
+// ── P6: knowledge vocabularies, the ingest ladder and the curation gap ───────
+
+/// Every id P6 renders into a `data-*` hook comes from an `as_str`/`as_id`,
+/// never from `{:?}`. The asymmetry between the three `Unknown` arms is the
+/// point of this test, not an accident of it.
+#[test]
+fn knowledge_string_conversions_round_trip() {
+    for (corpus, id) in [
+        (RecallCorpus::Words, "words"),
+        (RecallCorpus::Meaning, "meaning"),
+        (RecallCorpus::Graph, "graph"),
+        (RecallCorpus::Thread, "thread"),
+    ] {
+        assert_eq!(corpus.as_str(), id);
+        assert_eq!(RecallCorpus::parse(id), corpus);
+    }
+    // An unnamed lane keeps the host's id, so a hit still says WHICH lane.
+    let lane = RecallCorpus::parse("lexical_v2");
+    assert_eq!(lane.as_str(), "lexical_v2");
+    assert!(matches!(lane, RecallCorpus::Unknown(_)));
+
+    for (refusal, id) in [
+        (
+            MemoryRefusal::ContainsMatterNumber,
+            "contains_matter_number",
+        ),
+        (MemoryRefusal::ContainsEmail, "contains_email"),
+        (MemoryRefusal::ContainsPhone, "contains_phone"),
+        (MemoryRefusal::CuratedKindOnly, "curated_kind_only"),
+    ] {
+        assert_eq!(refusal.as_str(), id);
+        assert_eq!(MemoryRefusal::parse(id), refusal);
+    }
+    // The guardrail id set is CLOSED: a host reason this vocabulary does not
+    // name collapses to `unknown` rather than leaking a string a proof
+    // written for a typed guardrail would then match.
+    let host = MemoryRefusal::Unknown("policy_denied".into());
+    assert_eq!(host.as_str(), "unknown");
+    assert_eq!(
+        MemoryRefusal::parse("policy_denied"),
+        MemoryRefusal::Unknown("policy_denied".into())
+    );
+
+    for (class, id) in [
+        (MemoryClass::Language, "language"),
+        (MemoryClass::Tone, "tone"),
+        (MemoryClass::Verbosity, "verbosity"),
+        (MemoryClass::WorkingMethod, "working_method"),
+    ] {
+        assert_eq!(class.as_str(), id);
+        assert_eq!(MemoryClass::parse(id), class);
+    }
+    // The two curated classes must round-trip through their host ids, or the
+    // kind select could not offer the choice that earns the refusal.
+    for id in ["lesson", "principle"] {
+        assert_eq!(MemoryClass::parse(id).as_str(), id);
+    }
+
+    for (state, id) in [
+        (MemoryState::Candidate, "candidate"),
+        (MemoryState::Confirmed, "confirmed"),
+        (MemoryState::Withdrawn, "withdrawn"),
+    ] {
+        assert_eq!(state.as_str(), id);
+        assert_eq!(MemoryState::parse(id), state);
+    }
+
+    // The verdict id must not carry the source COUNT, or a proof could never
+    // assert on the verdict itself.
+    assert_eq!(
+        GroundingVerdict::Grounded { sources: 1 }.as_id(),
+        "grounded"
+    );
+    assert_eq!(
+        GroundingVerdict::Grounded { sources: 9 }.as_id(),
+        "grounded"
+    );
+    assert_eq!(GroundingVerdict::NotFound.as_id(), "not_found");
+    assert_eq!(GroundingVerdict::AssistantOnly.as_id(), "assistant_only");
+}
+
+fn corpus_with(scope: CorpusScope, phase: IngestPhase) -> KnowledgeSource {
+    KnowledgeSource::Corpus {
+        scope,
+        ingest: IngestStatus {
+            phase,
+            files_seen: 3,
+            files_indexed: 3,
+            clusters: 2,
+            as_of: "2027-01-01".into(),
+        },
+        query_mode: CorpusQueryMode::Fused,
+        posture: ChatPosture::Grounded,
+    }
+}
+
+#[test]
+fn ingest_in_flight_covers_the_three_working_phases_and_not_idle() {
+    for phase in [
+        IngestPhase::Walking,
+        IngestPhase::Indexing,
+        IngestPhase::Clustering,
+    ] {
+        let sources = vec![corpus_with(CorpusScope::All, phase.clone())];
+        assert!(any_ingest_in_flight(&sources), "{phase:?} is in flight");
+    }
+    // Idle and the two terminal phases are NOT in flight: a poll loop keyed
+    // on `Idle` would never stop.
+    for phase in [
+        IngestPhase::Idle,
+        IngestPhase::Ready,
+        IngestPhase::Failed(AssistantReason::default()),
+    ] {
+        let sources = vec![corpus_with(CorpusScope::All, phase.clone())];
+        assert!(!any_ingest_in_flight(&sources), "{phase:?} is settled");
+    }
+}
+
+#[test]
+fn with_ingest_replaces_one_scope_and_leaves_its_neighbour_alone() {
+    let intake = CorpusScope::Folder("kb/intake".into());
+    let court = CorpusScope::Folder("kb/court".into());
+    let sources = vec![
+        corpus_with(intake.clone(), IngestPhase::Ready),
+        corpus_with(court.clone(), IngestPhase::Ready),
+        KnowledgeSource::MemoryStore {
+            enabled: true,
+            capture_enabled: true,
+        },
+    ];
+    let walking = IngestStatus {
+        phase: IngestPhase::Walking,
+        files_seen: 3,
+        files_indexed: 0,
+        clusters: 0,
+        as_of: "2027-01-02".into(),
+    };
+    let next = with_ingest(sources, &intake, walking);
+    let phases: Vec<&'static str> = corpus_ingests(&next)
+        .iter()
+        .map(|(_, s)| s.phase.as_id())
+        .collect();
+    // Two folders share `CorpusScope::as_id() == "folder"`, so a replacement
+    // keyed on the id alone would hit both. This one is keyed on the scope.
+    assert_eq!(phases, vec!["walking", "ready"]);
+    assert_eq!(
+        memory_flags(&next),
+        Some((true, true)),
+        "a non-corpus source is carried through untouched"
+    );
+    let _ = court;
+}
+
+#[test]
+fn every_offered_memory_class_is_addressable_and_includes_the_curated_pair() {
+    let choices = memory_class_choices();
+    let ids: Vec<&str> = choices.iter().map(MemoryClass::as_str).collect();
+    assert!(ids.contains(&"lesson"), "{ids:?}");
+    assert!(ids.contains(&"principle"), "{ids:?}");
+    for class in &choices {
+        assert_eq!(
+            MemoryClass::parse(class.as_str()).as_str(),
+            class.as_str(),
+            "every offered class survives the select's round trip"
+        );
+    }
+}
+
+#[test]
+fn a_candidate_entry_is_the_one_that_awaits_curation() {
+    let entry = |state: MemoryState| AssistantMemoryEntry {
+        id: "mem-0001".into(),
+        revision: 1,
+        class: MemoryClass::Tone,
+        text: "Keep it short.".into(),
+        state,
+        capabilities: AssistantCapabilities {
+            granted: vec![AssistantCapability::MemoryConfirm],
+            details: vec![],
+        },
+        retention: None,
+    };
+    assert!(awaits_curation(&entry(MemoryState::Candidate)));
+    assert!(!awaits_curation(&entry(MemoryState::Confirmed)));
+    assert!(!awaits_curation(&entry(MemoryState::Withdrawn)));
+}
+
+/// P4 left the knowledge-change reopen deliberately silent and pinned that
+/// silence in its browser proof, so that whoever gave the reopen a sentence
+/// had to change the assertion rather than route around it. This is that
+/// sentence: three reasons, three answers, and the knowledge one names no
+/// engine because no engine changed.
+#[test]
+fn reopen_notice_names_the_engine_only_for_an_engine_switch() {
+    let t = AiChatWorkspaceTexts::default();
+    assert_eq!(reopen_notice(ReopenReason::Boot, "Claude Code", &t), None);
+
+    let switched =
+        reopen_notice(ReopenReason::EngineSwitch, "Claude Code", &t).expect("a switch announces");
+    assert!(switched.contains("Claude Code"), "{switched}");
+    assert!(!switched.contains("{engine}"), "{switched}");
+
+    let knowledge = reopen_notice(ReopenReason::KnowledgeChange, "Claude Code", &t)
+        .expect("a knowledge change announces its reset");
+    assert_eq!(knowledge, t.knowledge_changed);
+    assert!(
+        !knowledge.contains("Claude Code"),
+        "a knowledge change must not name an engine that did not change: {knowledge}"
+    );
+    assert_ne!(knowledge, switched);
+
+    // And the same three answers in Spanish, or the notice is a literal.
+    let es = AiChatWorkspaceTexts::es();
+    assert_ne!(
+        reopen_notice(ReopenReason::KnowledgeChange, "Claude Code", &es),
+        reopen_notice(ReopenReason::KnowledgeChange, "Claude Code", &t)
+    );
+}
+
+/// Every vocabulary the knowledge rail renders has localized copy, and an
+/// `Unknown` arm shows the host's own id rather than a blank.
+#[test]
+fn knowledge_labels_are_localized_and_never_blank() {
+    for t in [AiChatWorkspaceTexts::default(), AiChatWorkspaceTexts::es()] {
+        for phase in [
+            IngestPhase::Idle,
+            IngestPhase::Walking,
+            IngestPhase::Indexing,
+            IngestPhase::Clustering,
+            IngestPhase::Ready,
+            IngestPhase::Failed(AssistantReason::default()),
+        ] {
+            assert!(!t.ingest_phase_label(&phase).trim().is_empty(), "{phase:?}");
+        }
+        for mode in [
+            CorpusQueryMode::FullText,
+            CorpusQueryMode::Similarity,
+            CorpusQueryMode::Llm,
+            CorpusQueryMode::Fused,
+        ] {
+            assert!(!t.query_mode_name(mode).trim().is_empty(), "{mode:?}");
+        }
+        for corpus in [
+            RecallCorpus::Words,
+            RecallCorpus::Meaning,
+            RecallCorpus::Graph,
+            RecallCorpus::Thread,
+        ] {
+            assert!(!t.recall_corpus_label(&corpus).trim().is_empty());
+        }
+        assert_eq!(
+            t.recall_corpus_label(&RecallCorpus::Unknown("lexical_v2".into())),
+            "lexical_v2",
+            "an unnamed lane is never narrated as one of the four named ones"
+        );
+        for refusal in [
+            MemoryRefusal::ContainsMatterNumber,
+            MemoryRefusal::ContainsEmail,
+            MemoryRefusal::ContainsPhone,
+            MemoryRefusal::CuratedKindOnly,
+            MemoryRefusal::Unknown("policy_denied".into()),
+        ] {
+            assert!(!t.memory_refusal_label(&refusal).trim().is_empty());
+        }
+        for class in memory_class_choices() {
+            assert!(!t.memory_class_label(&class).trim().is_empty());
+        }
+        for verdict in [
+            GroundingVerdict::Grounded { sources: 1 },
+            GroundingVerdict::NotFound,
+            GroundingVerdict::AssistantOnly,
+        ] {
+            assert!(!t.grounding_label(&verdict).trim().is_empty());
+        }
+        let counts = t.ingest_counts_line(&IngestStatus {
+            phase: IngestPhase::Ready,
+            files_seen: 6,
+            files_indexed: 4,
+            clusters: 3,
+            as_of: "2027-01-01".into(),
+        });
+        assert!(
+            counts.contains('6') && counts.contains('4') && counts.contains('3'),
+            "{counts}"
+        );
+        assert!(
+            !counts.contains('{'),
+            "every placeholder is substituted: {counts}"
+        );
+    }
+}
+
+/// The showcase's own copy must never imply that anything EXTRACTS memories.
+/// The extraction jobs exist and have never run against either database, so
+/// a workspace that hinted at them would be describing a capability the
+/// actor does not have.
+#[test]
+fn no_text_claims_memories_are_extracted_automatically() {
+    for t in [AiChatWorkspaceTexts::default(), AiChatWorkspaceTexts::es()] {
+        for (name, value) in t.fields() {
+            let lower = value.to_lowercase();
+            for needle in ["extract", "automatic", "autom\u{e1}tic"] {
+                assert!(
+                    !lower.contains(needle),
+                    "{name} implies extraction or automation: {value:?}"
+                );
+            }
+        }
+    }
+}
+
+/// The not-found sentence must survive the markdown renderer BYTE FOR BYTE.
+///
+/// The transcript renders an assistant message through `editmark_core`, which
+/// typographically substitutes a straight apostrophe with a right single
+/// quotation mark. The first real run of the knowledge browser lane compared
+/// the model's straight-quoted sentence against the DOM's curly-quoted one
+/// and failed, correctly. The copy is now apostrophe-free; this guard is what
+/// stops one being reintroduced, because the failure it causes is a
+/// browser-lane failure eight minutes away rather than a compile error.
+#[test]
+fn grounded_not_found_survives_the_markdown_renderer() {
+    for t in [AiChatWorkspaceTexts::default(), AiChatWorkspaceTexts::es()] {
+        for ch in ['\'', '\u{2019}', '"', '\u{201c}', '\u{201d}', '*', '_', '`'] {
+            assert!(
+                !t.grounded_not_found.contains(ch),
+                "{ch:?} is either substituted or read as markup by the \
+                 renderer, so a sentence pinned for exact comparison cannot \
+                 carry it: {:?}",
+                t.grounded_not_found
+            );
+        }
     }
 }

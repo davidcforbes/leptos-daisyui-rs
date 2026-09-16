@@ -15,8 +15,12 @@ use wasm_bindgen_futures::spawn_local;
 use super::backend::{ChatWorkspaceBackend, ChatWorkspaceErrorKind, WorkspaceRefusal};
 use super::engine_header::EngineHeader;
 use super::evidence_rail::EvidenceRail;
-use super::knowledge::{KnowledgeSelection, KnowledgeSource};
-use super::knowledge_rail::KnowledgeSourceRail;
+use super::knowledge::{
+    CorpusScope, KnowledgeSelection, KnowledgeSource, MemoryDraft, MemoryRefusal, RecallReceipt,
+};
+use super::knowledge_rail::{
+    KnowledgeDraft, KnowledgeSourceRail, any_ingest_in_flight, with_ingest,
+};
 use super::provider::{
     AvailabilityReasonCode, ProviderCard, card_ready_for_ask, card_unready_reason,
 };
@@ -24,7 +28,7 @@ use super::settings_rows::{ProviderSettingsRows, TuningDraft};
 use super::status::{TurnNotice, TurnRecord};
 use super::texts::AiChatWorkspaceTexts;
 use crate::components::ai_assistant_workspace::{
-    AssistantAccess, AttemptLifecycle, RefusalNextAction,
+    AssistantAccess, AttemptLifecycle, MemoryState, RefusalNextAction,
 };
 use crate::components::ai_chat::AiChatTexts;
 use crate::components::ai_chat::{
@@ -41,6 +45,29 @@ static WORKSPACE_SEQ: AtomicU64 = AtomicU64::new(0);
 /// milliseconds. Deliberately slower than `AiChat`'s own 100 ms transport
 /// poll: this is metadata for the header, not the stream.
 const TURN_POLL_MS: u64 = 200;
+
+/// The ingest ticker's own beat, in milliseconds. Short, because it only
+/// COUNTS; see [`INGEST_TICKS_PER_PHASE`] for what actually advances a phase.
+const INGEST_TICK_MS: u64 = 150;
+
+/// How many ticks one ingest phase is held for before the composite re-reads
+/// the knowledge sources — 900 ms.
+///
+/// Both the duration and the COUNTING are findings rather than taste, and the
+/// browser lane produced them one after the other:
+///
+/// * At 250 ms per rung the first TWO rungs were gone before the proof's
+///   post-click settle finished; its first sample read `clustering`. A phase
+///   display that changes faster than the page can be read is not a phase
+///   display — an actor watching a folder index sees the same rungs flash.
+/// * Lengthening the interval alone was still not enough, because a
+///   FREE-RUNNING interval has an arbitrary phase relative to the click: a
+///   tick landing a millisecond after `walking` was applied consumed the rung
+///   immediately, and the proof's next sample read `indexing`. Counting ticks
+///   and resetting the counter when the reindex starts is what gives every
+///   rung — including the first — its full interval, measured from the action
+///   that caused it.
+const INGEST_TICKS_PER_PHASE: u32 = 6;
 
 /// How long a turn may sit without reaching a terminal lifecycle before the
 /// watchdog fails it, in milliseconds.
@@ -101,7 +128,7 @@ pub enum ReopenReason {
     /// The knowledge selection changed (corpus, query mode or posture). The
     /// session is rebuilt because a turn is opened against a knowledge mix,
     /// but the engine did not change — so the engine-switch wording would be
-    /// false. P6 owns whatever a knowledge change should say instead.
+    /// false. It gets its OWN sentence: see [`reopen_notice`].
     KnowledgeChange,
 }
 
@@ -109,6 +136,33 @@ pub enum ReopenReason {
 /// transcript.
 pub fn reopen_announces_switch(reason: ReopenReason) -> bool {
     matches!(reason, ReopenReason::EngineSwitch)
+}
+
+/// What the transcript should say about a reopen, or `None` for a reopen
+/// with nothing to report.
+///
+/// Three reasons, three answers, and the middle one was the whole point of
+/// the hand-off P4 left here. An ENGINE switch names the engine. A KNOWLEDGE
+/// change names neither engine nor knowledge source — it says the
+/// conversation started over, which is the part the actor can otherwise only
+/// discover by noticing their transcript is gone. BOOT says nothing, because
+/// there was no conversation to reset.
+///
+/// Silence for a knowledge change was P4's deliberate placeholder (its proof
+/// pinned the silence so that whoever added a notice had to come back and
+/// change the assertion, rather than route around it). It cannot stay:
+/// `on_knowledge_select` reopens the session, which CLEARS the transcript,
+/// and a reset that announces nothing is indistinguishable from a bug.
+pub fn reopen_notice(
+    reason: ReopenReason,
+    engine_label: &str,
+    texts: &AiChatWorkspaceTexts,
+) -> Option<String> {
+    match reason {
+        ReopenReason::Boot => None,
+        ReopenReason::EngineSwitch => Some(texts.switched_engine.replace("{engine}", engine_label)),
+        ReopenReason::KnowledgeChange => Some(texts.knowledge_changed.clone()),
+    }
 }
 
 /// Whether a lifecycle is one the turn can never leave.
@@ -300,6 +354,20 @@ pub fn AiChatWorkspace(
     // one notice rather than five a second.
     let cancel_announced: RwSignal<Option<String>> = RwSignal::new(None);
     let draft = TuningDraft::new();
+    // The knowledge rail's two write flows. The DRAFT is held here, not in
+    // the rail, because only the composite learns whether a `remember` was
+    // accepted — and a refused draft must survive its refusal.
+    let knowledge_draft = KnowledgeDraft::new();
+    let receipt: RwSignal<Option<RecallReceipt>> = RwSignal::new(None);
+    let memory_refusal: RwSignal<Option<MemoryRefusal>> = RwSignal::new(None);
+    // Whether the memory store failed to answer. A typed honesty state, not
+    // an absent receipt: an unreachable store must not leave the LAST
+    // receipt on screen, where it reads as a fresh result.
+    let memory_offline: RwSignal<bool> = RwSignal::new(false);
+    // Ticks elapsed in the current ingest phase. Reset by a reindex, so the
+    // phase clock is measured from the ACTION rather than from an interval
+    // that happens to be running.
+    let ingest_ticks: RwSignal<u32> = RwSignal::new(0);
     // The open session, plus the generation that forces a remount. Reading
     // `generation` inside the panel's view closure is what makes an engine
     // switch REPLACE the panel rather than reuse it: `AiChat` seeds its
@@ -378,16 +446,12 @@ pub fn AiChatWorkspace(
         let tuning = draft.to_tuning(&card);
         let knowledge = selection.get_untracked();
         let label = card.capabilities.label.clone();
-        let announces = reopen_announces_switch(reason);
         let refused = id.clone();
         spawn_local(async move {
             let fut = backend.with_value(|b| b.open_session(&id, &knowledge, settings, tuning));
             match fut.await {
                 Ok(transport) => {
-                    let notice = texts
-                        .get_untracked()
-                        .switched_engine
-                        .replace("{engine}", &label);
+                    let notice = reopen_notice(reason, &label, &texts.get_untracked());
                     // `ChatSession::new` starts at `ChatSettings::default()`
                     // — both visibility flags FALSE — and the session, not
                     // the transport, is what drops a `Thinking` or
@@ -408,19 +472,22 @@ pub fn AiChatWorkspace(
                     refusal.try_set(None);
                     // Any reopen resets the conversation, so the previous
                     // annotations describe a transcript that no longer
-                    // exists and are always cleared. Only an ENGINE SWITCH
-                    // announces: a boot has no conversation to have reset,
-                    // and a knowledge change did not change the engine the
-                    // announcement would name.
-                    annotations.try_set(if announces {
-                        vec![TranscriptAnnotation {
-                            anchor: AnnotationAnchor::AtStart,
-                            kind: AnnotationKind::Notice,
-                            body: AnnotationBody::Text(notice),
-                        }]
-                    } else {
-                        Vec::new()
-                    });
+                    // exists and are always cleared. What replaces them is
+                    // `reopen_notice`'s business: a boot says nothing, an
+                    // engine switch names the engine, and a knowledge change
+                    // says the conversation started over WITHOUT naming an
+                    // engine that did not change.
+                    annotations.try_set(
+                        notice
+                            .map(|body| {
+                                vec![TranscriptAnnotation {
+                                    anchor: AnnotationAnchor::AtStart,
+                                    kind: AnnotationKind::Notice,
+                                    body: AnnotationBody::Text(body),
+                                }]
+                            })
+                            .unwrap_or_default(),
+                    );
                     generation.try_update(|g| *g += 1);
                 }
                 Err(e) => {
@@ -650,6 +717,122 @@ pub fn AiChatWorkspace(
         }
     });
 
+    // Re-read the published knowledge sources. Every memory mutation goes
+    // through here rather than patching the local copy, so the rail shows
+    // what the HOST holds — a `set_memory_state` the host refused must not
+    // leave a confirmed badge on screen.
+    let refresh_knowledge = move || {
+        spawn_local(async move {
+            let fut = backend.with_value(|b| b.knowledge());
+            if let Ok(k) = fut.await {
+                sources.try_set(k);
+            }
+        });
+    };
+
+    let on_reindex = Callback::new(move |scope: CorpusScope| {
+        spawn_local(async move {
+            let fut = backend.with_value(|b| b.reindex(&scope));
+            if let Ok(status) = fut.await {
+                // Restart the phase clock, so the FIRST rung gets a full
+                // interval rather than whatever is left of a tick that was
+                // already in flight.
+                ingest_ticks.try_set(0);
+                // The reindex's OWN status is applied, rather than a
+                // `knowledge()` refresh: see `with_ingest` for why a refresh
+                // here makes the first phase unobservable.
+                sources.try_update(|s| {
+                    *s = with_ingest(std::mem::take(s), &scope, status);
+                });
+            }
+        });
+    });
+
+    let on_memory_flags = Callback::new(move |(use_enabled, capture): (bool, bool)| {
+        spawn_local(async move {
+            let fut = backend.with_value(|b| b.set_memory_flags(use_enabled, capture));
+            let _ = fut.await;
+            refresh_knowledge();
+        });
+    });
+
+    let on_recall = Callback::new(move |query: String| {
+        spawn_local(async move {
+            let fut = backend.with_value(|b| b.recall(&query));
+            match fut.await {
+                Ok(r) => {
+                    memory_offline.try_set(false);
+                    receipt.try_set(Some(r));
+                }
+                Err(_) => {
+                    // No fake receipt, and the previous one is dropped: a
+                    // receipt is evidence that a search RAN, so leaving a
+                    // stale one beside an unreachable store would be the
+                    // workspace vouching for a search that did not happen.
+                    memory_offline.try_set(true);
+                    receipt.try_set(None);
+                }
+            }
+        });
+    });
+
+    let on_remember = Callback::new(move |d: MemoryDraft| {
+        spawn_local(async move {
+            let fut = backend.with_value(|b| b.remember(d));
+            match fut.await {
+                Ok(Ok(_)) => {
+                    memory_offline.try_set(false);
+                    memory_refusal.try_set(None);
+                    // Only an ACCEPTED write clears the draft. A refusal
+                    // leaves the actor's own words in the box to edit.
+                    knowledge_draft.remember_body.try_set(String::new());
+                    refresh_knowledge();
+                }
+                Ok(Err(refusal)) => {
+                    memory_offline.try_set(false);
+                    memory_refusal.try_set(Some(refusal));
+                }
+                Err(_) => {
+                    memory_offline.try_set(true);
+                    memory_refusal.try_set(None);
+                }
+            }
+        });
+    });
+
+    let on_memory_state = Callback::new(move |(id, state): (String, MemoryState)| {
+        spawn_local(async move {
+            let fut = backend.with_value(|b| b.set_memory_state(&id, state));
+            let _ = fut.await;
+            refresh_knowledge();
+        });
+    });
+
+    // Advance the ingest ladder only while a corpus is actually mid-ingest,
+    // and only once every `INGEST_TICKS_PER_PHASE` ticks. An unconditional
+    // poll would hold the fixture's phase ladder open forever and log a
+    // `Knowledge` call several times a second on a workspace nobody is
+    // indexing anything on; a free-running one would hand the first rung an
+    // arbitrary fraction of its interval (see the constants).
+    if let Ok(handle) = leptos::leptos_dom::helpers::set_interval_with_handle(
+        move || {
+            if !any_ingest_in_flight(&sources.get_untracked()) {
+                ingest_ticks.try_set(0);
+                return;
+            }
+            let next = ingest_ticks.get_untracked() + 1;
+            if next >= INGEST_TICKS_PER_PHASE {
+                ingest_ticks.try_set(0);
+                refresh_knowledge();
+            } else {
+                ingest_ticks.try_set(next);
+            }
+        },
+        std::time::Duration::from_millis(INGEST_TICK_MS),
+    ) {
+        on_cleanup(move || handle.clear());
+    }
+
     let extra_prefix = id_prefix.clone();
     let settings_extra = ViewFn::from(move || {
         view! {
@@ -714,13 +897,22 @@ pub fn AiChatWorkspace(
                     sources=sources
                     selection=selection
                     on_select=on_knowledge_select
+                    on_reindex=on_reindex
+                    on_memory_flags=on_memory_flags
+                    on_recall=on_recall
+                    on_remember=on_remember
+                    on_memory_state=on_memory_state
+                    receipt=receipt
+                    memory_offline=memory_offline
+                    refusal=memory_refusal
+                    draft=knowledge_draft
                     texts=texts
                     id_prefix=rail_prefix
                 />
                 <div class="h-[32rem] min-h-0 overflow-hidden rounded-box border border-base-300 bg-base-100">
                     {panel}
                 </div>
-                <EvidenceRail turn=turn texts=texts />
+                <EvidenceRail turn=turn selection=selection texts=texts />
             </div>
         </div>
     }

@@ -402,8 +402,19 @@ async fn capabilities_drive_the_settings_form_shape() {
 
 // ── 9 ───────────────────────────────────────────────────────────────────────
 
-/// The knowledge rail's controls name what they DECIDE, and changing one does
-/// not announce a provider switch that never happened.
+/// The knowledge rail's controls name what they DECIDE, and changing one
+/// announces a KNOWLEDGE change rather than a provider switch that never
+/// happened.
+///
+/// P6 note: this test used to assert the transcript stayed EMPTY after a rail
+/// change. That silence was P4's deliberate placeholder, pinned here so that
+/// whoever gave the reopen a sentence had to come back and change this
+/// assertion rather than route around it. P6 gave it one
+/// (`patterns::reopen_notice`), because a rail change REBUILDS the session
+/// and therefore clears the transcript, and a reset that announces nothing is
+/// indistinguishable from a bug. The property being defended is unchanged and
+/// is now stronger: the notice must not be the engine-switch wording, and the
+/// engine must not change.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires demo dev server (cargo xtask test-ai-chat)"]
 async fn knowledge_rail_labels_its_controls_and_never_announces_a_switch() {
@@ -417,10 +428,16 @@ async fn knowledge_rail_labels_its_controls_and_never_announces_a_switch() {
     // about what the control decides.
     let shape = settings_shape(&h).await;
     let labels = shape["railLabels"].as_array().cloned().unwrap_or_default();
+    let controls: Vec<&str> = labels
+        .iter()
+        .map(|row| row["control"].as_str().unwrap_or_default())
+        .collect();
     assert_eq!(
-        labels.len(),
-        3,
-        "corpus scope, query mode and posture each carry a label: {shape}"
+        controls,
+        vec!["corpus-scope", "query-mode", "posture", "remember-kind"],
+        "every labelled rail select, by NAME rather than by count (P6 added \
+         the memory-kind select, and a count would have let a rename pass): \
+         {shape}"
     );
     for row in &labels {
         let control = row["control"].as_str().unwrap_or_default();
@@ -472,10 +489,30 @@ async fn knowledge_rail_labels_its_controls_and_never_announces_a_switch() {
         Some(engine_before.as_str()),
         "a posture change does not change the engine: {after}"
     );
+    let after_roles: Vec<String> = after["roles"]
+        .as_array()
+        .unwrap_or(&vec![])
+        .iter()
+        .map(|v| v.as_str().unwrap_or_default().to_owned())
+        .collect();
+    assert_eq!(
+        after_roles,
+        vec!["notice".to_owned()],
+        "the reopen is announced exactly once: {after}"
+    );
+    let announced = after["texts"]
+        .as_array()
+        .and_then(|a| a.first().cloned())
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .unwrap_or_default();
+    assert_eq!(
+        announced, "Knowledge sources changed, so this conversation started over.",
+        "a knowledge change says the conversation restarted: {after}"
+    );
     assert!(
-        after["roles"].as_array().is_some_and(|r| r.is_empty()),
-        "and it announces NOTHING — the transcript stays empty rather than \
-         claiming a switch: {after}"
+        !announced.contains("Switched"),
+        "and it must NOT be the engine-switch wording, because the engine did \
+         not change: {announced:?}"
     );
     let calls = backend_calls(&h).await;
     assert!(
@@ -497,6 +534,17 @@ async fn knowledge_rail_labels_its_controls_and_never_announces_a_switch() {
         .map(|v| v.as_str().unwrap_or_default().to_owned())
         .collect();
     assert_eq!(roles, vec!["notice".to_owned()], "{switched}");
+    let switched_text = switched["texts"]
+        .as_array()
+        .and_then(|a| a.first().cloned())
+        .and_then(|v| v.as_str().map(str::to_owned))
+        .unwrap_or_default();
+    assert!(
+        switched_text.contains("Switched"),
+        "an ENGINE switch still names the switch, which is what makes the \
+         knowledge notice above a DIFFERENT sentence rather than simply the \
+         only sentence: {switched_text:?}"
+    );
 
     assert_no_browser_errors(&h, "knowledge rail").await;
 }
