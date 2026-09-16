@@ -97,6 +97,7 @@ Each step is scoped per-crate; that scoping **is** the xtask's logic.
 | `test-svg-paint` | `cargo test -p leptos-daisyui-rs --test svg_paint_routing` | Source scan (no browser) over **all of `src/`**: no `fill=`/`stroke=`/`stop-color=`/`flood-color=`/`lighting-color=` may carry a custom property, and any non-literal value must be a `charts::paint` binding. `var()` substitution is not specified to run in a presentation attribute, so a token there degrades to `fill: black` or `stroke: none` **silently, with no console error**. It has to be its own step because `test-lib` runs unit tests only — an integration test not named here never runs in the gate at all. Scoped to `src/charts` originally, which is exactly how it read green over four live defects in `src/components/gantt/` (ldui-1g5, widened in ldui-xxc). |
 | `test-ld-class-coverage` | `cargo test -p leptos-daisyui-rs --test ld_class_stylesheet_coverage` | Source scan (no browser): every literal `ld-*` class a component or demo page emits must be defined by a stylesheet this crate ships (`styles/tokens.css`, `ui_tokens_css()` or `ui_animations_css()`), and the type ramp must work from `styles/tokens.css` alone -- ldui-h7tw's defect class. Registered as its own step in ldui-n1iv: it had been referenced by comments as "the test that asserts it" while running in no lane at all, and failed locally on a stray literal the same day both gates read green. |
 | `test-bare-buttons` | `cargo test -p leptos-daisyui-rs --test no_bare_library_buttons` | Source guard requiring library buttons to carry a framework interaction/style marker or an explicit allowance. |
+| `test-web-sys-features` | `cargo test -p leptos-daisyui-rs --test web_sys_features_cover_usages` | Source scan (no browser) guarding every `web_sys::Type` / `web_sys::console` use in `src/` against a matching Cargo feature — missing features fail as `E0425`/`E0433` and look like "web-sys will not compile". |
 
 ### Pattern-scoped verification
 
@@ -263,7 +264,7 @@ for page-scoped and catalog suite membership and grouping.
 
 ### Gate cadence during a live Beads drain
 
-`cargo xtask verify` is the 17-step native gate listed in the table above.
+`cargo xtask verify` is the 19-step native gate listed in the table above.
 `cargo xtask verify-full` adds every registered browser lane. Report its actual
 summary count; `full_steps()` in `xtask/src/main.rs` defines membership, and a
 remembered total can drift when a lane is added.

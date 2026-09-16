@@ -314,6 +314,25 @@ fn gate_steps() -> Vec<Step> {
             ],
             None,
         ),
+        // Guards every `web_sys::Type` / `web_sys::console` use in `src/`
+        // against a matching Cargo feature on the library's `web-sys`
+        // dependency. Missing features fail as `E0425`/`E0433` ("cannot find
+        // type/module in crate `web_sys`") and read as "web-sys will not
+        // compile" even though the crate itself is fine. Same shape as the
+        // steps above — a native integration test that `test-lib`'s `--lib`
+        // cannot reach.
+        cmd(
+            "test-web-sys-features",
+            "cargo",
+            &[
+                "test",
+                "-p",
+                "leptos-daisyui-rs",
+                "--test",
+                "web_sys_features_cover_usages",
+            ],
+            None,
+        ),
         // Intra-doc links and missing-docs rot silently: the crate sets
         // `#![warn(missing_docs)]` but nothing ran `cargo doc` at all, so 18
         // warnings (broken `crate::...` links, refs to removed symbols, links
@@ -2514,7 +2533,8 @@ mod tests {
                 "test-daisyui5",
                 "test-svg-paint",
                 "test-ld-class-coverage",
-                "test-bare-buttons"
+                "test-bare-buttons",
+                "test-web-sys-features",
             ]
         );
     }
@@ -3227,7 +3247,8 @@ pub fn r() -> f32 { radius::CARD }
                 "test-daisyui5",
                 "test-svg-paint",
                 "test-ld-class-coverage",
-                "test-bare-buttons"
+                "test-bare-buttons",
+                "test-web-sys-features",
             ]
         );
     }

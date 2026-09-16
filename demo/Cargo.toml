@@ -41,6 +41,9 @@ web-sys = { version = "0.3", features = [
     "Navigator",
     "Clipboard",
     "Performance",
+    "KeyboardEvent",
+    "MouseEvent",
+    "console",
 ] }
 
 console_log = "1.0.0"
