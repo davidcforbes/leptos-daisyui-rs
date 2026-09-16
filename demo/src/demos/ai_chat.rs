@@ -10,8 +10,9 @@
 //! kind of defect no English-only page can show.
 
 use super::ai_chat_live::{
-    LiveChatWorkspaceBackend, LivePrefs, LiveRequest, LiveStatus, WorkspaceMode, fetch_backends,
-    load_prefs, request_intent, store_prefs,
+    LiveChatWorkspaceBackend, LivePrefs, LiveRequest, LiveStatus, ModeSwitch, WorkspaceMode,
+    drives_live, fetch_backends, load_prefs, mode_switch_effect, promote_on, request_intent,
+    store_prefs,
 };
 use crate::core::{ContentLayout, Section};
 use leptos::prelude::*;
@@ -328,20 +329,33 @@ fn AiChatPage(
                         backend: list.first().map(|c| c.id.clone()),
                     });
                     status.set(LiveStatus::Opening);
-                    live.set_value(Some(Rc::new(LiveChatWorkspaceBackend::new(
+                    let backend = Rc::new(LiveChatWorkspaceBackend::new(
                         &url, list, status, notice, owner,
-                    ))));
-                    // Mounting the workspace over the live backend is what
-                    // opens the session: the composite asks for settings,
-                    // providers and knowledge, then opens. Until this flips,
-                    // the fixture is what the page is driving.
-                    connected.set(true);
+                    ));
+                    // The SECOND request. Opening the session here, rather
+                    // than letting the mount do it, is what makes a failed
+                    // Connect leave the fixture driving: the swap below
+                    // happens only once a session really exists, and the
+                    // composite adopts that session instead of opening its
+                    // own.
+                    let opened = backend.connect().await.is_ok();
+                    live.set_value(Some(backend));
+                    if opened && promote_on(&status.get_untracked()) {
+                        connected.set(true);
+                    } else {
+                        // Nothing was promoted, so nothing has to be torn
+                        // down; the banner already carries why.
+                        live.set_value(None);
+                    }
                 }
             }
         });
     };
 
-    let disconnect = move |_| {
+    // One teardown, reached from two places: the Disconnect button and the
+    // Fixture radio. A live session must never outlive the mode that named
+    // it — see `mode_switch_effect`.
+    let tear_down = move || {
         if let Some(b) = live.get_value() {
             b.disconnect();
         }
@@ -349,6 +363,14 @@ fn AiChatPage(
         connected.set(false);
         notice.set(None);
         status.set(LiveStatus::Idle);
+    };
+    let disconnect = move |_| tear_down();
+
+    let select_mode = move |value: WorkspaceMode| {
+        if mode_switch_effect(value, connected.get_untracked()) == ModeSwitch::DisconnectFirst {
+            tear_down();
+        }
+        mode.set(value);
     };
 
     let mode_radio = move |value: WorkspaceMode, label: &'static str| {
@@ -364,7 +386,7 @@ fn AiChatPage(
                     class="radio radio-sm"
                     data-ai-chat-live-mode=live_hook
                     prop:checked=move || mode.get() == value
-                    on:change=move |_| mode.set(value)
+                    on:change=move |_| select_mode(value)
                 />
                 <span>{label}</span>
             </label>
@@ -521,11 +543,14 @@ fn AiChatPage(
                         // Disconnect puts the fixture back. The composite is
                         // handed `Rc<dyn ChatWorkspaceBackend>` either way,
                         // so it never sees which one it has.
-                        let live_backend: Option<Rc<dyn ChatWorkspaceBackend>> = connected
-                            .get()
-                            .then(|| live.get_value())
-                            .flatten()
-                            .map(|b| b as Rc<dyn ChatWorkspaceBackend>);
+                        // `drives_live` reads the mode AND the session, so
+                        // `data-ai-chat-mode="fixture"` can never be published
+                        // over a workspace a live backend is driving.
+                        let live_backend: Option<Rc<dyn ChatWorkspaceBackend>> =
+                            drives_live(mode.get(), connected.get())
+                                .then(|| live.get_value())
+                                .flatten()
+                                .map(|b| b as Rc<dyn ChatWorkspaceBackend>);
                         let active = live_backend.unwrap_or_else(|| backend.get_value());
                         view! {
                             <AiChatWorkspace backend=active texts=texts chat_texts=chat_texts />

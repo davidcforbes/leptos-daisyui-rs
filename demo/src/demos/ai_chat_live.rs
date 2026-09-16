@@ -51,7 +51,7 @@ use leptos_daisyui_rs::patterns::{
     ChatPosture, ChatWorkspaceBackend, ChatWorkspaceError, ChatWorkspaceErrorKind, CorpusQueryMode,
     CorpusScope, IngestPhase, IngestStatus, KnowledgeSelection, KnowledgeSource, MemoryDraft,
     MemoryRefusal, ModelSource, ProviderCard, ProviderTuning, RecallReceipt, TuningSchema,
-    TurnRecord, WorkspaceFuture,
+    TurnRecord, WorkspaceFuture, ai_chat_settings_for_card, card_ready_for_ask,
 };
 use leptos_daisyui_rs::utils::use_event_source_fetch;
 use wasm_bindgen::{JsCast, JsValue};
@@ -194,6 +194,52 @@ pub fn request_intent(mode: WorkspaceMode, connect_pressed: bool) -> Option<Live
         (WorkspaceMode::Live, true) => Some(LiveRequest::FetchBackends),
         _ => None,
     }
+}
+
+/// What selecting a mode must do to a session that is already live.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ModeSwitch {
+    /// Nothing to tear down.
+    Nothing,
+    /// A live session is open and the page is leaving Live mode, so the
+    /// session must be closed BEFORE the mode changes.
+    DisconnectFirst,
+}
+
+/// Selecting Fixture while a live session is open must tear it down.
+///
+/// Otherwise the live backend keeps driving the workspace with its SSE reader
+/// attached and its command pump running, while `data-ai-chat-mode` publishes
+/// `fixture` — the page asserting, in a stable hook, the opposite of what it
+/// is doing. The Disconnect control also lives inside the Live section, so it
+/// would be hidden at exactly the moment it is the only way back.
+pub fn mode_switch_effect(target: WorkspaceMode, connected: bool) -> ModeSwitch {
+    match (target, connected) {
+        (WorkspaceMode::Fixture, true) => ModeSwitch::DisconnectFirst,
+        _ => ModeSwitch::Nothing,
+    }
+}
+
+/// Whether the page is driving the LIVE backend — the single rule the
+/// workspace mount and the `data-ai-chat-mode` attribute both read.
+///
+/// Both halves are required. A session that is connected is not being driven
+/// once the actor has selected Fixture, and a mode that says Live means
+/// nothing until a session actually exists.
+pub fn drives_live(mode: WorkspaceMode, connected: bool) -> bool {
+    mode == WorkspaceMode::Live && connected
+}
+
+/// Whether a Connect that reached this status may replace the fixture
+/// workspace with the live one.
+///
+/// ONLY [`LiveStatus::Ready`]. A Connect makes two requests — the backend
+/// list, then the session open — and promoting on the first unmounts the
+/// fixture for a Connect that has not succeeded yet: kill the server between
+/// the two, or have the open rejected, and the page is left showing a live
+/// workspace with no session and no fixture behind it.
+pub fn promote_on(status: &LiveStatus) -> bool {
+    matches!(status, LiveStatus::Ready { .. })
 }
 
 /// Normalizes an operator-typed base URL to an origin this page can build
@@ -412,6 +458,13 @@ struct LiveCore {
     owner: Owner,
     session: RefCell<LiveSession>,
     pump: Cell<bool>,
+    /// The transport of a session opened by an explicit `connect`, waiting
+    /// for the composite to adopt it on its first `open_session`.
+    ///
+    /// This is what lets a failed Connect be reported BEFORE the workspace is
+    /// swapped: the page opens the session itself, and the composite's own
+    /// open then reuses it rather than opening a second one.
+    pending: RefCell<Option<(String, Box<dyn ChatTransport>)>>,
 }
 
 /// A [`ChatWorkspaceBackend`] over a locally-running `editmark-server`.
@@ -449,8 +502,49 @@ impl LiveChatWorkspaceBackend {
                 owner,
                 session: RefCell::new(LiveSession::default()),
                 pump: Cell::new(false),
+                pending: RefCell::new(None),
             }),
         }
+    }
+
+    /// The engine this backend would open first — the same card the composite
+    /// picks, so a session opened here is the session it goes on to adopt.
+    fn first_ready_engine(&self) -> Option<ProviderCard> {
+        let as_of = now_iso();
+        self.core
+            .backends
+            .iter()
+            .map(|c| card_for(c, &as_of))
+            .find(card_ready_for_ask)
+    }
+
+    /// Open the first session as an EXPLICIT, page-driven action.
+    ///
+    /// The composite opens sessions as a consequence of being mounted, so a
+    /// page that mounts it to connect has already replaced the fixture by the
+    /// time an open can fail. Doing the open here inverts that: the workspace
+    /// is swapped only after this returns `Ok`, and the transport is handed to
+    /// the composite's own `open_session` rather than a second session being
+    /// opened for it.
+    pub async fn connect(&self) -> Result<String, ChatWorkspaceError> {
+        let Some(card) = self.first_ready_engine() else {
+            self.core.status.set(LiveStatus::NoBackends);
+            return Err(ChatWorkspaceError {
+                kind: ChatWorkspaceErrorKind::Unavailable,
+                message: "The server advertised no engine this workspace can ask.".to_owned(),
+            });
+        };
+        let engine_id = card.engine.id.clone();
+        let transport = self
+            .open_session(
+                &engine_id,
+                &KnowledgeSelection::default(),
+                ai_chat_settings_for_card(&card),
+                ProviderTuning::default(),
+            )
+            .await?;
+        *self.core.pending.borrow_mut() = Some((engine_id.clone(), transport));
+        Ok(engine_id)
     }
 
     /// Closes the open session and stops the pump and the SSE reader. Safe
@@ -458,6 +552,7 @@ impl LiveChatWorkspaceBackend {
     pub fn disconnect(&self) {
         let core = self.core.clone();
         core.pump.set(false);
+        core.pending.borrow_mut().take();
         let (id, sse) = {
             let mut session = core.session.borrow_mut();
             session.handle = None;
@@ -780,6 +875,18 @@ impl ChatWorkspaceBackend for LiveChatWorkspaceBackend {
         let core = self.core.clone();
         let engine_id = engine_id.to_owned();
         Box::pin(async move {
+            // Adopt the session an explicit Connect already opened, rather
+            // than closing it and opening a second one for the same engine.
+            let adopted = {
+                let mut pending = core.pending.borrow_mut();
+                match pending.as_ref() {
+                    Some((id, _)) if *id == engine_id => pending.take().map(|(_, t)| t),
+                    _ => None,
+                }
+            };
+            if let Some(transport) = adopted {
+                return Ok(transport);
+            }
             core.status.set(LiveStatus::Opening);
             let previous = {
                 let mut session = core.session.borrow_mut();
@@ -942,6 +1049,67 @@ mod tests {
             request_intent(WorkspaceMode::Live, true),
             Some(LiveRequest::FetchBackends)
         );
+    }
+
+    /// I1: the mode attribute must never describe a backend the page is not
+    /// driving, and leaving Live must take the session with it.
+    #[test]
+    fn switching_to_fixture_tears_a_live_session_down() {
+        assert_eq!(
+            mode_switch_effect(WorkspaceMode::Fixture, true),
+            ModeSwitch::DisconnectFirst,
+            "leaving Live with a session open must close it: the Disconnect \
+             control lives inside the Live section and is hidden the moment \
+             the mode changes"
+        );
+        assert_eq!(
+            mode_switch_effect(WorkspaceMode::Fixture, false),
+            ModeSwitch::Nothing
+        );
+        assert_eq!(
+            mode_switch_effect(WorkspaceMode::Live, true),
+            ModeSwitch::Nothing,
+            "re-selecting Live does not disturb the session it is already on"
+        );
+        assert_eq!(
+            mode_switch_effect(WorkspaceMode::Live, false),
+            ModeSwitch::Nothing
+        );
+
+        // And the mount reads BOTH facts, so `fixture` on the hook and a live
+        // backend under the workspace cannot coexist.
+        assert!(!drives_live(WorkspaceMode::Fixture, true));
+        assert!(!drives_live(WorkspaceMode::Live, false));
+        assert!(!drives_live(WorkspaceMode::Fixture, false));
+        assert!(drives_live(WorkspaceMode::Live, true));
+    }
+
+    /// I4: a Connect makes two requests, and only the second one earns the
+    /// swap.
+    #[test]
+    fn a_failed_connect_never_promotes_the_live_workspace() {
+        assert!(promote_on(&LiveStatus::Ready {
+            session_id: "s1".to_owned(),
+            backend: "mock".to_owned(),
+        }));
+        // Every non-Ready status, including the one a backend list produces.
+        for status in [
+            LiveStatus::Idle,
+            LiveStatus::FetchingBackends,
+            LiveStatus::Opening,
+            LiveStatus::NoBackends,
+            LiveStatus::SessionLost,
+            LiveStatus::Unreachable {
+                base: DEFAULT_BASE.to_owned(),
+                detail: "refused".to_owned(),
+            },
+        ] {
+            assert!(
+                !promote_on(&status),
+                "{} must leave the fixture mounted and driving",
+                status.as_id()
+            );
+        }
     }
 
     #[test]

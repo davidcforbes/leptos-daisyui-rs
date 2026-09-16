@@ -30,7 +30,6 @@ web-sys = { version = "0.3", features = [
     # Live mode (demos/ai_chat_live.rs) talks to a local editmark-server over
     # fetch + SSE. Feature unification would supply these through the library,
     # but a crate that CALLS them declares them.
-    "Request",
     "RequestInit",
     "Response",
     "Headers",
