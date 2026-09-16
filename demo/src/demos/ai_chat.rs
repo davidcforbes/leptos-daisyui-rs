@@ -2,17 +2,80 @@
 //! over the seeded in-memory backend, with the language and mode switches
 //! that later phases of this epic extend.
 //!
-//! Sections honesty / lifecycle / knowledge / usage arrive in P5-P7; this
-//! page deliberately ships only what it can demonstrate today.
+//! Sections knowledge / usage / quick actions arrive in P6-P7; this page
+//! deliberately ships only what it can demonstrate today.
 
 use crate::core::{ContentLayout, Section};
 use leptos::prelude::*;
 use leptos_daisyui_rs::components::AiChatTexts;
 use leptos_daisyui_rs::patterns::{
-    AiChatWorkspace, AiChatWorkspaceTexts, ChatWorkspaceBackend, InMemoryChatWorkspaceBackend,
-    ModelSource, ProviderCard, desktop_provider_catalogue,
+    AiChatWorkspace, AiChatWorkspaceTexts, AvailabilityReasonCode, ChatWorkspaceBackend,
+    InMemoryChatWorkspaceBackend, ModelSource, ProviderCard, ai_chat_honesty_state_for_code,
+    ai_chat_honesty_tone, desktop_provider_catalogue,
 };
 use std::rc::Rc;
+
+/// Every availability reason this workspace names, in the order the
+/// vocabulary declares them. `Unknown` is included deliberately: a host code
+/// this crate has never heard of still has to render, and showing that it
+/// does is the point of the row.
+fn every_reason_code() -> Vec<AvailabilityReasonCode> {
+    vec![
+        AvailabilityReasonCode::TierEffectsDisabled,
+        AvailabilityReasonCode::NotArmed,
+        AvailabilityReasonCode::CliMissing,
+        AvailabilityReasonCode::CliVersionUnsupported,
+        AvailabilityReasonCode::CliVersionUntested,
+        AvailabilityReasonCode::CliProtocolUnsupported,
+        AvailabilityReasonCode::CredentialKeyUnavailable,
+        AvailabilityReasonCode::NotSignedIn,
+        AvailabilityReasonCode::SignInExpired,
+        AvailabilityReasonCode::BudgetExhausted,
+        AvailabilityReasonCode::EngineBusy,
+        AvailabilityReasonCode::SignInShapeUnavailable,
+        AvailabilityReasonCode::EngineProcessNotRunning,
+        AvailabilityReasonCode::ModelNotInstalled,
+        AvailabilityReasonCode::Unknown("a_host_code_we_do_not_name".to_owned()),
+    ]
+}
+
+/// The lifecycle ladder, as the id each state publishes on
+/// `data-ai-chat-turn-status` paired with the field that labels it.
+fn lifecycle_rows(texts: &AiChatWorkspaceTexts) -> Vec<(&'static str, String)> {
+    vec![
+        ("admitted", texts.state_admitted.clone()),
+        ("queued", texts.state_queued.clone()),
+        ("running", texts.state_running.clone()),
+        ("validating", texts.state_validating.clone()),
+        ("completed", texts.state_completed.clone()),
+        ("completed", texts.state_declined.clone()),
+        ("denied", texts.state_denied.clone()),
+        ("unavailable", texts.state_unavailable.clone()),
+        ("failed", texts.state_failed.clone()),
+        ("canceled", texts.state_canceled_kept.clone()),
+        ("canceled", texts.state_canceled_discarded.clone()),
+        ("interrupted", texts.state_interrupted.clone()),
+    ]
+}
+
+/// What a finished turn PRODUCED, which is a different question from what
+/// state it is in — and the reason the workspace publishes two hooks.
+fn outcome_rows() -> Vec<(&'static str, &'static str)> {
+    vec![
+        ("completed", "The engine answered the question."),
+        (
+            "declined",
+            "The engine healthily declined, and said what it could not cover. Never an error.",
+        ),
+        (
+            "truncated",
+            "The answer stopped short. Announced, never folded into completed.",
+        ),
+        ("failed", "We tried and it broke."),
+        ("unavailable", "It refused to run."),
+        ("canceled", "The actor stopped it."),
+    ]
+}
 
 /// Which backend the page is driving.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -194,6 +257,93 @@ pub fn AiChatDemo() -> impl IntoView {
                             />
                         }
                     }}
+                </div>
+            </Section>
+
+            <Section title="Honesty" col=true>
+                <p class="text-sm opacity-70">
+                    "Every availability reason is typed, and each one maps to an honesty state, \
+                     a tone and exactly one next step. Three states are kept apart on purpose: \
+                     not_enabled (the account or host says no and nothing was attempted), \
+                     unavailable (something was attempted and refused to run) and failed \
+                     (something was attempted and broke). A host code this vocabulary has never \
+                     seen still renders, carrying the host's own code."
+                </p>
+                <ul
+                    class="grid w-full grid-cols-1 gap-3 lg:grid-cols-2"
+                    data-testid="ai-chat-honesty"
+                >
+                    {move || {
+                        let t = texts.get();
+                        every_reason_code()
+                            .into_iter()
+                            .map(|code| {
+                                let state = ai_chat_honesty_state_for_code(&code);
+                                let tone = ai_chat_honesty_tone(state);
+                                let action = code.next_action().as_str();
+                                let copy = t.availability_reason(&code);
+                                let id = code.as_code().to_owned();
+                                let label = id.clone();
+                                view! {
+                                    <li
+                                        class="flex flex-col gap-1 rounded-box border border-base-300 bg-base-100 p-4"
+                                        data-ai-chat-reason-row=id
+                                    >
+                                        <span class=tone>{state}</span>
+                                        <span class="text-xs font-semibold">{label}</span>
+                                        <span class="text-xs opacity-70">{copy}</span>
+                                        <span class="text-xs opacity-60">{action}</span>
+                                    </li>
+                                }
+                            })
+                            .collect_view()
+                    }}
+                </ul>
+            </Section>
+
+            <Section title="Lifecycle" col=true>
+                <p class="text-sm opacity-70">
+                    "A turn walks admitted, queued, running, validating and then one terminal \
+                     state. The workspace publishes where it is on data-ai-chat-turn-status and \
+                     what it produced on data-ai-chat-outcome, because those are two different \
+                     questions: a completed turn may still have declined or been cut short."
+                </p>
+                <div class="grid w-full grid-cols-1 gap-4 lg:grid-cols-2">
+                    <ul class="flex flex-col gap-2" data-testid="ai-chat-lifecycle">
+                        {move || {
+                            let t = texts.get();
+                            lifecycle_rows(&t)
+                                .into_iter()
+                                .map(|(id, label)| {
+                                    view! {
+                                        <li
+                                            class="flex items-center justify-between gap-3 rounded-box border border-base-300 bg-base-100 p-3 text-sm"
+                                            data-ai-chat-lifecycle-row=id
+                                        >
+                                            <span class="font-mono text-xs opacity-60">{id}</span>
+                                            <span>{label}</span>
+                                        </li>
+                                    }
+                                })
+                                .collect_view()
+                        }}
+                    </ul>
+                    <ul class="flex flex-col gap-2" data-testid="ai-chat-outcomes">
+                        {outcome_rows()
+                            .into_iter()
+                            .map(|(id, meaning)| {
+                                view! {
+                                    <li
+                                        class="flex flex-col gap-1 rounded-box border border-base-300 bg-base-100 p-3 text-sm"
+                                        data-ai-chat-outcome-row=id
+                                    >
+                                        <span class="font-mono text-xs opacity-60">{id}</span>
+                                        <span class="text-xs opacity-70">{meaning}</span>
+                                    </li>
+                                }
+                            })
+                            .collect_view()}
+                    </ul>
                 </div>
             </Section>
 

@@ -20,6 +20,9 @@ mod snapshot_table_page;
 use client_snapshot_list::ClientSnapshotListDemo;
 use leptos::mount::mount_to_body;
 use leptos::prelude::*;
+use leptos_daisyui_rs::patterns::{
+    AvailabilityReasonCode, ChatWorkspaceFault, FixtureClock, SEED_CHAT_NOW_MS,
+};
 use leptos_daisyui_rs::test_mode;
 use leptos_daisyui_rs::tokens::{UiAnimationsPreamble, UiTokensPreamble};
 use snapshot_table_page::{
@@ -89,11 +92,22 @@ fn main() {
             .and_then(|window| window.location().pathname().ok())
             .is_some_and(|path| path.ends_with("/entity-table-external-focus"));
         // The BASE `/ai-chat-fixture` suffix is matched LAST of the ai-chat
-        // family, so a later `/ai-chat-fixture-<fault>` document can be
-        // inserted above it without `ends_with` swallowing it first.
-        let ai_chat_fixture = web_sys::window()
-            .and_then(|window| window.location().pathname().ok())
-            .is_some_and(|path| path.ends_with("/ai-chat-fixture"));
+        // family, so every `/ai-chat-fixture-<fault>` document below is
+        // tested BEFORE it — `ends_with` would otherwise swallow them all,
+        // since each of their suffixes contains the base one.
+        let ai_chat_path = || {
+            web_sys::window()
+                .and_then(|window| window.location().pathname().ok())
+                .unwrap_or_default()
+        };
+        let ai_chat_failures = ai_chat_path().ends_with("/ai-chat-fixture-failures");
+        let ai_chat_groq_no_key = ai_chat_path().ends_with("/ai-chat-fixture-groq-no-key");
+        let ai_chat_tier_disabled = ai_chat_path().ends_with("/ai-chat-fixture-tier-disabled");
+        let ai_chat_ollama = ai_chat_path().ends_with("/ai-chat-fixture-ollama-unreachable");
+        let ai_chat_watchdog = ai_chat_path().ends_with("/ai-chat-fixture-watchdog");
+        let ai_chat_budget = ai_chat_path().ends_with("/ai-chat-fixture-budget-exhausted");
+        let ai_chat_cancel = ai_chat_path().ends_with("/ai-chat-fixture-cancel");
+        let ai_chat_fixture = ai_chat_path().ends_with("/ai-chat-fixture");
         let helpdesk_fixture = web_sys::window()
             .and_then(|window| window.location().pathname().ok())
             .is_some_and(|path| path.ends_with("/helpdesk-fixture"));
@@ -123,6 +137,88 @@ fn main() {
                 } else if helpdesk_fixture_fail_writes {
                     view! {
                         <helpdesk_fixture::HelpdeskFixture fault=leptos_daisyui_rs::patterns::HelpdeskFault::FailWrites />
+                    }
+                        .into_any()
+                } else if ai_chat_failures {
+                    view! { <ai_chat_fixture::AiChatFixture scripted=true /> }.into_any()
+                } else if ai_chat_groq_no_key {
+                    view! {
+                        <ai_chat_fixture::AiChatFixture
+                            scripted=true
+                            fault=ChatWorkspaceFault::KeyMissing {
+                                engine_id: "groq-gpt-oss-120b".to_owned(),
+                            }
+                        />
+                    }
+                        .into_any()
+                } else if ai_chat_tier_disabled {
+                    view! {
+                        <ai_chat_fixture::AiChatFixture fault=ChatWorkspaceFault::TierDisabled />
+                    }
+                        .into_any()
+                } else if ai_chat_ollama {
+                    // TWO workspaces, because one backend carries one fault
+                    // and these two reasons only mean something beside each
+                    // other: a runtime that is not running is a different
+                    // problem, with a different fix, from a model that is
+                    // not installed. Only the first owns the oracle.
+                    view! {
+                        <ai_chat_fixture::AiChatFixture
+                            case="not_running"
+                            fault=ChatWorkspaceFault::EngineUnavailable {
+                                engine_id: "ollama".to_owned(),
+                                code: AvailabilityReasonCode::EngineProcessNotRunning,
+                            }
+                        />
+                        <ai_chat_fixture::AiChatFixture
+                            case="model_missing"
+                            oracle=false
+                            fault=ChatWorkspaceFault::EngineUnavailable {
+                                engine_id: "ollama".to_owned(),
+                                code: AvailabilityReasonCode::ModelNotInstalled,
+                            }
+                        />
+                    }
+                        .into_any()
+                } else if ai_chat_watchdog {
+                    // A clock that jumps 20 s per transport poll crosses the
+                    // 120 000 ms watchdog in seven polls instead of twelve
+                    // hundred; its neighbour's clock never advances at all,
+                    // so the same stalled script must NOT trip. That pair is
+                    // the proof that the threshold is read from the clock.
+                    view! {
+                        <ai_chat_fixture::AiChatFixture
+                            case="fast"
+                            scripted=true
+                            clock=FixtureClock::new(SEED_CHAT_NOW_MS, 20_000)
+                        />
+                        <ai_chat_fixture::AiChatFixture
+                            case="frozen"
+                            oracle=false
+                            scripted=true
+                            clock=FixtureClock::new(SEED_CHAT_NOW_MS, 0)
+                        />
+                    }
+                        .into_any()
+                } else if ai_chat_budget {
+                    view! {
+                        <ai_chat_fixture::AiChatFixture
+                            fault=ChatWorkspaceFault::BudgetExhausted
+                        />
+                    }
+                        .into_any()
+                } else if ai_chat_cancel {
+                    // Same shape as the ollama document: one backend can
+                    // only discard OR keep, so the two cancels are two
+                    // workspaces on one page.
+                    view! {
+                        <ai_chat_fixture::AiChatFixture case="kept" scripted=true />
+                        <ai_chat_fixture::AiChatFixture
+                            case="discarded"
+                            oracle=false
+                            scripted=true
+                            fault=ChatWorkspaceFault::CancelDiscards
+                        />
                     }
                         .into_any()
                 } else if ai_chat_fixture {

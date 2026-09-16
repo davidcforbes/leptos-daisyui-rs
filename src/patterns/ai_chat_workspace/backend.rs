@@ -9,6 +9,7 @@ use std::pin::Pin;
 
 use crate::components::ai_assistant_workspace::{
     AssistantConnection, AssistantMemory, AssistantMemoryEntry, AssistantSettings, MemoryState,
+    RefusalNextAction,
 };
 use crate::components::ai_chat::{ChatSettings, ChatTransport};
 
@@ -58,6 +59,87 @@ pub enum ChatWorkspaceErrorKind {
     Upstream,
     /// The composite asked for something this backend does not implement.
     Unsupported,
+}
+
+impl ChatWorkspaceErrorKind {
+    /// The stable wire string this kind round-trips to, for a `data-*` hook
+    /// or a telemetry field.
+    ///
+    /// Never `{:?}`: `Debug` prints a Rust variant name that a rename is
+    /// free to change, while this string is a contract a proof and a host
+    /// both read. Same idiom as
+    /// [`super::provider::ReasoningEffort::as_str`] and
+    /// `crate::components::ai_chat::AnnotationKind::as_str`.
+    ///
+    /// The match is exhaustive on purpose even though the enum is
+    /// `#[non_exhaustive]`: inside this crate a new kind must break THIS
+    /// function, rather than quietly inherit a catch-all string that a
+    /// proof would then read as a real category.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Unavailable => "unavailable",
+            Self::Refused => "refused",
+            Self::NotFound => "not_found",
+            Self::Network => "network",
+            Self::Upstream => "upstream",
+            Self::Unsupported => "unsupported",
+        }
+    }
+
+    /// Parses a wire string produced by [`Self::as_str`]; anything else is
+    /// `None` rather than a guessed category.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "unavailable" => Some(Self::Unavailable),
+            "refused" => Some(Self::Refused),
+            "not_found" => Some(Self::NotFound),
+            "network" => Some(Self::Network),
+            "upstream" => Some(Self::Upstream),
+            "unsupported" => Some(Self::Unsupported),
+            _ => None,
+        }
+    }
+}
+
+/// A refusal the workspace is currently being honest about, with every
+/// part a renderer needs already typed.
+///
+/// A refusal reaches an actor as three separate facts, and flattening any
+/// of them into the others loses something: the [`ChatWorkspaceErrorKind`]
+/// is the machine-readable category, the
+/// [`super::provider::AvailabilityReasonCode`] is WHY (and is the only
+/// thing that can pick a truthful next step), and the message is the
+/// host's own scrubbed sentence. A composite that kept only the message
+/// would have to string-match it to decide what button to offer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkspaceRefusal {
+    /// The typed category, rendered as the refusal's stable wire string.
+    pub kind: ChatWorkspaceErrorKind,
+    /// Why the request was refused, when the host said. `None` when a
+    /// transport-level error carried no availability reason — the next
+    /// action then falls back to the one that promises nothing.
+    pub code: Option<super::provider::AvailabilityReasonCode>,
+    /// The host's display-safe sentence.
+    pub message: String,
+    /// The engine the refused request named, so a retry can be aimed at it.
+    pub engine_id: Option<String>,
+}
+
+impl WorkspaceRefusal {
+    /// The single next step to offer, derived from the reason code.
+    ///
+    /// A refusal with no code falls back to
+    /// [`RefusalNextAction::NewConversation`] — the one action that neither
+    /// promises a retry will help nor implies settings can fix a problem
+    /// nothing identified. Same choice
+    /// `super::provider::AvailabilityReasonCode::next_action` makes for its
+    /// own unknown code.
+    pub fn next_action(&self) -> RefusalNextAction {
+        self.code
+            .as_ref()
+            .map(|c| c.next_action())
+            .unwrap_or(RefusalNextAction::NewConversation)
+    }
 }
 
 /// Everything the `AiChatWorkspace` composite asks of its host: engine and

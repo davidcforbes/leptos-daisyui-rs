@@ -175,6 +175,85 @@ pub fn lifecycle_id(l: &AttemptLifecycle) -> &'static str {
     }
 }
 
+/// The stable id for what a turn PRODUCED, which is a different question
+/// from what state it is in ([`lifecycle_id`]).
+///
+/// Returns `None` while the turn is still moving: a hook that reported
+/// `"completed"` on an admitted turn would be a promise the turn has not
+/// made yet. The two distinctions [`lifecycle_id`] deliberately collapses
+/// are made here instead, because they are about the RESULT:
+///
+/// * a completed turn that declined to answer is `"declined"` — a healthy
+///   outcome, never an error, so a renderer must not give it an error tone,
+/// * a completed turn the engine cut short carries
+///   [`TurnNotice::Truncated`] and is `"truncated"`, because "completed" on
+///   a half-finished answer is the silent fold this whole phase exists to
+///   prevent.
+///
+/// `Denied` and `Interrupted` keep their own [`lifecycle_id`] strings: they
+/// are producible by a host even though this crate's fixture never mints
+/// them, and folding them into a neighbouring id would misreport them.
+pub fn outcome_id(record: &TurnRecord) -> Option<&'static str> {
+    let truncated = record
+        .notices
+        .iter()
+        .any(|n| matches!(n, TurnNotice::Truncated));
+    Some(match &record.lifecycle {
+        AttemptLifecycle::Completed(answer) => match &answer.outcome {
+            AnswerOutcome::Declined { .. } => "declined",
+            _ if truncated => "truncated",
+            _ => "completed",
+        },
+        AttemptLifecycle::Failed { .. } => "failed",
+        AttemptLifecycle::Unavailable { .. } => "unavailable",
+        AttemptLifecycle::Canceled { .. } => "canceled",
+        AttemptLifecycle::Denied { .. } => "denied",
+        AttemptLifecycle::Interrupted { .. } => "interrupted",
+        AttemptLifecycle::Unknown(_) => "unknown",
+        AttemptLifecycle::Admitted
+        | AttemptLifecycle::Queued
+        | AttemptLifecycle::Running
+        | AttemptLifecycle::Validating => return None,
+    })
+}
+
+/// The TYPED kind of a turn's failure, taken from the lifecycle's own
+/// reason code, or `None` for a turn that did not fail.
+///
+/// The code comes off the record, never from matching words in a message:
+/// a renderer that string-matched `"expired"` out of a diagnostic would
+/// call an untested CLI version an expired credential, which is exactly
+/// the confusion `AvailabilityReasonCode::is_credential_failure` exists to
+/// prevent.
+///
+/// Both terminal shapes are included because both are failures to the
+/// actor: `Failed` is "we tried and it broke", `Unavailable` is "it refused
+/// to run". They stay distinguishable through [`outcome_id`].
+pub fn failure_kind(record: &TurnRecord) -> Option<&str> {
+    match &record.lifecycle {
+        AttemptLifecycle::Failed { reason } | AttemptLifecycle::Unavailable { reason } => {
+            Some(reason.code.as_str())
+        }
+        _ => None,
+    }
+}
+
+/// The material limitations a DECLINED answer reported, or an empty slice.
+///
+/// Read off the lifecycle's own outcome rather than
+/// [`TurnRecord::outcome`], for the same reason [`completed_answer`] is: a
+/// canceled turn also populates that field, and a cancel has no
+/// limitations to list.
+pub fn declined_limitations(record: &TurnRecord) -> &[String] {
+    match &record.lifecycle {
+        AttemptLifecycle::Completed(answer) => match &answer.outcome {
+            AnswerOutcome::Declined { limitations, .. } => limitations.as_slice(),
+            _ => &[],
+        },
+        _ => &[],
+    }
+}
+
 /// The answer text a turn may be presented with as a FINISHED answer, or
 /// `None`.
 ///

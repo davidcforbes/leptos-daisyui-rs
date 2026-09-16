@@ -189,6 +189,17 @@ pub enum AvailabilityReasonCode {
     EngineBusy,
     /// This engine's sign-in mechanism is itself unavailable.
     SignInShapeUnavailable,
+    /// The engine's local runtime process is not running, so nothing is
+    /// listening to answer. Deliberately NOT named after any one engine: it
+    /// is the shape every locally hosted runtime has (a model server the
+    /// actor starts themselves), and naming it `Ollama…` would force the
+    /// next local runtime to invent a synonym.
+    EngineProcessNotRunning,
+    /// The engine is reachable but the requested model is not installed on
+    /// this machine. Distinct from [`Self::EngineProcessNotRunning`]: the
+    /// runtime answered, and the fix is to fetch a model rather than to
+    /// start a process.
+    ModelNotInstalled,
     /// A host reason this vocabulary does not name.
     Unknown(String),
 }
@@ -211,6 +222,8 @@ impl AvailabilityReasonCode {
             "budget_exhausted" => Self::BudgetExhausted,
             "engine_busy" => Self::EngineBusy,
             "sign_in_shape_unavailable" => Self::SignInShapeUnavailable,
+            "engine_process_not_running" => Self::EngineProcessNotRunning,
+            "model_not_installed" => Self::ModelNotInstalled,
             other => Self::Unknown(other.to_owned()),
         }
     }
@@ -231,6 +244,8 @@ impl AvailabilityReasonCode {
             Self::BudgetExhausted => "budget_exhausted",
             Self::EngineBusy => "engine_busy",
             Self::SignInShapeUnavailable => "sign_in_shape_unavailable",
+            Self::EngineProcessNotRunning => "engine_process_not_running",
+            Self::ModelNotInstalled => "model_not_installed",
             Self::Unknown(s) => s.as_str(),
         }
     }
@@ -256,7 +271,12 @@ impl AvailabilityReasonCode {
     /// wait). The CLI/protocol environment reasons and
     /// [`AvailabilityReasonCode::SignInShapeUnavailable`] also map to
     /// `RetryLater`: none of them is fixed by a settings edit, so offering
-    /// `OpenSettings` would be dishonest. [`AvailabilityReasonCode::TierEffectsDisabled`]
+    /// `OpenSettings` would be dishonest.
+    /// [`AvailabilityReasonCode::EngineProcessNotRunning`] and
+    /// [`AvailabilityReasonCode::ModelNotInstalled`] map to `RetryLater` for
+    /// the same reason: both are fixed OUTSIDE this workspace (start the
+    /// runtime, fetch the model), and a settings pane that cannot do either
+    /// must not be offered as the remedy. [`AvailabilityReasonCode::TierEffectsDisabled`]
     /// maps to `OpenSettings` because that is where an actor checks
     /// tier/plan state, even though nothing there lifts the restriction
     /// directly. An unrecognized reason maps to
@@ -275,7 +295,9 @@ impl AvailabilityReasonCode {
             | Self::CliVersionUnsupported
             | Self::CliVersionUntested
             | Self::CliProtocolUnsupported
-            | Self::SignInShapeUnavailable => RefusalNextAction::RetryLater,
+            | Self::SignInShapeUnavailable
+            | Self::EngineProcessNotRunning
+            | Self::ModelNotInstalled => RefusalNextAction::RetryLater,
             Self::TierEffectsDisabled => RefusalNextAction::OpenSettings,
             Self::Unknown(_) => RefusalNextAction::NewConversation,
         }

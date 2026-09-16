@@ -705,3 +705,426 @@ fn a_pinned_card_publishes_exactly_its_pinned_model() {
         "an unpinned catalogue is untouched"
     );
 }
+
+// ── P5: honesty, outcome, failure shape and usage ───────────────────────────
+
+/// Drive one turn on claude-code to a terminal lifecycle and return its
+/// record. `script` of `None` leaves the engine's own seeded script in place.
+///
+/// Uses the REAL fixture rather than a hand-built `TurnRecord`: the point of
+/// every assertion below is what a host's own pipeline produces, and a
+/// literal record would let a wrong fixture and a wrong renderer agree.
+#[cfg(feature = "test-mode")]
+fn turn_record(script: Option<TurnScript>, prompt: &str) -> TurnRecord {
+    use crate::components::ai_chat::{ChatRequest, ChatSession};
+
+    let mut backend = InMemoryChatWorkspaceBackend::seeded();
+    if let Some(script) = script {
+        backend = backend.with_script("claude-code", PromptMatcher::Any, script);
+    }
+    let transport = now(backend.open_session(
+        "claude-code",
+        &KnowledgeSelection {
+            posture: ChatPosture::Assistant,
+            ..KnowledgeSelection::default()
+        },
+        Default::default(),
+        ProviderTuning::default(),
+    ))
+    .expect("the seeded fixture opens a session");
+    let mut session = ChatSession::new(transport);
+    session
+        .send(ChatRequest {
+            prompt: prompt.to_owned(),
+            attachments: Vec::new(),
+            page_context: None,
+        })
+        .expect("send");
+    let id = backend.current_turn_id().expect("a live turn after send");
+    for _ in 0..80 {
+        session.poll();
+    }
+    now(backend.turn(&id)).expect("the record survives the turn")
+}
+
+#[test]
+fn not_enabled_and_failed_are_two_different_answers_to_two_different_questions() {
+    // The account withheld the effect: nothing was attempted.
+    let (tier, reason) = honesty_for(true, None, None, false);
+    assert_eq!(tier, "not_enabled");
+    assert_eq!(reason.as_deref(), Some("tier_effects_disabled"));
+
+    // Something was attempted and broke. Different hook value AND different
+    // tone — a proof that compared only the hook could pass while both
+    // states looked identical on screen.
+    let failed = TurnRecord {
+        id: "t".into(),
+        engine_id: "claude-code".into(),
+        lifecycle: AttemptLifecycle::Failed {
+            reason: AssistantReason {
+                code: "engine_error".into(),
+                message: "the engine stopped".into(),
+            },
+        },
+        usage: None,
+        tokens_per_sec: None,
+        evidence: None,
+        outcome: None,
+        notices: vec![],
+    };
+    let (state, code) = honesty_for(false, None, Some(&failed), false);
+    assert_eq!(state, "failed");
+    assert_eq!(code.as_deref(), Some("engine_error"));
+    assert_ne!(honesty_tone("not_enabled"), honesty_tone("failed"));
+
+    // And a tier denial outranks the engine's own verdict: a broken card
+    // under a denied tier still reads `not_enabled`, because the account is
+    // the thing the actor has to fix first.
+    let (state, code) = honesty_for(true, None, Some(&failed), false);
+    assert_eq!(state, "not_enabled");
+    assert_eq!(code.as_deref(), Some("tier_effects_disabled"));
+}
+
+#[test]
+fn every_availability_code_has_a_state_and_the_three_credential_ones_differ() {
+    let codes = [
+        AvailabilityReasonCode::TierEffectsDisabled,
+        AvailabilityReasonCode::NotArmed,
+        AvailabilityReasonCode::CliMissing,
+        AvailabilityReasonCode::CliVersionUnsupported,
+        AvailabilityReasonCode::CliVersionUntested,
+        AvailabilityReasonCode::CliProtocolUnsupported,
+        AvailabilityReasonCode::CredentialKeyUnavailable,
+        AvailabilityReasonCode::NotSignedIn,
+        AvailabilityReasonCode::SignInExpired,
+        AvailabilityReasonCode::BudgetExhausted,
+        AvailabilityReasonCode::EngineBusy,
+        AvailabilityReasonCode::SignInShapeUnavailable,
+        AvailabilityReasonCode::EngineProcessNotRunning,
+        AvailabilityReasonCode::ModelNotInstalled,
+        AvailabilityReasonCode::Unknown("future".into()),
+    ];
+    let texts = AiChatWorkspaceTexts::default();
+    for code in &codes {
+        let state = honesty_state_for_code(code);
+        assert!(!state.is_empty(), "{code:?} has no honesty state");
+        assert!(
+            !honesty_tone(state).is_empty(),
+            "{state} has no tone classes"
+        );
+        assert!(
+            !texts.availability_reason(code).trim().is_empty(),
+            "{code:?} has no copy"
+        );
+        let (reported, reason) = honesty_for(false, Some(code), None, false);
+        assert_eq!(reported, state);
+        assert_eq!(reason.as_deref(), Some(code.as_code()));
+    }
+    // The three credential fixes are three different actions, so they must
+    // not collapse into one state.
+    let credential = [
+        honesty_state_for_code(&AvailabilityReasonCode::CredentialKeyUnavailable),
+        honesty_state_for_code(&AvailabilityReasonCode::NotSignedIn),
+        honesty_state_for_code(&AvailabilityReasonCode::SignInExpired),
+    ];
+    let mut sorted = credential.to_vec();
+    sorted.sort_unstable();
+    sorted.dedup();
+    assert_eq!(sorted.len(), 3, "{credential:?}");
+    // And a local runtime that is not running is not the same problem as a
+    // model that is not installed, even though both read `unavailable`.
+    assert_ne!(
+        AvailabilityReasonCode::EngineProcessNotRunning.as_code(),
+        AvailabilityReasonCode::ModelNotInstalled.as_code()
+    );
+    assert_ne!(
+        texts.reason_engine_process_not_running,
+        texts.reason_model_not_installed
+    );
+}
+
+#[test]
+fn the_two_new_local_runtime_codes_round_trip_and_ask_for_no_credential() {
+    for code in [
+        AvailabilityReasonCode::EngineProcessNotRunning,
+        AvailabilityReasonCode::ModelNotInstalled,
+    ] {
+        assert_eq!(AvailabilityReasonCode::parse(code.as_code()), code);
+        assert!(
+            !code.is_credential_failure(),
+            "{code:?} is an environment fact, never a stale credential"
+        );
+        assert_eq!(
+            code.next_action(),
+            crate::components::ai_assistant_workspace::RefusalNextAction::RetryLater,
+            "neither is fixed in a settings pane"
+        );
+    }
+}
+
+#[test]
+#[cfg(feature = "test-mode")]
+fn a_declined_answer_is_a_healthy_completion_that_lists_its_limitations() {
+    let record = turn_record(
+        Some(TurnScript::new().declined(
+            vec![
+                "The court calendar was not indexed.".to_owned(),
+                "No filing deadline was published.".to_owned(),
+            ],
+            "2026-01-01T00:00:00Z",
+        )),
+        "decline",
+    );
+    assert_eq!(lifecycle_id(&record.lifecycle), "completed");
+    assert_eq!(outcome_id(&record), Some("declined"));
+    assert_eq!(
+        failure_kind(&record),
+        None,
+        "a decline is not a failure and must never carry a failure kind"
+    );
+    assert_eq!(declined_limitations(&record).len(), 2);
+    let (state, _) = honesty_for(false, None, Some(&record), false);
+    assert_eq!(
+        state, "ready",
+        "declining healthily is not an honesty fault"
+    );
+}
+
+#[test]
+#[cfg(feature = "test-mode")]
+fn a_truncated_completion_never_reads_as_a_finished_one() {
+    let truncated = turn_record(
+        Some(TurnScript::new().text_words("half an answer").truncated()),
+        "truncate",
+    );
+    assert_eq!(lifecycle_id(&truncated.lifecycle), "completed");
+    assert_eq!(outcome_id(&truncated), Some("truncated"));
+    assert_eq!(declined_limitations(&truncated).len(), 0);
+
+    // Negative control: the same script without the truncation mark.
+    let whole = turn_record(
+        Some(TurnScript::new().text_words("a whole answer")),
+        "whole",
+    );
+    assert_eq!(outcome_id(&whole), Some("completed"));
+}
+
+#[test]
+#[cfg(feature = "test-mode")]
+fn a_failure_kind_is_the_records_own_code_and_untested_is_not_expired() {
+    let untested = turn_record(
+        Some(TurnScript::new().fail(AvailabilityReasonCode::CliVersionUntested)),
+        "fail",
+    );
+    assert_eq!(failure_kind(&untested), Some("cli_version_untested"));
+    assert_eq!(outcome_id(&untested), Some("unavailable"));
+    assert!(
+        !AvailabilityReasonCode::CliVersionUntested.is_credential_failure(),
+        "an untested CLI version is an environment fact"
+    );
+
+    // The negative control on the same shape: an expired sign-in IS a
+    // credential failure and carries a different code entirely.
+    let expired = turn_record(
+        Some(TurnScript::new().fail(AvailabilityReasonCode::SignInExpired)),
+        "expired",
+    );
+    assert_eq!(failure_kind(&expired), Some("sign_in_expired"));
+    assert_ne!(failure_kind(&untested), failure_kind(&expired));
+    assert!(AvailabilityReasonCode::SignInExpired.is_credential_failure());
+
+    // A crash is `Failed`, not `Unavailable`: we tried and it broke, rather
+    // than it refusing to run.
+    let errored = turn_record(Some(TurnScript::new().error("the engine stopped")), "error");
+    assert_eq!(failure_kind(&errored), Some("engine_error"));
+    assert_eq!(outcome_id(&errored), Some("failed"));
+}
+
+#[test]
+#[cfg(feature = "test-mode")]
+fn usage_keeps_plan_and_metered_apart_while_reasoning_stays_inside_output() {
+    // claude-code's own seeded script reports a PRICED turn, so every token
+    // lands on the metered side and the plan side stays empty.
+    let record = turn_record(None, "the intake checklist conflict check");
+    let figures = usage_figures(&record).expect("the seeded script reports usage");
+    assert_eq!(figures.metered_tokens, 812 + 96);
+    assert_eq!(
+        figures.plan_tokens, 0,
+        "nothing leaks across the split: {figures:?}"
+    );
+    assert_eq!(figures.reasoning_tokens, 41);
+    assert_eq!(figures.output_tokens, 96);
+    assert!(
+        figures.reasoning_tokens <= figures.output_tokens,
+        "{figures:?}"
+    );
+
+    // The negative control on the other side of the split: codex-cli's
+    // script reports no cost, so the SAME four hooks move to the plan side
+    // and the metered side is the empty one.
+    let plan = {
+        use crate::components::ai_chat::{ChatRequest, ChatSession};
+        let backend = InMemoryChatWorkspaceBackend::seeded();
+        let transport = now(backend.open_session(
+            "codex-cli",
+            &KnowledgeSelection {
+                posture: ChatPosture::Assistant,
+                ..KnowledgeSelection::default()
+            },
+            Default::default(),
+            ProviderTuning::default(),
+        ))
+        .expect("open codex-cli");
+        let mut session = ChatSession::new(transport);
+        session
+            .send(ChatRequest {
+                prompt: "anything".to_owned(),
+                attachments: Vec::new(),
+                page_context: None,
+            })
+            .expect("send");
+        let id = backend.current_turn_id().expect("a live turn");
+        for _ in 0..80 {
+            session.poll();
+        }
+        now(backend.turn(&id)).expect("record")
+    };
+    let plan_figures = usage_figures(&plan).expect("codex reports usage too");
+    assert_eq!(plan_figures.plan_tokens, 240 + 44);
+    assert_eq!(plan_figures.metered_tokens, 0);
+    assert!(plan_figures.reasoning_tokens <= plan_figures.output_tokens);
+
+    // A turn with no usage publishes nothing rather than zeroes, which would
+    // read as "this turn cost nothing".
+    let empty = TurnRecord {
+        usage: None,
+        ..record.clone()
+    };
+    assert_eq!(usage_figures(&empty), None);
+}
+
+#[test]
+fn a_cancel_notice_tells_the_actor_which_cancel_they_got() {
+    let texts = AiChatWorkspaceTexts::default();
+    let kept = cancel_notice(&AttemptLifecycle::Canceled { discarded: false }, &texts)
+        .expect("a kept cancel is announced");
+    let discarded = cancel_notice(&AttemptLifecycle::Canceled { discarded: true }, &texts)
+        .expect("a discarded cancel is announced");
+    assert_ne!(kept, discarded, "the two cancels leave different things");
+    assert_eq!(
+        cancel_notice(&AttemptLifecycle::Running, &texts),
+        None,
+        "a turn that was not canceled announces no cancel"
+    );
+}
+
+#[test]
+fn the_watchdog_failure_kind_is_its_own_thing() {
+    assert_eq!(WATCHDOG_FAILURE_KIND, "watchdog");
+    assert_eq!(
+        AvailabilityReasonCode::parse(WATCHDOG_FAILURE_KIND),
+        AvailabilityReasonCode::Unknown("watchdog".into()),
+        "the watchdog is not an availability reason: nothing said the engine \
+         was unavailable, this workspace simply stopped waiting"
+    );
+    assert_eq!(
+        header_failure_kind(None, true).as_deref(),
+        Some("watchdog"),
+        "a timed-out turn reports a failure even though its own record is \
+         still Running — which is exactly why the flag cannot live on the \
+         record"
+    );
+    assert_eq!(header_failure_kind(None, false), None);
+    let (state, reason) = honesty_for(false, None, None, true);
+    assert_eq!(state, "failed");
+    assert_eq!(reason.as_deref(), Some("watchdog"));
+}
+
+#[test]
+fn a_workspace_refusal_derives_its_next_step_and_promises_nothing_without_one() {
+    use crate::components::ai_assistant_workspace::RefusalNextAction;
+
+    let keyless = WorkspaceRefusal {
+        kind: ChatWorkspaceErrorKind::Refused,
+        code: Some(AvailabilityReasonCode::CredentialKeyUnavailable),
+        message: "no key".into(),
+        engine_id: Some("groq-gpt-oss-120b".into()),
+    };
+    assert_eq!(keyless.next_action(), RefusalNextAction::OpenSettings);
+    assert_eq!(keyless.kind.as_str(), "refused");
+
+    let untyped = WorkspaceRefusal {
+        kind: ChatWorkspaceErrorKind::Network,
+        code: None,
+        message: "no answer".into(),
+        engine_id: None,
+    };
+    assert_eq!(
+        untyped.next_action(),
+        RefusalNextAction::NewConversation,
+        "with nothing identified, the honest offer is the one that neither \
+         promises a retry will help nor implies settings can fix it"
+    );
+    assert_eq!(untyped.kind.as_str(), "network");
+}
+
+#[test]
+fn every_error_kind_round_trips_its_wire_string() {
+    let all = [
+        ChatWorkspaceErrorKind::Unavailable,
+        ChatWorkspaceErrorKind::Refused,
+        ChatWorkspaceErrorKind::NotFound,
+        ChatWorkspaceErrorKind::Network,
+        ChatWorkspaceErrorKind::Upstream,
+        ChatWorkspaceErrorKind::Unsupported,
+    ];
+    let mut codes: Vec<&str> = Vec::new();
+    for kind in &all {
+        assert_eq!(
+            ChatWorkspaceErrorKind::parse(kind.as_str()).as_ref(),
+            Some(kind)
+        );
+        codes.push(kind.as_str());
+    }
+    codes.sort_unstable();
+    codes.dedup();
+    assert_eq!(codes.len(), all.len(), "each kind needs its own string");
+    assert_eq!(ChatWorkspaceErrorKind::parse("Refused"), None);
+}
+
+#[test]
+#[cfg(feature = "test-mode")]
+fn a_watchdog_failure_never_renders_as_the_actor_pressing_stop() {
+    // `ChatSession::fail_turn` reaches the transport through `cancel()`, so
+    // the host's record of a timed-out turn comes back CANCELED. Reading
+    // that record naively publishes `outcome=canceled` and
+    // `cancel-discarded=false` — telling the actor they stopped a turn they
+    // never touched.
+    let canceled = canceled_record(false);
+    assert!(matches!(
+        canceled.lifecycle,
+        AttemptLifecycle::Canceled { discarded: false }
+    ));
+
+    assert_eq!(
+        header_outcome_id(Some(&canceled), true),
+        Some("failed"),
+        "the watchdog owns the outcome of a turn it failed"
+    );
+    assert_eq!(
+        header_cancel_discarded(Some(&canceled), true),
+        None,
+        "and publishes no cancel at all, rather than `false`"
+    );
+
+    // The negative control on the same record: an actor's own cancel, with
+    // the watchdog silent, still reports exactly what it is.
+    assert_eq!(header_outcome_id(Some(&canceled), false), Some("canceled"));
+    assert_eq!(header_cancel_discarded(Some(&canceled), false), Some(false));
+    let discarded = canceled_record(true);
+    assert_eq!(
+        header_cancel_discarded(Some(&discarded), false),
+        Some(true),
+        "and the two cancels stay distinguishable"
+    );
+}

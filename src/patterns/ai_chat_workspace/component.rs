@@ -12,16 +12,20 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use wasm_bindgen_futures::spawn_local;
 
-use super::backend::{ChatWorkspaceBackend, ChatWorkspaceErrorKind};
+use super::backend::{ChatWorkspaceBackend, ChatWorkspaceErrorKind, WorkspaceRefusal};
 use super::engine_header::EngineHeader;
 use super::evidence_rail::EvidenceRail;
 use super::knowledge::{KnowledgeSelection, KnowledgeSource};
 use super::knowledge_rail::KnowledgeSourceRail;
-use super::provider::{ProviderCard, card_ready_for_ask};
+use super::provider::{
+    AvailabilityReasonCode, ProviderCard, card_ready_for_ask, card_unready_reason,
+};
 use super::settings_rows::{ProviderSettingsRows, TuningDraft};
 use super::status::{TurnNotice, TurnRecord};
 use super::texts::AiChatWorkspaceTexts;
-use crate::components::ai_assistant_workspace::AttemptLifecycle;
+use crate::components::ai_assistant_workspace::{
+    AssistantAccess, AttemptLifecycle, RefusalNextAction,
+};
 use crate::components::ai_chat::AiChatTexts;
 use crate::components::ai_chat::{
     AiChat, AnnotationAnchor, AnnotationBody, AnnotationKind, Capabilities, ChatSession,
@@ -122,6 +126,23 @@ pub fn notice_text(notice: &TurnNotice, texts: &AiChatWorkspaceTexts) -> (&'stat
     }
 }
 
+/// The transcript notice a CANCELED turn earns, or `None` for a turn that
+/// was not canceled.
+///
+/// The two cancels are not one event with a flag: a kept partial leaves the
+/// actor something to read and a discarded one leaves them nothing, so they
+/// get two sentences. Returning `None` for every other lifecycle is what
+/// keeps the composite from announcing a cancel that never happened.
+pub fn cancel_notice(lifecycle: &AttemptLifecycle, texts: &AiChatWorkspaceTexts) -> Option<String> {
+    match lifecycle {
+        AttemptLifecycle::Canceled { discarded: true } => {
+            Some(texts.canceled_discarded_notice.clone())
+        }
+        AttemptLifecycle::Canceled { discarded: false } => Some(texts.canceled_kept_notice.clone()),
+        _ => None,
+    }
+}
+
 /// The `Capabilities` one card should PUBLISH to the generic panel, which is
 /// not always the `Capabilities` it carries.
 ///
@@ -213,6 +234,19 @@ pub fn AiChatWorkspace(
     /// threshold can never be crossed.
     #[prop(optional, into)]
     now_ms: Option<Signal<i64>>,
+    /// Invoked when the actor presses a refusal's single next-step button,
+    /// with the typed action that button offered.
+    ///
+    /// `RefusalNextAction::RetryLater` and
+    /// `RefusalNextAction::NewConversation` are also acted on HERE — the
+    /// composite owns reopening a session, so a button that only notified
+    /// the host would do nothing in the common case.
+    /// `RefusalNextAction::OpenSettings` is notify-only: the settings an
+    /// actor must fix (a credential, a plan) live in the host application,
+    /// and a workspace that pretended to open them would be lying about
+    /// what the click did.
+    #[prop(optional, into)]
+    on_refusal_action: Option<Callback<RefusalNextAction>>,
     /// Extra classes merged onto the root.
     #[prop(optional, into)]
     class: &'static str,
@@ -233,7 +267,19 @@ pub fn AiChatWorkspace(
         RwSignal::new(initial_knowledge.unwrap_or_default());
     let annotations: RwSignal<Vec<TranscriptAnnotation>> = RwSignal::new(Vec::new());
     let turn: RwSignal<Option<TurnRecord>> = RwSignal::new(None);
-    let refusal: RwSignal<Option<String>> = RwSignal::new(None);
+    let refusal: RwSignal<Option<WorkspaceRefusal>> = RwSignal::new(None);
+    // Whether the actor's reasoning tier denies every effect. Read from
+    // `settings()` at boot, BEFORE the first session is opened, because a
+    // denied tier must stop the open rather than explain it afterwards.
+    let tier_denied: RwSignal<bool> = RwSignal::new(false);
+    // Whether the watchdog has failed the live turn. Separate from the
+    // record: `fail_turn` acts on the `ChatSession`, so a stalled turn's own
+    // lifecycle never leaves `Running` and the record can never carry this.
+    let timed_out: RwSignal<bool> = RwSignal::new(false);
+    // The turn id whose cancellation has already been announced, so a
+    // terminal lifecycle the composite re-reads on every 200 ms tick becomes
+    // one notice rather than five a second.
+    let cancel_announced: RwSignal<Option<String>> = RwSignal::new(None);
     let draft = TuningDraft::new();
     // The open session, plus the generation that forces a remount. Reading
     // `generation` inside the panel's view closure is what makes an engine
@@ -271,6 +317,33 @@ pub fn AiChatWorkspace(
         });
     };
 
+    // The typed refusal for a card the workspace will not open a session
+    // against, which is a DIFFERENT event from a session that was opened and
+    // then failed. The reason code comes off the card (or off the tier), so
+    // the next-step button is derived rather than guessed.
+    let refuse_card = move |id: &str| {
+        let t = texts.get_untracked();
+        let (code, message) = if tier_denied.get_untracked() {
+            let code = AvailabilityReasonCode::TierEffectsDisabled;
+            let message = t.availability_reason(&code);
+            (Some(code), message)
+        } else {
+            match card_for(id).and_then(|c| card_unready_reason(&c)) {
+                Some(code) => {
+                    let message = t.availability_reason(&code);
+                    (Some(code), message)
+                }
+                None => (None, t.not_enabled.clone()),
+            }
+        };
+        refusal.set(Some(WorkspaceRefusal {
+            kind: ChatWorkspaceErrorKind::Refused,
+            code,
+            message,
+            engine_id: Some(id.to_owned()),
+        }));
+    };
+
     // Open (or reopen) a session against one engine.
     //
     // A refused open is an honesty state, not a reset: the previous session
@@ -287,6 +360,7 @@ pub fn AiChatWorkspace(
         let knowledge = selection.get_untracked();
         let label = card.capabilities.label.clone();
         let announces = reopen_announces_switch(reason);
+        let refused = id.clone();
         spawn_local(async move {
             let fut = backend.with_value(|b| b.open_session(&id, &knowledge, settings, tuning));
             match fut.await {
@@ -310,6 +384,8 @@ pub fn AiChatWorkspace(
                     turn.try_set(None);
                     watched.try_set(None);
                     announced.try_set(0);
+                    timed_out.try_set(false);
+                    cancel_announced.try_set(None);
                     refusal.try_set(None);
                     // Any reopen resets the conversation, so the previous
                     // annotations describe a transcript that no longer
@@ -329,11 +405,17 @@ pub fn AiChatWorkspace(
                     generation.try_update(|g| *g += 1);
                 }
                 Err(e) => {
-                    let message = match e.kind {
-                        ChatWorkspaceErrorKind::Unavailable => e.message,
-                        _ => e.message,
-                    };
-                    refusal.try_set(Some(message));
+                    // The card's own reason is what picks a truthful next
+                    // step; the error kind alone cannot tell "sign in again"
+                    // from "wait". A transport error with no card reason
+                    // falls back to the action that promises nothing.
+                    let code = card_for(&refused).and_then(|c| card_unready_reason(&c));
+                    refusal.try_set(Some(WorkspaceRefusal {
+                        kind: e.kind,
+                        code,
+                        message: e.message,
+                        engine_id: Some(refused),
+                    }));
                 }
             }
         });
@@ -350,6 +432,11 @@ pub fn AiChatWorkspace(
                         .map(|r| format!("{}: {r}", b.policy_label))
                 });
                 budget.try_set(line);
+                // The tier verdict is read BEFORE the first open below, and
+                // it outranks every card: an account that may not use
+                // assistant effects at all must not have a session opened
+                // for it just because one engine looks healthy.
+                tier_denied.try_set(matches!(s.reasoning_tier, AssistantAccess::Denied { .. }));
             }
             let fut = backend.with_value(|b| b.knowledge());
             if let Ok(k) = fut.await {
@@ -364,9 +451,16 @@ pub fn AiChatWorkspace(
                 .and_then(|id| list.iter().find(|c| c.engine.id == id).cloned())
                 .or_else(|| list.iter().find(|c| card_ready_for_ask(c)).cloned());
             cards.try_set(list);
-            if let Some(card) = chosen {
-                open_engine(card.engine.id.clone(), ReopenReason::Boot);
+            let Some(card) = chosen else {
+                return;
+            };
+            if tier_denied.get_untracked() {
+                // Denied: no session at all, and the header says why. Opening
+                // one anyway would render a composer the actor may not use.
+                refuse_card(&card.engine.id);
+                return;
             }
+            open_engine(card.engine.id.clone(), ReopenReason::Boot);
         });
     };
     boot();
@@ -382,6 +476,7 @@ pub fn AiChatWorkspace(
                 let at = now.get_untracked();
                 watched.set(Some((id.clone(), at, false)));
                 announced.set(0);
+                timed_out.set(false);
                 (at, false)
             }
         };
@@ -406,6 +501,27 @@ pub fn AiChatWorkspace(
                 announced.try_set(record.notices.len());
                 annotations.try_update(|a| a.extend(fresh));
             }
+            // A cancel is announced once per turn, by id: the record stays
+            // terminal for as long as it is the live turn, and the composite
+            // re-reads it every tick. A WATCHDOG failure is excluded: it
+            // reaches the transport through `cancel()` too, and announcing
+            // "you stopped this answer" for a turn the actor never touched
+            // would be the same lie the watchdog notice exists to replace.
+            let fresh_cancel = cancel_notice(&record.lifecycle, &t)
+                .filter(|_| !timed_out.get_untracked())
+                .filter(|_| {
+                    cancel_announced.get_untracked().as_deref() != Some(record.id.as_str())
+                });
+            if let Some(body) = fresh_cancel {
+                cancel_announced.try_set(Some(record.id.clone()));
+                annotations.try_update(|a| {
+                    a.push(TranscriptAnnotation {
+                        anchor: AnnotationAnchor::AtEnd,
+                        kind: AnnotationKind::Warning,
+                        body: AnnotationBody::Text(body),
+                    })
+                });
+            }
             turn.try_set(Some(record));
             if watchdog_should_fire(elapsed, terminal, already_fired) {
                 let message = t.turn_timed_out.clone();
@@ -419,6 +535,7 @@ pub fn AiChatWorkspace(
                         body: AnnotationBody::Text(message),
                     })
                 });
+                timed_out.try_set(true);
                 // Marked fired, NOT cleared: clearing re-seeds the same
                 // turn id on the next tick and replays every notice.
                 watched.try_update(|w| {
@@ -461,11 +578,39 @@ pub fn AiChatWorkspace(
 
     let on_engine_change = Callback::new(move |id: String| {
         // A card that cannot be asked never gets a session opened against it;
-        // the header already carries the reason.
-        if card_for(&id).is_some_and(|c| card_ready_for_ask(&c)) {
+        // the header already carries the reason. A denied tier refuses every
+        // card, however healthy the card itself looks.
+        if !tier_denied.get_untracked() && card_for(&id).is_some_and(|c| card_ready_for_ask(&c)) {
             open_engine(id, ReopenReason::EngineSwitch);
         } else {
-            refusal.set(Some(texts.get_untracked().not_enabled));
+            refuse_card(&id);
+        }
+    });
+    let refusal_action = Callback::new(move |action: RefusalNextAction| {
+        if let Some(cb) = on_refusal_action {
+            cb.run(action);
+        }
+        let refused = refusal
+            .get_untracked()
+            .and_then(|r| r.engine_id)
+            .unwrap_or_else(|| engine_id.get_untracked());
+        match action {
+            // The composite owns both of these, so the button does what it
+            // says: try the refused engine again, or start over on the
+            // engine that is running.
+            RefusalNextAction::RetryLater => {
+                if !refused.is_empty() {
+                    open_engine(refused, ReopenReason::EngineSwitch);
+                }
+            }
+            RefusalNextAction::NewConversation => {
+                let id = engine_id.get_untracked();
+                if !id.is_empty() {
+                    open_engine(id, ReopenReason::Boot);
+                }
+            }
+            // Notify-only: see the prop's own documentation.
+            RefusalNextAction::OpenSettings => {}
         }
     });
     let on_permission_mode_change = Callback::new(move |mode: String| {
@@ -534,8 +679,11 @@ pub fn AiChatWorkspace(
                 turn=turn
                 budget=budget
                 refusal=refusal
+                tier_denied=tier_denied
+                timed_out=timed_out
                 notices=header_notices
                 texts=texts
+                on_refusal_action=refusal_action
             />
             <div class="grid w-full grid-cols-1 gap-4 lg:grid-cols-[16rem_1fr_16rem]">
                 <KnowledgeSourceRail

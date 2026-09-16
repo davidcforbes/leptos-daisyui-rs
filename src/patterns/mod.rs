@@ -40,18 +40,25 @@ pub use ai_chat_workspace::{
     MemoryDraft, MemoryRefusal, ModelSource, OfficeKnowledgeScope, ProviderCard,
     ProviderSettingsRows, ProviderTuning, QuickAction, ReasoningEffort, RecallCorpus, RecallHit,
     RecallReceipt, ReopenReason, TuningDraft, TuningSchema, TurnEvidence, TurnNotice, TurnRecord,
-    UsageTotals, WorkspaceFuture, canceled_partial, card_ready_for_ask, card_unready_reason,
-    citations_of, completed_answer, corpus_choices, cost_line, desktop_provider_catalogue,
-    effort_selection, engine_is_metered, guardrail_refusal, label_is_distinct_from_options,
-    lifecycle_id, notice_text, published_capabilities, reopen_announces_switch, usage_line,
+    UsageFigures, UsageTotals, WorkspaceFuture, WorkspaceRefusal, canceled_partial,
+    card_ready_for_ask, card_unready_reason, citations_of, completed_answer, corpus_choices,
+    cost_line, declined_limitations, desktop_provider_catalogue, effort_selection,
+    engine_is_metered, guardrail_refusal, label_is_distinct_from_options, lifecycle_id,
+    notice_text, outcome_id, published_capabilities, reopen_announces_switch, usage_figures,
+    usage_line,
 };
 // Aliased: these are generic enough that a bare re-export would read as the
 // whole `patterns` module's vocabulary rather than the chat workspace's.
 pub use ai_chat_workspace::{
     DEFAULT_TEMPERATURE as AI_CHAT_DEFAULT_TEMPERATURE, EFFORT_CHOICES as AI_CHAT_EFFORT_CHOICES,
-    WATCHDOG_MS as AI_CHAT_WATCHDOG_MS, is_terminal as ai_chat_turn_is_terminal,
-    scope_label as ai_chat_scope_label, scope_value as ai_chat_scope_value,
-    settings_for as ai_chat_settings_for_card,
+    WATCHDOG_FAILURE_KIND as AI_CHAT_WATCHDOG_FAILURE_KIND, WATCHDOG_MS as AI_CHAT_WATCHDOG_MS,
+    cancel_notice as ai_chat_cancel_notice, failure_kind as ai_chat_failure_kind,
+    header_cancel_discarded as ai_chat_header_cancel_discarded,
+    header_failure_kind as ai_chat_header_failure_kind,
+    header_outcome_id as ai_chat_header_outcome_id, honesty_for as ai_chat_honesty_for,
+    honesty_state_for_code as ai_chat_honesty_state_for_code, honesty_tone as ai_chat_honesty_tone,
+    is_terminal as ai_chat_turn_is_terminal, scope_label as ai_chat_scope_label,
+    scope_value as ai_chat_scope_value, settings_for as ai_chat_settings_for_card,
     watchdog_should_fire as ai_chat_watchdog_should_fire,
 };
 // `BackendCall` and `SEED_NOW_MS` are also the names `helpdesk` uses for its

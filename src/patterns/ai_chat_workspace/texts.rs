@@ -236,6 +236,26 @@ pub struct AiChatWorkspaceTexts {
     /// Note shown for an engine that authenticates with a host-held key,
     /// in place of any input. A key must never be typeable in this panel.
     pub credential_note: String,
+    /// Copy for `AvailabilityReasonCode::EngineProcessNotRunning`. Must name
+    /// the runtime the actor starts, because "unavailable" alone leaves them
+    /// with nothing to do.
+    pub reason_engine_process_not_running: String,
+    /// Copy for `AvailabilityReasonCode::ModelNotInstalled`. Must be about
+    /// fetching a model, never about starting a process: those are two
+    /// different actions and telling an actor the wrong one wastes their time.
+    pub reason_model_not_installed: String,
+    /// The honesty strip's copy when nothing is wrong. A strip that only
+    /// ever appears on trouble teaches an actor that its absence means
+    /// nothing was checked.
+    pub honesty_ready: String,
+    /// Transcript notice for a cancellation that KEPT whatever had streamed.
+    pub canceled_kept_notice: String,
+    /// Transcript notice for a cancellation whose partial output the host
+    /// discarded. Distinct copy, because the two cancels leave the actor with
+    /// different things.
+    pub canceled_discarded_notice: String,
+    /// Heading for the list of a declined answer's material limitations.
+    pub limitations_label: String,
 }
 
 impl Default for AiChatWorkspaceTexts {
@@ -356,6 +376,16 @@ impl Default for AiChatWorkspaceTexts {
             codex_disable_code_mode: "Disable code mode".into(),
             codex_no_mcp: "This engine never offers MCP tool access.".into(),
             credential_note: "This engine authenticates with a key the host holds. A key is never typed into this panel.".into(),
+            reason_engine_process_not_running:
+                "This engine's local runtime isn't running. Start it (for example, `ollama serve`) and try again."
+                    .into(),
+            reason_model_not_installed:
+                "The selected model isn't installed on this machine. Fetch it first (for example, `ollama pull llama3.1:8b`)."
+                    .into(),
+            honesty_ready: "Ready to answer".into(),
+            canceled_kept_notice: "You stopped this answer. What had already arrived is kept.".into(),
+            canceled_discarded_notice: "You stopped this answer, and the partial output was discarded.".into(),
+            limitations_label: "What this answer could not cover".into(),
         }
     }
 }
@@ -364,7 +394,7 @@ impl AiChatWorkspaceTexts {
     /// The number of fields on this struct; kept in sync with the struct and
     /// [`Self::fields`] by hand, and asserted equal to both by
     /// `en_and_es_texts_are_complete_and_differ` in `tests.rs`.
-    pub const FIELD_COUNT: usize = 106;
+    pub const FIELD_COUNT: usize = 112;
 
     /// Spanish copy, with full orthographic accents (not a transliteration).
     pub fn es() -> Self {
@@ -490,6 +520,16 @@ impl AiChatWorkspaceTexts {
             codex_disable_code_mode: "Desactivar el modo de código".into(),
             codex_no_mcp: "Este motor nunca ofrece acceso a herramientas MCP.".into(),
             credential_note: "Este motor se autentica con una clave que guarda el anfitrión. Nunca se escribe una clave en este panel.".into(),
+            reason_engine_process_not_running:
+                "El entorno local de este motor no está en ejecución. Inícialo (por ejemplo, `ollama serve`) e inténtalo de nuevo."
+                    .into(),
+            reason_model_not_installed:
+                "El modelo seleccionado no está instalado en esta máquina. Descárgalo primero (por ejemplo, `ollama pull llama3.1:8b`)."
+                    .into(),
+            honesty_ready: "Listo para responder".into(),
+            canceled_kept_notice: "Detuviste esta respuesta. Se conserva lo que ya había llegado.".into(),
+            canceled_discarded_notice: "Detuviste esta respuesta y se descartó el resultado parcial.".into(),
+            limitations_label: "Lo que esta respuesta no pudo cubrir".into(),
         }
     }
 
@@ -519,6 +559,10 @@ impl AiChatWorkspaceTexts {
             AvailabilityReasonCode::SignInShapeUnavailable => {
                 self.reason_sign_in_shape_unavailable.clone()
             }
+            AvailabilityReasonCode::EngineProcessNotRunning => {
+                self.reason_engine_process_not_running.clone()
+            }
+            AvailabilityReasonCode::ModelNotInstalled => self.reason_model_not_installed.clone(),
             AvailabilityReasonCode::Unknown(code) => code.clone(),
         }
     }
@@ -698,6 +742,21 @@ impl AiChatWorkspaceTexts {
             ),
             ("codex_no_mcp", self.codex_no_mcp.as_str()),
             ("credential_note", self.credential_note.as_str()),
+            (
+                "reason_engine_process_not_running",
+                self.reason_engine_process_not_running.as_str(),
+            ),
+            (
+                "reason_model_not_installed",
+                self.reason_model_not_installed.as_str(),
+            ),
+            ("honesty_ready", self.honesty_ready.as_str()),
+            ("canceled_kept_notice", self.canceled_kept_notice.as_str()),
+            (
+                "canceled_discarded_notice",
+                self.canceled_discarded_notice.as_str(),
+            ),
+            ("limitations_label", self.limitations_label.as_str()),
         ]
     }
 }
