@@ -166,3 +166,9 @@ catch, because it asserts on the data and agrees with itself.
   through a smart-punctuation pass (ldui-zlu0).
 - A phase ladder was unobservable: a 500 ms blind settle sat inside the 900 ms
   window being measured.
+
+## Cloud agent progress (2026-09-16)
+
+- Closed on main / this branch: `ldui-afan`, `ldui-t2zq`, `ldui-zlgl`, `ldui-zlu0`, `ldui-iilm.10` (I2 fixed; I3 → `ldui-4bi8`), `ldui-4klx` (web-sys features).
+- Blocked on private sibling checkouts (`ldui-3uzu`): `ldui-iilm.11`, `ldui-iilm.12`, `ldui-9ics`, `ldui-ikvx`, `ldui-qob6`.
+- Toolchain pinned via `rust-toolchain.toml` (1.98.1 + wasm32).

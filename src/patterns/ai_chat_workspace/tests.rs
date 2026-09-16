@@ -836,11 +836,39 @@ fn no_text_claims_memories_are_extracted_automatically() {
 ///   test 9) but is deliberately ABSENT: a `TranscriptAnnotation` renders
 ///   through `AnnotationRow`'s plain `<span class="whitespace-pre-wrap">`,
 ///   never through markdown, so nothing substitutes anything in it. Adding
-///   it would forbid punctuation that is perfectly safe there.
+///   it would forbid punctuation that is perfectly safe there. See
+///   [`BYTE_PINNED_NON_MARKDOWN_FIELD_NAMES`].
 /// * Every other browser assertion on copy is `contains`, which survives a
 ///   substitution and therefore needs no guard.
+///
+/// The name list is the source of truth; [`markdown_pinned_fields`] looks
+/// values up through `fields()` so a rename fails here instead of silently
+/// pinning a stale string. [`markdown_pinned_fields_tracks_browser_byte_pins`]
+/// mechanically cross-checks the browser suite so a new byte-exact pin cannot
+/// land without updating one of the two lists.
+const MARKDOWN_PINNED_FIELD_NAMES: &[&str] = &["grounded_not_found"];
+
+/// Browser (or unit) byte-pins that deliberately do **not** go through
+/// markdown, so they must stay out of [`MARKDOWN_PINNED_FIELD_NAMES`].
+const BYTE_PINNED_NON_MARKDOWN_FIELD_NAMES: &[&str] = &["knowledge_changed"];
+
 fn markdown_pinned_fields(t: &AiChatWorkspaceTexts) -> Vec<(&'static str, &str)> {
-    vec![("grounded_not_found", t.grounded_not_found.as_str())]
+    let table = t.fields();
+    MARKDOWN_PINNED_FIELD_NAMES
+        .iter()
+        .map(|name| {
+            let value = table
+                .iter()
+                .find(|(n, _)| n == name)
+                .map(|(_, v)| *v)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{name} is markdown-pinned but missing from AiChatWorkspaceTexts::fields()"
+                    )
+                });
+            (*name, value)
+        })
+        .collect()
 }
 
 /// Why a candidate sentence cannot be compared byte-for-byte against its own
@@ -967,6 +995,102 @@ fn markdown_pinned_copy_survives_smart_punctuation() {
             .any(|(name, _)| *name == "knowledge_changed"),
         "annotations are not markdown; see markdown_pinned_fields"
     );
+    assert!(
+        BYTE_PINNED_NON_MARKDOWN_FIELD_NAMES.contains(&"knowledge_changed"),
+        "knowledge_changed must stay on the non-markdown exclusion list"
+    );
+}
+
+/// Every EN text value that a browser smoke suite pins with a string literal
+/// must be declared in [`MARKDOWN_PINNED_FIELD_NAMES`] or
+/// [`BYTE_PINNED_NON_MARKDOWN_FIELD_NAMES`].
+///
+/// Without this, a new `assert_eq!(bubble, "…")` against copy that flows
+/// through `MarkdownView` can land without updating the smart-punctuation
+/// guard — and the only failure is an eight-minute browser lane on a
+/// one-character rewrite. The scan is the mechanical cross-check
+/// `FIELD_COUNT` already has for field inventory.
+#[test]
+fn markdown_pinned_fields_tracks_browser_byte_pins() {
+    let en = AiChatWorkspaceTexts::default();
+    let pinned: std::collections::BTreeSet<&str> =
+        MARKDOWN_PINNED_FIELD_NAMES.iter().copied().collect();
+    let excluded: std::collections::BTreeSet<&str> = BYTE_PINNED_NON_MARKDOWN_FIELD_NAMES
+        .iter()
+        .copied()
+        .collect();
+    assert!(
+        pinned.is_disjoint(&excluded),
+        "a field cannot be both markdown-pinned and excluded: {:?}",
+        pinned.intersection(&excluded).collect::<Vec<_>>()
+    );
+
+    // The function and the name list must agree exactly.
+    let from_fn: std::collections::BTreeSet<&str> = markdown_pinned_fields(&en)
+        .into_iter()
+        .map(|(n, _)| n)
+        .collect();
+    assert_eq!(
+        from_fn, pinned,
+        "markdown_pinned_fields drifted from MARKDOWN_PINNED_FIELD_NAMES"
+    );
+
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+    let mut smoke = String::new();
+    for path in rust_sources(&root) {
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default();
+        if name.starts_with("ai_chat_") && name.ends_with("_smoke.rs") {
+            smoke.push_str(&std::fs::read_to_string(&path).expect("readable smoke source"));
+            smoke.push('\n');
+        }
+    }
+    assert!(
+        !smoke.is_empty(),
+        "found no tests/ai_chat_*_smoke.rs sources to cross-check"
+    );
+
+    let mut seen_literal: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+    for (name, value) in en.fields() {
+        // Short labels ("en", "Ask", "Engine") appear as substrings all over
+        // the smoke suites; only sentence-length copy is a byte-pin risk for
+        // the smart-punctuation guard.
+        if value.chars().count() < 24 {
+            continue;
+        }
+        let literal = format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""));
+        if smoke.contains(&literal) {
+            seen_literal.insert(name);
+            assert!(
+                pinned.contains(name) || excluded.contains(name),
+                "{name} appears as a byte-exact string literal in an ai-chat \
+                 browser smoke suite but is neither markdown-pinned nor on the \
+                 non-markdown exclusion list. Add it to \
+                 MARKDOWN_PINNED_FIELD_NAMES (if MarkdownView renders it) or \
+                 BYTE_PINNED_NON_MARKDOWN_FIELD_NAMES (if it does not)."
+            );
+        }
+    }
+
+    for name in &pinned {
+        assert!(
+            seen_literal.contains(name),
+            "{name} is markdown-pinned but no ai-chat browser smoke suite \
+             pins its EN value as a string literal anymore — remove it from \
+             MARKDOWN_PINNED_FIELD_NAMES or restore the browser assert"
+        );
+    }
+    for name in &excluded {
+        assert!(
+            seen_literal.contains(name),
+            "{name} is on the non-markdown exclusion list but no ai-chat \
+             browser smoke suite pins its EN value as a string literal \
+             anymore — remove it from BYTE_PINNED_NON_MARKDOWN_FIELD_NAMES \
+             or restore the browser assert"
+        );
+    }
 }
 
 /// Every quick action's prompt is real localized copy, not the same English
@@ -1062,16 +1186,55 @@ const LIVE_WIRE_MARKERS: [&str; 3] = [
     "data-ai-chat-live-connect",
 ];
 
-/// Whether this source is one a browser lane actually loads: the fixture
-/// host binary itself, or one of the `*_fixture.rs` documents it mounts.
+/// The page-scoped host binary the ai-chat (and other focused) browser lanes
+/// actually compile. Lane-driven membership is derived from THIS file's own
+/// `mod` / `#[path]` declarations — not from a filename heuristic — so a
+/// newly-mounted fixture cannot slip past the live-wire rule by picking a
+/// name that does not end in `_fixture.rs` (ldui-iilm.10 / I2).
+const LANE_HOST_SOURCE: &str = "demo/src/client_snapshot_test_host.rs";
+
+/// File names (basename only) the focused browser host compiles in, including
+/// the host itself.
 ///
-/// Deliberately a NAME rule rather than a computed module closure, so it is
-/// readable and cannot quietly stop matching. Its limit is worth stating: a
-/// fixture that mounted some third module which in turn reached live mode
-/// would slip past this particular check — [`LIVE_MARKERS`], which covers
-/// every demo source, is what catches that one.
-fn is_lane_driven(name: &str) -> bool {
-    name == "client_snapshot_test_host.rs" || name.ends_with("_fixture.rs")
+/// Deliberately NOT derived from `demo/src/main.rs`: that binary is the
+/// catalog showcase and legitimately mounts Live mode. Computing the set
+/// from the host's own module list is the shape that stays complete when a
+/// fixture is added without quietly sweeping in the showcase page.
+fn lane_driven_file_names() -> std::collections::BTreeSet<String> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let host = std::fs::read_to_string(root.join(LANE_HOST_SOURCE))
+        .unwrap_or_else(|e| panic!("readable {LANE_HOST_SOURCE}: {e}"));
+    let mut names = std::collections::BTreeSet::new();
+    names.insert("client_snapshot_test_host.rs".to_owned());
+
+    for line in host.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("#[path = \"") {
+            let path = rest.split('"').next().unwrap_or("");
+            if let Some(file) = std::path::Path::new(path)
+                .file_name()
+                .and_then(|n| n.to_str())
+            {
+                names.insert(file.to_owned());
+            }
+            continue;
+        }
+        // Bare `mod foo;` — skip `mod foo {` and anything already attributed
+        // via `#[path]` on the previous line by only accepting the semicolon
+        // form that names a sibling file under demo/src/.
+        if let Some(rest) = trimmed.strip_prefix("mod ") {
+            let name = rest.trim_end_matches(';').trim();
+            if rest.contains('{') || name.is_empty() || name.contains(' ') {
+                continue;
+            }
+            names.insert(format!("{name}.rs"));
+        }
+    }
+    names
+}
+
+fn is_lane_driven(name: &str, lane_files: &std::collections::BTreeSet<String>) -> bool {
+    lane_files.contains(name)
 }
 
 /// Every `.rs` file under one directory, recursively.
@@ -1109,6 +1272,12 @@ fn rust_sources(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
 #[test]
 fn no_lane_touches_the_live_server() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let lane_files = lane_driven_file_names();
+    assert!(
+        lane_files.len() >= 5,
+        "host module sweep found too few lane-driven files ({lane_files:?}); \
+         the parser is not reading {LANE_HOST_SOURCE}"
+    );
     let mut scanned_tests = 0usize;
     let mut scanned_demo = 0usize;
     let mut lane_driven: Vec<String> = Vec::new();
@@ -1155,7 +1324,7 @@ fn no_lane_touches_the_live_server() {
             // A lane-driven document may not even MOUNT the live backend:
             // the showcase page owns Live mode, and a fixture the suite
             // loads must offer no way to reach a server at all.
-            if is_lane_driven(&name) {
+            if is_lane_driven(&name, &lane_files) {
                 lane_driven.push(name.clone());
                 for marker in LIVE_WIRE_MARKERS {
                     assert!(
@@ -1180,15 +1349,16 @@ fn no_lane_touches_the_live_server() {
         "only {scanned_demo} demo sources were scanned, so the scan is not \
          reading the pages the lanes actually drive"
     );
-    // The two sources that carry the ai-chat lanes, by name: a rename that
-    // stopped matching would otherwise leave this rule checking nothing.
-    for required in ["client_snapshot_test_host.rs", "ai_chat_fixture.rs"] {
-        assert!(
-            lane_driven.iter().any(|n| n == required),
-            "{required} was not recognised as lane-driven, so the \
-             fixture-host rule is reading the wrong files: {lane_driven:?}"
-        );
-    }
+    // Completeness, not presence: every module the host compiles must have
+    // been recognised. A rename that stopped the parser matching would
+    // otherwise leave this rule checking a stale subset.
+    let recognised: std::collections::BTreeSet<_> = lane_driven.iter().cloned().collect();
+    let missing: Vec<_> = lane_files.difference(&recognised).cloned().collect();
+    assert!(
+        missing.is_empty(),
+        "host modules not recognised as lane-driven (parser incomplete): \
+         {missing:?}; recognised={recognised:?}; expected={lane_files:?}"
+    );
     assert!(
         exception_seen,
         "the named exception {LIVE_BACKEND_FILE} was never found, so the \
