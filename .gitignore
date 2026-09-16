@@ -13,3 +13,6 @@
 .beads-credential-key
 .beads/proxieddb/
 *.gate.lock*
+
+# Session scratch logs (gate/lane output, never committed)
+.tmp/
