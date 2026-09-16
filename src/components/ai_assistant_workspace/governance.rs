@@ -423,20 +423,30 @@ pub enum CoverageState {
     /// Host-confirmed complete coverage of the stated interval and stage.
     Complete,
     /// Only part of the required inventory was covered.
-    Partial { /// Named cause.
-        reason: AssistantReason },
+    Partial {
+        /// Named cause.
+        reason: AssistantReason,
+    },
     /// The required inventory was missed.
-    Missed { /// Named cause.
-        reason: AssistantReason },
+    Missed {
+        /// Named cause.
+        reason: AssistantReason,
+    },
     /// This coverage lane has not been configured.
-    Unconfigured { /// Named cause.
-        reason: AssistantReason },
+    Unconfigured {
+        /// Named cause.
+        reason: AssistantReason,
+    },
     /// Available evidence cannot establish coverage.
-    Unassessable { /// Named cause.
-        reason: AssistantReason },
+    Unassessable {
+        /// Named cause.
+        reason: AssistantReason,
+    },
     /// Coverage is paused under the stated capacity policy.
-    CapacityPaused { /// Named cause.
-        reason: AssistantReason },
+    CapacityPaused {
+        /// Named cause.
+        reason: AssistantReason,
+    },
     /// Unsupported coverage cannot imply an all-clear.
     Unknown(String),
 }

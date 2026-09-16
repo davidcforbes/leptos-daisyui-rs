@@ -26,6 +26,16 @@ pub use types::{
 // Re-export the shared model so consumers can build a session/transport and
 // drive the component without a direct `ai-chat-core` dependency.
 pub use ai_chat_core::{
-    ChatError, ChatMessage, ChatRequest, ChatRole, ChatSession, ChatSettings, ChatTransport,
-    MessageMeta, StreamEvent, Usage,
+    AttachmentRef, Capabilities, ChatError, ChatMessage, ChatRequest, ChatRole, ChatSession,
+    ChatSettings, ChatTransport, Citation, HitlState, MessageMeta, StreamEvent, ToolCall, Usage,
 };
+
+/// Wire types shared with the engine service and editmark-server
+/// (`OpenSessionRequest`, `DocumentInput`, `SendRequest`, `SessionSnapshot`).
+///
+/// ```
+/// use leptos_daisyui_rs::components::{Capabilities, ai_chat::wire::OpenSessionRequest};
+/// ```
+pub mod wire {
+    pub use ai_chat_core::wire::*;
+}

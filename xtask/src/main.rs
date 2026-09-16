@@ -283,6 +283,24 @@ fn gate_steps() -> Vec<Step> {
             ],
             None,
         ),
+        // ldui-iilm.1: `tests/ai_assistant_workspace_contract.rs` (8 tests)
+        // was registered in no lane -- `test-lib` is `--lib` only, so an
+        // integration test not named as its own step runs nowhere, same
+        // shape as `test-ld-class-coverage` above.
+        cmd(
+            "test-ai-assistant-contract",
+            "cargo",
+            &[
+                "test",
+                "-p",
+                "leptos-daisyui-rs",
+                "--test",
+                "ai_assistant_workspace_contract",
+                "--features",
+                "test-mode",
+            ],
+            None,
+        ),
         cmd(
             "test-bare-buttons",
             "cargo",
@@ -2461,6 +2479,7 @@ mod tests {
                 "test-daisyui5",
                 "test-svg-paint",
                 "test-ld-class-coverage",
+                "test-ai-assistant-contract",
                 "test-bare-buttons"
             ]
         );
@@ -2797,6 +2816,32 @@ pub fn r() -> f32 { radius::CARD }
             "{args:?}"
         );
         assert!(args.iter().any(|a| a == "--test"), "{args:?}");
+    }
+
+    /// ldui-iilm.1: `tests/ai_assistant_workspace_contract.rs` (8 tests) must
+    /// be a native GATE step, not merely a file under `tests/` -- `test-lib`
+    /// is `--lib` only, so an integration test not named as its own step
+    /// runs nowhere.
+    #[test]
+    fn ai_assistant_contract_is_a_native_gate_step() {
+        let gate = gate_steps();
+        let step = gate
+            .iter()
+            .find(|s| s.name == "test-ai-assistant-contract")
+            .expect("test-ai-assistant-contract must be in the native gate");
+        let Run::Cmd { program, args, .. } = &step.run else {
+            panic!("test-ai-assistant-contract must be a native cargo command");
+        };
+        assert_eq!(*program, "cargo");
+        assert!(
+            args.iter().any(|a| a == "ai_assistant_workspace_contract"),
+            "{args:?}"
+        );
+        assert!(args.iter().any(|a| a == "--test"), "{args:?}");
+        assert!(
+            args.iter().any(|a| a == "test-mode"),
+            "must build the ai_assistant_workspace types behind test-mode: {args:?}"
+        );
     }
 
     #[test]
@@ -3174,6 +3219,7 @@ pub fn r() -> f32 { radius::CARD }
                 "test-daisyui5",
                 "test-svg-paint",
                 "test-ld-class-coverage",
+                "test-ai-assistant-contract",
                 "test-bare-buttons"
             ]
         );

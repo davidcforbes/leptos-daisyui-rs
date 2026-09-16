@@ -2,7 +2,11 @@
 
 mod accordion;
 pub mod ai_assistant_workspace;
-mod ai_chat;
+// `pub`, not `mod`: acceptance for ldui-iilm.1 needs the fully-qualified
+// `components::ai_chat::wire::…` path (the wire types shared with the
+// engine service and editmark-server) reachable from outside the crate,
+// matching the existing `ai_assistant_workspace`/`client_call_workspace` pattern.
+pub mod ai_chat;
 mod alert;
 mod app_shell;
 mod auto_complete;
