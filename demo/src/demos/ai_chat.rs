@@ -2,8 +2,12 @@
 //! over the seeded in-memory backend, with the language and mode switches
 //! that later phases of this epic extend.
 //!
-//! Sections usage / quick actions arrive in P7; this page deliberately ships
-//! only what it can demonstrate today.
+//! The page body is [`AiChatPage`], which takes the locale it opens in, so
+//! `/components/ai-chat` and `/components/ai-chat-es` are the SAME page under
+//! two text tables rather than two pages that must be kept in step. The ES
+//! route exists so the visual audits see a Spanish layout: Spanish copy is
+//! reliably longer than English, and a row that only just fits in EN is the
+//! kind of defect no English-only page can show.
 
 use crate::core::{ContentLayout, Section};
 use leptos::prelude::*;
@@ -196,11 +200,60 @@ fn tuning_label(card: &ProviderCard) -> String {
     }
 }
 
-/// The showcase page for the AI-chat workspace.
+/// How one engine's usage is billed, and therefore whether the workspace can
+/// ever show a cost for it.
+///
+/// Derived from the catalogue rather than stored on a card: an engine that
+/// authenticates with a key the host holds is billed per call, and one that
+/// runs behind a subscription CLI or on the local machine is not. The
+/// workspace's own accounting is the authority for what the numbers MEAN —
+/// `UsageTotals` keeps plan and metered apart forever, and
+/// `UsageTotals::cost_incomplete` is what makes an accumulated metered cost
+/// a floor rather than a total.
+fn billing_row(card: &ProviderCard) -> (&'static str, &'static str, &'static str) {
+    if card.capabilities.needs_api_key {
+        (
+            "Metered",
+            "Reported per turn, and a floor once any turn arrives unpriced",
+            "Inside output",
+        )
+    } else if matches!(card.model_source, ModelSource::Discovered { .. }) {
+        (
+            "Neither",
+            "Runs on this machine, so nothing is billed and no cost is shown",
+            "Inside output",
+        )
+    } else {
+        (
+            "Plan",
+            "Covered by a subscription, so the workspace shows no per-turn cost",
+            "Inside output",
+        )
+    }
+}
+
+/// The showcase page for the AI-chat workspace, in English.
 #[component]
 pub fn AiChatDemo() -> impl IntoView {
+    view! { <AiChatPage initial=Language::En /> }
+}
+
+/// The same page, opened in Spanish. Its own route so the layout audits
+/// measure a Spanish rendering rather than an English one.
+#[component]
+pub fn AiChatEsDemo() -> impl IntoView {
+    view! { <AiChatPage initial=Language::Es /> }
+}
+
+/// The showcase page body.
+#[component]
+fn AiChatPage(
+    /// Which text table the page opens in. The switch below still works;
+    /// this only decides where it starts.
+    initial: Language,
+) -> impl IntoView {
     let mode = RwSignal::new(WorkspaceMode::Fixture);
-    let language = RwSignal::new(Language::En);
+    let language = RwSignal::new(initial);
     let texts = Signal::derive(move || match language.get() {
         Language::En => AiChatWorkspaceTexts::default(),
         Language::Es => AiChatWorkspaceTexts::es(),
@@ -217,12 +270,17 @@ pub fn AiChatDemo() -> impl IntoView {
     );
 
     let mode_radio = move |value: WorkspaceMode, label: &'static str| {
+        // Only the Live option carries `data-ai-chat-live-mode`; `None`
+        // omits the attribute entirely, so the hook names one control rather
+        // than both with a value a proof would have to read.
+        let live_hook = (value == WorkspaceMode::Live).then_some("");
         view! {
             <label class="flex items-center gap-2 text-sm">
                 <input
                     type="radio"
                     name="ai-chat-mode"
                     class="radio radio-sm"
+                    data-ai-chat-live-mode=live_hook
                     prop:checked=move || mode.get() == value
                     on:change=move |_| mode.set(value)
                 />
@@ -313,6 +371,15 @@ pub fn AiChatDemo() -> impl IntoView {
             </Section>
 
             <Section title="Workspace" col=true>
+                <p class="text-sm opacity-70">
+                    "The quick-action bar under the header seeds the composer and sends \
+                     nothing, so a canned prompt is a starting point the actor edits. Seven \
+                     actions are static chips; Translate is not one of them, because its \
+                     prompt is the only one that is not static copy \u{2014} it needs a \
+                     language, so it carries its own input and stays disabled until one is \
+                     named. Every chip's label and the prompt it fills come from the same \
+                     text table, so both swap with the language switch above."
+                </p>
                 <div class="w-full" data-testid="ai-chat-workspace">
                     {move || {
                         view! {
@@ -323,6 +390,49 @@ pub fn AiChatDemo() -> impl IntoView {
                             />
                         }
                     }}
+                </div>
+            </Section>
+
+            <Section title="Usage and cost" col=true>
+                <p class="text-sm opacity-70">
+                    "Plan-covered and metered usage are never added together: they answer two \
+                     different questions, and a single total would misreport both. Reasoning \
+                     tokens are a SUBSET of output tokens for every engine here, never an \
+                     addition to them, so a workspace that summed the two would double-count \
+                     the thinking. A metered cost the backend never reported is shown as \
+                     absent rather than as zero, and once any turn in a session arrives \
+                     unpriced the accumulated figure stays a floor for the rest of that \
+                     session's life. The live counters for the running conversation are in \
+                     the workspace header above; this table is the vocabulary behind them."
+                </p>
+                <div class="w-full overflow-x-auto" data-testid="ai-chat-usage">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>"Engine"</th>
+                                <th>"Billing"</th>
+                                <th>"Reasoning tokens"</th>
+                                <th>"Cost known?"</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {desktop_provider_catalogue()
+                                .into_iter()
+                                .map(|card| {
+                                    let (billing, cost, reasoning) = billing_row(&card);
+                                    let picker = card.picker_label.clone();
+                                    view! {
+                                        <tr data-ai-chat-usage-row=card.engine.id.clone()>
+                                            <td class="font-semibold">{picker}</td>
+                                            <td data-ai-chat-usage-billing=billing>{billing}</td>
+                                            <td class="opacity-70">{reasoning}</td>
+                                            <td class="opacity-70">{cost}</td>
+                                        </tr>
+                                    }
+                                })
+                                .collect_view()}
+                        </tbody>
+                    </table>
                 </div>
             </Section>
 

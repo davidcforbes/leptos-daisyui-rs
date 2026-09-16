@@ -26,11 +26,13 @@
 //! without a second navigation.
 
 use leptos::prelude::*;
+use leptos_daisyui_rs::components::AiChatTexts;
 use leptos_daisyui_rs::components::ai_assistant_workspace::{AssistantAccess, RefusalNextAction};
 use leptos_daisyui_rs::patterns::{
-    AiChatWorkspace, AvailabilityReasonCode, ChatPosture, ChatWorkspaceBackend, ChatWorkspaceFault,
-    FixtureClock, InMemoryChatWorkspaceBackend, KnowledgeSelection, PromptMatcher, ProviderTuning,
-    ReasoningEffort, TurnScript, desktop_provider_catalogue, lifecycle_id, outcome_id,
+    AiChatWorkspace, AiChatWorkspaceTexts, AvailabilityReasonCode, ChatPosture,
+    ChatWorkspaceBackend, ChatWorkspaceFault, FixtureClock, InMemoryChatWorkspaceBackend,
+    KnowledgeSelection, PromptMatcher, ProviderTuning, ReasoningEffort, TurnScript,
+    desktop_provider_catalogue, lifecycle_id, outcome_id,
 };
 use std::rc::Rc;
 use wasm_bindgen_futures::spawn_local;
@@ -270,6 +272,101 @@ pub fn AiChatFixture(
 
     let backend: Rc<dyn ChatWorkspaceBackend> = Rc::new(backend);
 
+    // The locale and backend-mode switches live on the ORACLE instance only.
+    // A document that mounts two workspaces would otherwise carry two radio
+    // groups of the same name, and a proof driving "the ES radio" would be
+    // driving whichever one the DOM happened to order first — the positional
+    // trap, wearing a stable hook.
+    let spanish = RwSignal::new(false);
+    let texts = Signal::derive(move || {
+        if spanish.get() {
+            AiChatWorkspaceTexts::es()
+        } else {
+            AiChatWorkspaceTexts::default()
+        }
+    });
+    let chat_texts = Signal::derive(move || {
+        if spanish.get() {
+            AiChatTexts::es()
+        } else {
+            AiChatTexts::default()
+        }
+    });
+    // Live mode is PRESENT and inert. Selecting it must reach no transport:
+    // the fixture keeps running and the workspace is never unmounted, so a
+    // proof can show the call log gains nothing (see
+    // `live_mode_switch_is_present_but_never_exercised`).
+    let live = RwSignal::new(false);
+
+    let locale_controls = move || {
+        if !oracle {
+            return ().into_any();
+        }
+        view! {
+            <div class="flex flex-wrap items-center gap-4">
+                <div
+                    class="flex items-center gap-4 text-sm"
+                    data-testid="ai-chat-language"
+                    data-fixture-locale=move || if spanish.get() { "es" } else { "en" }
+                >
+                    <label class="flex items-center gap-2">
+                        <input
+                            type="radio"
+                            name="ai-chat-language"
+                            class="radio radio-sm"
+                            data-ai-chat-locale-choice="en"
+                            prop:checked=move || !spanish.get()
+                            on:change=move |_| spanish.set(false)
+                        />
+                        <span>"EN"</span>
+                    </label>
+                    <label class="flex items-center gap-2">
+                        <input
+                            type="radio"
+                            name="ai-chat-language"
+                            class="radio radio-sm"
+                            data-ai-chat-locale-choice="es"
+                            prop:checked=move || spanish.get()
+                            on:change=move |_| spanish.set(true)
+                        />
+                        <span>"ES"</span>
+                    </label>
+                </div>
+                <div class="flex items-center gap-4 text-sm" data-testid="ai-chat-mode">
+                    <label class="flex items-center gap-2">
+                        <input
+                            type="radio"
+                            name="ai-chat-mode"
+                            class="radio radio-sm"
+                            data-ai-chat-fixture-mode=""
+                            prop:checked=move || !live.get()
+                            on:change=move |_| live.set(false)
+                        />
+                        <span>"Fixture"</span>
+                    </label>
+                    <label class="flex items-center gap-2">
+                        <input
+                            type="radio"
+                            name="ai-chat-mode"
+                            class="radio radio-sm"
+                            data-ai-chat-live-mode=""
+                            prop:checked=move || live.get()
+                            on:change=move |_| live.set(true)
+                        />
+                        <span>"Live"</span>
+                    </label>
+                </div>
+                <Show when=move || live.get()>
+                    <p class="text-sm opacity-70" data-ai-chat-live-mode-reason="">
+                        "A live backend is not wired up here, so the fixture keeps running. \
+                         Nothing below changes, and no request leaves this page."
+                    </p>
+                </Show>
+            </div>
+        }
+        .into_any()
+    };
+
     // A scripted document opens in ASSISTANT posture, and this is not a
     // convenience: `KnowledgeSelection::default()` is GROUNDED, and a
     // grounded turn whose prompt matches no seeded document has its script
@@ -294,9 +391,13 @@ pub fn AiChatFixture(
                 id="ai-chat-workspace"
                 data-testid="ai-chat-workspace"
                 data-ai-chat-case=case
+                class="flex flex-col gap-4"
             >
+                {locale_controls}
                 <AiChatWorkspace
                     backend=backend
+                    texts=texts
+                    chat_texts=chat_texts
                     now_ms=Signal::from(clock)
                     initial_knowledge=knowledge
                     on_refusal_action=on_refusal_action

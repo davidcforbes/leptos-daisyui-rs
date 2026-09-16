@@ -2141,3 +2141,331 @@ async fn watchdog_fires_once_from_the_fixture_clock_and_never_without_it() {
 
     assert_no_browser_errors(&h, "watchdog").await;
 }
+
+// ── 21 ──────────────────────────────────────────────────────────────────────
+
+/// Count the `OpenSession` entries in the backend's call log.
+///
+/// `BackendCall`'s `Debug` is what the fixture publishes, and its
+/// `OpenSession` variant carries a struct body — matching the VARIANT name at
+/// the start of the string is therefore the only stable test. Matching a
+/// field's rendered value is not: `Debug` prints `posture: Assistant`, the
+/// enum's own Rust name, never `ChatPosture::as_id`'s lowercase wire string.
+fn open_sessions(calls: &[String]) -> usize {
+    calls
+        .iter()
+        .filter(|c| c.starts_with("OpenSession"))
+        .count()
+}
+
+/// Every `[data-ai-chat-label]` inside one workspace, as `(field, text)`.
+async fn labelled_text(h: &pixelproof_web::Harness, root: &str) -> Vec<(String, String)> {
+    let raw = eval_json(
+        h,
+        &format!(
+            r#"(() => {{
+                const root = document.querySelector('{root}');
+                if (!root) return null;
+                return Array.from(root.querySelectorAll('[data-ai-chat-label]')).map(e => ({{
+                    field: e.getAttribute('data-ai-chat-label'),
+                    text: e.textContent.trim(),
+                }}));
+            }})()"#
+        ),
+    )
+    .await;
+    raw.as_array()
+        .unwrap_or(&vec![])
+        .iter()
+        .map(|v| {
+            (
+                v["field"].as_str().unwrap_or_default().to_owned(),
+                v["text"].as_str().unwrap_or_default().to_owned(),
+            )
+        })
+        .collect()
+}
+
+/// Wait until one workspace root publishes `locale` on
+/// `data-ai-chat-workspace-locale`.
+///
+/// A real signal, not a settle: the attribute is written by the same render
+/// that replaces the copy, so observing it means the swap has happened. A
+/// fixed sleep here would be a guess about how long a signal takes to
+/// propagate, and every assertion that follows compares exact strings.
+async fn wait_for_locale(h: &pixelproof_web::Harness, root: &str, locale: &str) {
+    let mut waited = 0;
+    loop {
+        let now = eval_json(
+            h,
+            &format!(
+                "document.querySelector('{root}')\
+                 ?.getAttribute('data-ai-chat-workspace-locale') ?? null"
+            ),
+        )
+        .await;
+        if now.as_str() == Some(locale) {
+            return;
+        }
+        assert!(
+            waited < 10_000,
+            "the workspace never reached locale {locale:?} (saw {now})"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        waited += 100;
+    }
+}
+
+/// Live mode is a choice an actor can SEE and select, and selecting it
+/// reaches nothing.
+///
+/// The two halves matter equally. A Live option that is absent would be the
+/// page hiding a capability the workspace is meant to have; a Live option
+/// that quietly opened a session would make every lane depend on a server
+/// nobody is running. So this asserts the control is present AND that
+/// choosing it leaves the fixture's own call log untouched: no `OpenSession`
+/// is added, and the workspace the fixture backs is still mounted and still
+/// answering afterwards.
+///
+/// Its companion is the native `no_lane_touches_the_live_server`, which
+/// scans this whole directory for the live bridge's port and transport. That
+/// one can fail before such a lane is even written; this one proves the
+/// control that would trigger it does not.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-ai-chat)"]
+async fn live_mode_switch_is_present_but_never_exercised() {
+    let h = harness_at(PAGE).await;
+    begin_browser_error_capture(&h).await;
+    ready_at(&h, ROOT).await;
+
+    assert_eq!(
+        eval_json(
+            &h,
+            "document.querySelector('[data-ai-chat-live-mode]') !== null"
+        )
+        .await,
+        json!(true),
+        "the Live option is present, not hidden"
+    );
+    // Negative control: before the click there is no explanation on the
+    // page, so the one asserted below is really this click's doing.
+    assert_eq!(
+        eval_json(
+            &h,
+            "document.querySelector('[data-ai-chat-live-mode-reason]') !== null"
+        )
+        .await,
+        json!(false),
+        "and it explains itself only once chosen"
+    );
+
+    let before = backend_calls(&h).await;
+    let opened_before = open_sessions(&before);
+    assert!(
+        opened_before >= 1,
+        "the fixture really did open a session, so a count that stays put \
+         afterwards means something: {before:?}"
+    );
+
+    click(&h, "[data-ai-chat-live-mode]").await;
+    // The explanation appearing IS the click landing — nothing is timed.
+    wait_for_selector(&h, "[data-ai-chat-live-mode-reason]").await;
+
+    let after = backend_calls(&h).await;
+    assert_eq!(
+        open_sessions(&after),
+        opened_before,
+        "selecting Live opened no session: {after:?}"
+    );
+
+    let shape = workspace_shape(&h, ROOT).await;
+    assert_eq!(
+        shape["panel"],
+        json!(true),
+        "and the fixture-backed workspace is still mounted, rather than \
+         replaced by a workspace with nothing behind it: {shape}"
+    );
+
+    // Still working afterwards, which is what "the fixture keeps running"
+    // has to mean if the sentence on the page is true.
+    ask(&h, ROOT, "hearing").await;
+    let answered = workspace_shape(&h, ROOT).await;
+    assert!(
+        strings(&answered["roles"]).iter().any(|r| r == "assistant"),
+        "{answered}"
+    );
+    assert_eq!(
+        open_sessions(&backend_calls(&h).await),
+        opened_before,
+        "and that turn still went through the session Live never replaced"
+    );
+
+    assert_no_browser_errors(&h, "live mode").await;
+}
+
+// ── 22 ──────────────────────────────────────────────────────────────────────
+
+/// Switching locale replaces every labelled string IN PLACE — the transcript
+/// survives, and the copy really is the other table's, field by field.
+///
+/// Three separate claims, and the third is the one a locale toggle usually
+/// fails silently. (1) No remount: the transcript's row count is identical
+/// across the switch, so the conversation was not thrown away. (2) Coverage:
+/// every element carrying `data-ai-chat-label` names a field that really
+/// exists on `AiChatWorkspaceTexts`, and its rendered text is byte-equal to
+/// that field's value in the active table — compared against the REAL table
+/// rather than a list copied into this file, which would rot. (3)
+/// Reversible: switching back restores the English values exactly, so the
+/// swap is a re-read and not a one-way overwrite.
+///
+/// The three strings P4 shipped in `settings_rows.rs` are exercised
+/// deliberately at the end, each behind the engine whose capabilities make
+/// it render: `effort_label` on claude-code, `codex_no_mcp` on codex-cli
+/// (the only card declaring Codex levers) and `credential_note` on groq (the
+/// only card needing a host-held key). A coverage assertion that never
+/// reached them would pass while all three stayed English.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-ai-chat)"]
+async fn locale_switch_replaces_labels_in_place_and_covers_every_label() {
+    use leptos_daisyui_rs::patterns::AiChatWorkspaceTexts;
+
+    let en_table = AiChatWorkspaceTexts::default();
+    let es_table = AiChatWorkspaceTexts::es();
+    let lookup = |table: &AiChatWorkspaceTexts, field: &str| -> Option<String> {
+        table
+            .fields()
+            .into_iter()
+            .find(|(name, _)| *name == field)
+            .map(|(_, value)| value.to_owned())
+    };
+
+    let h = harness_at(PAGE).await;
+    begin_browser_error_capture(&h).await;
+    ready_at(&h, ROOT).await;
+
+    ask(&h, ROOT, "hearing").await;
+    let before = workspace_shape(&h, ROOT).await;
+    let rows_before = strings(&before["roles"]).len();
+    assert!(
+        rows_before > 0,
+        "there is a transcript to preserve: {before}"
+    );
+
+    let en_labels = labelled_text(&h, ROOT).await;
+    assert!(
+        en_labels.len() >= 10,
+        "the workspace really does publish labelled copy: {en_labels:?}"
+    );
+    for (field, text) in &en_labels {
+        let expected = lookup(&en_table, field)
+            .unwrap_or_else(|| panic!("{field} is not a field of AiChatWorkspaceTexts"));
+        assert_eq!(text, &expected, "{field} does not render its own EN value");
+    }
+
+    click(&h, "[data-ai-chat-locale-choice=\"es\"]").await;
+    wait_for_locale(&h, ROOT, "es").await;
+
+    let es_labels = labelled_text(&h, ROOT).await;
+    let en_names: Vec<&String> = en_labels.iter().map(|(f, _)| f).collect();
+    let es_names: Vec<&String> = es_labels.iter().map(|(f, _)| f).collect();
+    assert_eq!(
+        es_names, en_names,
+        "the same elements are still there, in the same order — a swap, not \
+         a re-render into a different shape"
+    );
+    for (field, text) in &es_labels {
+        let expected = lookup(&es_table, field)
+            .unwrap_or_else(|| panic!("{field} is not a field of AiChatWorkspaceTexts"));
+        assert_eq!(text, &expected, "{field} did not swap to its ES value");
+    }
+
+    let after = workspace_shape(&h, ROOT).await;
+    assert_eq!(
+        strings(&after["roles"]).len(),
+        rows_before,
+        "the transcript survived the switch, so the workspace was not \
+         remounted: {after}"
+    );
+
+    click(&h, "[data-ai-chat-locale-choice=\"en\"]").await;
+    wait_for_locale(&h, ROOT, "en").await;
+    assert_eq!(
+        labelled_text(&h, ROOT).await,
+        en_labels,
+        "switching back restores English exactly"
+    );
+    assert_eq!(
+        strings(&workspace_shape(&h, ROOT).await["roles"]).len(),
+        rows_before,
+        "and still without losing the conversation"
+    );
+
+    // The three settings-row strings, each behind the engine that renders
+    // it. In ES, so a literal that never reached the table shows up as an
+    // English sentence rather than as a missing element.
+    click(&h, "[data-ai-chat-locale-choice=\"es\"]").await;
+    wait_for_locale(&h, ROOT, "es").await;
+    for (engine, field) in [
+        (CLAUDE, "effort_label"),
+        (CODEX, "codex_no_mcp"),
+        (GROQ, "credential_note"),
+    ] {
+        select_engine(&h, engine).await;
+        let labels = labelled_text(&h, ROOT).await;
+        let found = labels
+            .iter()
+            .find(|(f, _)| f == field)
+            .unwrap_or_else(|| panic!("{engine} renders no {field}: {labels:?}"));
+        assert_eq!(
+            &found.1,
+            &lookup(&es_table, field).expect("field exists"),
+            "{field} on {engine} is not the Spanish table's value"
+        );
+    }
+
+    assert_no_browser_errors(&h, "locale switch").await;
+}
+
+// ── 23 ──────────────────────────────────────────────────────────────────────
+
+/// Zero blocking axe findings with the settings popover open, a
+/// pre-admission refusal on screen and the workspace in Spanish.
+///
+/// Each of the three is a state earlier audits never covered, and each is
+/// where an accessibility defect actually hides: a popover's controls are
+/// the ones most likely to be missing a label, a refusal is rendered copy
+/// with an action button that appears in no other state, and a translated
+/// table is where a control that only just fitted in English overflows.
+/// Auditing the calm default page would prove none of it.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-ai-chat)"]
+async fn axe_clean_with_settings_drawer_refusal_and_es_locale() {
+    let h = harness_at(PAGE_GROQ_NO_KEY).await;
+    begin_browser_error_capture(&h).await;
+    ready_at(&h, ROOT).await;
+
+    click(&h, "[data-ai-chat-locale-choice=\"es\"]").await;
+    wait_for_locale(&h, ROOT, "es").await;
+
+    // The refusal: groq has no key on this document, so asking for it is
+    // refused before anything is admitted.
+    request_engine(&h, ROOT, GROQ).await;
+    let refused = workspace_shape(&h, ROOT).await;
+    assert_eq!(
+        refused["refusalKind"],
+        json!("refused"),
+        "the audited page really is showing a refusal: {refused}"
+    );
+
+    click(&h, &format!("{ROOT} [data-ai-chat-settings]")).await;
+    wait_for_selector(&h, &format!("{ROOT} [data-ai-chat-provider-rows]")).await;
+
+    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
+        .expect("load vendored axe-core");
+    let report = axe.run(h.page()).await.expect("run axe-core");
+    report
+        .assert_no_blocking("ai-chat settings + refusal + es")
+        .unwrap_or_else(|error| panic!("{error}; {}", report.summary()));
+
+    assert_no_browser_errors(&h, "es axe").await;
+}

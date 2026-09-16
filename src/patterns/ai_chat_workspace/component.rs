@@ -24,6 +24,7 @@ use super::knowledge_rail::{
 use super::provider::{
     AvailabilityReasonCode, ProviderCard, card_ready_for_ask, card_unready_reason,
 };
+use super::quick_actions::QuickActionBar;
 use super::settings_rows::{ProviderSettingsRows, TuningDraft};
 use super::status::{TurnNotice, TurnRecord};
 use super::texts::AiChatWorkspaceTexts;
@@ -354,6 +355,13 @@ pub fn AiChatWorkspace(
     // one notice rather than five a second.
     let cancel_announced: RwSignal<Option<String>> = RwSignal::new(None);
     let draft = TuningDraft::new();
+    // The composer's draft, owned HERE rather than inside the panel: the
+    // quick-action bar sits outside `AiChat` (it is workspace copy, driven
+    // by the workspace's own text table) and has to write the very box the
+    // actor types into. Held across a session swap on purpose — a re-opened
+    // session must not silently delete a half-written question, which is the
+    // same rule the refusal path already keeps.
+    let composer = RwSignal::new(String::new());
     // The knowledge rail's two write flows. The DRAFT is held here, not in
     // the rail, because only the composite learns whether a `remember` was
     // accepted — and a refused draft must survive its refusal.
@@ -867,6 +875,7 @@ pub fn AiChatWorkspace(
         .into_any()
     });
 
+    let bar_prefix = id_prefix.clone();
     let rail_prefix = id_prefix.clone();
     let panel = move || {
         generation.track();
@@ -885,6 +894,7 @@ pub fn AiChatWorkspace(
                     on_permission_mode_change=on_permission_mode_change
                     annotations=annotations
                     on_restart=on_panel_restart
+                    composer=composer
                     settings_extra=settings_extra.clone()
                 />
             }
@@ -913,6 +923,7 @@ pub fn AiChatWorkspace(
                 texts=texts
                 on_refusal_action=refusal_action
             />
+            <QuickActionBar texts=texts composer=composer id_prefix=bar_prefix />
             <div class="grid w-full grid-cols-1 gap-4 lg:grid-cols-[16rem_1fr_16rem]">
                 <KnowledgeSourceRail
                     sources=sources

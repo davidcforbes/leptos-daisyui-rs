@@ -292,7 +292,9 @@ pub fn ProviderSettingsRows(
         <div class="flex flex-col gap-2" data-ai-chat-provider-rows="">
             <Show when=shows_effort>
                 <label class="flex flex-col gap-1 text-xs" for=effort_id>
-                    <span class="opacity-60">{move || texts.get().effort_label}</span>
+                    <span class="opacity-60" data-ai-chat-label="effort_label">
+                        {move || texts.get().effort_label}
+                    </span>
                     <select
                         id=effort_id
                         data-ai-chat-effort-select=""
@@ -344,13 +346,21 @@ pub fn ProviderSettingsRows(
             <Show when=shows_levers>
                 <div class="flex flex-col gap-2">
                     {levers}
-                    <p class="text-xs opacity-60" data-ai-chat-no-mcp="">
+                    <p
+                        class="text-xs opacity-60"
+                        data-ai-chat-no-mcp=""
+                        data-ai-chat-label="codex_no_mcp"
+                    >
                         {move || texts.get().codex_no_mcp}
                     </p>
                 </div>
             </Show>
             <Show when=needs_key>
-                <p class="text-xs opacity-60" data-ai-chat-credential-note="">
+                <p
+                    class="text-xs opacity-60"
+                    data-ai-chat-credential-note=""
+                    data-ai-chat-label="credential_note"
+                >
                     {move || texts.get().credential_note}
                 </p>
             </Show>

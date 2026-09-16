@@ -104,7 +104,7 @@ impl ChatScopeOption {
 /// ```css
 /// @source inline("chat chat-start chat-end chat-header chat-bubble chat-bubble-primary chat-bubble-info chat-bubble-warning chat-bubble-neutral chat-bubble-ghost chat-image avatar avatar-placeholder");
 /// @source inline("link text-error");
-/// @source inline("flex flex-col flex-1 flex-wrap items-center justify-between justify-start gap-1 gap-2 h-full min-h-0 w-full w-72 w-52 w-6 h-6 overflow-y-auto p-1 p-2 p-3 p-4 space-y-3 space-y-2");
+/// @source inline("flex flex-col flex-1 flex-wrap items-center justify-between justify-start gap-1 gap-2 h-full min-h-0 w-full w-72 w-52 w-6 h-6 overflow-y-auto p-1 p-2 p-3 p-4 space-y-3 space-y-2 contents");
 /// @source inline("border-t border-b border-base-300 text-xs text-sm opacity-50 opacity-60 text-right whitespace-pre-wrap resize-none max-h-[320px] text-[10px]");
 /// @source inline("btn btn-primary btn-error btn-ghost btn-sm btn-xs textarea textarea-bordered loading loading-dots loading-sm rounded-full");
 /// @source inline("select select-sm select-bordered");
@@ -237,12 +237,22 @@ pub fn AiChat(
     /// uses this to re-check availability, log, or clear its own banner.
     #[prop(optional, into)]
     on_retry: Option<Callback<()>>,
+    /// The composer's draft text, when the host wants to own it.
+    ///
+    /// The panel clears and reads this signal exactly as it does its own, so
+    /// a host control that seeds a prompt (a quick-action chip, a template
+    /// picker) writes the same place the actor types — and a draft seeded
+    /// that way is still only a draft: nothing here sends. `None` keeps the
+    /// draft private to the panel, which is what every existing call site
+    /// gets.
+    #[prop(optional)]
+    composer: Option<RwSignal<String>>,
 ) -> impl IntoView {
     // Bumped whenever a poll() (or a send) changes the transcript, so the
     // message-list closure re-runs. `messages()` borrows the session, so we
     // snapshot to an owned Vec for rendering.
     let version = RwSignal::new(0u32);
-    let input = RwSignal::new(String::new());
+    let input = composer.unwrap_or_else(|| RwSignal::new(String::new()));
     // Whether the transcript should follow new content; toggled by the user's scroll.
     let stick = RwSignal::new(true);
     let list_ref: NodeRef<Div> = NodeRef::new();
@@ -689,6 +699,14 @@ pub fn AiChat(
                                 " \u{25be}"
                             </button>
                             <DropdownContent class="dropdown-content bg-base-100 rounded-box z-10 w-52 p-1 shadow border border-base-300">
+                                // `DropdownContent` renders a `<ul>`, and a
+                                // list may contain only `<li>`. Putting the
+                                // buttons in directly is an axe `list`
+                                // violation, which is how this was found.
+                                // `contents` makes the wrapper generate no
+                                // box, so the children rejoin the list's own
+                                // flow and the layout is unchanged.
+                                <li class="contents">
                                 <For each=move || scopes.get() key=|o| o.id.clone() let:opt>
                                     {
                                         let id = opt.id.clone();
@@ -709,6 +727,7 @@ pub fn AiChat(
                                         }
                                     }
                                 </For>
+                                </li>
                             </DropdownContent>
                         </Dropdown>
                     </Show>
@@ -723,7 +742,14 @@ pub fn AiChat(
                             >
                                 "\u{2699}"
                             </button>
-                            <DropdownContent class="dropdown-content bg-base-100 rounded-box z-10 w-72 p-3 shadow border border-base-300 space-y-2">
+                            <DropdownContent class="dropdown-content bg-base-100 rounded-box z-10 w-72 p-3 shadow border border-base-300">
+                                // See the scope dropdown above: a `<ul>` may
+                                // contain only `<li>`. `space-y-2` moves onto
+                                // the wrapper rather than staying on the list,
+                                // because it spaces a parent's OWN children —
+                                // left on the `<ul>` it would space the single
+                                // wrapper against nothing.
+                                <li class="space-y-2">
                                 <Show when=move || !backends.get().is_empty()>
                                     <label class="flex flex-col gap-1 text-xs" for=id_backend>
                                         <span class="opacity-60">{move || texts.get().backend}</span>
@@ -901,6 +927,7 @@ pub fn AiChat(
                                 >
                                     {move || texts.get().apply}
                                 </button>
+                                </li>
                             </DropdownContent>
                         </Dropdown>
                     </Show>

@@ -213,6 +213,16 @@ pub struct AiChatWorkspaceTexts {
     pub qa_convert_to_table: String,
     /// Prompt template seeded by `QuickAction::Translate`; `{language}` is substituted.
     pub qa_translate: String,
+    /// Accessible name for the quick-action bar as a group of controls.
+    pub quick_actions_label: String,
+    /// Label for the target-language input the `Translate` quick action
+    /// reads. `Translate` is the one action with no static prompt, so it
+    /// carries a control rather than a chip.
+    pub qa_language_label: String,
+    /// Button label for the `Translate` quick action. Distinct from
+    /// [`Self::qa_translate`], which is the PROMPT template and carries a
+    /// `{language}` placeholder no button may display.
+    pub qa_translate_button: String,
     /// Toast template shown after switching engines; `{engine}` is substituted.
     pub switched_engine: String,
     /// Toast shown after starting a new conversation.
@@ -447,6 +457,9 @@ impl Default for AiChatWorkspaceTexts {
             qa_add_details: "Add more details".into(),
             qa_convert_to_table: "Convert this to a table".into(),
             qa_translate: "Translate this to {language}".into(),
+            quick_actions_label: "Quick actions".into(),
+            qa_language_label: "Target language".into(),
+            qa_translate_button: "Translate".into(),
             switched_engine: "Switched to {engine}".into(),
             conversation_reset: "Conversation reset".into(),
             stopped: "Stopped".into(),
@@ -510,7 +523,7 @@ impl AiChatWorkspaceTexts {
     /// The number of fields on this struct; kept in sync with the struct and
     /// [`Self::fields`] by hand, and asserted equal to both by
     /// `en_and_es_texts_are_complete_and_differ` in `tests.rs`.
-    pub const FIELD_COUNT: usize = 139;
+    pub const FIELD_COUNT: usize = 142;
 
     /// Spanish copy, with full orthographic accents (not a transliteration).
     pub fn es() -> Self {
@@ -617,6 +630,9 @@ impl AiChatWorkspaceTexts {
             qa_add_details: "Agregar más detalles".into(),
             qa_convert_to_table: "Convertir esto en una tabla".into(),
             qa_translate: "Traducir esto a {language}".into(),
+            quick_actions_label: "Acciones rápidas".into(),
+            qa_language_label: "Idioma de destino".into(),
+            qa_translate_button: "Traducir".into(),
             switched_engine: "Se cambió a {engine}".into(),
             conversation_reset: "Conversación reiniciada".into(),
             stopped: "Detenido".into(),
@@ -953,6 +969,9 @@ impl AiChatWorkspaceTexts {
             ("qa_add_details", self.qa_add_details.as_str()),
             ("qa_convert_to_table", self.qa_convert_to_table.as_str()),
             ("qa_translate", self.qa_translate.as_str()),
+            ("quick_actions_label", self.quick_actions_label.as_str()),
+            ("qa_language_label", self.qa_language_label.as_str()),
+            ("qa_translate_button", self.qa_translate_button.as_str()),
             ("switched_engine", self.switched_engine.as_str()),
             ("conversation_reset", self.conversation_reset.as_str()),
             ("stopped", self.stopped.as_str()),

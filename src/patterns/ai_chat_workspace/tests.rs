@@ -968,3 +968,110 @@ fn markdown_pinned_copy_survives_smart_punctuation() {
         "annotations are not markdown; see markdown_pinned_fields"
     );
 }
+
+/// Every quick action's prompt is real localized copy, not the same English
+/// sentence in both tables.
+///
+/// The check is per ACTION rather than over the whole set: a table that
+/// translated seven of eight would still differ overall, and the eighth
+/// would ship English into a Spanish composer. `Translate` is included with
+/// a language substituted, because its prompt is a template and a proof that
+/// only compared templates would never exercise the substitution the bar
+/// actually performs.
+#[test]
+fn quick_actions_prompts_localize() {
+    let en = AiChatWorkspaceTexts::default();
+    let es = AiChatWorkspaceTexts::es();
+    let mut actions: Vec<QuickAction> = QuickAction::all_static().to_vec();
+    actions.push(QuickAction::Translate {
+        language: "portugués".to_owned(),
+    });
+
+    for action in &actions {
+        let en_prompt = action.prompt(&en);
+        let es_prompt = action.prompt(&es);
+        assert!(
+            !en_prompt.is_empty() && !es_prompt.is_empty(),
+            "{} has an empty prompt",
+            action.as_id()
+        );
+        assert_ne!(
+            en_prompt,
+            es_prompt,
+            "{} renders the same sentence in both tables",
+            action.as_id()
+        );
+        // No template placeholder may survive into a rendered prompt.
+        assert!(
+            !en_prompt.contains("{language}") && !es_prompt.contains("{language}"),
+            "{} leaked its placeholder: {en_prompt:?} / {es_prompt:?}",
+            action.as_id()
+        );
+    }
+
+    // The substitution really used the language it was handed, in both
+    // tables — a `replace` against the wrong placeholder would silently
+    // leave the sentence intact and still differ EN from ES.
+    let translate = QuickAction::Translate {
+        language: "portugués".to_owned(),
+    };
+    assert!(translate.prompt(&en).contains("portugués"));
+    assert!(translate.prompt(&es).contains("portugués"));
+
+    // And every action's `texts_field` names a field that really exists, so
+    // the `data-ai-chat-label` a chip publishes can be resolved against the
+    // table by name.
+    let names: Vec<&'static str> = en.fields().into_iter().map(|(name, _)| name).collect();
+    for action in &actions {
+        assert!(
+            names.contains(&action.texts_field()),
+            "{} claims the field {:?}, which is not on the struct",
+            action.as_id(),
+            action.texts_field()
+        );
+    }
+}
+
+/// No browser lane in this repo may talk to the live SSE bridge.
+///
+/// Live mode is PRESENT in the showcase and the fixture — a choice an actor
+/// can see and select — and it is deliberately inert. The risk is that a
+/// later phase wires it and a lane starts reaching a real server on
+/// `127.0.0.1:8099`, at which point the suite stops being reproducible and
+/// starts failing for whoever does not happen to be running one. A source
+/// scan is the only check that can fail BEFORE such a lane is written; a
+/// network assertion inside the harness could only fail after.
+#[test]
+fn no_lane_touches_the_live_server() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+    let mut scanned = 0usize;
+    let entries = std::fs::read_dir(&dir).expect("the integration-test directory exists");
+    for entry in entries {
+        let path = entry.expect("readable dir entry").path();
+        if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+            continue;
+        }
+        let source = std::fs::read_to_string(&path).expect("readable test source");
+        scanned += 1;
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default();
+        assert!(
+            !source.contains("8099"),
+            "{name} names the live SSE bridge's port; a lane must drive the \
+             fixture, never a live server"
+        );
+        assert!(
+            !source.contains("SseBridgeTransport"),
+            "{name} names the live transport; a lane must drive the fixture"
+        );
+    }
+    // The scan's own positive control: a glob that silently matched nothing
+    // would pass this test forever while checking nothing at all.
+    assert!(
+        scanned > 20,
+        "only {scanned} integration-test sources were scanned, so the scan \
+         is not reading the suite it claims to cover"
+    );
+}

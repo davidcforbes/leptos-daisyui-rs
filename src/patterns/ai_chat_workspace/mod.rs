@@ -65,7 +65,7 @@ pub use provider::{
     ReasoningEffort, TuningSchema, card_ready_for_ask, card_unready_reason,
     desktop_provider_catalogue,
 };
-pub use quick_actions::QuickAction;
+pub use quick_actions::{QuickAction, QuickActionBar};
 pub use settings_rows::{
     CodexLever, DEFAULT_TEMPERATURE, EFFORT_CHOICES, ProviderSettingsRows, TuningDraft,
     effort_selection,
