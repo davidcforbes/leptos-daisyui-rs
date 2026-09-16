@@ -12,6 +12,8 @@
 mod backend;
 mod evidence;
 mod knowledge;
+#[cfg(feature = "test-mode")]
+mod memory;
 mod provider;
 mod quick_actions;
 mod status;
@@ -28,6 +30,12 @@ pub use knowledge::{
     ChatPosture, CorpusQueryMode, CorpusScope, IngestPhase, IngestStatus, KnowledgeSelection,
     KnowledgeSource, MemoryDraft, MemoryRefusal, OfficeKnowledgeScope, RecallCorpus, RecallHit,
     RecallReceipt, guardrail_refusal,
+};
+#[cfg(feature = "test-mode")]
+pub use memory::{
+    BackendCall, ChatWorkspaceFault, FixtureClock, InMemoryChatWorkspaceBackend, PromptMatcher,
+    SEED_ACTOR, SEED_FOLDER_COURT, SEED_FOLDER_INTAKE, SEED_NOW_MS, SEED_RECALL_QUERY,
+    SEED_RECALL_SEARCH, ScriptedChatTransport, TurnScript,
 };
 pub use provider::{
     AvailabilityReasonCode, CodexLevers, GroqTuning, ModelSource, ProviderCard, ProviderTuning,

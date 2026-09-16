@@ -481,3 +481,30 @@ fn governance_unknown_arms_are_reachable() {
     let state = KnowledgeState::Unknown("a-future-state".into());
     assert!(matches!(state, KnowledgeState::Unknown(ref s) if s == "a-future-state"));
 }
+
+/// The shipped fixture must stay a pure in-process scripted backend: it may
+/// never reach for the live SSE bridge, a host path helper, or the network.
+/// Scanning the source is the only check that fails when someone adds one,
+/// because such a reference compiles perfectly well. The needles live in this
+/// file rather than inside `memory.rs` so the test cannot match itself.
+#[test]
+#[cfg(feature = "test-mode")]
+fn memory_rs_never_references_the_live_bridge() {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/src/patterns/ai_chat_workspace/memory.rs"
+    );
+    let source = std::fs::read_to_string(path).expect("the fixture source is readable");
+    for needle in [
+        "SseBridgeTransport",
+        "paths::",
+        "use_event_source_fetch",
+        "http://",
+        "fetch(",
+    ] {
+        assert!(
+            !source.contains(needle),
+            "memory.rs must not reference {needle}"
+        );
+    }
+}

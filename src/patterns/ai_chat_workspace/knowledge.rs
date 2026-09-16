@@ -295,6 +295,11 @@ pub struct RecallReceipt {
     pub since: Option<String>,
     /// The results, in host-decided display order.
     pub hits: Vec<RecallHit>,
+    /// The host's own presentable description of the search that ran, shown
+    /// verbatim rather than reconstructed from the query modes. The real
+    /// memory service returns this string beside the hits, and a workspace
+    /// that paraphrased it would claim a retrieval strategy it cannot see.
+    pub search: String,
 }
 
 /// A proposed personal-memory candidate, before the guardrail or the host
@@ -323,6 +328,11 @@ pub enum MemoryRefusal {
     ContainsEmail,
     /// The text appears to contain a phone number.
     ContainsPhone,
+    /// The proposed class is one a curator creates, never a write. The real
+    /// memory service refuses `lesson` and `principle` on write: those are
+    /// distilled out of accepted items during curation, so accepting one
+    /// directly would let a workspace mint organizational doctrine.
+    CuratedKindOnly,
     /// A host refusal reason this vocabulary does not name.
     Unknown(String),
 }

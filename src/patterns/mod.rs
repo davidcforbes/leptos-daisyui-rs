@@ -41,6 +41,17 @@ pub use ai_chat_workspace::{
     TurnEvidence, TurnRecord, UsageTotals, WorkspaceFuture, desktop_provider_catalogue,
     guardrail_refusal, lifecycle_id,
 };
+// `BackendCall` and `SEED_NOW_MS` are also the names `helpdesk` uses for its
+// own fixture's call log and seeded clock, and `helpdesk`'s are re-exported by
+// glob below. The two are unrelated types, so the chat-workspace fixture's are
+// aliased here rather than shadowing the helpdesk names.
+#[cfg(feature = "test-mode")]
+pub use ai_chat_workspace::{
+    BackendCall as ChatWorkspaceCall, ChatWorkspaceFault, FixtureClock,
+    InMemoryChatWorkspaceBackend, PromptMatcher, SEED_ACTOR as SEED_CHAT_ACTOR, SEED_FOLDER_COURT,
+    SEED_FOLDER_INTAKE, SEED_NOW_MS as SEED_CHAT_NOW_MS, SEED_RECALL_QUERY, SEED_RECALL_SEARCH,
+    ScriptedChatTransport, TurnScript,
+};
 pub use async_data_section::{AsyncDataSection, AsyncDataTexts, state_shows_content};
 pub use contracts::{
     AccessibilityContract, AccessibilityObligation, AccessibleLabel, CapabilityAction,
