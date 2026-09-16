@@ -148,6 +148,12 @@ pub fn AiChatFixture(
     /// wrapper so a document carrying two workspaces can address each.
     #[prop(optional, into)]
     case: Option<String>,
+    /// Whether this instance renders the composite's quick-action bar.
+    /// `false` drives `AiChatWorkspace`'s `show_quick_actions` opt-out, so a
+    /// document can carry one workspace with the bar and one without and the
+    /// two are each other's control.
+    #[prop(optional, default = true)]
+    quick_actions: bool,
     /// Whether this instance owns the document's debug oracle. Exactly one
     /// instance per document may: the oracle keys are global, so a second
     /// writer would overwrite the first and a proof would read whichever
@@ -398,6 +404,7 @@ pub fn AiChatFixture(
                     backend=backend
                     texts=texts
                     chat_texts=chat_texts
+                    show_quick_actions=quick_actions
                     now_ms=Signal::from(clock)
                     initial_knowledge=knowledge
                     on_refusal_action=on_refusal_action

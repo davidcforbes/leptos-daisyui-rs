@@ -171,9 +171,16 @@ fn main() {
                                 code: AvailabilityReasonCode::EngineProcessNotRunning,
                             }
                         />
+                        // This one also declines the quick-action bar. The
+                        // two roots are therefore each other's control for
+                        // `AiChatWorkspace`'s `show_quick_actions` opt-out:
+                        // "the bar is absent here" only means the prop works
+                        // if the workspace beside it, on the same document
+                        // and the same build, still has one.
                         <ai_chat_fixture::AiChatFixture
                             case="model_missing"
                             oracle=false
+                            quick_actions=false
                             fault=ChatWorkspaceFault::EngineUnavailable {
                                 engine_id: "ollama".to_owned(),
                                 code: AvailabilityReasonCode::ModelNotInstalled,

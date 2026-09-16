@@ -321,6 +321,22 @@ pub fn AiChatWorkspace(
     /// what the click did.
     #[prop(optional, into)]
     on_refusal_action: Option<Callback<RefusalNextAction>>,
+    /// Whether to render the quick-action bar between the engine header and
+    /// the three-column body.
+    ///
+    /// Defaults to `true`, so every existing consumer is unchanged. It is a
+    /// prop rather than a fixture of the composite because the bar is an
+    /// OPINION about how a chat is started — seven canned prompts and a
+    /// translate control — and a host that already offers its own way in
+    /// (a command palette, a record-level action, a template picker) would
+    /// otherwise be given a second one it cannot decline, wired to copy it
+    /// does not own.
+    ///
+    /// Opting out removes the bar entirely; nothing else about the composite
+    /// changes, and the composer the bar would have written is still the
+    /// panel's own.
+    #[prop(optional, into, default = Signal::stored(true))]
+    show_quick_actions: Signal<bool>,
     /// Extra classes merged onto the root.
     #[prop(optional, into)]
     class: &'static str,
@@ -923,7 +939,13 @@ pub fn AiChatWorkspace(
                 texts=texts
                 on_refusal_action=refusal_action
             />
-            <QuickActionBar texts=texts composer=composer id_prefix=bar_prefix />
+            <Show when=move || show_quick_actions.get()>
+                <QuickActionBar
+                    texts=texts
+                    composer=composer
+                    id_prefix=bar_prefix.clone()
+                />
+            </Show>
             <div class="grid w-full grid-cols-1 gap-4 lg:grid-cols-[16rem_1fr_16rem]">
                 <KnowledgeSourceRail
                     sources=sources

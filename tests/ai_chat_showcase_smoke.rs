@@ -2092,6 +2092,42 @@ async fn ollama_not_running_and_model_not_pulled_are_distinct() {
         );
     }
 
+    // The quick-action bar's opt-out, proved on this document because it
+    // already mounts two workspaces and so already has the one thing this
+    // assertion needs: a control. "The bar is absent" is only evidence that
+    // `show_quick_actions=false` did anything if the workspace BESIDE it,
+    // on the same document and the same build, still has one. A test that
+    // only looked at the opted-out root would pass just as happily if the
+    // bar had never been built at all.
+    assert_eq!(
+        quick_action_bar_present(&h, &not_running_root).await,
+        json!(true),
+        "the default is unchanged: a workspace that says nothing about \
+         quick actions still gets them"
+    );
+    assert_eq!(
+        quick_action_bar_present(&h, &model_missing_root).await,
+        json!(false),
+        "and a host that declines them gets none — no bar, no chips, no \
+         language input"
+    );
+    // Not merely hidden: none of the bar's own controls exists anywhere
+    // under that root, so a consumer cannot tab into a control it opted out
+    // of.
+    assert_eq!(
+        eval_json(
+            &h,
+            &format!(
+                "document.querySelectorAll('{model_missing_root} \
+                 [data-ai-chat-quick-action], {model_missing_root} \
+                 [data-ai-chat-quick-action-language]').length"
+            ),
+        )
+        .await,
+        json!(0),
+        "the opt-out removes the controls, it does not just hide the bar"
+    );
+
     assert_no_browser_errors(&h, "ollama reasons").await;
 }
 
@@ -2220,6 +2256,51 @@ fn open_sessions(calls: &[String]) -> usize {
         .filter(|c| c.starts_with("OpenSession"))
         .count()
 }
+
+/// Whether one workspace root renders the composite's quick-action bar.
+async fn quick_action_bar_present(h: &pixelproof_web::Harness, root: &str) -> Value {
+    eval_json(
+        h,
+        &format!("document.querySelector('{root} [data-ai-chat-quick-actions]') !== null"),
+    )
+    .await
+}
+
+/// Every `data-ai-chat-label` the base fixture document publishes, in DOM
+/// order, on the engine it opens with (`claude-code`).
+///
+/// Pinned as an exact ordered list, not counted against a floor. A floor
+/// sitting at the real count — `>= 10` when 11 render — cannot fail when one
+/// element silently loses its hook, and "one element quietly stopped being
+/// covered" is the entire regression the coverage assertion exists to catch.
+/// A `>=` assertion pinned to the value it is measuring is not a test; it is
+/// a comment with a semicolon.
+///
+/// The set is engine-dependent by design: `codex_no_mcp` and
+/// `credential_note` are deliberately ABSENT here, because claude-code
+/// declares neither Codex levers nor a host-held key. Test 22 reaches those
+/// two by switching engines at the end, which is the only way to exercise
+/// them at all.
+///
+/// Hand-maintained, like `AiChatWorkspaceTexts::FIELD_COUNT`. Adding a
+/// labelled string to the workspace fails this, loudly, with the new name in
+/// the diff — which is the intended way to learn that the set moved.
+const EXPECTED_LABELS: [&str; 11] = [
+    // The quick-action bar, in render order: its group label, the seven
+    // static chips, then the Translate control's own label and button.
+    "quick_actions_label",
+    "qa_summarize",
+    "qa_rewrite",
+    "qa_expand",
+    "qa_fix_grammar",
+    "qa_simplify",
+    "qa_add_details",
+    "qa_convert_to_table",
+    "qa_language_label",
+    "qa_translate_button",
+    // From the settings popover's provider rows.
+    "effort_label",
+];
 
 /// Every `[data-ai-chat-label]` inside one workspace, as `(field, text)`.
 async fn labelled_text(h: &pixelproof_web::Harness, root: &str) -> Vec<(String, String)> {
@@ -2456,10 +2537,20 @@ async fn locale_switch_replaces_labels_in_place_and_covers_every_label() {
         "there is a transcript to preserve: {before}"
     );
 
+    // The settings rows render from the loaded provider card, so wait for
+    // the one label that comes from them before snapshotting — a real
+    // signal, not a settle. Without it the snapshot could be taken a beat
+    // early and the exact-set assertion below would fail for a reason that
+    // has nothing to do with labelling.
+    wait_for_selector(&h, &format!("{ROOT} [data-ai-chat-label=\"effort_label\"]")).await;
+
     let en_labels = labelled_text(&h, ROOT).await;
-    assert!(
-        en_labels.len() >= 10,
-        "the workspace really does publish labelled copy: {en_labels:?}"
+    let en_names: Vec<&str> = en_labels.iter().map(|(f, _)| f.as_str()).collect();
+    assert_eq!(
+        en_names, EXPECTED_LABELS,
+        "the labelled set is pinned, not floored. A count comparison could \
+         not fail when one element silently lost its data-ai-chat-label — \
+         which is the regression this whole test exists to catch: {en_labels:?}"
     );
     for (field, text) in &en_labels {
         let expected = lookup(&en_table, field)
@@ -2471,12 +2562,11 @@ async fn locale_switch_replaces_labels_in_place_and_covers_every_label() {
     wait_for_locale(&h, ROOT, "es").await;
 
     let es_labels = labelled_text(&h, ROOT).await;
-    let en_names: Vec<&String> = en_labels.iter().map(|(f, _)| f).collect();
-    let es_names: Vec<&String> = es_labels.iter().map(|(f, _)| f).collect();
+    let es_names: Vec<&str> = es_labels.iter().map(|(f, _)| f.as_str()).collect();
     assert_eq!(
-        es_names, en_names,
+        es_names, EXPECTED_LABELS,
         "the same elements are still there, in the same order — a swap, not \
-         a re-render into a different shape"
+         a re-render into a different shape: {es_labels:?}"
     );
     for (field, text) in &es_labels {
         let expected = lookup(&es_table, field)
