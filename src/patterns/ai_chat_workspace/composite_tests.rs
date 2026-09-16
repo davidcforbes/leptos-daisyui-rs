@@ -451,6 +451,77 @@ fn a_cards_tuning_payload_carries_only_the_levers_its_schema_declares() {
 }
 
 #[test]
+#[cfg(feature = "test-mode")]
+fn the_usage_line_reports_the_turn_the_figures_beside_it_report() {
+    // claude-code is NOT metered by `engine_is_metered`, but its seeded
+    // script is priced, so the fixture accumulates every token onto the
+    // METERED side. Selecting a bucket by engine id therefore rendered
+    // `0 in · 0 cached · 0 out · 0 rsn` for a turn whose own figures say 908
+    // tokens — the subtitle and the hooks beside it describing one turn and
+    // disagreeing about it.
+    let record = turn_record(None, "the intake checklist conflict check");
+    let figures = usage_figures(&record).expect("the seeded script reports usage");
+    assert!(!engine_is_metered("claude-code"));
+    assert_eq!(figures.plan_tokens, 0, "the plan side really is empty");
+    assert_eq!(figures.metered_tokens, 812 + 96);
+
+    let line = usage_line(&record).expect("a turn with usage has a usage line");
+    assert!(
+        line.contains("96 out"),
+        "the line must report the output the figures report: {line:?}"
+    );
+    assert!(line.contains("41 rsn"), "and the reasoning: {line:?}");
+    assert!(line.contains("812 in"), "and the input: {line:?}");
+    assert!(
+        !line.starts_with("0 in"),
+        "a priced turn must never read as an empty one: {line:?}"
+    );
+
+    // The negative control on the other side of the split: codex-cli reports
+    // no cost, so its tokens land on the PLAN side, and the same line must
+    // follow them there rather than to a fixed bucket.
+    let plan = {
+        use crate::components::ai_chat::{ChatRequest, ChatSession};
+        let backend = InMemoryChatWorkspaceBackend::seeded();
+        let transport = now(backend.open_session(
+            "codex-cli",
+            &KnowledgeSelection {
+                posture: ChatPosture::Assistant,
+                ..KnowledgeSelection::default()
+            },
+            Default::default(),
+            ProviderTuning::default(),
+        ))
+        .expect("open codex-cli");
+        let mut session = ChatSession::new(transport);
+        session
+            .send(ChatRequest {
+                prompt: "anything".to_owned(),
+                attachments: Vec::new(),
+                page_context: None,
+            })
+            .expect("send");
+        let id = backend.current_turn_id().expect("a live turn");
+        for _ in 0..80 {
+            session.poll();
+        }
+        now(backend.turn(&id)).expect("record")
+    };
+    let plan_line = usage_line(&plan).expect("codex reports usage too");
+    assert!(plan_line.contains("44 out"), "{plan_line:?}");
+    assert!(plan_line.contains("240 in"), "{plan_line:?}");
+
+    // A turn with no usage has no line at all, rather than a row of zeroes.
+    assert_eq!(
+        usage_line(&TurnRecord {
+            usage: None,
+            ..record
+        }),
+        None
+    );
+}
+
+#[test]
 fn engine_metering_policy_splits_plan_from_metered() {
     assert!(engine_is_metered("groq-gpt-oss-120b"));
     assert!(engine_is_metered("ollama"));

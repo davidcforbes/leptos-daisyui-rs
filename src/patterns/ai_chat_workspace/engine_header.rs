@@ -19,7 +19,7 @@ use super::provider::{
 use super::status::{TurnRecord, declined_limitations, failure_kind, lifecycle_id, outcome_id};
 use super::texts::AiChatWorkspaceTexts;
 use crate::components::ai_assistant_workspace::{AttemptLifecycle, RefusalNextAction};
-use crate::components::ai_chat::format_usage_subtitle;
+use crate::components::ai_chat::{Usage, format_usage_subtitle};
 
 /// The failure kind a watchdog-failed turn reports.
 ///
@@ -32,10 +32,19 @@ pub const WATCHDOG_FAILURE_KIND: &str = "watchdog";
 
 /// Engines whose usage is billed per token rather than covered by the plan.
 ///
-/// A fixture-grade policy, deliberately explicit: the header must pick ONE of
-/// `UsageTotals`' two `Usage` fields to render, and adding them together would
-/// misreport both (see `UsageTotals`' own documentation). A real host knows
-/// which of its engines are metered from its plan, not from this list.
+/// A fixture-grade policy for a HOST deciding which side of
+/// [`super::status::UsageTotals`] a turn's usage accumulates onto
+/// (`add_plan` vs `add_metered`). A real host knows this from its plan, not
+/// from this list.
+///
+/// The header deliberately does NOT use it to choose what to render. It once
+/// did, and that was a defect: `claude-code` is not metered by this policy,
+/// but the seeded fixture accumulates by reported COST, so a priced
+/// claude-code turn lands entirely on the metered side — and the header
+/// rendered `0 in · 0 cached · 0 out · 0 rsn` directly beside
+/// `Metered: 908`. Which side a host chose is its own business; what the
+/// header owes the actor is the turn's real numbers, so [`usage_line`] reads
+/// the record rather than guessing from an engine id.
 pub fn engine_is_metered(engine_id: &str) -> bool {
     engine_id.starts_with("groq") || engine_id == "ollama"
 }
@@ -43,18 +52,29 @@ pub fn engine_is_metered(engine_id: &str) -> bool {
 /// The header subtitle for one turn's usage, or `None` when the turn reported
 /// none.
 ///
+/// Reads BOTH buckets and adds them per token kind, for the same reason
+/// [`usage_figures`]' `reasoning_tokens`/`output_tokens` do: these are counts
+/// of one kind of token, not two kinds of money, and the plan/metered
+/// distinction stays fully visible in its own two labelled hooks beside this
+/// line. Selecting one bucket by engine id instead is what made this subtitle
+/// read `0 in · 0 cached · 0 out · 0 rsn` next to `Metered: 908` — a line and
+/// its neighbours describing the same turn and disagreeing about it.
+///
 /// `format_usage_subtitle` formats token counts only — it has no cost output
 /// at all — so cost is rendered separately by the header, which is also where
 /// `cost_incomplete` turns the figure into an explicit floor rather than a
 /// total.
-pub fn usage_line(record: &TurnRecord, engine_id: &str) -> Option<String> {
+pub fn usage_line(record: &TurnRecord) -> Option<String> {
     let totals = record.usage.as_ref()?;
-    let usage = if engine_is_metered(engine_id) {
-        &totals.metered
-    } else {
-        &totals.plan
-    };
-    Some(format_usage_subtitle(usage))
+    let (plan, metered) = (&totals.plan, &totals.metered);
+    Some(format_usage_subtitle(&Usage {
+        cost_usd: plan.cost_usd + metered.cost_usd,
+        input_tokens: plan.input_tokens + metered.input_tokens,
+        output_tokens: plan.output_tokens + metered.output_tokens,
+        reasoning_tokens: plan.reasoning_tokens + metered.reasoning_tokens,
+        cache_read_tokens: plan.cache_read_tokens + metered.cache_read_tokens,
+        cache_creation_tokens: plan.cache_creation_tokens + metered.cache_creation_tokens,
+    }))
 }
 
 /// The cost figure for one turn, and whether it is a floor rather than a
@@ -276,10 +296,7 @@ pub fn EngineHeader(
             .map(|r| t.lifecycle_label(&r.lifecycle))
             .unwrap_or_default()
     };
-    let usage = move || {
-        let id = engine_id.get();
-        turn.get().and_then(|r| usage_line(&r, &id))
-    };
+    let usage = move || turn.get().and_then(|r| usage_line(&r));
     let figures = move || turn.get().as_ref().and_then(usage_figures);
     let tps = move || turn.get().and_then(|r| r.tokens_per_sec);
     let cost = move || {
@@ -408,10 +425,10 @@ pub fn EngineHeader(
                                     {format!("{}: {}", t.usage_metered, f.metered_tokens)}
                                 </span>
                                 <span data-ai-chat-usage-reasoning=f.reasoning_tokens.to_string()>
-                                    {f.reasoning_tokens}
+                                    {format!("{}: {}", t.usage_reasoning, f.reasoning_tokens)}
                                 </span>
                                 <span data-ai-chat-usage-output=f.output_tokens.to_string()>
-                                    {f.output_tokens}
+                                    {format!("{}: {}", t.usage_output, f.output_tokens)}
                                 </span>
                             }
                         })

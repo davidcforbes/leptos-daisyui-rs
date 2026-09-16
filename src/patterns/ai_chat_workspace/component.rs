@@ -677,6 +677,26 @@ pub fn AiChatWorkspace(
             refuse_card(&id);
         }
     });
+    // "New session" is `AiChat`'s own control: it restarts the session and
+    // clears the transcript, and the composite only learns through this
+    // callback. Without it the header goes on publishing the FINISHED turn's
+    // outcome, usage, limitations and honesty — and the annotations it grew —
+    // over a conversation that no longer exists. The `tick_turn_id` fallback
+    // made that permanent rather than transient, so the stale state is a
+    // completed answer, not a passing `validating`.
+    //
+    // Nothing is announced: the actor pressed the button, so a notice row on
+    // the empty transcript would be the composite telling them what they just
+    // did. Same reasoning as `ReopenReason::Boot`.
+    let on_panel_restart = Callback::new(move |()| {
+        turn.set(None);
+        watched.set(None);
+        announced.set(0);
+        timed_out.set(false);
+        cancel_announced.set(None);
+        annotations.set(Vec::new());
+        refusal.set(None);
+    });
     let refusal_action = Callback::new(move |action: RefusalNextAction| {
         if let Some(cb) = on_refusal_action {
             cb.run(action);
@@ -864,6 +884,7 @@ pub fn AiChatWorkspace(
                     permission_mode=Signal::derive(move || draft.permission_mode.get())
                     on_permission_mode_change=on_permission_mode_change
                     annotations=annotations
+                    on_restart=on_panel_restart
                     settings_extra=settings_extra.clone()
                 />
             }

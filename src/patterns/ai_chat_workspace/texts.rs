@@ -41,6 +41,12 @@ pub struct AiChatWorkspaceTexts {
     pub usage_plan: String,
     /// Label for metered (pay-as-you-go) usage.
     pub usage_metered: String,
+    /// Label for the reasoning-token figure. Without it the usage row reads
+    /// `Plan: 0  Metered: 908  41  96` and the last two numbers look like
+    /// continuations of the metered one.
+    pub usage_reasoning: String,
+    /// Label for the output-token figure; see [`Self::usage_reasoning`].
+    pub usage_output: String,
     /// Label for the tokens-per-second throughput readout.
     pub tokens_per_sec: String,
     /// Shown in place of a metered cost the backend did not report.
@@ -350,6 +356,8 @@ impl Default for AiChatWorkspaceTexts {
             budget_remaining: "Budget remaining".into(),
             usage_plan: "Plan usage".into(),
             usage_metered: "Metered usage".into(),
+            usage_reasoning: "Reasoning tokens".into(),
+            usage_output: "Output tokens".into(),
             tokens_per_sec: "Tokens per second".into(),
             cost_absent: "Cost not available".into(),
             state_admitted: "Admitted".into(),
@@ -496,7 +504,7 @@ impl AiChatWorkspaceTexts {
     /// The number of fields on this struct; kept in sync with the struct and
     /// [`Self::fields`] by hand, and asserted equal to both by
     /// `en_and_es_texts_are_complete_and_differ` in `tests.rs`.
-    pub const FIELD_COUNT: usize = 137;
+    pub const FIELD_COUNT: usize = 139;
 
     /// Spanish copy, with full orthographic accents (not a transliteration).
     pub fn es() -> Self {
@@ -512,6 +520,8 @@ impl AiChatWorkspaceTexts {
             budget_remaining: "Presupuesto restante".into(),
             usage_plan: "Uso del plan".into(),
             usage_metered: "Uso medido".into(),
+            usage_reasoning: "Tokens de razonamiento".into(),
+            usage_output: "Tokens de salida".into(),
             tokens_per_sec: "Tokens por segundo".into(),
             cost_absent: "Costo no disponible".into(),
             state_admitted: "Admitido".into(),
@@ -827,6 +837,8 @@ impl AiChatWorkspaceTexts {
             ("budget_remaining", self.budget_remaining.as_str()),
             ("usage_plan", self.usage_plan.as_str()),
             ("usage_metered", self.usage_metered.as_str()),
+            ("usage_reasoning", self.usage_reasoning.as_str()),
+            ("usage_output", self.usage_output.as_str()),
             ("tokens_per_sec", self.tokens_per_sec.as_str()),
             ("cost_absent", self.cost_absent.as_str()),
             ("state_admitted", self.state_admitted.as_str()),

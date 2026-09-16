@@ -1022,6 +1022,7 @@ async fn workspace_shape(h: &pixelproof_web::Harness, root: &str) -> Value {
                     refusalActions: Array.from(
                         root.querySelectorAll('[data-ai-chat-refusal-action]')
                     ).map(e => e.getAttribute('data-ai-chat-refusal-action')),
+                    usageLine: q('[data-ai-chat-usage]')?.textContent.trim() ?? null,
                     usagePlan: num('data-ai-chat-usage-plan'),
                     usageMetered: num('data-ai-chat-usage-metered'),
                     usageReasoning: num('data-ai-chat-usage-reasoning'),
@@ -1300,6 +1301,22 @@ async fn usage_keeps_plan_and_metered_apart_and_reasoning_inside_output() {
     assert!(
         metered["usageTps"].as_str().is_some(),
         "throughput is published once an elapsed time exists: {metered}"
+    );
+    // The human-readable line and the split hooks describe the SAME turn, so
+    // they may not disagree about it. Selecting a bucket by engine id made
+    // this line read `0 in · 0 cached · 0 out · 0 rsn` two elements away from
+    // `Metered: 908`.
+    let line = metered["usageLine"]
+        .as_str()
+        .expect("a turn with usage publishes a usage line")
+        .to_owned();
+    assert!(
+        line.contains(&format!("{output} out")) && line.contains(&format!("{reasoning} rsn")),
+        "the line must carry the same output/reasoning the hooks do: {line:?} vs {metered}"
+    );
+    assert!(
+        !line.contains("0 out"),
+        "a priced turn must never read as an empty one: {line:?}"
     );
     // No hook anywhere carries the forbidden total.
     let total = metered["usagePlan"].as_u64().unwrap() + metered["usageMetered"].as_u64().unwrap();
@@ -1716,15 +1733,31 @@ async fn restart_clears_the_transcript_and_reaches_the_transport() {
         "no restart before the click"
     );
 
-    ask(&h, ROOT, "the intake checklist conflict check").await;
+    // A turn that leaves a NOTICE behind, so the annotation leg is not
+    // vacuous: an escalation becomes an AtEnd Warning the composite owns, and
+    // it outlives the turn that produced it by design.
+    ask(&h, ROOT, "escalate").await;
+    let escalated = workspace_shape(&h, ROOT).await;
+    assert_eq!(
+        strings(&escalated["noticeRows"]).len(),
+        1,
+        "the escalation really is in the transcript: {escalated}"
+    );
+
+    // A turn that leaves the HEADER full: an outcome, limitations, usage and
+    // a terminal lifecycle, all derived from a record.
+    ask(&h, ROOT, "decline").await;
     let answered = workspace_shape(&h, ROOT).await;
     assert!(
         strings(&answered["roles"]).contains(&"user".to_owned()),
         "there is a conversation to clear: {answered}"
     );
+    assert_eq!(answered["outcome"], json!("declined"), "{answered}");
+    assert_eq!(answered["turnStatus"], json!("completed"), "{answered}");
+    assert_eq!(strings(&answered["limitations"]).len(), 2, "{answered}");
 
     click(&h, &format!("{ROOT} [data-ai-chat-new-session]")).await;
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    tokio::time::sleep(std::time::Duration::from_millis(800)).await;
 
     let cleared = workspace_shape(&h, ROOT).await;
     assert!(
@@ -1734,6 +1767,32 @@ async fn restart_clears_the_transcript_and_reaches_the_transport() {
     assert!(
         backend_calls(&h).await.iter().any(|c| c == "Restart"),
         "and the transport was told, not just the screen"
+    );
+
+    // …and so is everything the header DERIVED from the turn that transcript
+    // held. `data-ai-chat-new-session` is `AiChat`'s own control; before the
+    // composite listened for it, the empty conversation sat under a header
+    // still reporting `outcome="declined"`, `turn-status="completed"`, both
+    // limitation rows, the old turn's usage and — after a failure — an
+    // `honesty="failed"` for a turn that no longer exists.
+    assert_eq!(
+        cleared["outcome"],
+        json!(null),
+        "a cleared conversation has produced nothing: {cleared}"
+    );
+    assert_eq!(cleared["turnStatus"], json!("idle"), "{cleared}");
+    assert_eq!(cleared["honesty"], json!("ready"), "{cleared}");
+    assert_eq!(cleared["failure"], json!(null), "{cleared}");
+    assert!(
+        strings(&cleared["limitations"]).is_empty(),
+        "the previous answer's limitations went with it: {cleared}"
+    );
+    assert_eq!(cleared["usagePlan"], json!(null), "{cleared}");
+    assert_eq!(cleared["usageMetered"], json!(null), "{cleared}");
+    assert_eq!(cleared["usageLine"], json!(null), "{cleared}");
+    assert!(
+        strings(&cleared["noticeRows"]).is_empty(),
+        "and so did the notices it grew: {cleared}"
     );
 
     assert_no_browser_errors(&h, "restart").await;
