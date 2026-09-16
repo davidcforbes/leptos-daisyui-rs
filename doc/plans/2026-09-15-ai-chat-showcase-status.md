@@ -29,7 +29,7 @@ attachments are out of scope (follow-up bead).
 |---|---|---|---|
 | P0 prereqs + orphan contract gate | ldui-iilm.1 | complete, reviewed | 1af0472 |
 | P1 pure model + texts (`patterns::ai_chat_workspace`) | ldui-iilm.2 | complete, reviewed (1 fix round) | 0bd77bc, cfbaee0, 7f736c2 |
-| P2 generic `AiChat` upgrades | ldui-iilm.3 | committed; fix round 1 landed, **scoped re-review pending** | e5ed0f2, 7000c6a |
+| P2 generic `AiChat` upgrades | ldui-iilm.3 | complete, reviewed (1 fix round, re-review clean) | e5ed0f2, 7000c6a |
 | P3 shipped fixture (`memory.rs`, test-mode) | ldui-iilm.4 | committed; review not approved; **fix round 1 brief ready, not dispatched** | b6db0a3 |
 | P4 composite + first page + `test-ai-chat` lane | ldui-iilm.5 | brief drafted (`task-P4-brief.md`), reconcile against P2/P3 reports first | — |
 | P5 honesty + lifecycle (+12 tests) | ldui-iilm.6 | brief drafted | — |
@@ -66,9 +66,8 @@ AI Memory bridge over MCP stdio).
 
 1. Open the ledger; the last lines name the running or held fix round.
 2. `bd ready` from the worktree (it redirects to the main checkout's tracker).
-3. Finish the P2 re-review (package `review-P2-fix1-b6db0a3..7000c6a.diff`),
-   then dispatch P3's fix round (`task-P3-fix1-brief.md`), then reconcile and
-   dispatch P4. One writer per worktree at a time. Use PowerShell for git in
+3. Dispatch P3's fix round (`task-P3-fix1-brief.md`), re-review it, close
+   ldui-iilm.4, then reconcile and dispatch P4. One writer per worktree at a time. Use PowerShell for git in
    the worktree; commit by path; never `cargo fmt` or commit while a verify
    run or browser lane is reading the tree.
 4. Before compiling editmark-server for Live mode (P9), re-checkout
