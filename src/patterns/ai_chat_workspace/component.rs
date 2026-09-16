@@ -42,6 +42,52 @@ const TURN_POLL_MS: u64 = 200;
 /// watchdog fails it, in milliseconds.
 pub const WATCHDOG_MS: i64 = 120_000;
 
+/// Whether the watchdog should fail the turn on this tick.
+///
+/// Pure so the threshold is provable without a browser: the composite's own
+/// tick supplies `elapsed_ms` from its clock, `terminal` from
+/// [`is_terminal`], and `already_fired` from the watched entry. All three
+/// gates matter, and each has its own test:
+///
+/// * `terminal` — a turn that finished at 130 s must not be failed after the
+///   fact,
+/// * `already_fired` — firing must be once per turn, not once per tick and
+///   not once per [`WATCHDOG_MS`] period (see the notice re-announcement this
+///   replaced),
+/// * `elapsed_ms >= WATCHDOG_MS` — inclusive, so the boundary tick fires.
+pub fn watchdog_should_fire(elapsed_ms: i64, terminal: bool, already_fired: bool) -> bool {
+    !terminal && !already_fired && elapsed_ms >= WATCHDOG_MS
+}
+
+/// Why a session is being (re)opened, and therefore whether the transcript
+/// should announce it.
+///
+/// A session is torn down and rebuilt for two unrelated reasons, and only one
+/// of them is a provider switch. Treating "a session already exists" as the
+/// discriminator announced `"Switched to {engine}"` for an engine that never
+/// changed, every time the actor picked a different folder in the knowledge
+/// rail.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReopenReason {
+    /// The workspace is booting; there is no conversation to reset and
+    /// nothing to announce.
+    Boot,
+    /// The actor picked a different engine. This is the only reason that
+    /// announces.
+    EngineSwitch,
+    /// The knowledge selection changed (corpus, query mode or posture). The
+    /// session is rebuilt because a turn is opened against a knowledge mix,
+    /// but the engine did not change — so the engine-switch wording would be
+    /// false. P6 owns whatever a knowledge change should say instead.
+    KnowledgeChange,
+}
+
+/// Whether reopening for this reason announces a provider switch in the
+/// transcript.
+pub fn reopen_announces_switch(reason: ReopenReason) -> bool {
+    matches!(reason, ReopenReason::EngineSwitch)
+}
+
 /// Whether a lifecycle is one the turn can never leave.
 pub fn is_terminal(l: &AttemptLifecycle) -> bool {
     matches!(
@@ -195,8 +241,14 @@ pub fn AiChatWorkspace(
     // settings form and its backend selection once, at mount.
     let session: RwSignal<Option<StoredValue<ChatSession, LocalStorage>>> = RwSignal::new(None);
     let generation = RwSignal::new(0u32);
-    // The turn the watchdog is timing, and when the composite first saw it.
-    let watched: RwSignal<Option<(String, i64)>> = RwSignal::new(None);
+    // The turn the watchdog is timing, when the composite first saw it, and
+    // whether the watchdog has already fired for it. The flag is why this is
+    // never cleared while the turn is still current: `fail_turn` acts on the
+    // `ChatSession`, not on the backend, so `current_turn_id()` keeps
+    // returning the same id — and clearing the entry re-seeded it on the next
+    // tick, which reset `announced` to 0 and re-announced every notice the
+    // turn had ever carried, once per watchdog period, forever.
+    let watched: RwSignal<Option<(String, i64, bool)>> = RwSignal::new(None);
     // How many of the live turn's notices have already been announced, so a
     // notice becomes an annotation exactly once.
     let announced: RwSignal<usize> = RwSignal::new(0);
@@ -224,7 +276,7 @@ pub fn AiChatWorkspace(
     // A refused open is an honesty state, not a reset: the previous session
     // stays mounted, so the actor's draft and transcript survive a refusal
     // they did not ask for, and the header explains what happened.
-    let open_engine = move |id: String| {
+    let open_engine = move |id: String, reason: ReopenReason| {
         let Some(card) = card_for(&id) else {
             return;
         };
@@ -234,7 +286,7 @@ pub fn AiChatWorkspace(
         let tuning = draft.to_tuning(&card);
         let knowledge = selection.get_untracked();
         let label = card.capabilities.label.clone();
-        let switching = session.get_untracked().is_some();
+        let announces = reopen_announces_switch(reason);
         spawn_local(async move {
             let fut = backend.with_value(|b| b.open_session(&id, &knowledge, settings, tuning));
             match fut.await {
@@ -259,11 +311,13 @@ pub fn AiChatWorkspace(
                     watched.try_set(None);
                     announced.try_set(0);
                     refusal.try_set(None);
-                    // A switch resets the conversation, so the previous
+                    // Any reopen resets the conversation, so the previous
                     // annotations describe a transcript that no longer
-                    // exists. The first open announces nothing: there is no
-                    // conversation to have been reset.
-                    annotations.try_set(if switching {
+                    // exists and are always cleared. Only an ENGINE SWITCH
+                    // announces: a boot has no conversation to have reset,
+                    // and a knowledge change did not change the engine the
+                    // announcement would name.
+                    annotations.try_set(if announces {
                         vec![TranscriptAnnotation {
                             anchor: AnnotationAnchor::AtStart,
                             kind: AnnotationKind::Notice,
@@ -311,7 +365,7 @@ pub fn AiChatWorkspace(
                 .or_else(|| list.iter().find(|c| card_ready_for_ask(c)).cloned());
             cards.try_set(list);
             if let Some(card) = chosen {
-                open_engine(card.engine.id.clone());
+                open_engine(card.engine.id.clone(), ReopenReason::Boot);
             }
         });
     };
@@ -322,13 +376,13 @@ pub fn AiChatWorkspace(
         let Some(id) = backend.with_value(|b| b.current_turn_id()) else {
             return;
         };
-        let started = match watched.get_untracked() {
-            Some((ref seen, at)) if *seen == id => at,
+        let (started, already_fired) = match watched.get_untracked() {
+            Some((ref seen, at, fired)) if *seen == id => (at, fired),
             _ => {
                 let at = now.get_untracked();
-                watched.set(Some((id.clone(), at)));
+                watched.set(Some((id.clone(), at, false)));
                 announced.set(0);
-                at
+                (at, false)
             }
         };
         let elapsed = now.get_untracked() - started;
@@ -353,7 +407,7 @@ pub fn AiChatWorkspace(
                 annotations.try_update(|a| a.extend(fresh));
             }
             turn.try_set(Some(record));
-            if !terminal && elapsed >= WATCHDOG_MS {
+            if watchdog_should_fire(elapsed, terminal, already_fired) {
                 let message = t.turn_timed_out.clone();
                 if let Some(s) = session.get_untracked() {
                     let _ = s.try_update_value(|s| s.fail_turn(message.clone()));
@@ -365,7 +419,13 @@ pub fn AiChatWorkspace(
                         body: AnnotationBody::Text(message),
                     })
                 });
-                watched.try_set(None);
+                // Marked fired, NOT cleared: clearing re-seeds the same
+                // turn id on the next tick and replays every notice.
+                watched.try_update(|w| {
+                    if let Some(entry) = w.as_mut() {
+                        entry.2 = true;
+                    }
+                });
             }
         });
     };
@@ -403,7 +463,7 @@ pub fn AiChatWorkspace(
         // A card that cannot be asked never gets a session opened against it;
         // the header already carries the reason.
         if card_for(&id).is_some_and(|c| card_ready_for_ask(&c)) {
-            open_engine(id);
+            open_engine(id, ReopenReason::EngineSwitch);
         } else {
             refusal.set(Some(texts.get_untracked().not_enabled));
         }
@@ -417,7 +477,7 @@ pub fn AiChatWorkspace(
         selection.set(next);
         let id = engine_id.get_untracked();
         if !id.is_empty() {
-            open_engine(id);
+            open_engine(id, ReopenReason::KnowledgeChange);
         }
     });
 
@@ -427,6 +487,7 @@ pub fn AiChatWorkspace(
             <ProviderSettingsRows
                 card=active_card
                 draft=draft
+                texts=texts
                 id_prefix=extra_prefix.clone()
                 on_change=on_tuning_change
             />

@@ -31,7 +31,10 @@ mod tests;
 pub use backend::{
     ChatWorkspaceBackend, ChatWorkspaceError, ChatWorkspaceErrorKind, WorkspaceFuture,
 };
-pub use component::{AiChatWorkspace, WATCHDOG_MS, is_terminal, notice_text, settings_for};
+pub use component::{
+    AiChatWorkspace, ReopenReason, WATCHDOG_MS, is_terminal, notice_text, published_capabilities,
+    reopen_announces_switch, settings_for, watchdog_should_fire,
+};
 pub use engine_header::{EngineHeader, cost_line, engine_is_metered, usage_line};
 pub use evidence::{GroundingVerdict, TurnEvidence};
 pub use evidence_rail::{EvidenceRail, citations_of};
@@ -40,7 +43,9 @@ pub use knowledge::{
     KnowledgeSource, MemoryDraft, MemoryRefusal, OfficeKnowledgeScope, RecallCorpus, RecallHit,
     RecallReceipt, guardrail_refusal,
 };
-pub use knowledge_rail::{KnowledgeSourceRail, corpus_choices, scope_label, scope_value};
+pub use knowledge_rail::{
+    KnowledgeSourceRail, corpus_choices, label_is_distinct_from_options, scope_label, scope_value,
+};
 #[cfg(feature = "test-mode")]
 pub use memory::{
     BackendCall, ChatWorkspaceFault, FixtureClock, InMemoryChatWorkspaceBackend, PromptMatcher,
@@ -55,6 +60,7 @@ pub use provider::{
 pub use quick_actions::QuickAction;
 pub use settings_rows::{
     CodexLever, DEFAULT_TEMPERATURE, EFFORT_CHOICES, ProviderSettingsRows, TuningDraft,
+    effort_selection,
 };
 pub use status::{
     TurnNotice, TurnRecord, UsageTotals, canceled_partial, completed_answer, lifecycle_id,

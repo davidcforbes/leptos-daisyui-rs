@@ -189,6 +189,24 @@ async fn settings_shape(h: &pixelproof_web::Harness) -> Value {
                     credentialNote: q('[data-ai-chat-credential-note]') !== null,
                     keyLikeInputs: keyish.length,
                     effortSelect: q('[data-ai-chat-effort-select]') !== null,
+                    effortOptions: q('[data-ai-chat-effort-select]')
+                        ? Array.from(q('[data-ai-chat-effort-select]').options)
+                            .map(o => o.value)
+                        : null,
+                    effortValue: q('[data-ai-chat-effort-select]')?.value ?? null,
+                    effortSelectedText: q('[data-ai-chat-effort-select]')
+                        ? (q('[data-ai-chat-effort-select]').selectedOptions[0]
+                            ?.textContent?.trim() ?? null)
+                        : null,
+                    railLabels: Array.from(
+                        root.querySelectorAll('[data-ai-chat-rail-label]')
+                    ).map(el => ({{
+                        control: el.getAttribute('data-ai-chat-rail-label'),
+                        label: el.textContent.trim(),
+                        options: Array.from(
+                            el.closest('label')?.querySelector('select')?.options ?? []
+                        ).map(o => o.textContent.trim()),
+                    }})),
                     temperature: q('[data-ai-chat-temperature]') !== null,
                     temperatureValue: q('[data-ai-chat-temperature]')?.value ?? null,
                     codexLevers: Array.from(
@@ -341,7 +359,146 @@ async fn capabilities_drive_the_settings_form_shape() {
     assert_eq!(spark["modelSelect"], json!(false), "{spark}");
     assert_eq!(spark["modelInput"], json!(false), "{spark}");
 
+    // I2: an unchosen reasoning effort must select the leading engine-default
+    // option. With three levels and nothing selected the browser shows its
+    // FIRST option — "low" — while `to_tuning` sends `None` and the engine
+    // runs at its own default, which is the `permission_mode` defect one row
+    // away.
+    let spark = settings_shape(&h).await;
+    assert_eq!(
+        spark["effortSelect"],
+        json!(true),
+        "codex-spark declares reasoning effort: {spark}"
+    );
+    assert_eq!(
+        spark["effortOptions"],
+        json!(["", "low", "medium", "high"]),
+        "the leading option carries an empty value: {spark}"
+    );
+    assert_eq!(
+        spark["effortValue"],
+        json!(""),
+        "nothing is chosen, so the engine-default option is selected — NOT \
+         `low`: {spark}"
+    );
+    assert_eq!(
+        spark["effortSelectedText"],
+        json!("Engine default"),
+        "and what the actor reads says so: {spark}"
+    );
+    assert_eq!(
+        applied_tuning(&h, SPARK).await["reasoning_effort"],
+        json!(null),
+        "the payload agrees with the control: {spark}"
+    );
+
+    // Ollama declares no reasoning effort at all — the row's negative control.
+    select_engine(&h, OLLAMA).await;
+    let ollama = settings_shape(&h).await;
+    assert_eq!(ollama["effortSelect"], json!(false), "{ollama}");
+
     assert_no_browser_errors(&h, "settings form shape").await;
+}
+
+// ── 9 ───────────────────────────────────────────────────────────────────────
+
+/// The knowledge rail's controls name what they DECIDE, and changing one does
+/// not announce a provider switch that never happened.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-ai-chat)"]
+async fn knowledge_rail_labels_its_controls_and_never_announces_a_switch() {
+    let h = harness_at(PAGE).await;
+    begin_browser_error_capture(&h).await;
+    ready(&h).await;
+
+    // I4: every rail control's visible label must be a FIELD label, not a
+    // repeat of one of its own options. A select whose accessible name is
+    // "Fused" tells a screen-reader user what is currently chosen and nothing
+    // about what the control decides.
+    let shape = settings_shape(&h).await;
+    let labels = shape["railLabels"].as_array().cloned().unwrap_or_default();
+    assert_eq!(
+        labels.len(),
+        3,
+        "corpus scope, query mode and posture each carry a label: {shape}"
+    );
+    for row in &labels {
+        let control = row["control"].as_str().unwrap_or_default();
+        let label = row["label"].as_str().unwrap_or_default();
+        let options: Vec<String> = row["options"]
+            .as_array()
+            .unwrap_or(&vec![])
+            .iter()
+            .map(|v| v.as_str().unwrap_or_default().to_owned())
+            .collect();
+        assert!(!label.is_empty(), "{control} has no label: {row}");
+        assert!(
+            !options.is_empty(),
+            "{control}'s options must be readable, or the check below is vacuous: {row}"
+        );
+        assert!(
+            !options.iter().any(|o| o == label),
+            "{control} is labelled {label:?}, which is one of its own options \
+             {options:?}"
+        );
+    }
+
+    // I1: a knowledge change rebuilds the session (a turn is opened against a
+    // knowledge mix) but does NOT change the engine, so it must not announce
+    // "Switched to {engine}". Pre-fix, `open_engine` read "a session already
+    // exists" as "this is a switch" and announced on every rail change.
+    let engine_before = shape["engine"].as_str().unwrap_or_default().to_owned();
+    let changed: bool = eval_json(
+        &h,
+        &format!(
+            r#"(() => {{
+                const sel = document.querySelector('{ROOT} [data-ai-chat-posture]');
+                if (!sel) return false;
+                sel.value = 'assistant';
+                sel.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                return sel.value === 'assistant';
+            }})()"#
+        ),
+    )
+    .await
+    .as_bool()
+    .unwrap_or(false);
+    assert!(changed, "the posture select must accept a value");
+    tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+
+    let after = settings_shape(&h).await;
+    assert_eq!(
+        after["engine"].as_str(),
+        Some(engine_before.as_str()),
+        "a posture change does not change the engine: {after}"
+    );
+    assert!(
+        after["roles"].as_array().is_some_and(|r| r.is_empty()),
+        "and it announces NOTHING — the transcript stays empty rather than \
+         claiming a switch: {after}"
+    );
+    let calls = backend_calls(&h).await;
+    assert!(
+        calls
+            .iter()
+            .any(|c| c.starts_with("OpenSession") && c.contains("posture: Assistant")),
+        "the new posture did reach the backend, so the silence above is not \
+         simply a change that never happened: {calls:?}"
+    );
+
+    // The positive control on the same document: an ENGINE switch still
+    // announces.
+    select_engine(&h, SPARK).await;
+    let switched = settings_shape(&h).await;
+    let roles: Vec<String> = switched["roles"]
+        .as_array()
+        .unwrap_or(&vec![])
+        .iter()
+        .map(|v| v.as_str().unwrap_or_default().to_owned())
+        .collect();
+    assert_eq!(roles, vec!["notice".to_owned()], "{switched}");
+
+    assert_no_browser_errors(&h, "knowledge rail").await;
 }
 
 // ── 2 ───────────────────────────────────────────────────────────────────────

@@ -463,3 +463,245 @@ fn two_folders_get_two_distinct_scope_values() {
     assert_eq!(scope_label(&a, &texts), "kb/intake");
     assert_eq!(scope_label(&CorpusScope::All, &texts), texts.scope_all);
 }
+
+// ── Fix round 1 ─────────────────────────────────────────────────────────────
+
+/// I1: only an engine switch announces one.
+///
+/// The pre-fix code used "a session already exists" as the discriminator, so
+/// every knowledge-rail change reopened the session and announced
+/// `"Switched to {engine}"` for an engine that had not changed. Breaking this
+/// (making `reopen_announces_switch` return `true` for `KnowledgeChange`)
+/// fails the second assertion.
+#[test]
+fn only_an_engine_switch_announces_a_switch() {
+    assert!(reopen_announces_switch(ReopenReason::EngineSwitch));
+    assert!(
+        !reopen_announces_switch(ReopenReason::KnowledgeChange),
+        "a corpus/posture/query-mode change rebuilds the session but does NOT \
+         change the engine, so the engine-switch wording would be false"
+    );
+    assert!(
+        !reopen_announces_switch(ReopenReason::Boot),
+        "a boot has no conversation to have reset"
+    );
+    // And the wording it would have used really does name an engine, which is
+    // why announcing it on a knowledge change is a lie rather than noise.
+    let en = AiChatWorkspaceTexts::default();
+    assert!(
+        en.switched_engine.contains("{engine}"),
+        "{}",
+        en.switched_engine
+    );
+    let es = AiChatWorkspaceTexts::es();
+    assert!(
+        es.switched_engine.contains("{engine}"),
+        "{}",
+        es.switched_engine
+    );
+}
+
+/// I2: an unchosen reasoning effort selects the engine-default option, never
+/// a level.
+///
+/// With three options and nothing selected a browser displays the FIRST one,
+/// so the pre-fix control read "low" while `to_tuning` sent `None`. Breaking
+/// this (returning `Some(0)` for `None`) fails the first assertion.
+#[test]
+fn an_unchosen_reasoning_effort_selects_no_level() {
+    assert_eq!(
+        effort_selection(None),
+        None,
+        "nothing chosen must select the leading engine-default option, not `low`"
+    );
+    assert_eq!(effort_selection(Some(&ReasoningEffort::Low)), Some(0));
+    assert_eq!(effort_selection(Some(&ReasoningEffort::Medium)), Some(1));
+    assert_eq!(effort_selection(Some(&ReasoningEffort::High)), Some(2));
+    assert_eq!(
+        effort_selection(Some(&ReasoningEffort::Unknown("blistering".into()))),
+        None,
+        "a level this vocabulary cannot offer falls back to engine-default \
+         rather than silently selecting a level it is not"
+    );
+    // `TuningDraft::seed_from` leaves `effort` at `None` for every card, so the
+    // `None` case above is the one a user meets on a freshly opened popover,
+    // not a hypothetical. That draft holds signals and needs a reactive owner,
+    // so the rendered consequence is proved in the browser lane instead —
+    // `capabilities_drive_the_settings_form_shape` reads the effort select's
+    // options and its selected value.
+}
+
+/// I3: the watchdog fires once per turn, never once per tick and never once
+/// per watchdog period.
+///
+/// The pre-fix code cleared the watched entry, which re-seeded it on the next
+/// tick (`current_turn_id()` is unchanged — `fail_turn` acts on the
+/// `ChatSession`, not the backend) and reset the notice counter to zero,
+/// replaying every notice as a fresh annotation forever. Breaking this
+/// (dropping the `already_fired` gate) fails the third assertion.
+#[test]
+fn the_watchdog_fires_once_per_turn() {
+    assert!(
+        watchdog_should_fire(WATCHDOG_MS, false, false),
+        "the boundary tick fires: the comparison is inclusive"
+    );
+    assert!(
+        !watchdog_should_fire(WATCHDOG_MS - 1, false, false),
+        "one millisecond short does not"
+    );
+    assert!(
+        !watchdog_should_fire(WATCHDOG_MS * 10, false, true),
+        "a turn the watchdog already failed is never failed again, however \
+         long it stays current"
+    );
+    assert!(
+        !watchdog_should_fire(WATCHDOG_MS * 10, true, false),
+        "a turn that finished is never failed after the fact"
+    );
+    assert!(
+        !watchdog_should_fire(0, false, false),
+        "and a turn that just started is not failed on its first tick"
+    );
+}
+
+/// I4: no rail control is labelled with one of its own options.
+///
+/// Pre-fix, all three were: the corpus select read "This folder", the
+/// query-mode select "Fused", the posture select "Grounded in this folder".
+/// A screen-reader user heard what was currently chosen and nothing about
+/// what the control decides. Breaking this (pointing any label back at an
+/// option field) fails that control's assertion, in both locales.
+#[test]
+fn knowledge_rail_label_is_never_one_of_its_own_options() {
+    for texts in [AiChatWorkspaceTexts::default(), AiChatWorkspaceTexts::es()] {
+        let scope_options = vec![
+            texts.scope_none.clone(),
+            texts.scope_file.clone(),
+            texts.scope_folder.clone(),
+            texts.scope_all.clone(),
+            texts.scope_custom.clone(),
+        ];
+        let mode_options = vec![
+            texts.query_full_text.clone(),
+            texts.query_similarity.clone(),
+            texts.query_llm.clone(),
+            texts.query_fused.clone(),
+        ];
+        let posture_options = vec![
+            texts.posture_grounded.clone(),
+            texts.posture_assistant.clone(),
+        ];
+        for (label, options, which) in [
+            (&texts.corpus_scope_label, &scope_options, "corpus scope"),
+            (&texts.query_mode_label, &mode_options, "query mode"),
+            (&texts.posture_label, &posture_options, "posture"),
+        ] {
+            assert!(
+                label_is_distinct_from_options(label, options),
+                "the {which} label {label:?} repeats one of its own options \
+                 ({options:?}) in locale {:?}",
+                texts.locale_id
+            );
+        }
+        // The helper itself has to be able to fail, or the loop above proves
+        // nothing.
+        assert!(!label_is_distinct_from_options(
+            &texts.query_fused,
+            &mode_options
+        ));
+        assert!(!label_is_distinct_from_options("  ", &mode_options));
+    }
+}
+
+/// I5: every visible string the settings rows render comes from the text
+/// table, and every one of them is translated.
+#[test]
+fn every_settings_row_string_is_translated() {
+    let en = AiChatWorkspaceTexts::default();
+    let es = AiChatWorkspaceTexts::es();
+    let pairs = [
+        ("effort_label", &en.effort_label, &es.effort_label),
+        (
+            "effort_engine_default",
+            &en.effort_engine_default,
+            &es.effort_engine_default,
+        ),
+        (
+            "temperature_label",
+            &en.temperature_label,
+            &es.temperature_label,
+        ),
+        (
+            "codex_web_search",
+            &en.codex_web_search,
+            &es.codex_web_search,
+        ),
+        (
+            "codex_suppress_plugins",
+            &en.codex_suppress_plugins,
+            &es.codex_suppress_plugins,
+        ),
+        (
+            "codex_disable_code_mode",
+            &en.codex_disable_code_mode,
+            &es.codex_disable_code_mode,
+        ),
+        ("codex_no_mcp", &en.codex_no_mcp, &es.codex_no_mcp),
+        ("credential_note", &en.credential_note, &es.credential_note),
+    ];
+    for (name, e, sp) in pairs {
+        assert!(!e.trim().is_empty(), "{name} is empty in EN");
+        assert!(!sp.trim().is_empty(), "{name} is empty in ES");
+        assert_ne!(e, sp, "{name} is identical in EN and ES");
+    }
+    // And the levers really read from the table rather than from a literal.
+    for lever in CodexLever::ALL {
+        assert_ne!(
+            lever.label(&en),
+            lever.label(&es),
+            "{} is not localized",
+            lever.as_id()
+        );
+    }
+}
+
+/// M1 (folded in): a pinned card publishes exactly its pin.
+///
+/// `AiChat` derives the Model row's shape from `Capabilities::models` alone,
+/// so a card that pins one of seven models has to publish one, or the panel
+/// offers all seven on an engine the host pinned. Browser test 1 covers the
+/// rendered result; this covers the projection itself.
+#[test]
+fn a_pinned_card_publishes_exactly_its_pinned_model() {
+    let spark = catalogue_card("codex-spark");
+    assert_eq!(
+        spark.capabilities.models.len(),
+        7,
+        "the raw card still carries the whole catalogue"
+    );
+    let published = published_capabilities(&spark);
+    assert_eq!(
+        published.models,
+        vec!["gpt-5.3-codex-spark".to_owned()],
+        "but what reaches the panel is the pin"
+    );
+    assert_eq!(
+        settings_for(&spark).model.as_deref(),
+        Some("gpt-5.3-codex-spark"),
+        "and the session opens on it"
+    );
+    // A discovered list is still a list of choices, so it must NOT collapse.
+    let ollama = catalogue_card("ollama");
+    assert_eq!(
+        published_capabilities(&ollama).models,
+        ollama.capabilities.models,
+        "a discovery timestamp is freshness, not a pin"
+    );
+    // Neither does a plain fixed catalogue.
+    let codex = catalogue_card("codex-cli");
+    assert_eq!(
+        published_capabilities(&codex).models.len(),
+        7,
+        "an unpinned catalogue is untouched"
+    );
+}

@@ -203,6 +203,39 @@ pub struct AiChatWorkspaceTexts {
     pub settings_reopened: String,
     /// Shown when live/streaming updates cannot currently be delivered.
     pub live_not_available: String,
+    /// Field label for the knowledge rail's corpus-scope select. A FIELD
+    /// label, never one of the control's own options: a select whose
+    /// accessible name repeats an option tells a screen-reader user what is
+    /// currently chosen and nothing about what the control decides.
+    pub corpus_scope_label: String,
+    /// The corpus-scope select's "no corpus at all" option.
+    pub scope_none: String,
+    /// Field label for the knowledge rail's query-mode select.
+    pub query_mode_label: String,
+    /// Field label for the knowledge rail's posture select.
+    pub posture_label: String,
+    /// Field label for the reasoning-effort select.
+    pub effort_label: String,
+    /// The reasoning-effort select's leading option, chosen when the host has
+    /// picked no effort and the engine runs at its own default. It exists so
+    /// the control can never display a level the host never chose: with three
+    /// options and nothing selected, a browser shows the FIRST one, and the
+    /// actor reads "low" on a turn that will run at the engine's default.
+    pub effort_engine_default: String,
+    /// Field label for the temperature slider; the value is appended.
+    pub temperature_label: String,
+    /// Label for the Codex CLI's built-in web-search lever.
+    pub codex_web_search: String,
+    /// Label for the Codex CLI's suppress-plugins lever.
+    pub codex_suppress_plugins: String,
+    /// Label for the Codex CLI's disable-code-mode lever.
+    pub codex_disable_code_mode: String,
+    /// Immutable statement that the Codex CLI offers no MCP tool access. Not
+    /// a control: there is nothing here for an actor to change.
+    pub codex_no_mcp: String,
+    /// Note shown for an engine that authenticates with a host-held key,
+    /// in place of any input. A key must never be typeable in this panel.
+    pub credential_note: String,
 }
 
 impl Default for AiChatWorkspaceTexts {
@@ -311,6 +344,18 @@ impl Default for AiChatWorkspaceTexts {
             turn_timed_out: "The turn timed out".into(),
             settings_reopened: "Settings reopened".into(),
             live_not_available: "Live updates aren't available right now".into(),
+            corpus_scope_label: "Knowledge source".into(),
+            scope_none: "No corpus".into(),
+            query_mode_label: "Query mode".into(),
+            posture_label: "Answer posture".into(),
+            effort_label: "Reasoning effort".into(),
+            effort_engine_default: "Engine default".into(),
+            temperature_label: "Temperature".into(),
+            codex_web_search: "Web search".into(),
+            codex_suppress_plugins: "Suppress plugins".into(),
+            codex_disable_code_mode: "Disable code mode".into(),
+            codex_no_mcp: "This engine never offers MCP tool access.".into(),
+            credential_note: "This engine authenticates with a key the host holds. A key is never typed into this panel.".into(),
         }
     }
 }
@@ -319,7 +364,7 @@ impl AiChatWorkspaceTexts {
     /// The number of fields on this struct; kept in sync with the struct and
     /// [`Self::fields`] by hand, and asserted equal to both by
     /// `en_and_es_texts_are_complete_and_differ` in `tests.rs`.
-    pub const FIELD_COUNT: usize = 94;
+    pub const FIELD_COUNT: usize = 106;
 
     /// Spanish copy, with full orthographic accents (not a transliteration).
     pub fn es() -> Self {
@@ -433,6 +478,18 @@ impl AiChatWorkspaceTexts {
             settings_reopened: "Configuración reabierta".into(),
             live_not_available: "Las actualizaciones en vivo no están disponibles en este momento"
                 .into(),
+            corpus_scope_label: "Fuente de conocimiento".into(),
+            scope_none: "Sin corpus".into(),
+            query_mode_label: "Modo de consulta".into(),
+            posture_label: "Postura de respuesta".into(),
+            effort_label: "Esfuerzo de razonamiento".into(),
+            effort_engine_default: "Valor predeterminado del motor".into(),
+            temperature_label: "Temperatura".into(),
+            codex_web_search: "Búsqueda web".into(),
+            codex_suppress_plugins: "Suprimir los complementos".into(),
+            codex_disable_code_mode: "Desactivar el modo de código".into(),
+            codex_no_mcp: "Este motor nunca ofrece acceso a herramientas MCP.".into(),
+            credential_note: "Este motor se autentica con una clave que guarda el anfitrión. Nunca se escribe una clave en este panel.".into(),
         }
     }
 
@@ -623,6 +680,24 @@ impl AiChatWorkspaceTexts {
             ("turn_timed_out", self.turn_timed_out.as_str()),
             ("settings_reopened", self.settings_reopened.as_str()),
             ("live_not_available", self.live_not_available.as_str()),
+            ("corpus_scope_label", self.corpus_scope_label.as_str()),
+            ("scope_none", self.scope_none.as_str()),
+            ("query_mode_label", self.query_mode_label.as_str()),
+            ("posture_label", self.posture_label.as_str()),
+            ("effort_label", self.effort_label.as_str()),
+            ("effort_engine_default", self.effort_engine_default.as_str()),
+            ("temperature_label", self.temperature_label.as_str()),
+            ("codex_web_search", self.codex_web_search.as_str()),
+            (
+                "codex_suppress_plugins",
+                self.codex_suppress_plugins.as_str(),
+            ),
+            (
+                "codex_disable_code_mode",
+                self.codex_disable_code_mode.as_str(),
+            ),
+            ("codex_no_mcp", self.codex_no_mcp.as_str()),
+            ("credential_note", self.credential_note.as_str()),
         ]
     }
 }

@@ -50,6 +50,18 @@ pub fn scope_value(scope: &CorpusScope) -> String {
     }
 }
 
+/// Whether one control's visible label is a FIELD label rather than a repeat
+/// of one of its own options.
+///
+/// A select whose accessible name is one of its options ("Fused", "Grounded
+/// in this folder") tells a screen-reader user what is currently chosen and
+/// nothing about what the control decides. Every rail control is checked
+/// against this in `knowledge_rail_label_is_never_one_of_its_own_options`,
+/// and the browser suite reads the same property off the rendered DOM.
+pub fn label_is_distinct_from_options(label: &str, options: &[String]) -> bool {
+    !label.trim().is_empty() && !options.iter().any(|o| o.trim() == label.trim())
+}
+
 /// The knowledge-selection rail.
 #[component]
 pub fn KnowledgeSourceRail(
@@ -83,7 +95,7 @@ pub fn KnowledgeSourceRail(
         let none_selected = current_value.is_none();
         let mut rows = vec![view! {
             <option value=String::new() selected=none_selected>
-                {t.posture_assistant.clone()}
+                {t.scope_none.clone()}
             </option>
         }];
         for scope in corpus_choices(&sources.get()) {
@@ -144,7 +156,9 @@ pub fn KnowledgeSourceRail(
         >
             <h3 class="text-sm font-semibold">{move || texts.get().grounded}</h3>
             <label class="flex flex-col gap-1 text-xs" for=scope_id>
-                <span class="opacity-60">{move || texts.get().scope_folder}</span>
+                <span class="opacity-60" data-ai-chat-rail-label="corpus-scope">
+                    {move || texts.get().corpus_scope_label}
+                </span>
                 <select
                     id=scope_id
                     data-ai-chat-corpus-scope=""
@@ -155,7 +169,9 @@ pub fn KnowledgeSourceRail(
                 </select>
             </label>
             <label class="flex flex-col gap-1 text-xs" for=mode_id>
-                <span class="opacity-60">{move || texts.get().query_fused}</span>
+                <span class="opacity-60" data-ai-chat-rail-label="query-mode">
+                    {move || texts.get().query_mode_label}
+                </span>
                 <select
                     id=mode_id
                     data-ai-chat-query-mode=""
@@ -172,7 +188,9 @@ pub fn KnowledgeSourceRail(
                 </select>
             </label>
             <label class="flex flex-col gap-1 text-xs" for=posture_id>
-                <span class="opacity-60">{move || texts.get().posture_grounded}</span>
+                <span class="opacity-60" data-ai-chat-rail-label="posture">
+                    {move || texts.get().posture_label}
+                </span>
                 <select
                     id=posture_id
                     data-ai-chat-posture=""

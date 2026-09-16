@@ -13,6 +13,7 @@
 use leptos::prelude::*;
 
 use super::provider::{CodexLevers, GroqTuning, ProviderCard, ProviderTuning, ReasoningEffort};
+use super::texts::AiChatWorkspaceTexts;
 
 /// The three reasoning-effort levels a picker offers, in ascending order.
 /// `ReasoningEffort::Unknown` is deliberately absent: it exists to preserve a
@@ -22,6 +23,29 @@ pub const EFFORT_CHOICES: [ReasoningEffort; 3] = [
     ReasoningEffort::Medium,
     ReasoningEffort::High,
 ];
+
+/// Which option index the reasoning-effort select should mark `selected`, or
+/// `None` when the draft holds no effort and the leading engine-default
+/// option must be chosen instead.
+///
+/// The same rule, and the same reason, as `ai_chat`'s own
+/// `permission_selection`: with three options and nothing selected a browser
+/// displays the FIRST one, so an unchosen effort renders as "low" while
+/// `TuningDraft::to_tuning` sends `None` and the engine runs at its own
+/// default. A control must never display a level the host never chose.
+/// `ReasoningEffort::Unknown` deliberately matches nothing here — it
+/// preserves a host value this vocabulary cannot offer as a choice, so it
+/// also falls back to the engine-default option rather than silently
+/// selecting a level it is not.
+pub fn effort_selection(chosen: Option<&ReasoningEffort>) -> Option<usize> {
+    let chosen = chosen?;
+    if matches!(chosen, ReasoningEffort::Unknown(_)) {
+        return None;
+    }
+    EFFORT_CHOICES
+        .iter()
+        .position(|e| e.as_str() == chosen.as_str())
+}
 
 /// Live, per-engine tuning state the settings rows edit.
 ///
@@ -157,13 +181,14 @@ impl CodexLever {
         }
     }
 
-    /// The English label for this lever. Engine-specific vocabulary a CLI
-    /// publishes itself, so it is not part of the localized workspace table.
-    pub fn label(&self) -> &'static str {
+    /// This lever's localized label. It is a visible string inside the
+    /// workspace root, so it lives in the workspace's own text table — a
+    /// phase that ships a string owns its texts field.
+    pub fn label(&self, texts: &AiChatWorkspaceTexts) -> String {
         match self {
-            CodexLever::WebSearch => "Web search",
-            CodexLever::SuppressPlugins => "Suppress plugins",
-            CodexLever::DisableCodeMode => "Disable code mode",
+            CodexLever::WebSearch => texts.codex_web_search.clone(),
+            CodexLever::SuppressPlugins => texts.codex_suppress_plugins.clone(),
+            CodexLever::DisableCodeMode => texts.codex_disable_code_mode.clone(),
         }
     }
 }
@@ -185,6 +210,10 @@ pub fn ProviderSettingsRows(
     card: Signal<Option<ProviderCard>>,
     /// The draft these rows edit.
     draft: TuningDraft,
+    /// Localized copy. Every visible string these rows render comes from
+    /// here; none of them is an English literal.
+    #[prop(into)]
+    texts: Signal<AiChatWorkspaceTexts>,
     /// Unique prefix for the control ids these rows mint.
     #[prop(into)]
     id_prefix: String,
@@ -206,15 +235,26 @@ pub fn ProviderSettingsRows(
 
     let effort_options = move || {
         let chosen = draft.effort.get();
-        EFFORT_CHOICES
+        let selected_index = effort_selection(chosen.as_ref());
+        // The leading option is what the control shows when the host has
+        // chosen no effort, so the browser can never present its first real
+        // level as though it had been picked (see `effort_selection`).
+        let engine_default = {
+            let label = texts.get().effort_engine_default;
+            let selected = selected_index.is_none();
+            view! { <option value=String::new() selected=selected>{label}</option> }
+        };
+        let levels = EFFORT_CHOICES
             .iter()
-            .map(|e| {
+            .enumerate()
+            .map(|(i, e)| {
                 let value = e.as_str().to_owned();
-                let selected = chosen.as_ref().is_some_and(|c| c.as_str() == e.as_str());
+                let selected = selected_index == Some(i);
                 let label = value.clone();
                 view! { <option value=value selected=selected>{label}</option> }
             })
-            .collect_view()
+            .collect_view();
+        view! { {engine_default} {levels} }
     };
 
     let levers = move || {
@@ -225,10 +265,11 @@ pub fn ProviderSettingsRows(
                 let lever = *lever;
                 let id = lever_id(lever);
                 let label_for = id.clone();
+                let label = lever.label(&texts.get());
                 let checked = lever.read(&levers_now);
                 view! {
                     <label class="flex items-center justify-between gap-2 text-xs" for=label_for>
-                        <span class="opacity-60">{lever.label()}</span>
+                        <span class="opacity-60">{label}</span>
                         <input
                             id=id
                             type="checkbox"
@@ -251,14 +292,19 @@ pub fn ProviderSettingsRows(
         <div class="flex flex-col gap-2" data-ai-chat-provider-rows="">
             <Show when=shows_effort>
                 <label class="flex flex-col gap-1 text-xs" for=effort_id>
-                    <span class="opacity-60">"Reasoning effort"</span>
+                    <span class="opacity-60">{move || texts.get().effort_label}</span>
                     <select
                         id=effort_id
                         data-ai-chat-effort-select=""
                         class="select select-sm select-bordered w-full"
                         on:change=move |e| {
                             let picked = event_target_value(&e);
-                            draft.effort.set(Some(ReasoningEffort::parse(&picked)));
+                            // The engine-default option carries an empty
+                            // value; it means "no effort chosen", not an
+                            // effort named "".
+                            draft
+                                .effort
+                                .set((!picked.is_empty()).then(|| ReasoningEffort::parse(&picked)));
                             on_change.run(());
                         }
                     >
@@ -269,7 +315,13 @@ pub fn ProviderSettingsRows(
             <Show when=shows_temperature>
                 <label class="flex flex-col gap-1 text-xs" for=temperature_id>
                     <span class="opacity-60">
-                        {move || format!("Temperature {:.2}", draft.temperature.get())}
+                        {move || {
+                            format!(
+                                "{} {:.2}",
+                                texts.get().temperature_label,
+                                draft.temperature.get(),
+                            )
+                        }}
                     </span>
                     <input
                         id=temperature_id
@@ -293,13 +345,13 @@ pub fn ProviderSettingsRows(
                 <div class="flex flex-col gap-2">
                     {levers}
                     <p class="text-xs opacity-60" data-ai-chat-no-mcp="">
-                        "This engine never offers MCP tool access."
+                        {move || texts.get().codex_no_mcp}
                     </p>
                 </div>
             </Show>
             <Show when=needs_key>
                 <p class="text-xs opacity-60" data-ai-chat-credential-note="">
-                    "This engine authenticates with a key the host holds. A key is never                      typed into this panel."
+                    {move || texts.get().credential_note}
                 </p>
             </Show>
         </div>
