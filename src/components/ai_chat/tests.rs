@@ -1,13 +1,17 @@
 use super::style::{
-    ComposerAction, clamp_composer_height, composer_hint, composer_key_action,
-    default_composer_placeholder, is_markdown, is_thinking, role_avatar_bg, role_avatar_initial,
-    role_avatar_initial_with, role_classes, role_label, role_label_with, should_stick_to_bottom,
+    ComposerAction, chat_state_attr, clamp_composer_height, composer_hint, composer_hint_for,
+    composer_key_action, composer_placeholder_for, default_composer_placeholder, is_markdown,
+    is_thinking, role_avatar_bg, role_avatar_initial, role_avatar_initial_with, role_classes,
+    role_data_attr, role_label, role_label_for, role_label_with, should_stick_to_bottom,
     show_welcome_chips,
 };
+use super::texts::AiChatTexts;
 use super::types::{
-    format_allowed_tools, format_usage, parse_allowed_tools, settings_from_form_fields,
+    AnnotationAnchor, AnnotationBody, AnnotationKind, ModelFieldMode, TranscriptAnnotation,
+    annotation_slots, format_allowed_tools, format_usage, format_usage_subtitle, model_field_mode,
+    parse_allowed_tools, settings_from_form_fields, settings_rows_for,
 };
-use ai_chat_core::{ChatRole, Usage};
+use ai_chat_core::{Capabilities, ChatRole, Usage};
 
 #[test]
 fn every_role_sits_start_for_full_width_rows() {
@@ -415,5 +419,324 @@ fn avatar_initial_distinguishes_thinking_from_tool() {
     assert_ne!(
         role_avatar_initial(&ChatRole::Thinking),
         role_avatar_initial(&ChatRole::Tool)
+    );
+}
+
+// --- Capability-driven settings rows ---
+
+/// One `Capabilities` fixture. Built through a helper rather than inline
+/// literals so a field added upstream breaks one line, not five tests.
+fn caps(
+    id: &str,
+    models: &[&str],
+    permission_modes: &[&str],
+    supports_thinking: bool,
+    supports_tool_calls: bool,
+) -> Capabilities {
+    Capabilities {
+        id: id.to_string(),
+        label: id.to_string(),
+        needs_api_key: false,
+        models: models.iter().map(|m| m.to_string()).collect(),
+        permission_modes: permission_modes.iter().map(|m| m.to_string()).collect(),
+        supports_thinking,
+        supports_tool_calls,
+    }
+}
+
+#[test]
+fn settings_rows_for_a_claude_like_backend_stay_free_text_with_a_permission_row() {
+    // Claude Code publishes no model list but does publish permission modes.
+    let c = caps(
+        "claude-code",
+        &[],
+        &["default", "acceptEdits", "plan", "bypassPermissions"],
+        true,
+        true,
+    );
+    let rows = settings_rows_for(Some(&c));
+    assert_eq!(rows.model, ModelFieldMode::FreeText);
+    assert!(rows.permission, "four permission modes must show the row");
+    assert!(rows.thinking);
+    assert!(rows.tool_calls);
+}
+
+#[test]
+fn settings_rows_for_a_codex_like_backend_select_from_its_models_without_a_permission_row() {
+    // Codex has sandbox semantics instead of CLI permission modes, so the
+    // permission row must not appear even though it has plenty of models.
+    let models = [
+        "gpt-5.6",
+        "gpt-5.6-mini",
+        "gpt-5.5",
+        "gpt-5.4",
+        "o4",
+        "o4-mini",
+        "o3",
+    ];
+    let c = caps("codex-cli", &models, &[], true, true);
+    let rows = settings_rows_for(Some(&c));
+    match rows.model {
+        ModelFieldMode::Select(list) => assert_eq!(list.len(), 7),
+        other => panic!("seven models should select, got {other:?}"),
+    }
+    assert!(
+        !rows.permission,
+        "no permission modes means no permission row"
+    );
+}
+
+#[test]
+fn settings_rows_for_a_groq_like_backend_pin_its_single_model() {
+    let c = caps("groq", &["llama-3.3-70b"], &[], true, true);
+    let rows = settings_rows_for(Some(&c));
+    assert_eq!(
+        rows.model,
+        ModelFieldMode::Pinned("llama-3.3-70b".to_string())
+    );
+    assert!(rows.thinking);
+    assert!(!rows.permission);
+}
+
+#[test]
+fn settings_rows_for_an_ollama_like_backend_disable_the_tool_calls_toggle() {
+    let c = caps("ollama", &["llama3", "mistral"], &[], true, false);
+    let rows = settings_rows_for(Some(&c));
+    match rows.model {
+        ModelFieldMode::Select(list) => assert_eq!(list.len(), 2),
+        other => panic!("two models should select, got {other:?}"),
+    }
+    assert!(
+        !rows.tool_calls,
+        "the toggle is still rendered, but disabled and explained"
+    );
+    assert!(rows.thinking);
+}
+
+#[test]
+fn settings_rows_without_capabilities_are_the_legacy_shape() {
+    // A host that never fetched a capability list must see exactly the
+    // popover it saw before this feature existed.
+    let rows = settings_rows_for(None);
+    assert_eq!(rows.model, ModelFieldMode::FreeText);
+    assert!(!rows.permission);
+    assert!(rows.thinking);
+    assert!(rows.tool_calls);
+}
+
+#[test]
+fn model_field_mode_handles_the_boundary_between_its_three_shapes() {
+    assert_eq!(model_field_mode(None), ModelFieldMode::FreeText);
+    assert_eq!(
+        model_field_mode(Some(&caps("empty", &[], &[], true, true))),
+        ModelFieldMode::FreeText,
+        "an empty model list is indistinguishable from no list"
+    );
+    assert_eq!(
+        model_field_mode(Some(&caps("one", &["only"], &[], true, true))),
+        ModelFieldMode::Pinned("only".to_string())
+    );
+    assert_eq!(
+        model_field_mode(Some(&caps("two", &["a", "b"], &[], true, true))),
+        ModelFieldMode::Select(vec!["a".to_string(), "b".to_string()]),
+        "two models is the smallest list worth a select"
+    );
+}
+
+// --- Header usage subtitle ---
+
+#[test]
+fn format_usage_subtitle_never_adds_reasoning_to_output() {
+    let u = Usage {
+        input_tokens: 1234,
+        output_tokens: 567,
+        reasoning_tokens: 500,
+        cache_read_tokens: 9000,
+        ..Default::default()
+    };
+    let line = format_usage_subtitle(&u);
+    assert_eq!(line, "1,234 in · 9,000 cached · 567 out · 500 rsn");
+    // The trap this pins: reasoning is a SUBSET of output, so 567 + 500 must
+    // never appear as the output figure.
+    assert!(
+        !line.contains("1,067"),
+        "reasoning must never be summed into output: {line}"
+    );
+}
+
+// --- Transcript annotation anchoring ---
+
+fn annotation(anchor: AnnotationAnchor, body: &str) -> TranscriptAnnotation {
+    TranscriptAnnotation {
+        anchor,
+        kind: AnnotationKind::Notice,
+        body: AnnotationBody::Text(body.to_string()),
+    }
+}
+
+#[test]
+fn annotations_land_at_start_after_a_message_and_at_the_end() {
+    let anns = [
+        annotation(AnnotationAnchor::AtEnd, "end"),
+        annotation(AnnotationAnchor::AtStart, "start"),
+        annotation(AnnotationAnchor::AfterMessage(1), "after 1"),
+    ];
+    // Three messages -> four slots.
+    let slots = annotation_slots(&anns, 3);
+    assert_eq!(slots.len(), 4);
+    assert_eq!(slots[0], vec![1], "AtStart renders before message 0");
+    assert_eq!(slots[1], Vec::<usize>::new());
+    assert_eq!(slots[2], vec![2], "AfterMessage(1) renders after message 1");
+    assert_eq!(slots[3], vec![0], "AtEnd renders after the last message");
+}
+
+#[test]
+fn an_out_of_range_after_message_annotation_clamps_to_the_end() {
+    // An annotation minted against a longer transcript must still be shown,
+    // not silently dropped, after the transcript is trimmed.
+    let anns = [annotation(AnnotationAnchor::AfterMessage(99), "stale")];
+    let slots = annotation_slots(&anns, 2);
+    assert_eq!(slots[2], vec![0]);
+    assert!(slots[0].is_empty());
+    assert!(slots[1].is_empty());
+}
+
+#[test]
+fn on_an_empty_transcript_start_annotations_precede_end_annotations() {
+    // Start and end are the same slot when there are no messages; declaration
+    // order alone would render "end" first here.
+    let anns = [
+        annotation(AnnotationAnchor::AtEnd, "end"),
+        annotation(AnnotationAnchor::AtStart, "start"),
+    ];
+    let slots = annotation_slots(&anns, 0);
+    assert_eq!(slots.len(), 1);
+    assert_eq!(slots[0], vec![1, 0]);
+}
+
+#[test]
+fn annotation_kind_data_attributes_are_stable_and_distinct() {
+    let kinds = [
+        AnnotationKind::Notice,
+        AnnotationKind::Warning,
+        AnnotationKind::Citations,
+        AnnotationKind::Evidence,
+    ];
+    assert_eq!(
+        kinds.map(|k| k.as_str()),
+        ["notice", "warning", "citations", "evidence"]
+    );
+}
+
+// --- DOM hooks ---
+
+#[test]
+fn role_data_attributes_are_unique_per_role() {
+    let roles = [
+        ChatRole::User,
+        ChatRole::Assistant,
+        ChatRole::System,
+        ChatRole::Thinking,
+        ChatRole::Tool,
+    ];
+    for (i, a) in roles.iter().enumerate() {
+        for b in &roles[i + 1..] {
+            assert_ne!(role_data_attr(a), role_data_attr(b), "{a:?} vs {b:?}");
+        }
+    }
+    assert_eq!(role_data_attr(&ChatRole::User), "user");
+    assert_eq!(role_data_attr(&ChatRole::Assistant), "assistant");
+    assert_eq!(role_data_attr(&ChatRole::System), "system");
+}
+
+#[test]
+fn panel_state_prefers_error_then_streaming_then_waiting() {
+    assert_eq!(chat_state_attr(false, false, false), "idle");
+    assert_eq!(chat_state_attr(true, false, false), "waiting");
+    assert_eq!(chat_state_attr(true, true, false), "streaming");
+    assert_eq!(
+        chat_state_attr(false, false, true),
+        "error",
+        "a consumed terminal error is the state the user must act on"
+    );
+}
+
+// --- Localized texts ---
+
+#[test]
+fn ai_chat_texts_en_and_es_complete_and_differ() {
+    let en = AiChatTexts::default();
+    let es = AiChatTexts::es();
+    let en_fields = en.fields();
+    let es_fields = es.fields();
+
+    assert_eq!(en_fields.len(), AiChatTexts::FIELD_COUNT);
+    assert_eq!(es_fields.len(), AiChatTexts::FIELD_COUNT);
+
+    // "Claude" is the assistant's proper name, not a translatable noun: it is
+    // the historical fallback shown when the host supplies no
+    // `assistant_label`, and translating it would rename the product.
+    let allowed_identical: &[&str] = &["role_assistant"];
+
+    for ((name, en_value), (es_name, es_value)) in en_fields.iter().zip(es_fields.iter()) {
+        assert_eq!(name, es_name, "fields() must list names in the same order");
+        assert!(!en_value.trim().is_empty(), "{name} is empty in EN");
+        assert!(!es_value.trim().is_empty(), "{name} is empty in ES");
+        if !allowed_identical.contains(name) {
+            assert_ne!(
+                en_value, es_value,
+                "{name} is identical in EN and ES and not on the allow-list"
+            );
+        }
+    }
+
+    // Both placeholder templates must keep the marker the panel substitutes,
+    // or the assistant's name silently disappears from the composer.
+    assert!(en.composer_placeholder.contains("{assistant}"));
+    assert!(es.composer_placeholder.contains("{assistant}"));
+}
+
+#[test]
+fn the_legacy_text_helpers_match_the_default_table() {
+    // `composer_hint`, `default_composer_placeholder` and `role_label_with`
+    // are thin wrappers kept for existing callers. They hold their own copy
+    // of the English strings, so this pins them to the table they claim to
+    // mirror -- otherwise the two can drift apart silently.
+    let en = AiChatTexts::default();
+    assert_eq!(composer_hint(false), composer_hint_for(false, &en));
+    assert_eq!(composer_hint(true), composer_hint_for(true, &en));
+    assert_eq!(
+        default_composer_placeholder("Codex"),
+        composer_placeholder_for("Codex", &en)
+    );
+    assert_eq!(
+        default_composer_placeholder(""),
+        composer_placeholder_for("", &en)
+    );
+    for r in [
+        ChatRole::User,
+        ChatRole::Assistant,
+        ChatRole::System,
+        ChatRole::Thinking,
+        ChatRole::Tool,
+    ] {
+        assert_eq!(role_label_with(&r, ""), role_label_for(&r, "", &en));
+        assert_eq!(role_label(&r), role_label_with(&r, ""));
+    }
+}
+
+#[test]
+fn localized_labels_follow_the_texts_table_but_never_rename_the_backend() {
+    let es = AiChatTexts::es();
+    assert_eq!(role_label_for(&ChatRole::User, "", &es), "Tú");
+    assert_eq!(role_label_for(&ChatRole::System, "", &es), "Sistema");
+    // A configured backend label is its own name and is never translated.
+    assert_eq!(
+        role_label_for(&ChatRole::Assistant, "Codex CLI (OpenAI)", &es),
+        "Codex CLI (OpenAI)"
+    );
+    assert_eq!(
+        composer_placeholder_for("Codex", &es),
+        "Pregúntale a Codex sobre este documento…"
     );
 }

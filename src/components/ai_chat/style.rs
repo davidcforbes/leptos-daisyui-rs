@@ -1,5 +1,7 @@
 //! Role → daisyUI class / label mapping for [`super::AiChat`].
 
+use super::texts::AiChatTexts;
+use super::types::AnnotationKind;
 use ai_chat_core::ChatRole;
 
 /// `(chat-side, chat-bubble-modifier)` daisyUI classes for a message role.
@@ -32,10 +34,66 @@ pub fn role_label(role: &ChatRole) -> &'static str {
 /// label — parity with ai-chat-engine (em-c7w1): a Codex session must read as
 /// Codex, never a hardcoded "Claude". An empty label keeps the historical
 /// default so label-less callers are unchanged.
+///
+/// A thin wrapper over [`role_label_for`] with the default (English) texts,
+/// kept so label-less callers and their tests are unchanged.
 pub fn role_label_with(role: &ChatRole, assistant_label: &str) -> String {
+    role_label_for(role, assistant_label, &AiChatTexts::default())
+}
+
+/// [`role_label_with`] over a localized [`AiChatTexts`] table.
+///
+/// A non-empty `assistant_label` still wins for the assistant — it is the
+/// configured backend's own name, which is never translated.
+pub fn role_label_for(role: &ChatRole, assistant_label: &str, texts: &AiChatTexts) -> String {
     match role {
         ChatRole::Assistant if !assistant_label.is_empty() => assistant_label.to_string(),
-        r => role_label(r).to_string(),
+        ChatRole::User => texts.role_user.clone(),
+        ChatRole::Assistant => texts.role_assistant.clone(),
+        ChatRole::System => texts.role_system.clone(),
+        ChatRole::Thinking => texts.role_thinking.clone(),
+        ChatRole::Tool => texts.role_tool.clone(),
+    }
+}
+
+/// The `data-chat-role` hook for a message role, mirroring the attribute
+/// 4iiz-Office's own chat surfaces expose so a single browser assertion
+/// reads both.
+pub fn role_data_attr(role: &ChatRole) -> &'static str {
+    match role {
+        ChatRole::User => "user",
+        ChatRole::Assistant => "assistant",
+        ChatRole::System => "system",
+        ChatRole::Thinking => "thinking",
+        ChatRole::Tool => "tool",
+    }
+}
+
+/// The root's `data-ai-chat-state` hook.
+///
+/// A consumed terminal error outranks the rest because it is the only state
+/// the user must act on; it can only be set while the turn is over, since
+/// `StreamEvent::Error` ends the turn, and it is cleared on the next send,
+/// retry or restart.
+pub fn chat_state_attr(waiting: bool, streaming: bool, has_error: bool) -> &'static str {
+    if has_error {
+        "error"
+    } else if streaming {
+        "streaming"
+    } else if waiting {
+        "waiting"
+    } else {
+        "idle"
+    }
+}
+
+/// daisyUI bubble modifier for an annotation row's tone.
+pub fn annotation_bubble_class(kind: AnnotationKind) -> &'static str {
+    match kind {
+        AnnotationKind::Notice => "chat-bubble-info",
+        AnnotationKind::Warning => "chat-bubble-warning",
+        AnnotationKind::Citations => "chat-bubble-ghost",
+        AnnotationKind::Evidence => "chat-bubble-neutral",
     }
 }
 
@@ -53,14 +111,27 @@ pub fn role_avatar_initial_with(role: &ChatRole, assistant_label: &str) -> Strin
 }
 
 /// Composer placeholder when the host didn't set one, addressed to the
-/// configured assistant (empty label keeps the historical "Claude").
-pub fn default_composer_placeholder(assistant_label: &str) -> String {
+/// configured assistant over a localized [`AiChatTexts`] table.
+///
+/// `AiChatTexts::composer_placeholder` is a template: its `{assistant}`
+/// marker is replaced with `assistant_label`, or with
+/// `AiChatTexts::role_assistant` when the label is empty.
+pub fn composer_placeholder_for(assistant_label: &str, texts: &AiChatTexts) -> String {
     let who = if assistant_label.is_empty() {
-        "Claude"
+        texts.role_assistant.as_str()
     } else {
         assistant_label
     };
-    format!("Ask {who} about this document\u{2026}")
+    texts.composer_placeholder.replace("{assistant}", who)
+}
+
+/// Composer placeholder when the host didn't set one, addressed to the
+/// configured assistant (empty label keeps the historical "Claude").
+///
+/// A thin wrapper over [`composer_placeholder_for`] with the default
+/// (English) texts, kept so existing callers and their tests are unchanged.
+pub fn default_composer_placeholder(assistant_label: &str) -> String {
+    composer_placeholder_for(assistant_label, &AiChatTexts::default())
 }
 
 /// True when a role's `content` is markdown (rendered via `MarkdownView`); the
@@ -133,8 +204,21 @@ pub fn clamp_composer_height(scroll_height: f64, base_height: f64, max_height: f
     scroll_height.max(base_height).min(max_height)
 }
 
+/// Composer hint caption over a localized [`AiChatTexts`] table: the
+/// keybinding reminder while idle, the in-flight hint while a turn is busy.
+pub fn composer_hint_for(waiting: bool, texts: &AiChatTexts) -> String {
+    if waiting {
+        texts.composer_hint_busy.clone()
+    } else {
+        texts.composer_hint.clone()
+    }
+}
+
 /// Composer hint caption text: the keybinding reminder while idle, switching
 /// to the in-flight hint (mirroring the Stop button) while a turn is busy.
+///
+/// The `&'static str` shape of [`composer_hint_for`] over the default
+/// (English) texts, kept so existing callers and their tests are unchanged.
 pub fn composer_hint(waiting: bool) -> &'static str {
     if waiting {
         "Generating\u{2026} \u{b7} Esc to stop"
