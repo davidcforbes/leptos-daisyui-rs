@@ -2,6 +2,7 @@
 
 mod action_feedback;
 mod active_filter_chips;
+mod ai_chat_workspace;
 mod async_data_section;
 mod contracts;
 mod dataset_selector;
@@ -30,6 +31,48 @@ pub use action_feedback::{
 pub use active_filter_chips::{
     ActiveFilterChip, ActiveFilterChips, ActiveFilterTexts, active_filter_summary,
     active_filter_summary_with,
+};
+pub use ai_chat_workspace::{
+    AiChatWorkspace, AiChatWorkspaceTexts, AvailabilityReasonCode, ChatPosture,
+    ChatWorkspaceBackend, ChatWorkspaceError, ChatWorkspaceErrorKind, CodexLever, CodexLevers,
+    CorpusQueryMode, CorpusScope, EngineHeader, EvidenceRail, GroqTuning, GroundingVerdict,
+    IngestPhase, IngestStatus, KnowledgeDraft, KnowledgeSelection, KnowledgeSource,
+    KnowledgeSourceRail, MemoryDraft, MemoryRefusal, ModelSource, OfficeKnowledgeScope,
+    ProviderCard, ProviderSettingsRows, ProviderTuning, QuickAction, QuickActionBar,
+    ReasoningEffort, RecallCorpus, RecallHit, RecallReceipt, ReopenReason, TuningDraft,
+    TuningSchema, TurnEvidence, TurnNotice, TurnRecord, UsageFigures, UsageTotals, WorkspaceFuture,
+    WorkspaceRefusal, any_ingest_in_flight, awaits_curation, canceled_partial, card_ready_for_ask,
+    card_unready_reason, citations_of, completed_answer, corpus_choices, corpus_ingests, cost_line,
+    declined_limitations, desktop_provider_catalogue, effort_selection, engine_is_metered,
+    evidence_of, facts_of, guardrail_refusal, label_is_distinct_from_options, lifecycle_id,
+    memory_class_choices, memory_flags, notice_text, office_collections, outcome_id,
+    personal_memory, published_capabilities, reopen_announces_switch, reopen_notice, tick_turn_id,
+    usage_figures, usage_line, with_ingest,
+};
+// Aliased: these are generic enough that a bare re-export would read as the
+// whole `patterns` module's vocabulary rather than the chat workspace's.
+pub use ai_chat_workspace::{
+    DEFAULT_TEMPERATURE as AI_CHAT_DEFAULT_TEMPERATURE, EFFORT_CHOICES as AI_CHAT_EFFORT_CHOICES,
+    WATCHDOG_FAILURE_KIND as AI_CHAT_WATCHDOG_FAILURE_KIND, WATCHDOG_MS as AI_CHAT_WATCHDOG_MS,
+    cancel_notice as ai_chat_cancel_notice, failure_kind as ai_chat_failure_kind,
+    header_cancel_discarded as ai_chat_header_cancel_discarded,
+    header_failure_kind as ai_chat_header_failure_kind,
+    header_outcome_id as ai_chat_header_outcome_id, honesty_for as ai_chat_honesty_for,
+    honesty_state_for_code as ai_chat_honesty_state_for_code, honesty_tone as ai_chat_honesty_tone,
+    is_terminal as ai_chat_turn_is_terminal, scope_label as ai_chat_scope_label,
+    scope_value as ai_chat_scope_value, settings_for as ai_chat_settings_for_card,
+    watchdog_should_fire as ai_chat_watchdog_should_fire,
+};
+// `BackendCall` and `SEED_NOW_MS` are also the names `helpdesk` uses for its
+// own fixture's call log and seeded clock, and `helpdesk`'s are re-exported by
+// glob below. The two are unrelated types, so the chat-workspace fixture's are
+// aliased here rather than shadowing the helpdesk names.
+#[cfg(feature = "test-mode")]
+pub use ai_chat_workspace::{
+    BackendCall as ChatWorkspaceCall, ChatWorkspaceFault, FixtureClock,
+    InMemoryChatWorkspaceBackend, PromptMatcher, SEED_ACTOR as SEED_CHAT_ACTOR, SEED_FOLDER_COURT,
+    SEED_FOLDER_INTAKE, SEED_NOW_MS as SEED_CHAT_NOW_MS, SEED_RECALL_QUERY, SEED_RECALL_SEARCH,
+    ScriptedChatTransport, TurnScript,
 };
 pub use async_data_section::{AsyncDataSection, AsyncDataTexts, state_shows_content};
 pub use contracts::{

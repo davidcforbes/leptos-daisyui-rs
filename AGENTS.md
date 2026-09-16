@@ -14,7 +14,7 @@ Integration tests are in `tests/`, PixelProof baselines in
 
 ## Build, Test, and Development Commands
 
-- `cargo xtask verify` runs the 19-step local gate: generated-token checks,
+- `cargo xtask verify` runs the 20-step local gate: generated-token checks,
   scoped formatting/clippy, a cargo-doc gate (`doc-lib`, `-D warnings`), builds, and native tests.
 - `cargo xtask verify-full` adds the browser suites and release Trunk build;
   it requires npm, Trunk, and Chrome. Run `npm install` in `demo/` once.

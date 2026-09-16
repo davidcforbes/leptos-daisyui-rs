@@ -1,6 +1,7 @@
 pub mod accordion;
 pub mod admin_workbench;
 pub mod ai_chat;
+pub mod ai_chat_live;
 pub mod alert;
 pub mod app_shell;
 pub mod softphone;

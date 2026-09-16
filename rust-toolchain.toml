@@ -1,0 +1,8 @@
+# Edition 2024 requires rustc >= 1.85. Pin stable so cloud/CI agents
+# do not silently land on an older default (e.g. 1.83) that cannot even
+# parse Cargo.toml, which presents as "the workspace will not compile"
+# before web-sys or any other crate is involved.
+[toolchain]
+channel = "1.98.1"
+targets = ["wasm32-unknown-unknown"]
+components = ["rustfmt", "clippy", "rust-analyzer"]
