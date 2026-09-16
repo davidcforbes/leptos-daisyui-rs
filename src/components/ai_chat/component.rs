@@ -176,6 +176,24 @@ pub fn AiChat(
     /// swaps the transport / reconfigures the session.
     #[prop(optional, into)]
     on_backend_change: Option<Callback<String>>,
+    /// Which published backend is actually active, when the HOST owns that
+    /// choice rather than the picker.
+    ///
+    /// `None` (the default) keeps the historical behaviour: the picker seeds
+    /// itself from the first published backend and tracks its own selection.
+    /// That is wrong for a host that switches backends by some other route —
+    /// its own picker, a route change, a remount after an engine switch —
+    /// because the panel then shapes the Model row, the permission row and
+    /// the two toggles from the FIRST backend's `Capabilities` while running
+    /// a different one, with no event to tell it otherwise. Same defect class
+    /// as `permission_mode` one row down: a host-owned value the panel can
+    /// only display.
+    ///
+    /// A value naming a backend this panel does not publish is ignored, so a
+    /// stale id degrades to the seeded behaviour rather than emptying the
+    /// picker.
+    #[prop(optional, into)]
+    active_backend_id: Signal<Option<String>>,
     /// Every label, placeholder and caption this panel renders. Defaults to
     /// the English table; `AiChatTexts::es` is the Spanish one, and a host
     /// overrides individual fields by struct-update syntax.
@@ -533,13 +551,22 @@ pub fn AiChat(
     };
 
     // Backend picker selection, seeded from the first capability like scopes.
-    let active_backend = RwSignal::new(String::new());
+    let internal_backend = RwSignal::new(String::new());
     Effect::new(move |_| {
         let list = backends.get();
-        if active_backend.with_untracked(|a| a.is_empty())
+        if internal_backend.with_untracked(|a| a.is_empty())
             && let Some(first) = list.first()
         {
-            active_backend.set(first.id.clone());
+            internal_backend.set(first.id.clone());
+        }
+    });
+    // A host-owned `active_backend_id` outranks the internal seed, but only
+    // when it names something this panel actually publishes.
+    let active_backend = Signal::derive(move || {
+        let list = backends.get();
+        match active_backend_id.get() {
+            Some(id) if list.iter().any(|c| c.id == id) => id,
+            _ => internal_backend.get(),
         }
     });
 
@@ -706,7 +733,7 @@ pub fn AiChat(
                                             class="select select-sm select-bordered w-full"
                                             on:change=move |e| {
                                                 let id = event_target_value(&e);
-                                                active_backend.set(id.clone());
+                                                internal_backend.set(id.clone());
                                                 if let Some(cb) = on_backend_change {
                                                     cb.run(id);
                                                 }

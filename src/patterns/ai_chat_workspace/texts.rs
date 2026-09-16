@@ -12,6 +12,11 @@ use crate::components::ai_assistant_workspace::{AnswerOutcome, AttemptLifecycle}
 /// `Default`/[`Self::es`] convention.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AiChatWorkspaceTexts {
+    /// Stable id of the locale this table is written in, for the composite's
+    /// `data-ai-chat-workspace-locale` hook and for a host that mixes tables.
+    /// Not display copy: it is the discriminator a proof reads to tell which
+    /// table is mounted without matching on a translated sentence.
+    pub locale_id: String,
     /// Label for the engine picker control.
     pub engine: String,
     /// Badge shown when the turn is grounded in a corpus.
@@ -204,6 +209,7 @@ impl Default for AiChatWorkspaceTexts {
     /// English copy.
     fn default() -> Self {
         Self {
+            locale_id: "en".into(),
             engine: "Engine".into(),
             grounded: "Grounded".into(),
             assistant: "Assistant".into(),
@@ -313,11 +319,12 @@ impl AiChatWorkspaceTexts {
     /// The number of fields on this struct; kept in sync with the struct and
     /// [`Self::fields`] by hand, and asserted equal to both by
     /// `en_and_es_texts_are_complete_and_differ` in `tests.rs`.
-    pub const FIELD_COUNT: usize = 93;
+    pub const FIELD_COUNT: usize = 94;
 
     /// Spanish copy, with full orthographic accents (not a transliteration).
     pub fn es() -> Self {
         Self {
+            locale_id: "es".into(),
             engine: "Motor".into(),
             grounded: "Fundamentado".into(),
             assistant: "Asistente".into(),
@@ -489,6 +496,7 @@ impl AiChatWorkspaceTexts {
     /// sync with the struct and [`Self::FIELD_COUNT`] by hand.
     pub fn fields(&self) -> Vec<(&'static str, &str)> {
         vec![
+            ("locale_id", self.locale_id.as_str()),
             ("engine", self.engine.as_str()),
             ("grounded", self.grounded.as_str()),
             ("assistant", self.assistant.as_str()),

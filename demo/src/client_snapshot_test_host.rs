@@ -4,6 +4,8 @@
 //! a focused component journey does not pay the compile/link cost of every
 //! unrelated demo page.
 
+#[path = "demos/ai_chat_fixture.rs"]
+mod ai_chat_fixture;
 #[path = "demos/client_snapshot_list.rs"]
 mod client_snapshot_list;
 mod debug;
@@ -86,6 +88,12 @@ fn main() {
         let external_focus_fixture = web_sys::window()
             .and_then(|window| window.location().pathname().ok())
             .is_some_and(|path| path.ends_with("/entity-table-external-focus"));
+        // The BASE `/ai-chat-fixture` suffix is matched LAST of the ai-chat
+        // family, so a later `/ai-chat-fixture-<fault>` document can be
+        // inserted above it without `ends_with` swallowing it first.
+        let ai_chat_fixture = web_sys::window()
+            .and_then(|window| window.location().pathname().ok())
+            .is_some_and(|path| path.ends_with("/ai-chat-fixture"));
         let helpdesk_fixture = web_sys::window()
             .and_then(|window| window.location().pathname().ok())
             .is_some_and(|path| path.ends_with("/helpdesk-fixture"));
@@ -117,6 +125,8 @@ fn main() {
                         <helpdesk_fixture::HelpdeskFixture fault=leptos_daisyui_rs::patterns::HelpdeskFault::FailWrites />
                     }
                         .into_any()
+                } else if ai_chat_fixture {
+                    view! { <ai_chat_fixture::AiChatFixture /> }.into_any()
                 } else if helpdesk_fixture {
                     view! { <helpdesk_fixture::HelpdeskFixture /> }.into_any()
                 } else if external_focus_fixture {

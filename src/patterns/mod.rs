@@ -33,13 +33,24 @@ pub use active_filter_chips::{
     active_filter_summary_with,
 };
 pub use ai_chat_workspace::{
-    AiChatWorkspaceTexts, AvailabilityReasonCode, ChatPosture, ChatWorkspaceBackend,
-    ChatWorkspaceError, ChatWorkspaceErrorKind, CodexLevers, CorpusQueryMode, CorpusScope,
-    GroqTuning, GroundingVerdict, IngestPhase, IngestStatus, KnowledgeSelection, KnowledgeSource,
-    MemoryDraft, MemoryRefusal, ModelSource, OfficeKnowledgeScope, ProviderCard, ProviderTuning,
-    QuickAction, ReasoningEffort, RecallCorpus, RecallHit, RecallReceipt, TuningSchema,
-    TurnEvidence, TurnNotice, TurnRecord, UsageTotals, WorkspaceFuture, desktop_provider_catalogue,
-    guardrail_refusal, lifecycle_id,
+    AiChatWorkspace, AiChatWorkspaceTexts, AvailabilityReasonCode, ChatPosture,
+    ChatWorkspaceBackend, ChatWorkspaceError, ChatWorkspaceErrorKind, CodexLever, CodexLevers,
+    CorpusQueryMode, CorpusScope, EngineHeader, EvidenceRail, GroqTuning, GroundingVerdict,
+    IngestPhase, IngestStatus, KnowledgeSelection, KnowledgeSource, KnowledgeSourceRail,
+    MemoryDraft, MemoryRefusal, ModelSource, OfficeKnowledgeScope, ProviderCard,
+    ProviderSettingsRows, ProviderTuning, QuickAction, ReasoningEffort, RecallCorpus, RecallHit,
+    RecallReceipt, TuningDraft, TuningSchema, TurnEvidence, TurnNotice, TurnRecord, UsageTotals,
+    WorkspaceFuture, canceled_partial, card_ready_for_ask, card_unready_reason, citations_of,
+    completed_answer, corpus_choices, cost_line, desktop_provider_catalogue, engine_is_metered,
+    guardrail_refusal, lifecycle_id, notice_text, usage_line,
+};
+// Aliased: these five are generic enough that a bare re-export would read as
+// the whole `patterns` module's vocabulary rather than the chat workspace's.
+pub use ai_chat_workspace::{
+    DEFAULT_TEMPERATURE as AI_CHAT_DEFAULT_TEMPERATURE, EFFORT_CHOICES as AI_CHAT_EFFORT_CHOICES,
+    WATCHDOG_MS as AI_CHAT_WATCHDOG_MS, is_terminal as ai_chat_turn_is_terminal,
+    scope_label as ai_chat_scope_label, scope_value as ai_chat_scope_value,
+    settings_for as ai_chat_settings_for_card,
 };
 // `BackendCall` and `SEED_NOW_MS` are also the names `helpdesk` uses for its
 // own fixture's call log and seeded clock, and `helpdesk`'s are re-exported by

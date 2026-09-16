@@ -130,8 +130,23 @@ pub struct TurnRecord {
     pub tokens_per_sec: Option<f64>,
     /// What backs the answer, when the turn completed.
     pub evidence: Option<TurnEvidence>,
-    /// The completed outcome, mirrored out of `lifecycle` for convenience
-    /// when a consumer only cares about outcome, not the full lifecycle.
+    /// What the turn produced, which is NOT the same thing as "the turn
+    /// finished".
+    ///
+    /// A completed turn mirrors its `lifecycle`'s own outcome here. A
+    /// **canceled** turn also populates this field, with
+    /// `AnswerOutcome::Answered` carrying whatever partial text had already
+    /// streamed when the cancel landed — and with an EMPTY `text` when the
+    /// cancel discarded the partial. That is the only route a canceled
+    /// turn's partial has out of a backend, because
+    /// `AttemptLifecycle::Canceled` carries nothing but a boolean.
+    ///
+    /// A renderer must therefore gate on [`Self::lifecycle`] BEFORE
+    /// presenting this as an answer: see [`completed_answer`], which returns
+    /// `None` for every non-completed lifecycle, and [`canceled_partial`],
+    /// which returns the partial only for a canceled one and never returns
+    /// an empty string. Reading this field directly renders a canceled turn
+    /// as a finished answer, and a discarded one as an empty answer bubble.
     pub outcome: Option<AnswerOutcome>,
     /// What happened to this turn that the stream could not say, in the
     /// order it happened. Empty for an ordinary turn. A composite holding a
@@ -157,5 +172,39 @@ pub fn lifecycle_id(l: &AttemptLifecycle) -> &'static str {
         AttemptLifecycle::Canceled { .. } => "canceled",
         AttemptLifecycle::Interrupted { .. } => "interrupted",
         AttemptLifecycle::Unknown(_) => "unknown",
+    }
+}
+
+/// The answer text a turn may be presented with as a FINISHED answer, or
+/// `None`.
+///
+/// Gated on [`TurnRecord::lifecycle`] rather than on
+/// [`TurnRecord::outcome`]'s shape, because a canceled turn also carries an
+/// `AnswerOutcome::Answered` (its surviving partial). Returning that text
+/// here would render a turn the actor stopped as though the engine had
+/// finished it.
+pub fn completed_answer(record: &TurnRecord) -> Option<&str> {
+    match (&record.lifecycle, &record.outcome) {
+        (AttemptLifecycle::Completed(_), Some(AnswerOutcome::Answered { text })) => {
+            Some(text.as_str())
+        }
+        _ => None,
+    }
+}
+
+/// The partial text a CANCELED turn kept, or `None`.
+///
+/// `None` covers both "this turn was not canceled" and "the cancel discarded
+/// the partial", which the backend reports as `Answered { text: "" }`. An
+/// empty string is never returned, so a renderer cannot emit an empty bubble
+/// for a discarded cancel by forwarding this value.
+pub fn canceled_partial(record: &TurnRecord) -> Option<&str> {
+    match (&record.lifecycle, &record.outcome) {
+        (AttemptLifecycle::Canceled { .. }, Some(AnswerOutcome::Answered { text }))
+            if !text.is_empty() =>
+        {
+            Some(text.as_str())
+        }
+        _ => None,
     }
 }

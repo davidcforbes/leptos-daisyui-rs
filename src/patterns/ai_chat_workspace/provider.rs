@@ -465,3 +465,54 @@ pub fn desktop_provider_catalogue() -> Vec<ProviderCard> {
         ),
     ]
 }
+
+/// Whether ONE provider card may currently be asked a question.
+///
+/// This is the per-card readiness the provider picker gates on, and it is a
+/// different question from the one
+/// `crate::components::ai_assistant_workspace::engine_ready_for_ask` answers:
+/// that function takes the whole `AssistantSettings` and reports only whether
+/// the actor's single ACCEPTED engine (`settings.accepted.engine_id`) is
+/// ready, so calling it once per card neither type-checks nor computes
+/// per-card readiness. The three conditions below are exactly the ones it
+/// checks on the engine it selects, minus the accepted-engine-id filter:
+///
+/// * the engine's availability is [`EngineAvailability::Enabled`],
+/// * its engine-level grants allow [`AssistantCapability::Ask`], and
+/// * its connection is `SignedIn` or `NotApplicable`.
+///
+/// Tier and budget are deliberately NOT part of this: they are properties of
+/// the account, not of a card, and a picker that hid every card on a denied
+/// tier would leave the actor with nothing to read the refusal against.
+pub fn card_ready_for_ask(card: &ProviderCard) -> bool {
+    card.engine.availability == EngineAvailability::Enabled
+        && card.engine.capabilities.allows(&AssistantCapability::Ask)
+        && matches!(
+            card.engine.connection.state,
+            ConnectionState::SignedIn | ConnectionState::NotApplicable
+        )
+}
+
+/// The availability reason a card that is not ready should show, derived from
+/// whichever gate [`card_ready_for_ask`] failed on. Returns `None` for a card
+/// that IS ready, so a caller cannot accidentally render a reason beside a
+/// usable engine.
+pub fn card_unready_reason(card: &ProviderCard) -> Option<AvailabilityReasonCode> {
+    if card_ready_for_ask(card) {
+        return None;
+    }
+    if let EngineAvailability::Disabled { reason_code, .. } = &card.engine.availability {
+        return Some(AvailabilityReasonCode::parse(reason_code));
+    }
+    Some(match card.engine.connection.state {
+        ConnectionState::Expired => AvailabilityReasonCode::SignInExpired,
+        ConnectionState::SignedIn | ConnectionState::NotApplicable => {
+            // Availability is Enabled and the connection is fine, so the only
+            // remaining gate is the missing `Ask` grant. That is an engine
+            // that exists but has not been armed for use — never a credential
+            // problem, so it must not read as one.
+            AvailabilityReasonCode::NotArmed
+        }
+        _ => AvailabilityReasonCode::NotSignedIn,
+    })
+}
