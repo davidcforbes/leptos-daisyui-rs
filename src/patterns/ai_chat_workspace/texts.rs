@@ -141,15 +141,21 @@ pub struct AiChatWorkspaceTexts {
     pub posture_assistant: String,
     /// Shown when a grounded turn found no supporting evidence. The EN copy is pinned exactly (not just non-empty) because it is the visible proof that a grounded posture withheld an ungrounded guess rather than making one up.
     ///
-    /// It carries NO apostrophe, and that is load-bearing rather than a style
-    /// choice. The transcript renders an assistant message through
-    /// `editmark_core`'s markdown pipeline, which typographically substitutes
-    /// a straight `'` for a right single quotation mark — so a sentence
-    /// pinned for BYTE-EXACT comparison against what the actor reads cannot
-    /// contain one. The first run of the knowledge browser lane caught this:
-    /// the model held one character and the DOM held another, and only the
-    /// exact comparison could see it. Pinned by
-    /// `grounded_not_found_survives_the_markdown_renderer` in `tests.rs`.
+    /// It carries no apostrophe, no `--` and no `...`, and that is
+    /// load-bearing rather than a style choice. The transcript renders an
+    /// assistant message through `editmark_core`'s markdown pipeline, which
+    /// parses with `Options::ENABLE_SMART_PUNCTUATION` — a pass that rewrites
+    /// FIVE things, not one: single quotes, double quotes, `...`, `--` and
+    /// `---`. Markdown's own inline markup and block prefixes change the
+    /// rendered text just as completely. A sentence pinned for BYTE-EXACT
+    /// comparison against what the actor reads can carry none of them.
+    ///
+    /// The first run of the knowledge browser lane caught the apostrophe: the
+    /// model held one character and the DOM held another, and only the exact
+    /// comparison could see it. The rule, not that instance, is what
+    /// `markdown_pinned_copy_survives_smart_punctuation` in `tests.rs`
+    /// enforces — over every field
+    /// [`markdown_pinned_fields`](../tests.rs) names, in both tables.
     pub grounded_not_found: String,
     /// Display name for `MemoryClass::Language`.
     pub kind_language: String,

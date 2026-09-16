@@ -1303,7 +1303,20 @@ impl ChatTransport for ScriptedChatTransport {
         // a grounded turn that matches no seeded document answers with the
         // localized not-found sentence and nothing else, whatever the script
         // would have said.
-        let hits = grounded_hits(&req.prompt);
+        //
+        // The POSTURE decides whether the corpus is consulted at all, and this
+        // is the only place it may be decided. `citations` and `facts` are
+        // both derived from `hits` below, so a posture-blind lookup made an
+        // `assistant_only` turn — whose own verdict reads "General assistance,
+        // no documents" — list the documents it says it did not read, each
+        // fact qualified "Quoted from {path}; the memo itself is the only
+        // source." That is the exact overreach the evidence rail exists to
+        // prevent, and it was invisible because no proof asked an assistant
+        // turn a question a document could answer.
+        let hits = match core.selection.posture {
+            ChatPosture::Grounded => grounded_hits(&req.prompt),
+            ChatPosture::Assistant => Vec::new(),
+        };
         let grounding = match core.selection.posture {
             ChatPosture::Grounded if hits.is_empty() => {
                 script = TurnScript::new().text_words(&core.texts.grounded_not_found);
@@ -2850,6 +2863,86 @@ mod tests {
                 .expect("e")
                 .grounding,
             GroundingVerdict::AssistantOnly
+        );
+    }
+
+    /// An `assistant_only` turn must produce NO citations and NO facts, even
+    /// for a prompt several seeded documents would have answered.
+    ///
+    /// The gap this closes: `grounded_hits` used to run whatever the posture
+    /// was, and both `citations` and `facts` are derived from it. The rail
+    /// then rendered `data-ai-chat-grounding="assistant_only"` — "General
+    /// assistance, no documents" — beside a citation list and facts qualified
+    /// "Quoted from kb/…; the memo itself is the only source." The honesty
+    /// surface was making a sourced claim in the one posture that promises no
+    /// sources.
+    ///
+    /// The prompt is the SAME one the grounded leg below uses, so this is not
+    /// a test that passes because nothing matched: the grounded assertion is
+    /// what proves the prompt really does hit documents.
+    #[test]
+    fn assistant_posture_cites_nothing_even_when_documents_would_match() {
+        let open = |b: &InMemoryChatWorkspaceBackend, posture: ChatPosture| {
+            let selection = KnowledgeSelection {
+                corpus: Some(CorpusScope::All),
+                posture,
+                ..KnowledgeSelection::default()
+            };
+            let t = now(b.open_session(
+                "claude-code",
+                &selection,
+                ChatSettings::default(),
+                ProviderTuning::default(),
+            ))
+            .expect("session");
+            ChatSession::new(t)
+        };
+        // The browser suite's own MATCHED prompt.
+        let prompt = "continuance request clerk scheduled";
+
+        // Positive control FIRST: this prompt really does reach documents, so
+        // the assistant assertion below cannot pass vacuously.
+        let grounded = InMemoryChatWorkspaceBackend::seeded();
+        let mut s = open(&grounded, ChatPosture::Grounded);
+        ask(&mut s, prompt);
+        let id = grounded.current_turn_id().expect("turn");
+        drain(&mut s, 80);
+        let evidence = now(grounded.turn(&id))
+            .expect("record")
+            .evidence
+            .expect("evidence");
+        assert!(
+            matches!(evidence.grounding, GroundingVerdict::Grounded { sources } if sources >= 1),
+            "{:?}",
+            evidence.grounding
+        );
+        assert!(!evidence.citations.is_empty(), "the prompt does match");
+        assert!(!evidence.facts.is_empty(), "and it does produce facts");
+
+        // The fix: the same prompt in ASSISTANT posture reaches no corpus.
+        let assisted = InMemoryChatWorkspaceBackend::seeded();
+        let mut s = open(&assisted, ChatPosture::Assistant);
+        ask(&mut s, prompt);
+        let id = assisted.current_turn_id().expect("turn");
+        drain(&mut s, 80);
+        let evidence = now(assisted.turn(&id))
+            .expect("record")
+            .evidence
+            .expect("evidence");
+        assert_eq!(evidence.grounding, GroundingVerdict::AssistantOnly);
+        assert!(
+            evidence.citations.is_empty(),
+            "an assistant turn cites nothing: {:?}",
+            evidence.citations
+        );
+        assert!(
+            evidence.facts.is_empty(),
+            "and claims no document-sourced facts: {:?}",
+            evidence
+                .facts
+                .iter()
+                .map(|f| f.qualification().to_owned())
+                .collect::<Vec<_>>()
         );
     }
 

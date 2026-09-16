@@ -239,6 +239,36 @@ async fn record_ladder(
     }
 }
 
+/// Click one element and return IMMEDIATELY, with no settle delay.
+///
+/// `common::click` sleeps `settle_ms` (500 ms) after the click, which is
+/// right for almost everything here and wrong for the ingest ladder: those
+/// 500 ms are blind time in the middle of the FIRST rung, and they are the
+/// reason `walking` kept going missing. Lengthening the rung to cover them
+/// only buys margin — this removes the blind window instead, so the sampler
+/// sees the rung from the instant it starts.
+///
+/// `el.click()` is enough: every reindex control is a real `<button>` with a
+/// Leptos `on:click`, and the suite already drives its selects and inputs by
+/// dispatched events.
+async fn click_now(h: &pixelproof_web::Harness, selector: &str) {
+    let ok: bool = eval_json(
+        h,
+        &format!(
+            r#"(() => {{
+                const el = document.querySelector('{selector}');
+                if (!el) return false;
+                el.click();
+                return true;
+            }})()"#
+        ),
+    )
+    .await
+    .as_bool()
+    .unwrap_or(false);
+    assert!(ok, "the control {selector} must exist to be clicked");
+}
+
 /// Set one `<select>` through a real change event.
 async fn set_select(h: &pixelproof_web::Harness, selector: &str, value: &str) {
     let ok: bool = eval_json(
@@ -422,7 +452,7 @@ async fn corpus_scopes_and_ingest_phases_advance_deterministically() {
         assert_eq!(corpus["error"], json!(null), "{corpus}");
     }
 
-    click(&h, &format!("{root} [data-ai-chat-reindex=\"{INTAKE}\"]")).await;
+    click_now(&h, &format!("{root} [data-ai-chat-reindex=\"{INTAKE}\"]")).await;
     let (ladder, neighbour) = record_ladder(&h, &root, INTAKE, COURT).await;
     assert_eq!(
         ladder,
@@ -457,7 +487,7 @@ async fn reindex_reaches_the_transport_and_restarts_the_phase_ladder() {
     let root = case_root(KNOWLEDGE);
     ready_at(&h, &root).await;
 
-    click(&h, &format!("{root} [data-ai-chat-reindex=\"{INTAKE}\"]")).await;
+    click_now(&h, &format!("{root} [data-ai-chat-reindex=\"{INTAKE}\"]")).await;
     let (first, _) = record_ladder(&h, &root, INTAKE, COURT).await;
     assert!(first.contains(&"walking".to_owned()), "{first:?}");
 
@@ -474,7 +504,7 @@ async fn reindex_reaches_the_transport_and_restarts_the_phase_ladder() {
 
     // A second reindex of the SAME scope restarts at walking. An
     // implementation that only ever advanced would sit at `ready`.
-    click(&h, &format!("{root} [data-ai-chat-reindex=\"{INTAKE}\"]")).await;
+    click_now(&h, &format!("{root} [data-ai-chat-reindex=\"{INTAKE}\"]")).await;
     let (second, neighbour) = record_ladder(&h, &root, INTAKE, COURT).await;
     assert_eq!(
         second,
@@ -636,6 +666,32 @@ async fn grounded_posture_answers_the_exact_absence_sentence() {
          even for a prompt no document covers: {assisted_answer:?}"
     );
     assert!(!assisted_answer.trim().is_empty(), "{assisted:?}");
+
+    // And the harder half of the same promise, still in assistant posture:
+    // a prompt that DOES match seeded documents must still cite nothing.
+    //
+    // `UNMATCHED` above cannot see this — with no overlap there is nothing to
+    // cite either way — which is exactly why a posture-blind corpus lookup
+    // survived the first round. `MATCHED` grounded, a few lines up, is the
+    // positive control that proves this prompt really does reach documents.
+    ask(&h, &root, MATCHED).await;
+    let sourced = rail_shape(&h, &root).await;
+    assert_eq!(
+        sourced["grounding"].as_str(),
+        Some("assistant_only"),
+        "the posture still governs the verdict: {sourced}"
+    );
+    assert!(
+        strings(&sourced["citations"]).is_empty(),
+        "an assistant turn must not list the documents its own verdict says \
+         it did not read: {sourced}"
+    );
+    assert_eq!(
+        sourced["facts"].as_array().map(Vec::len),
+        Some(0),
+        "and must claim no document-sourced fact, whose qualification would \
+         read \"Quoted from kb/...\": {sourced}"
+    );
 
     assert_no_browser_errors(&h, "grounded posture").await;
 }

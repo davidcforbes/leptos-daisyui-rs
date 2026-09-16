@@ -820,26 +820,151 @@ fn no_text_claims_memories_are_extracted_automatically() {
     }
 }
 
-/// The not-found sentence must survive the markdown renderer BYTE FOR BYTE.
+/// Every text field this crate compares BYTE FOR BYTE against what the
+/// markdown renderer produced, with the field name a failure should print.
 ///
-/// The transcript renders an assistant message through `editmark_core`, which
-/// typographically substitutes a straight apostrophe with a right single
-/// quotation mark. The first real run of the knowledge browser lane compared
-/// the model's straight-quoted sentence against the DOM's curly-quoted one
-/// and failed, correctly. The copy is now apostrophe-free; this guard is what
-/// stops one being reintroduced, because the failure it causes is a
-/// browser-lane failure eight minutes away rather than a compile error.
+/// Membership is the whole point, so it is stated rather than inferred.
+/// A field belongs here when BOTH are true: something asserts it with
+/// equality (not `contains`) against rendered DOM text, AND the element it
+/// lands in is rendered through `crate::markdown::MarkdownView`.
+///
+/// * `grounded_not_found` qualifies: `ai_chat_knowledge_smoke`'s test 4
+///   asserts the whole trimmed answer bubble equals it, and an assistant
+///   message is markdown (`is_markdown(&msg.role)` in
+///   `components/ai_chat/component.rs`).
+/// * `knowledge_changed` is byte-pinned too (`ai_chat_showcase_smoke`'s
+///   test 9) but is deliberately ABSENT: a `TranscriptAnnotation` renders
+///   through `AnnotationRow`'s plain `<span class="whitespace-pre-wrap">`,
+///   never through markdown, so nothing substitutes anything in it. Adding
+///   it would forbid punctuation that is perfectly safe there.
+/// * Every other browser assertion on copy is `contains`, which survives a
+///   substitution and therefore needs no guard.
+fn markdown_pinned_fields(t: &AiChatWorkspaceTexts) -> Vec<(&'static str, &str)> {
+    vec![("grounded_not_found", t.grounded_not_found.as_str())]
+}
+
+/// Why a candidate sentence cannot be compared byte-for-byte against its own
+/// rendering, or `None` when it can.
+///
+/// `editmark-core` parses with `Options::ENABLE_SMART_PUNCTUATION`
+/// (`editmark-core/src/layout.rs`), and pulldown-cmark's smart-punctuation
+/// pass rewrites FIVE things, not one: single quotes, double quotes,
+/// `...` to an ellipsis, `--` to an en dash and `---` to an em dash. The
+/// first guard written here covered the quote families only, because the
+/// defect that prompted it happened to be an apostrophe — which would have
+/// left the next author to rediscover the same class eight minutes into a
+/// browser lane. The rule, not the instance, is what belongs in a guard.
+///
+/// The second group is markdown STRUCTURE: characters the parser reads as
+/// inline markup (so the text between them is emitted without them), and
+/// line prefixes that make the sentence a heading, list item or quote rather
+/// than a paragraph. Neither is substitution, but both change the rendered
+/// text of a pinned sentence just as completely.
+fn markdown_substitution_hazard(text: &str) -> Option<String> {
+    // Rewritten by the smart-punctuation pass, or already its output.
+    const SUBSTITUTED: [char; 9] = [
+        '\'', '\u{2018}', '\u{2019}', '"', '\u{201c}', '\u{201d}', '\u{2026}', '\u{2013}',
+        '\u{2014}',
+    ];
+    // Read as inline markup, so the delimiters do not survive to the DOM.
+    const MARKUP: [char; 8] = ['*', '_', '`', '[', ']', '<', '>', '&'];
+
+    for ch in SUBSTITUTED {
+        if text.contains(ch) {
+            return Some(format!("{ch:?} is rewritten by ENABLE_SMART_PUNCTUATION"));
+        }
+    }
+    for ch in MARKUP {
+        if text.contains(ch) {
+            return Some(format!("{ch:?} is read as inline markdown markup"));
+        }
+    }
+    for seq in ["...", "--"] {
+        if text.contains(seq) {
+            return Some(format!(
+                "{seq:?} is rewritten by ENABLE_SMART_PUNCTUATION into a \
+                 single character"
+            ));
+        }
+    }
+    let first = text.trim_start();
+    for prefix in ["#", "- ", "* ", "+ ", "> ", "    "] {
+        if first.starts_with(prefix) {
+            return Some(format!(
+                "a line starting {prefix:?} is parsed as a block, not a \
+                 paragraph"
+            ));
+        }
+    }
+    let ordered = first
+        .split_once(". ")
+        .is_some_and(|(head, _)| !head.is_empty() && head.chars().all(|c| c.is_ascii_digit()));
+    if ordered {
+        return Some("a line starting \"<digits>. \" is parsed as an ordered list".to_owned());
+    }
+    None
+}
+
+/// Copy pinned byte-for-byte against the markdown renderer must contain
+/// nothing that renderer rewrites.
+///
+/// The failure this converts is specific: a one-character copy edit passes
+/// `cargo fmt`, `cargo clippy` and the whole unit lane, then fails
+/// `test-ai-chat-knowledge` eight minutes later on a byte mismatch nobody can
+/// see by reading either string. It is now a compile-time-fast unit failure
+/// naming the character and the reason.
 #[test]
-fn grounded_not_found_survives_the_markdown_renderer() {
+fn markdown_pinned_copy_survives_smart_punctuation() {
     for t in [AiChatWorkspaceTexts::default(), AiChatWorkspaceTexts::es()] {
-        for ch in ['\'', '\u{2019}', '"', '\u{201c}', '\u{201d}', '*', '_', '`'] {
+        for (name, value) in markdown_pinned_fields(&t) {
             assert!(
-                !t.grounded_not_found.contains(ch),
-                "{ch:?} is either substituted or read as markup by the \
-                 renderer, so a sentence pinned for exact comparison cannot \
-                 carry it: {:?}",
-                t.grounded_not_found
+                markdown_substitution_hazard(value).is_none(),
+                "{}: {name} = {value:?} \u{2014} {}",
+                t.locale_id,
+                markdown_substitution_hazard(value).unwrap_or_default()
             );
         }
     }
+
+    // The guard's own positive control. Without it, a checker that quietly
+    // stopped matching anything would look exactly like clean copy -- which
+    // is the failure mode this whole test exists to prevent one level up.
+    for bad in [
+        "I couldn't find that in this folder.",
+        "I could not find that \u{2019}here\u{2019}.",
+        "I could not find that -- try another folder.",
+        "I could not find that...",
+        "I could not find that in *this* folder.",
+        "# Not found",
+        "- Not found",
+        "1. Not found",
+        "Not found <yet>",
+        "Fish & chips were not found",
+    ] {
+        assert!(
+            markdown_substitution_hazard(bad).is_some(),
+            "the guard must reject {bad:?}"
+        );
+    }
+    // ...and must not reject copy that is genuinely safe, or it would forbid
+    // every sentence and prove nothing.
+    for good in [
+        "I could not find that in this folder.",
+        "No pude encontrar eso en esta carpeta.",
+        "Nada coincidi\u{f3} con esa b\u{fa}squeda.",
+    ] {
+        assert_eq!(markdown_substitution_hazard(good), None, "{good:?}");
+    }
+
+    // `knowledge_changed` is byte-pinned by the browser suite but renders
+    // through a plain span, not markdown. Asserting its ABSENCE from the
+    // pinned list keeps that distinction deliberate: if a later phase routes
+    // annotations through markdown, this line is what has to change.
+    let en = AiChatWorkspaceTexts::default();
+    assert!(
+        !markdown_pinned_fields(&en)
+            .iter()
+            .any(|(name, _)| *name == "knowledge_changed"),
+        "annotations are not markdown; see markdown_pinned_fields"
+    );
 }
