@@ -90,7 +90,7 @@ pub fn event_aria_label(ev: &SchedulerEvent) -> String {
 /// `event_accessible_label` callback, if the component was given one).
 ///
 /// `formatted` is `None` when the caller supplied no formatter at all --
-/// falls back to the English [`event_aria_label`] default, byte-for-byte,
+/// falls back to the English [`event_aria_label`](crate::components::event_aria_label) default, byte-for-byte,
 /// so every existing call site is unaffected. `formatted` is also treated
 /// as absent when the caller's formatter ran but returned an empty or
 /// whitespace-only string: a translation catalogue with a gap must never

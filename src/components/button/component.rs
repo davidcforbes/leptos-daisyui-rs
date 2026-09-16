@@ -73,7 +73,7 @@ pub(crate) fn resolve_native_disabled(
 ///
 /// `loading=true` disables the underlying `<button>` at the DOM level for as
 /// long as it is `true`, **but only when `button_type` is
-/// [`ButtonType::Submit`]** — see [`resolve_native_disabled`]. A native
+/// [`ButtonType::Submit`]** — see `resolve_native_disabled`. A native
 /// `disabled` button dispatches no `click` at all (browser-enforced), so
 /// neither an explicitly `disabled` nor a `loading` submit button can submit
 /// its form, by mouse or keyboard. A `loading` [`ButtonType::Button`]/
@@ -133,7 +133,7 @@ pub(crate) fn resolve_native_disabled(
 pub fn Button(
     /// Shows loading spinner when true. When `button_type` is
     /// [`ButtonType::Submit`], also disables the button at the DOM level for
-    /// as long as it is true — see [`resolve_native_disabled`] and the
+    /// as long as it is true — see `resolve_native_disabled` and the
     /// component doc's "Disabled and loading submit buttons cannot submit"
     /// section. A loading submit button is natively `disabled` but keeps its
     /// ordinary (non-`btn-disabled`) visual style — the spinner alone

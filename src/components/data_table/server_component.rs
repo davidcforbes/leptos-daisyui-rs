@@ -1315,7 +1315,7 @@ pub fn ServerDataTable(
     /// Keeps a nonempty accepted offset page mounted while `loading` reports
     /// replacement activity. Initial loading with no accepted rows still
     /// renders the loading body. Cursor pagination continues to derive
-    /// retention from [`ServerCursorPageState`] instead of this option.
+    /// retention from [`ServerCursorPage`] instead of this option.
     #[prop(optional, into)]
     retain_rows_while_loading: Signal<bool>,
 

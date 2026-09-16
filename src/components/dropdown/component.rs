@@ -149,13 +149,18 @@ pub fn DropdownSummary(
 
 /// # DropdownContent Component
 ///
-///  Content container for dropdown menu items.
+/// Content container for dropdown items. The rendered element depends on
+/// `is_menu`: a menu renders a `<ul>` wrapping `<li>` items, while
+/// non-menu popover content (labels, buttons, form controls, `<div>`
+/// panels) renders a `<div>`, because a `<ul>` permits only `<li>`,
+/// `<script>`, and `<template>` children.
 ///
 /// ## Node References
-/// - `node_ref` - Rederences the top `<ul>` element ([HTMLUlElement](https://developer.mozilla.org/en-US/docs/Web/API/HTMLUlElement))
+/// - `node_ref` - References the `<ul>` element ([HTMLUlElement](https://developer.mozilla.org/en-US/docs/Web/API/HTMLUlElement)); only bound when `is_menu` is `true` and unused for the non-menu `<div>` popover
 #[component]
 pub fn DropdownContent(
-    /// Whether this is a menu (adds specific styling)
+    /// Whether this is a menu (adds specific styling and renders a `<ul>`
+    /// instead of a `<div>`)
     #[prop(optional, into)]
     is_menu: bool,
 
@@ -163,18 +168,27 @@ pub fn DropdownContent(
     #[prop(optional, into)]
     class: &'static str,
 
-    /// Reference to the ul element
+    /// Reference to the `<ul>` element (only bound when `is_menu` is `true`;
+    /// a non-menu popover renders a `<div>` and ignores this ref)
     #[prop(optional)]
     node_ref: NodeRef<Ul>,
 
-    /// Menu content
+    /// Dropdown items (`<li>` children for a menu, arbitrary content otherwise)
     children: Children,
 ) -> impl IntoView {
     let menu = if is_menu { "menu " } else { "" };
 
-    view! {
-        <ul node_ref=node_ref class=move || merge_classes!("dropdown-content", menu, class)>
-            {children()}
-        </ul>
+    if is_menu {
+        view! {
+            <ul node_ref=node_ref class=move || merge_classes!("dropdown-content", menu, class)>
+                {children()}
+            </ul>
+        }
+        .into_any()
+    } else {
+        view! {
+            <div class=move || merge_classes!("dropdown-content", menu, class)>{children()}</div>
+        }
+        .into_any()
     }
 }

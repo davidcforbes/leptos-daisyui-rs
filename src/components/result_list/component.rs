@@ -149,7 +149,7 @@ pub fn ResultList(
 /// first/last row, `Enter` activates the highlighted row, hover previews,
 /// click both selects and activates, and the highlighted row scrolls into
 /// view. When `items` carries a blank or duplicate key, the listbox renders
-/// an error banner instead of guessing — see [`validate_result_list_items`].
+/// an error banner instead of guessing — see [`validate_result_list_items`](crate::components::validate_result_list_items).
 ///
 /// Reach for [`ResultList`] instead when rows have no independent identity
 /// from their display text (a plain ranked list where the row *is* the
@@ -264,7 +264,7 @@ pub fn KeyedResultList<T>(
 
     /// Ranked, keyed results to display, top to bottom. Every key must be
     /// non-blank and unique within the current list; see
-    /// [`validate_result_list_items`].
+    /// [`validate_result_list_items`](crate::components::validate_result_list_items).
     #[prop(into)]
     items: Signal<Vec<ResultListItem<T>>>,
 

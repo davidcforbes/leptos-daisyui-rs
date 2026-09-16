@@ -10,7 +10,7 @@
 //! name Cognito actually returned).
 //!
 //! Pairs with [`crate::components::LoginScreen`] for the UI and
-//! [`crate::utils::webauthn`] for the passkey ceremonies.
+//! `crate::utils::webauthn` for the passkey ceremonies.
 //!
 //! # Talking to Cognito without an SDK
 //!
@@ -92,7 +92,7 @@ pub enum SignInOutcome {
         session: String,
     },
     /// First-time TOTP setup — the user has NO authenticator yet (distinct from
-    /// [`MfaRequired`]). Run [`CognitoClient::begin_totp_setup`] (show the QR) →
+    /// `MfaRequired`). Run [`CognitoClient::begin_totp_setup`] (show the QR) →
     /// [`verify_totp_setup`](CognitoClient::verify_totp_setup) →
     /// [`respond_mfa_setup`](CognitoClient::respond_mfa_setup).
     MfaSetupRequired {
@@ -462,7 +462,7 @@ impl CognitoClient {
     }
 
     /// Begin a passkey sign-in: returns `(session, request_options_json)` to
-    /// hand to [`crate::utils::webauthn::get_assertion`].
+    /// hand to `crate::utils::webauthn::get_assertion`.
     ///
     /// Answers [`CognitoError::NoPasskey`] when the account has no registered
     /// credential — Cognito signals this by returning `SELECT_CHALLENGE`
@@ -511,7 +511,7 @@ impl CognitoClient {
     }
 
     /// Finish a passkey sign-in with the assertion produced by
-    /// [`crate::utils::webauthn::get_assertion`].
+    /// `crate::utils::webauthn::get_assertion`.
     pub async fn complete_passkey_signin(
         &self,
         username: &str,
@@ -535,7 +535,7 @@ impl CognitoClient {
     }
 
     /// Begin passkey enrollment; returns the creation-options JSON for
-    /// [`crate::utils::webauthn::create_credential`].
+    /// `crate::utils::webauthn::create_credential`.
     ///
     /// `access_token` must carry the **`aws.cognito.signin.user.admin`** scope —
     /// a hosted-UI token scoped `openid profile email` does not, and this call
@@ -557,7 +557,7 @@ impl CognitoClient {
     }
 
     /// Finish passkey enrollment with the credential from
-    /// [`crate::utils::webauthn::create_credential`].
+    /// `crate::utils::webauthn::create_credential`.
     ///
     /// Note the created credential must be **discoverable**: Cognito's creation
     /// options request `residentKey: "required"`, and a non-discoverable

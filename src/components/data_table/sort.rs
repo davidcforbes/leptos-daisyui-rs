@@ -9,7 +9,7 @@
 //! looking at the largest balances and they are not.
 //!
 //! A column therefore declares *how* its cells should be compared via
-//! [`SortAs`], and this module turns the declaration into an [`Ordering`].
+//! [`SortAs`], and this module turns the declaration into an [`Ordering`](std::cmp::Ordering).
 //! [`SortAs::Text`] is the default and is byte-for-byte the old behaviour,
 //! so existing tables are unaffected.
 //!

@@ -12,7 +12,7 @@
 //! A table cell is display copy. Comparing it means comparing whatever the
 //! current locale, format callback or column renderer decided to print, so a
 //! filter built on rendered text silently changes meaning when the copy does.
-//! Every value on this path is an [`EntityDate`] -- a calendar day with no
+//! Every value on this path is an `EntityDate` -- a calendar day with no
 //! timezone, no clock and no formatting -- and the caller maps a row to one
 //! with an ordinary accessor:
 //!

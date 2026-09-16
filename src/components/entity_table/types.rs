@@ -698,8 +698,8 @@ impl EntityColumnFilter {
     ///
     /// Nothing, by itself. The filter row is a control surface; the caller
     /// applies the constraint to its own rows, and
-    /// [`EntityDateFilter`] is the framework-owned predicate for doing that
-    /// against an [`EntityDate`] accessor rather than against rendered cell
+    /// [`EntityDateFilter`](super::EntityDateFilter) is the framework-owned predicate for doing that
+    /// against an `EntityDate` accessor rather than against rendered cell
     /// text. Both range ends are inclusive; see that type for what an empty,
     /// half-open, impossible or unreadable filter does.
     ///
@@ -1619,7 +1619,7 @@ pub struct EntityColumn<T> {
     /// Semantic presentation kind (default [`EntityColumnKind::Text`]). Set
     /// via [`EntityColumn::numeric`], [`EntityColumn::identifier`], or the
     /// lower-level [`EntityColumn::tabular_numbers`]; contributes an
-    /// additive class resolved by [`EntityColumnKind::default_class`].
+    /// additive class resolved by `EntityColumnKind::default_class`.
     pub kind: EntityColumnKind,
     /// Plain text used for default rendering and accessible/exported content.
     pub text: Rc<dyn Fn(&T) -> String>,

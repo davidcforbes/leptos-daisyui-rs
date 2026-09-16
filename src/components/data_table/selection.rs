@@ -130,7 +130,7 @@ pub fn index_of_key(
 /// (`has_activate`) was supplied. A plain display table with neither gains no
 /// tab stops -- a 50-row page would otherwise add 50 tab stops to a table the
 /// user only reads. `aria-selected` is a narrower gate than this one -- see
-/// [`row_aria_selected`].
+/// `row_aria_selected`.
 pub fn row_is_interactive(has_selection: bool, has_activate: bool) -> bool {
     has_selection || has_activate
 }

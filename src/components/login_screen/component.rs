@@ -102,7 +102,7 @@ pub fn LoginScreen(
     on_mfa_submit: Option<Callback<String>>,
 
     /// The passkey / Windows Hello action was pressed. The host runs the
-    /// WebAuthn ceremony (see [`crate::auth::cognito_webauthn`] for a Cognito
+    /// WebAuthn ceremony (see `crate::auth::cognito` for a Cognito
     /// implementation).
     #[prop(into, optional)]
     on_passkey: Option<Callback<()>>,

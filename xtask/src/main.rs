@@ -23,6 +23,11 @@ enum Run {
         program: &'static str,
         args: Vec<String>,
         cwd: Option<&'static str>,
+        /// Extra environment for the child (e.g. `RUSTDOCFLAGS`), layered over
+        /// the inherited environment. Empty for almost every step; only the
+        /// rustdoc gate needs it, because `cargo doc` has no `--deny-warnings`
+        /// flag and `-D warnings` has to reach the rustdoc process.
+        env: Vec<(&'static str, &'static str)>,
     },
     /// Spawn the demo dev server on a free port, run a browser-driven test
     /// binary against it, then tear the server down. See [`run_browser_suite`].
@@ -49,12 +54,26 @@ fn cmd(
     parts: &[&str],
     cwd: Option<&'static str>,
 ) -> Step {
+    cmd_env(name, program, parts, cwd, &[])
+}
+
+/// Build a subprocess step with extra environment for the child. Used only
+/// where the tool has no in-command-line way to reach the setting (`cargo
+/// doc`'s warnings live behind `RUSTDOCFLAGS`).
+fn cmd_env(
+    name: &'static str,
+    program: &'static str,
+    parts: &[&str],
+    cwd: Option<&'static str>,
+    env: &[(&'static str, &'static str)],
+) -> Step {
     Step {
         name,
         run: Run::Cmd {
             program,
             args: args(parts),
             cwd,
+            env: env.to_vec(),
         },
     }
 }
@@ -295,6 +314,27 @@ fn gate_steps() -> Vec<Step> {
             ],
             None,
         ),
+        // Intra-doc links and missing-docs rot silently: the crate sets
+        // `#![warn(missing_docs)]` but nothing ran `cargo doc` at all, so 18
+        // warnings (broken `crate::...` links, refs to removed symbols, links
+        // to private items) accumulated unnoticed. `--features test-mode`
+        // because `src/test_mode.rs` is feature-gated and must be documented
+        // too; `-D warnings` because warn-only has never been a gate.
+        // `RUSTDOCFLAGS` is the only way to reach rustdoc's warning level.
+        cmd_env(
+            "doc-lib",
+            "cargo",
+            &[
+                "doc",
+                "-p",
+                "leptos-daisyui-rs",
+                "--no-deps",
+                "--features",
+                "test-mode",
+            ],
+            None,
+            &[("RUSTDOCFLAGS", "-D warnings")],
+        ),
     ]
 }
 
@@ -309,6 +349,9 @@ fn steps_for(sub: &str) -> Vec<Step> {
             "fmt-check" => s.name == "fmt-check",
             "build" => s.name == "build",
             "check-demo" => s.name == "check-demo",
+            // The rustdoc gate is its own subcommand so a deliberate-link
+            // break can be exercised without running the whole gate.
+            "doc" => s.name.starts_with("doc"),
             _ => false,
         })
         .collect()
@@ -760,11 +803,19 @@ fn full_steps() -> Vec<Step> {
 fn run_step(step: &Step) -> bool {
     eprintln!("\n----- {} -----", step.name);
     match &step.run {
-        Run::Cmd { program, args, cwd } => {
+        Run::Cmd {
+            program,
+            args,
+            cwd,
+            env,
+        } => {
             let mut c = Command::new(program);
             c.args(args);
             if let Some(dir) = cwd {
                 c.current_dir(dir);
+            }
+            for (key, value) in env {
+                c.env(key, value);
             }
             match c.status() {
                 Ok(s) => s.success(),
@@ -2337,7 +2388,9 @@ fn main() -> ExitCode {
     let sub = std::env::args().nth(1).unwrap_or_default();
     match sub.as_str() {
         "verify" => run_steps(&gate_steps()),
-        "fmt-check" | "clippy" | "build" | "check-demo" | "test" => run_steps(&steps_for(&sub)),
+        "fmt-check" | "clippy" | "build" | "check-demo" | "test" | "doc" => {
+            run_steps(&steps_for(&sub))
+        }
         "verify-full" => run_steps(&full_steps()),
         "test-reactivity" => run_steps(&[reactivity_step()]),
         "test-client-snapshot" => run_steps(&[client_snapshot_step(), snapshot_table_step()]),

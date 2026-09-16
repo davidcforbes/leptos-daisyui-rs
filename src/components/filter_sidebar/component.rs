@@ -318,7 +318,7 @@ pub fn FilterSidebar(
     /// layout width and no pointer events when the panel collapses
     /// (`ldui-8hba` -- retaining its width while merely invisible pushed the
     /// toggle button outside the panel on the right-docked orientation, see
-    /// [`filter_sidebar_header_actions_wrapper`] for the full story), and
+    /// `filter_sidebar_header_actions_wrapper` for the full story), and
     /// goes `inert` so it drops out of the tab order and accessibility tree
     /// too. Sits between the title and the toggle in DOM order, so left/right
     /// mirroring (`flex-row-reverse` on [`SidebarSide::Right`]) carries it

@@ -98,7 +98,7 @@ impl EntityPagePlan {
     /// `run_lengths` describes only rows the table actually displays, so a
     /// collapsed group contributes nothing here -- it holds no rows, and its
     /// heading is placed separately by
-    /// [`entity_grouped_page_sections`](super::grouping::entity_grouped_page_sections).
+    /// `entity_grouped_page_sections`.
     #[must_use]
     pub fn grouped(run_lengths: &[usize], capacity: usize) -> Self {
         let capacity = capacity.max(1);

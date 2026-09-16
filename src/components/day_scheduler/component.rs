@@ -60,7 +60,7 @@ use leptos::{html::Div, prelude::*};
 /// `event_content` renders something visual-only.
 ///
 /// The default accessible name is English interval grammar --
-/// `"{title}, {start} to {end}"`, exactly [`event_aria_label`]'s output --
+/// `"{title}, {start} to {end}"`, exactly [`event_aria_label`](crate::components::event_aria_label)'s output --
 /// and every existing call site keeps that default untouched. A localised
 /// page supplies `event_accessible_label` instead: a
 /// `Callback<SchedulerEvent, String>` that receives the whole event (not a
@@ -111,7 +111,7 @@ use leptos::{html::Div, prelude::*};
 /// If the callback returns an empty or whitespace-only string -- a
 /// translation catalogue with a gap, or (as above) a locale branch that
 /// intentionally defers -- the block falls back to the same English
-/// [`event_aria_label`] default rather than emitting an empty `aria-label`.
+/// [`event_aria_label`](crate::components::event_aria_label) default rather than emitting an empty `aria-label`.
 /// An event block's accessible name is the *only* name a screen-reader user
 /// gets for it, so an unnamed interactive control is a worse outcome than
 /// a wrong-language one; this fallback keeps every interactive event named.
@@ -190,7 +190,7 @@ pub fn DayScheduler(
     /// Optional accessible-name formatter for interactive event blocks: given
     /// the whole [`SchedulerEvent`], returns the complete string used as
     /// `aria-label`. Overrides the built-in English
-    /// `"{title}, {start} to {end}"` grammar ([`event_aria_label`]) for
+    /// `"{title}, {start} to {end}"` grammar ([`event_aria_label`](crate::components::event_aria_label)) for
     /// locales that reorder or inflect the interval differently -- e.g.
     /// Spanish `"{title}, de {start} a {end}"`. Read inside the same
     /// reactive `aria-label` closure the default uses, so a callback that

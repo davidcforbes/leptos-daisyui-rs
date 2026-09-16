@@ -8,7 +8,7 @@
 //! failure.
 //!
 //! Pairs with [`crate::components::LoginScreen`] (the UI) and
-//! [`crate::utils::webauthn`] (the passkey ceremonies).
+//! `crate::utils::webauthn` (the passkey ceremonies).
 
 mod cognito;
 
