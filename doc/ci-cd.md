@@ -296,7 +296,7 @@ for page-scoped and catalog suite membership and grouping.
 
 ### Gate cadence during a live Beads drain
 
-`cargo xtask verify` is the 19-step native gate listed in the table above.
+`cargo xtask verify` is the 20-step native gate listed in the table above.
 `cargo xtask verify-full` adds every registered browser lane. Report its actual
 summary count; `full_steps()` in `xtask/src/main.rs` defines membership, and a
 remembered total can drift when a lane is added.

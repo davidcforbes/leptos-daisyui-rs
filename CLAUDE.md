@@ -61,11 +61,15 @@ cargo xtask test-snapshot-table-page-filter-actions  # SnapshotTablePage's opt-i
 cargo xtask test-entity-draft-row      # EntityTable inline draft-row editing (ldui-ff2f)
 cargo xtask test-app-shell             # AppShell region contract (ldui-a8an)
 cargo xtask test-field-context-scoping # Field id minting / no inheritance (ldui-a8an)
+cargo xtask test-helpdesk              # Helpdesk composite: board, drawer, New Request dialog, host-owned capability table (ldui-b5mu, ldui-ftdy)
+cargo xtask test-ai-chat               # AiChatWorkspace showcase over the seeded fixture (ldui-iilm)
+cargo xtask test-ai-chat-knowledge     # knowledge rail: corpora, ingest, grounding, recall, guardrails (ldui-iilm.7)
+cargo xtask test-admin-workbench       # KpiStrip ladders + the measured help-bubble side (ldui-k3ip, ldui-rzvv)
 cargo xtask gen-tokens [--check]     # regenerate styles/tokens.css from ui-tokens
 cargo xtask check-sibling-tokens     # preamble.rs's ui_tokens refs must exist on the sibling's DEFAULT branch
 # (list non-exhaustive and rot-prone — the dispatch match in
 #  xtask/src/main.rs is the self-updating source of truth; newer lanes include
-#  test-helpdesk, test-softphone, test-section-heading, verify-pattern, check-demo, ...)
+#  test-softphone, test-section-heading, test-search-picker-dialog, verify-pattern, check-demo, ...)
 cargo xtask bump patch|minor|major   # bump the library version (human-chosen level)
 ```
 
@@ -433,6 +437,27 @@ discards a layered `ring-*` (ldui-xr7i). Selection rings are `outline`s — a
 box-shadow ring counts as a rogue DEPTH finding in the style audit — and
 keyboard focus is the framework's `ld-focus-ring`, which outranks any
 `focus-visible:` utility you add.
+
+### Tooltip bubbles occupy layout at opacity 0 — measure edges, never index them
+
+daisyUI's tooltip bubble is a `::before` pseudo-element: absolutely positioned,
+`width: max-content`, `max-width: 20rem`, and present at `opacity: 0` before any
+hover. An opacity-0 box still extends its containing block's scrollable
+overflow, so a centred `tooltip-top` bubble on a trigger near a container's
+right edge adds up to ~160px of horizontal scroll **at rest** — a phantom
+scrollbar, and exactly what the `ldui-k3ip` admin-workbench contract measures.
+
+Which trigger sits at an edge is a question of *rendered* geometry. A card's
+list index cannot know where a wrapped row ends (the columns are container
+queries Rust never sees), and a rung-gated CSS variant cannot either — both
+were tried for `KpiStrip` (ldui-rzvv) and both failed the contract. The crate's
+answer is `components::tooltip::geometry`, promoted from `RecordHeader`: the
+container owns a `ResizeObserver` that bumps a generation; each trigger
+measures itself against the container on mount, on every bump, and on
+hover/focus, then writes the `Tooltip`'s `position`. A declared edge is only
+the first-paint seed. Prove it in a lane by reading `data-tooltip-placement`
+*and* the bubble's computed `right` inset (`auto` means `tooltip-top`; a length
+means `tooltip-left` really applied), at two container widths.
 
 ## Component Guidelines
 
