@@ -286,6 +286,8 @@ async fn settings_shape(h: &pixelproof_web::Harness) -> Value {
                         .map(e => e.getAttribute('data-chat-role')),
                     texts: Array.from(root.querySelectorAll('[data-chat-role]'))
                         .map(e => e.textContent.trim()),
+                    toolPhases: Array.from(root.querySelectorAll('[data-chat-role]'))
+                        .map(e => e.getAttribute('data-chat-tool-phase')),
                     chatState: q('[data-ai-chat-state]')
                         ?.getAttribute('data-ai-chat-state') ?? null,
                     composer: q('[data-ai-chat-composer]')?.value ?? null,
@@ -947,9 +949,41 @@ async fn send_streams_thinking_tool_call_result_and_text_in_order() {
         .iter()
         .map(|v| v.as_str().unwrap_or_default().to_owned())
         .collect();
-    assert!(texts[2].contains("Read"), "the tool CALL row: {texts:?}");
+    // ldui-opnw: both tool rows are the SAME role, so the only way to name
+    // the result without counting positions is the phase hook ai_chat_core
+    // carries (ldui-ikvx). Derive both indices from it: a literal `texts[3]`
+    // keeps passing while describing the wrong row the day a row is inserted.
+    let phases: Vec<Option<String>> = shape["toolPhases"]
+        .as_array()
+        .unwrap_or(&vec![])
+        .iter()
+        .map(|v| v.as_str().map(str::to_owned))
+        .collect();
+    assert_eq!(
+        phases,
+        vec![
+            None,
+            None,
+            Some("call".to_owned()),
+            Some("result".to_owned()),
+            None,
+        ],
+        "only the two tool rows carry data-chat-tool-phase, call before result: {shape}"
+    );
+    let call_idx = phases
+        .iter()
+        .position(|p| p.as_deref() == Some("call"))
+        .expect("a call row");
+    let result_idx = phases
+        .iter()
+        .position(|p| p.as_deref() == Some("result"))
+        .expect("a result row");
     assert!(
-        texts[3].contains("conflict check"),
+        texts[call_idx].contains("Read"),
+        "the tool CALL row, selected by phase: {texts:?}"
+    );
+    assert!(
+        texts[result_idx].contains("conflict check"),
         "the tool RESULT row: {texts:?}"
     );
     assert!(
@@ -1115,6 +1149,8 @@ async fn workspace_shape(h: &pixelproof_web::Harness, root: &str) -> Value {
                         .map(e => e.getAttribute('data-chat-role')),
                     texts: Array.from(root.querySelectorAll('[data-chat-role]'))
                         .map(e => e.textContent.trim()),
+                    toolPhases: Array.from(root.querySelectorAll('[data-chat-role]'))
+                        .map(e => e.getAttribute('data-chat-tool-phase')),
                     panel: q('[data-ai-chat-panel]') !== null,
                     errorStrip: q('[data-ai-chat-error]') !== null,
                     retryButton: q('[data-ai-chat-retry]') !== null,
