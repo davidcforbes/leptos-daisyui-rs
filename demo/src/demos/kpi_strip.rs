@@ -251,6 +251,17 @@ pub fn KpiStripDemo() -> impl IntoView {
             // A constrained column, the case ldui-tnyq exists for: the same
             // twelve cards must step DOWN here rather than asking how wide
             // the window is.
+            // ldui-rzvv: the only fixture whose LAST card carries help, so the
+            // measured, inward-opening bubble has a single-row instance to be
+            // proven against.
+            <Section title="Balanced six, trailing card with help">
+                <div class="w-full" data-testid="kpi-strip-balanced-six-trailing-help">
+                    <KpiStrip
+                        items=Signal::derive(|| dashboard_kpis().into_iter().skip(3).take(6).collect::<Vec<_>>())
+                        layout=KpiStripLayout::BalancedSix
+                    />
+                </div>
+            </Section>
             <Section title="Balanced six in a narrow column">
                 <div class="w-full max-w-md" data-testid="kpi-strip-balanced-six-narrow">
                     <KpiStrip

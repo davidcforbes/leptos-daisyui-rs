@@ -1396,6 +1396,94 @@ async fn balanced_six_handles_six_five_and_empty_item_sets_ldui_k3ip() {
     assert_no_browser_errors(&h, "kpi-strip balanced-six counts").await;
 }
 
+/// The help bubble's side is MEASURED against the strip (ldui-rzvv), never
+/// taken from a card's index: whichever card ends a wrapped row flips its
+/// bubble inward, so the strip never scrolls horizontally at rest -- the
+/// bubble exists at `opacity: 0` before any hover, which is what the
+/// `ldui-k3ip` contract measures. `data-tooltip-placement` is the Tooltip's
+/// own resolved side; the computed `right` inset of the bubble is the
+/// stylesheet's confirmation that `tooltip-left` actually applied.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-admin-workbench)"]
+async fn the_help_bubble_side_is_measured_not_indexed_ldui_rzvv() {
+    let h = harness_at(KPI_STRIP_PAGE).await;
+    begin_browser_error_capture(&h).await;
+
+    async fn help_probe(h: &pixelproof_web::Harness, testid: &str) -> Value {
+        let expr = format!(
+            r#"(() => {{
+                const root = document.querySelector('[data-testid="{testid}"]');
+                const grid = root.querySelector('[data-kpi-strip]');
+                const triggers = Array.from(root.querySelectorAll('[data-kpi-help-edge]'));
+                return {{
+                    declared: triggers.map(t => t.getAttribute('data-kpi-help-edge')),
+                    placements: triggers.map(t => t.getAttribute('data-tooltip-placement')),
+                    bubbleRight: triggers.map(t => getComputedStyle(t, '::before').right),
+                    containerWidth: Math.round(root.querySelector('[data-kpi-strip-container]').getBoundingClientRect().width),
+                    overflowing: grid.scrollWidth > grid.clientWidth + 1,
+                }};
+            }})()"#
+        );
+        eval_json(h, &expr).await
+    }
+
+    // Wide: six cards in one row; the trailing card carries the help and
+    // its bubble opens LEFT because there is no room to its right.
+    h.set_viewport(ViewportSize::new(1680, 1000))
+        .await
+        .expect("set viewport");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let wide = help_probe(&h, "kpi-strip-balanced-six-trailing-help").await;
+    assert_eq!(wide["declared"], json!(["right"]), "{wide}");
+    assert_eq!(
+        wide["placements"],
+        json!(["left"]),
+        "the trailing card opens inward: {wide}"
+    );
+    assert_ne!(
+        wide["bubbleRight"][0],
+        json!("auto"),
+        "the stylesheet resolved tooltip-left: {wide}"
+    );
+    assert_eq!(wide["overflowing"], json!(false), "{wide}");
+
+    // Narrow: twelve cards wrap three per row, and the help card (index 8)
+    // ENDS its row while being Interior by index. Only measurement can know.
+    let narrow = help_probe(&h, "kpi-strip-balanced-six-narrow").await;
+    assert_eq!(narrow["declared"], json!(["interior"]), "{narrow}");
+    assert_eq!(
+        narrow["placements"],
+        json!(["left"]),
+        "the row-end card flips by geometry, not by index: {narrow}"
+    );
+    assert_eq!(
+        narrow["overflowing"],
+        json!(false),
+        "the k3ip contract at rest: {narrow}"
+    );
+
+    // Re-measured on reflow: below @4xl the six cards wrap 4 + 2, the
+    // trailing card has room on its right again, and the bubble goes back
+    // to daisyUI's centered default.
+    h.set_viewport(ViewportSize::new(768, 1000))
+        .await
+        .expect("set viewport");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let stepped = help_probe(&h, "kpi-strip-balanced-six-trailing-help").await;
+    assert!(
+        stepped["containerWidth"].as_f64().unwrap_or(9999.0) < 896.0,
+        "the fixture must be below @4xl here: {stepped}"
+    );
+    assert_eq!(
+        stepped["placements"],
+        json!(["top"]),
+        "re-measured: {stepped}"
+    );
+    assert_eq!(stepped["overflowing"], json!(false), "{stepped}");
+
+    assert_no_browser_errors(&h, "kpi-strip help side").await;
+}
+
 /// A balanced-six strip in a constrained column steps DOWN rather than
 /// asking how wide the window is (ldui-tnyq), and never overflows.
 #[tokio::test(flavor = "multi_thread")]

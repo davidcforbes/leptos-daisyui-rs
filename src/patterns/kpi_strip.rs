@@ -17,10 +17,12 @@
 
 use crate::components::{
     Badge, BadgeColor, BadgeSize, BadgeStyle, CapacityBar, CapacityBarColor, Pressable,
-    StatDeltaTrend, Tooltip, TooltipEdge, capacity_bar_percent,
+    StatDeltaTrend, Tooltip, TooltipEdge, TooltipPosition, capacity_bar_percent,
+    measure_tooltip_position, tooltip_position_for_edge,
 };
 use crate::merge_classes;
 use leptos::{html::Div, prelude::*};
+use web_sys::wasm_bindgen::JsCast;
 
 /// Reactive framework-owned copy for `KpiStrip`/`KpiCard`'s own generated
 /// text -- the unavailable-value fallback, the trend-direction words folded
@@ -1476,6 +1478,20 @@ pub fn KpiCard(
     #[prop(optional, into)]
     help_edge: Signal<TooltipEdge>,
 
+    /// The element the help bubble must stay inside, when the card is one of
+    /// a [`KpiStrip`]'s: the strip's container. With it, the bubble's side is
+    /// MEASURED against real geometry (ldui-rzvv) -- whichever card ends a
+    /// wrapped row is the one that flips, whatever its index -- and
+    /// `help_edge` is only the first-paint seed. Without it (a card placed
+    /// by hand) `help_edge` decides outright, as before.
+    #[prop(optional)]
+    help_bounds: Option<NodeRef<Div>>,
+
+    /// Bumped by the strip's ResizeObserver on every reflow, so the measured
+    /// side follows the strip through wrapping and un-wrapping.
+    #[prop(optional, into)]
+    help_generation: Signal<u32>,
+
     /// Activation callback, receiving the stable [`KpiItem::id`].
     ///
     /// One callback, one control: supplying this AND an item [`KpiAction`]
@@ -1663,6 +1679,43 @@ pub fn KpiCard(
         }
     });
 
+    // ldui-rzvv: the bubble's side is measured, never indexed. daisyUI's
+    // bubble is `position: absolute`, `width: max-content`, `max-width:
+    // 20rem`, and exists at `opacity: 0` before any hover, so a centered
+    // bubble on a row-end card already spills past the strip at rest --
+    // 125px of phantom horizontal scroll in a 448px column, which is what
+    // the `ldui-k3ip` contract measures. Rust cannot see where a wrapped
+    // row ends (the columns are container queries), so the strip hands
+    // down its container and a reflow generation, and each card measures
+    // its own trigger against it -- the RecordHeader mechanism (ldui-q73d).
+    // `help_edge` seeds the first paint so the declared last card never
+    // shows a spilling bubble even for one frame.
+    let tooltip_ref = NodeRef::<Div>::new();
+    let help_len = help.chars().count();
+    let tooltip_position = RwSignal::new(tooltip_position_for_edge(
+        &TooltipPosition::Top,
+        help_edge.get_untracked(),
+    ));
+    let remeasure = move || {
+        let (Some(bounds), Some(trigger)) = (
+            help_bounds.and_then(|bounds| bounds.get_untracked()),
+            tooltip_ref.get_untracked(),
+        ) else {
+            return;
+        };
+        tooltip_position.set(measure_tooltip_position(
+            bounds.unchecked_ref::<web_sys::Element>(),
+            trigger.unchecked_ref::<web_sys::Element>(),
+            help_len,
+        ));
+    };
+    Effect::new(move |_| {
+        help_generation.track();
+        if help_bounds.is_some_and(|bounds| bounds.get().is_some()) && tooltip_ref.get().is_some() {
+            remeasure();
+        }
+    });
+
     let help_button = help_id.clone().map(|_| {
         view! {
             // `relative z-2`: above a stretched hidden-label action control
@@ -1670,7 +1723,15 @@ pub fn KpiCard(
             // the tooltip itself escapes the card unclipped (op-k0kt2) and,
             // on the first or last card of the strip, opens inward rather
             // than off the container's edge (op-du33s).
-            <Tooltip tip=help.clone() edge=help_edge class="relative z-2 shrink-0">
+            <Tooltip
+                node_ref=tooltip_ref
+                tip=help.clone()
+                position=tooltip_position
+                class="relative z-2 shrink-0"
+                attr:data-kpi-help-edge=move || help_edge.get().as_str()
+                on:pointerenter=move |_| remeasure()
+                on:focusin=move |_| remeasure()
+            >
                 <span
                     class="inline-flex h-4 w-4 items-center justify-center rounded-full border border-base-content/40 text-base-content/75 ld-text-small"
                     aria-hidden="true"
@@ -2027,6 +2088,41 @@ pub fn KpiStrip(
     #[prop(optional)]
     node_ref: NodeRef<Div>,
 ) -> impl IntoView {
+    // ldui-rzvv: the strip's container is what every card's help bubble is
+    // measured against, and a ResizeObserver on it is the reflow signal --
+    // wrapping and un-wrapping both change its size -- bumping
+    // `layout_generation`, which each card's placement effect tracks. The
+    // observer also fires once on `observe`, after layout, so the first
+    // measurement is taken against settled geometry (the RecordHeader
+    // mechanism, ldui-q73d).
+    let container_ref = NodeRef::<Div>::new();
+    let layout_generation = RwSignal::new(0u32);
+    Effect::new(move |_| {
+        let Some(container) = container_ref.get() else {
+            return;
+        };
+        let closure = wasm_bindgen::closure::Closure::wrap(Box::new(
+            move |_entries: js_sys::Array, _observer: web_sys::ResizeObserver| {
+                layout_generation.update(|generation| *generation = generation.wrapping_add(1));
+            },
+        )
+            as Box<dyn FnMut(js_sys::Array, web_sys::ResizeObserver)>);
+        match web_sys::ResizeObserver::new(closure.as_ref().unchecked_ref()) {
+            Ok(observer) => {
+                observer.observe(&container);
+                // `Closure`/`ResizeObserver` are not `Send`/`Sync` but
+                // `on_cleanup` requires both; this only ever runs
+                // single-threaded on wasm32, which `SendWrapper` encodes.
+                let guard = send_wrapper::SendWrapper::new((closure, observer));
+                on_cleanup(move || {
+                    let (closure, observer) = guard.take();
+                    observer.disconnect();
+                    drop(closure);
+                });
+            }
+            Err(_) => drop(closure),
+        }
+    });
     view! {
         // Structural container only. An element cannot answer its OWN
         // container query, so the `@sm`/`@lg`/`@4xl`/`@5xl` steps on the grid
@@ -2044,7 +2140,7 @@ pub fn KpiStrip(
         // classes are all present. Six demo fixtures hit exactly this
         // (ldui-k3ip); the fix is `w-full` or an explicit width on the
         // PARENT, which this component cannot supply for you.
-        <div class="@container w-full" data-kpi-strip-container="true">
+        <div node_ref=container_ref class="@container w-full" data-kpi-strip-container="true">
         <div
             node_ref=node_ref
             class=move || merge_classes!(kpi_strip_grid_class(layout.get(), compact.get()), class)
@@ -2095,6 +2191,8 @@ pub fn KpiStrip(
                                     compact=compact
                                     texts=texts
                                     help_edge=help_edge
+                                    help_bounds=container_ref
+                                    help_generation=layout_generation
                                     on_activate=on_activate
                                 />
                             }
@@ -2107,6 +2205,8 @@ pub fn KpiStrip(
                                     compact=compact
                                     texts=texts
                                     help_edge=help_edge
+                                    help_bounds=container_ref
+                                    help_generation=layout_generation
                                 />
                             }
                                 .into_any()
@@ -2233,7 +2333,7 @@ mod tests {
         // reformat read as a defect.
         let flattened = component.split_whitespace().collect::<Vec<_>>().join(" ");
         assert!(
-            flattened.contains(r#"<Tooltip tip=help.clone()"#)
+            flattened.contains(r#"tip=help.clone()"#)
                 && flattened.contains(r#"class="relative z-2 shrink-0""#),
             "the help trigger paints above a stretched action control"
         );
@@ -2305,20 +2405,71 @@ mod tests {
         assert_eq!(kpi_card_help_edge(1, 2), TooltipEdge::Right);
     }
 
+    /// ldui-rzvv: the index is only the first-paint seed. The card measures
+    /// its trigger against the strip's container on mount, on every
+    /// ResizeObserver reflow, and on hover/focus -- so whichever card ends a
+    /// wrapped row flips, whatever its index. Twelve balanced-six cards in a
+    /// 448px column put the help card at the END of its row while its index
+    /// says Interior; the measured side is what keeps the strip from
+    /// scrolling horizontally at rest (`ldui-k3ip`).
+    ///
+    /// BREAK: remove the `help_generation.track()` line; the reflow
+    /// assertion fails.
+    #[test]
+    fn help_tooltip_placement_is_measured_not_indexed() {
+        let card = kpi_card_source();
+        assert!(
+            card.contains("measure_tooltip_position("),
+            "the card measures"
+        );
+        assert!(
+            card.contains("help_generation.track();"),
+            "and re-measures on reflow"
+        );
+        assert!(
+            card.contains("on:pointerenter=move |_| remeasure()")
+                && card.contains("on:focusin=move |_| remeasure()"),
+            "and again on hover/focus"
+        );
+        assert!(
+            card.contains("tooltip_position_for_edge(")
+                && card.contains("help_edge.get_untracked()"),
+            "the declared edge seeds the first paint"
+        );
+        let strip = module_source()
+            .split_once("pub fn KpiStrip(")
+            .expect("KpiStrip component source")
+            .1;
+        assert!(
+            strip.contains("web_sys::ResizeObserver::new"),
+            "the strip owns the observer"
+        );
+        assert_eq!(
+            strip.matches("help_bounds=container_ref").count(),
+            2,
+            "both render arms hand the container down"
+        );
+    }
+
     /// The wiring, not just the arithmetic: the card must hand its declared
     /// edge to the `Tooltip`, the strip must compute one per card, and the
     /// edge must reach the reconciliation key -- a card that becomes the
     /// last one when the list shrinks has to re-render to move its bubble.
     ///
-    /// BREAK: drop `edge=help_edge` from the card's `Tooltip`; the first
-    /// assertion fails.
+    /// Since ldui-rzvv the `Tooltip` takes a MEASURED `position` and the
+    /// declared edge seeds it and travels on `data-kpi-help-edge`.
+    ///
+    /// BREAK: drop `position=tooltip_position` from the card's `Tooltip`;
+    /// the first assertion fails.
     #[test]
     fn the_strip_declares_each_cards_edge_and_keys_on_it() {
         let card = kpi_card_source();
         let flattened = card.split_whitespace().collect::<Vec<_>>().join(" ");
         assert!(
-            flattened.contains("<Tooltip tip=help.clone() edge=help_edge"),
-            "the help trigger must carry its declared edge: {flattened}"
+            flattened.contains(
+                "<Tooltip node_ref=tooltip_ref tip=help.clone() position=tooltip_position"
+            ) && flattened.contains("attr:data-kpi-help-edge=move || help_edge.get().as_str()"),
+            "the help trigger must carry the measured side and declare its edge: {flattened}"
         );
 
         let strip = module_source()
