@@ -3,6 +3,7 @@ use super::style::{
     composer_hint_for, composer_key_action, composer_placeholder_for, effective_assistant_label,
     is_markdown, is_thinking, role_avatar_bg, role_avatar_initial_with, role_classes,
     role_data_attr, role_label_for, should_stick_to_bottom, show_welcome_chips,
+    tool_phase_data_attr,
 };
 use super::texts::AiChatTexts;
 use super::types::{
@@ -1107,6 +1108,9 @@ fn MessageBubble(
 ) -> impl IntoView {
     let (side, bubble) = role_classes(&msg.role);
     let role_attr = role_data_attr(&msg.role);
+    // `None` renders no attribute at all, so `[data-chat-tool-phase]`
+    // selects a tool call or its result and nothing else.
+    let tool_phase_attr = tool_phase_data_attr(&msg.meta);
     let label = role_label_for(&msg.role, &assistant_label, &texts);
     let copy_label = texts.copy.clone();
     let copy_title = texts.copy_message.clone();
@@ -1139,6 +1143,7 @@ fn MessageBubble(
         <div
             class=move || merge_classes!("chat ld-aichat-msg-in", side)
             data-chat-role=role_attr
+            data-chat-tool-phase=tool_phase_attr
             data-chat-index=index
         >
             <div class="chat-image avatar avatar-placeholder">

@@ -2,7 +2,7 @@
 
 use super::texts::AiChatTexts;
 use super::types::AnnotationKind;
-use ai_chat_core::ChatRole;
+use ai_chat_core::{ChatRole, MessageMeta, ToolPhase};
 
 /// `(chat-side, chat-bubble-modifier)` daisyUI classes for a message role.
 ///
@@ -84,6 +84,28 @@ pub fn role_data_attr(role: &ChatRole) -> &'static str {
         ChatRole::System => "system",
         ChatRole::Thinking => "thinking",
         ChatRole::Tool => "tool",
+    }
+}
+
+/// The `data-chat-tool-phase` hook for a message, or `None` when the message
+/// carries no phase.
+///
+/// A tool turn reaches the transcript as TWO `ChatRole::Tool` messages, the
+/// call and its result, which `data-chat-role` alone cannot tell apart. A
+/// consumer wanting the RESULT therefore had to reach for it by document
+/// position, and a positional selector does not fail when the transcript
+/// changes shape: it silently starts describing something else. `ai_chat_core`
+/// stamps `MessageMeta::tool_phase` on both messages, and this maps that field
+/// onto a hook a selector can name.
+///
+/// `None` means the attribute is not emitted at all, which is the whole
+/// contract: an empty `data-chat-tool-phase=""` would still match the
+/// `[data-chat-tool-phase]` selector and make every ordinary bubble look like
+/// half of a tool turn.
+pub fn tool_phase_data_attr(meta: &MessageMeta) -> Option<&'static str> {
+    match meta.tool_phase? {
+        ToolPhase::Call => Some("call"),
+        ToolPhase::Result => Some("result"),
     }
 }
 

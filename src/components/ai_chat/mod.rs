@@ -19,6 +19,7 @@ pub use style::{
     composer_key_action, composer_placeholder_for, default_composer_placeholder,
     effective_assistant_label, is_markdown, is_thinking, role_classes, role_data_attr, role_label,
     role_label_for, role_label_with, should_stick_to_bottom, show_welcome_chips,
+    tool_phase_data_attr,
 };
 pub use texts::AiChatTexts;
 pub use transport::{BridgeCommand, SseBridgeHandle, SseBridgeTransport, parse_sse_data};
@@ -33,7 +34,8 @@ pub use types::{
 // drive the component without a direct `ai-chat-core` dependency.
 pub use ai_chat_core::{
     AttachmentRef, Capabilities, ChatError, ChatMessage, ChatRequest, ChatRole, ChatSession,
-    ChatSettings, ChatTransport, Citation, HitlState, MessageMeta, StreamEvent, ToolCall, Usage,
+    ChatSettings, ChatTransport, Citation, HitlState, MessageMeta, StreamEvent, ToolCall,
+    ToolPhase, Usage,
 };
 
 /// Wire types shared with the engine service and editmark-server

@@ -3,7 +3,7 @@ use super::style::{
     composer_key_action, composer_placeholder_for, default_composer_placeholder,
     effective_assistant_label, is_markdown, is_thinking, role_avatar_bg, role_avatar_initial,
     role_avatar_initial_with, role_classes, role_data_attr, role_label, role_label_for,
-    role_label_with, should_stick_to_bottom, show_welcome_chips,
+    role_label_with, should_stick_to_bottom, show_welcome_chips, tool_phase_data_attr,
 };
 use super::texts::AiChatTexts;
 use super::types::{
@@ -13,8 +13,8 @@ use super::types::{
     reconcile_model_for, retry_outcome, settings_from_form_fields, settings_rows_for,
 };
 use ai_chat_core::{
-    Capabilities, ChatError, ChatRequest, ChatRole, ChatSession, ChatSettings, ChatTransport,
-    StreamEvent, Usage,
+    Capabilities, ChatError, ChatMessage, ChatRequest, ChatRole, ChatSession, ChatSettings,
+    ChatTransport, MessageMeta, StreamEvent, ToolPhase, Usage,
 };
 
 #[test]
@@ -651,6 +651,78 @@ fn role_data_attributes_are_unique_per_role() {
     assert_eq!(role_data_attr(&ChatRole::User), "user");
     assert_eq!(role_data_attr(&ChatRole::Assistant), "assistant");
     assert_eq!(role_data_attr(&ChatRole::System), "system");
+}
+
+#[test]
+fn tool_phase_hook_is_absent_unless_the_message_carries_one() {
+    let mut meta = MessageMeta::default();
+    assert_eq!(
+        tool_phase_data_attr(&meta),
+        None,
+        "a message with no phase must emit no attribute, not an empty one"
+    );
+
+    meta.tool_phase = Some(ToolPhase::Call);
+    assert_eq!(tool_phase_data_attr(&meta), Some("call"));
+    meta.tool_phase = Some(ToolPhase::Result);
+    assert_eq!(tool_phase_data_attr(&meta), Some("result"));
+    assert_ne!(
+        tool_phase_data_attr(&meta),
+        Some(""),
+        "an empty value would match [data-chat-tool-phase] on every row"
+    );
+}
+
+/// The point of the hook: a consumer can name the tool RESULT without
+/// counting rows.
+///
+/// Both halves of a tool turn are `ChatRole::Tool`, so `data-chat-role` alone
+/// forces a positional selector -- and a positional selector does not fail
+/// when the transcript changes, it starts describing something else. The
+/// second call below is exactly that case: its result has not arrived, so
+/// "the last tool bubble" still finds an element and that element is a CALL.
+#[test]
+fn the_tool_result_is_selectable_by_phase_not_by_position() {
+    let tool = |phase: ToolPhase, content: &str| {
+        let mut m = ChatMessage::new(ChatRole::Tool, content);
+        m.meta.tool_phase = Some(phase);
+        m
+    };
+    let transcript = [
+        ChatMessage::new(ChatRole::User, "search this folder"),
+        tool(ToolPhase::Call, "search(folder)"),
+        tool(ToolPhase::Result, "3 matches"),
+        tool(ToolPhase::Call, "open(match 1)"),
+    ];
+
+    // What `[data-chat-tool-phase]` would select, in document order.
+    let phases: Vec<&str> = transcript
+        .iter()
+        .filter_map(|m| tool_phase_data_attr(&m.meta))
+        .collect();
+    assert_eq!(phases, ["call", "result", "call"]);
+
+    let result = transcript
+        .iter()
+        .find(|m| tool_phase_data_attr(&m.meta) == Some("result"))
+        .expect("the result is selected by phase, never by index");
+    assert_eq!(result.content, "3 matches");
+
+    let last_tool = transcript
+        .iter()
+        .rev()
+        .find(|m| m.role == ChatRole::Tool)
+        .expect("the transcript has tool rows");
+    assert_ne!(
+        last_tool.content, result.content,
+        "the last tool row is a pending CALL: a positional selector would \
+         have reported it as the result"
+    );
+
+    // Non-tool rows carry no phase, so the hook cannot over-select.
+    for m in transcript.iter().filter(|m| m.role != ChatRole::Tool) {
+        assert_eq!(tool_phase_data_attr(&m.meta), None);
+    }
 }
 
 #[test]
