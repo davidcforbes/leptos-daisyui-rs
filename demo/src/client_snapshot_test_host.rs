@@ -118,6 +118,9 @@ fn main() {
         let helpdesk_fixture_fail_writes = web_sys::window()
             .and_then(|window| window.location().pathname().ok())
             .is_some_and(|path| path.ends_with("/helpdesk-fixture-fail-writes"));
+        let helpdesk_fixture_no_attachments = web_sys::window()
+            .and_then(|window| window.location().pathname().ok())
+            .is_some_and(|path| path.ends_with("/helpdesk-fixture-no-attachments"));
         view! {
             <UiTokensPreamble />
             <UiAnimationsPreamble />
@@ -140,6 +143,8 @@ fn main() {
                         <helpdesk_fixture::HelpdeskFixture fault=leptos_daisyui_rs::patterns::HelpdeskFault::FailWrites />
                     }
                         .into_any()
+                } else if helpdesk_fixture_no_attachments {
+                    view! { <helpdesk_fixture::HelpdeskFixture attachments=false /> }.into_any()
                 } else if ai_chat_failures {
                     view! { <ai_chat_fixture::AiChatFixture scripted=true /> }.into_any()
                 } else if ai_chat_groq_no_key {

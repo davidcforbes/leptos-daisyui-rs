@@ -77,8 +77,11 @@ pub fn Helpdesk(
     #[prop(optional, into)]
     class: &'static str,
     /// Node reference for the root `<div>`.
-    #[prop(optional)]
-    node_ref: NodeRef<leptos::html::Div>,
+    /// Whether the New Request dialog offers image attachments. Defaults to
+    /// `true`; a host whose backend takes no images sets `false` (ldui-8tlg).
+    #[prop(optional, default = true)]
+    attachments: bool,
+    #[prop(optional)] node_ref: NodeRef<leptos::html::Div>,
 ) -> impl IntoView {
     let backend = StoredValue::new_local(backend);
     let caps = Signal::derive(move || RoleCapabilities::for_role(role.get()));
@@ -620,7 +623,14 @@ pub fn Helpdesk(
                 on_close=Callback::new(move |_| close_detail())
                 on_action=on_action
             />
-            <NewRequestDialog open=dialog_open meta=meta context=context texts=texts on_submit=on_submit />
+            <NewRequestDialog
+                open=dialog_open
+                meta=meta
+                context=context
+                texts=texts
+                attachments=attachments
+                on_submit=on_submit
+            />
             <Show when=move || toast.get().is_some()>
                 <Toast attr:data-helpdesk-toast="">
                     <div class="alert alert-success">

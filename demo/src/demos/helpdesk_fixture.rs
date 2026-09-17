@@ -18,7 +18,12 @@ use std::rc::Rc;
 
 /// Both roles mounted on one document over one shared backend.
 #[component]
-pub fn HelpdeskFixture(#[prop(optional)] fault: Option<HelpdeskFault>) -> impl IntoView {
+pub fn HelpdeskFixture(
+    #[prop(optional)] fault: Option<HelpdeskFault>,
+    /// `false` mounts both roles with attachments withheld (ldui-8tlg).
+    #[prop(optional, default = true)]
+    attachments: bool,
+) -> impl IntoView {
     let mut backend = InMemoryHelpdeskBackend::seeded();
     if let Some(f) = fault {
         backend = backend.with_fault(f);
@@ -49,6 +54,7 @@ pub fn HelpdeskFixture(#[prop(optional)] fault: Option<HelpdeskFault>) -> impl I
                     context=ctx.clone()
                     current_user_id=Some(SEED_ME.to_owned())
                     now_ms=fixed_now
+                    attachments=attachments
                 />
             </section>
             <section id="helpdesk-requester" data-testid="helpdesk-requester">
@@ -58,6 +64,7 @@ pub fn HelpdeskFixture(#[prop(optional)] fault: Option<HelpdeskFault>) -> impl I
                     context=ctx.clone()
                     current_user_id=Some(SEED_ME.to_owned())
                     now_ms=fixed_now
+                    attachments=attachments
                 />
             </section>
         </div>

@@ -6,6 +6,7 @@ mod common;
 use common::{
     assert_no_browser_errors, begin_browser_error_capture, click, harness_at, wait_for_selector,
 };
+use pixelproof_web::Key;
 use serde_json::{Value, json};
 
 const PAGE: &str = "/helpdesk-fixture";
@@ -64,6 +65,9 @@ async fn snapshot(h: &pixelproof_web::Harness, root: &str) -> Value {
                     submitDisabled: root.querySelector('[data-helpdesk-submit]')?.disabled ?? null,
                     images: root.querySelectorAll('[data-image-attachment-item]').length,
                     imageStatus: root.querySelector('[data-image-attachment-status]')?.textContent?.trim() ?? null,
+                    imagesOffered: root.querySelector('[data-helpdesk-images]') !== null,
+                    summaryFocused: document.activeElement === root.querySelector('[data-helpdesk-summary]'),
+                    launcherFocused: document.activeElement === root.querySelector('[data-helpdesk-new-request]'),
                 }};
             }})()"#
         ),
@@ -379,6 +383,68 @@ async fn not_configured_shows_panel_and_no_submit() {
         s["notConfigured"].as_bool().unwrap() && !s["submitPresent"].as_bool().unwrap(),
         "{s}"
     );
+}
+
+/// ldui-efuf: a dialog that opens without taking focus is unusable by
+/// keyboard even when every label is right. Open moves focus to the summary
+/// field; Escape closes and hands it back to the launcher. Both are waited
+/// for by `:focus`, never inferred from a timer.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-helpdesk)"]
+async fn opening_the_dialog_focuses_the_summary_and_escape_returns_focus() {
+    let h = harness_at(PAGE).await;
+    begin_browser_error_capture(&h).await;
+    wait_for_selector(&h, &format!("{SUPPORT} [data-helpdesk-new-request]")).await;
+    click(&h, &format!("{SUPPORT} [data-helpdesk-new-request]")).await;
+    wait_for_selector(&h, &format!("{SUPPORT} [data-helpdesk-summary]:focus")).await;
+    let s = snapshot(&h, SUPPORT).await;
+    assert_eq!(
+        s["summaryFocused"],
+        json!(true),
+        "open focuses the summary: {s}"
+    );
+    assert_eq!(
+        s["imagesOffered"],
+        json!(true),
+        "the default offers attachments: {s}"
+    );
+
+    // A real key press: Modal answers the native `cancel` event, which a
+    // synthetic keydown never fires.
+    h.press_key_sequence(&[Key::Escape]).await.expect("Escape");
+    wait_for_selector(&h, &format!("{SUPPORT} [data-helpdesk-new-request]:focus")).await;
+    let s = snapshot(&h, SUPPORT).await;
+    assert_eq!(
+        s["launcherFocused"],
+        json!(true),
+        "close returns focus to the launcher: {s}"
+    );
+    assert_no_browser_errors(&h, "dialog focus").await;
+}
+
+/// ldui-8tlg: a host whose backend takes no images withholds the control
+/// instead of refusing at submit. The variant is a pathname suffix, like
+/// every other fixture here.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-helpdesk)"]
+async fn a_host_can_withhold_attachments() {
+    let h = harness_at(&format!("{PAGE}-no-attachments")).await;
+    begin_browser_error_capture(&h).await;
+    wait_for_selector(&h, &format!("{SUPPORT} [data-helpdesk-new-request]")).await;
+    click(&h, &format!("{SUPPORT} [data-helpdesk-new-request]")).await;
+    wait_for_selector(&h, &format!("{SUPPORT} [data-helpdesk-summary]:focus")).await;
+    let s = snapshot(&h, SUPPORT).await;
+    assert_eq!(
+        s["imagesOffered"],
+        json!(false),
+        "attachments withheld: {s}"
+    );
+    assert_eq!(
+        s["submitPresent"],
+        json!(true),
+        "the rest of the form is intact: {s}"
+    );
+    assert_no_browser_errors(&h, "no attachments").await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -9,6 +9,7 @@ use crate::components::{
     ModalAction, ModalBox, Textarea,
 };
 use crate::patterns::{PageStatePanel, PageStatePanelKind, PageStatePanelTexts};
+use leptos::html::Input as HtmlInput;
 use leptos::prelude::*;
 use leptos::web_sys;
 
@@ -91,12 +92,35 @@ pub fn NewRequestDialog(
     /// All rendered copy.
     #[prop(optional, into, default = Signal::stored(HelpdeskTexts::default()))]
     texts: Signal<HelpdeskTexts>,
+    /// Whether the dialog offers image attachments. Defaults to `true`, so
+    /// every existing call site is unchanged. A host whose backend takes no
+    /// images sets `false` and the person is never offered a control that
+    /// cannot work (ldui-8tlg); the submitted draft then carries no images.
+    #[prop(optional, default = true)]
+    attachments: bool,
     /// Submits the draft; the second argument resolves with the outcome.
     on_submit: Callback<(NewTicket, Callback<Result<HelpdeskTicket, HelpdeskError>>)>,
 ) -> impl IntoView {
     let caps = NewTicketCaps::default();
     let draft = RwSignal::new(Draft::default());
     let images: RwSignal<Vec<ImageAttachment>> = RwSignal::new(Vec::new());
+    let summary_ref = NodeRef::<HtmlInput>::new();
+
+    // Opening the dialog focuses the summary field (ldui-efuf). Deferred to
+    // the next animation frame, like `SearchPickerDialog`, so it runs after
+    // Modal's own effect calls `show_modal()`: calling `.focus()` on a
+    // descendant before the dialog is the document's top layer is a silent
+    // no-op. Closing returns focus to the launcher through the native
+    // `<dialog>` close, which Modal drives.
+    Effect::new(move |_| {
+        if open.get() {
+            request_animation_frame(move || {
+                if let Some(element) = summary_ref.get_untracked() {
+                    let _ = element.focus();
+                }
+            });
+        }
+    });
     let touched = RwSignal::new(false);
     let pending = RwSignal::new(false);
     let error = RwSignal::new(Option::<String>::None);
@@ -225,6 +249,7 @@ pub fn NewRequestDialog(
                             required=true
                         >
                             <Input
+                                node_ref=summary_ref
                                 value=Signal::derive(move || draft.get().summary)
                                 maxlength=Some(caps.summary_max as u32)
                                 on_input=Callback::new(move |v: String| {
@@ -251,9 +276,18 @@ pub fn NewRequestDialog(
                                 attr:data-helpdesk-description=""
                             />
                         </Field>
-                        <div data-helpdesk-images="">
-                            <ImageAttachmentField images=images capture_document_paste=true disabled=pending />
-                        </div>
+                        {attachments
+                            .then(move || {
+                                view! {
+                                    <div data-helpdesk-images="">
+                                        <ImageAttachmentField
+                                            images=images
+                                            capture_document_paste=true
+                                            disabled=pending
+                                        />
+                                    </div>
+                                }
+                            })}
                         <p class="text-sm text-base-content/75" data-helpdesk-context="">
                             {context_line}
                         </p>
