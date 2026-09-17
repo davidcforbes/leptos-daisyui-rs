@@ -12,6 +12,12 @@ param(
     [string]$Task = ""
 )
 
+# sccache 0.17+ expands rustc @argfiles; compiling web-sys then fails on
+# Windows with os error 206. Cargo already writes the argfile. Drop the
+# wrapper for this session so rustc can read it.
+Remove-Item Env:RUSTC_WRAPPER -ErrorAction SilentlyContinue
+Remove-Item Env:CARGO_BUILD_RUSTC_WRAPPER -ErrorAction SilentlyContinue
+
 # Color functions
 function Write-Success { param($Message) Write-Host $Message -ForegroundColor Green }
 function Write-Info { param($Message) Write-Host $Message -ForegroundColor Cyan }

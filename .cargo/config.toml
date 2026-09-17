@@ -1,2 +1,11 @@
 [alias]
 xtask = "run --package xtask --"
+
+# Do not set rustc-wrapper here. Cargo prefers the process environment
+# `RUSTC_WRAPPER` over this file, so a `[env] force` table cannot stop a
+# machine-wide sccache. sccache 0.17+ expands rustc `@argfile`s; on Windows
+# that makes `web-sys` overflow CreateProcess's 32,767-character limit
+# (`os error 206`, reported as `could not compile web-sys`). xtask, the
+# launcher, and cargo-make unset the wrapper before spawning cargo
+# (mozilla/sccache#2397). For a raw `cargo check`, unset it in the shell:
+#   Remove-Item Env:RUSTC_WRAPPER

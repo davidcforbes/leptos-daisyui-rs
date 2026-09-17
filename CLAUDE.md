@@ -142,6 +142,13 @@ the strip's PARENT a width; the component cannot supply it.
 **per-crate**. The library's clippy/test steps pass `--features test-mode`;
 without it `src/test_mode.rs` is neither linted nor tested.
 
+**Windows `web-sys` + sccache is `os error 206`, not a rustc bug.** sccache
+0.17+ expands rustc `@argfile`s, so `web-sys`'s feature `--cfg` list exceeds
+CreateProcess's 32,767-character limit (`could not compile web-sys`). rustc
+1.98+ is fine. `cargo xtask`, `.\launcher.ps1`, and `cargo make` unset
+`RUSTC_WRAPPER` before spawning cargo. A raw `cargo check` in a shell that
+has sccache must `Remove-Item Env:RUSTC_WRAPPER` first.
+
 **The visual-quality rulebook is [`doc/visual-quality/`](./doc/visual-quality/)** —
 one page per defect pattern the `test-style`/`test-layout` audits detect, with
 the fix rather than the ratchet.

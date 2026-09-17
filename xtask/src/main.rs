@@ -800,6 +800,18 @@ fn full_steps() -> Vec<Step> {
     steps
 }
 
+/// sccache 0.17 expands rustc `@argfile`s. On Windows that makes `web-sys`
+/// (hundreds of `--cfg feature=...` flags) overflow CreateProcess's 32,767-char
+/// limit (`os error 206`). Cargo already writes the argfile; rustc can read
+/// it. Strip the wrapper from every compiler-invoking child so this workspace
+/// compiles under rustc 1.98+ even when the machine has `RUSTC_WRAPPER=sccache`.
+fn strip_windows_sccache_wrapper(cmd: &mut Command) {
+    if cfg!(windows) {
+        cmd.env_remove("RUSTC_WRAPPER");
+        cmd.env_remove("CARGO_BUILD_RUSTC_WRAPPER");
+    }
+}
+
 fn run_step(step: &Step) -> bool {
     eprintln!("\n----- {} -----", step.name);
     match &step.run {
@@ -810,6 +822,7 @@ fn run_step(step: &Step) -> bool {
             env,
         } => {
             let mut c = Command::new(program);
+            strip_windows_sccache_wrapper(&mut c);
             c.args(args);
             if let Some(dir) = cwd {
                 c.current_dir(dir);
@@ -1259,7 +1272,9 @@ impl DemoServer {
         let port = free_port()?;
         let target_label = html_target.unwrap_or("index.html");
         eprintln!("xtask: starting `trunk serve {target_label}` in demo/ on port {port}");
-        let child = Command::new("trunk")
+        let mut child_cmd = Command::new("trunk");
+        strip_windows_sccache_wrapper(&mut child_cmd);
+        let child = child_cmd
             // Trunk 0.21 treats the conventional `NO_COLOR=1` value as a
             // Boolean CLI value and rejects it. Isolate the child from that
             // ambient setting and express the intent through Trunk's stable
@@ -1372,7 +1387,9 @@ fn run_browser_suite(test: &str, html_target: Option<&str>) -> bool {
 }
 
 fn run_browser_test(test: &str, base: &str) -> bool {
-    Command::new("cargo")
+    let mut cargo = Command::new("cargo");
+    strip_windows_sccache_wrapper(&mut cargo);
+    cargo
         .args([
             "test",
             "-p",
@@ -2472,6 +2489,15 @@ mod tests {
         assert!(text.contains("PASS fmt-check"));
         assert!(text.contains("PASS test"));
         assert!(text.contains("2/2 passed"));
+    }
+
+    #[test]
+    fn windows_sccache_wrapper_strip_compiles_as_a_command_helper() {
+        let mut cmd = Command::new("cargo");
+        strip_windows_sccache_wrapper(&mut cmd);
+        // env_remove is not introspectable; keeping a call site in tests means
+        // deleting the helper is a compile failure rather than a silent miss.
+        let _ = cmd;
     }
 
     #[test]

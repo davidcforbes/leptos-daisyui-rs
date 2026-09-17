@@ -75,6 +75,28 @@ The gate is **advisory-first**: it runs every step even if an earlier one fails,
 then prints a PASS/FAIL summary. The process exit code is the number of failed
 steps (0 = all green), so a hook or script can gate on it.
 
+## Compiler pin and the Windows `web-sys` compile failure
+
+[`rust-toolchain.toml`](../rust-toolchain.toml) pins **current stable** (verified
+at rustc 1.98.1) plus the `wasm32-unknown-unknown` target. rustup installs that
+channel on the next `cargo` invocation.
+
+On Windows, compiling `web-sys` with many features under `RUSTC_WRAPPER=sccache`
+fails as `could not compile web-sys` with `os error 206` (filename too long).
+sccache 0.17+ expands rustc `@argfile`s, so the feature `--cfg` list exceeds
+CreateProcess's 32,767-character limit ([mozilla/sccache#2397](https://github.com/mozilla/sccache/issues/2397)).
+Cargo itself already writes the argfile; rustc can read it. Cargo's own
+`[env]` table cannot stop this — it applies to rustc *after* cargo has already
+decided to prefix sccache. xtask, [`launcher.ps1`](../launcher.ps1), and
+cargo-make therefore **unset** `RUSTC_WRAPPER` before spawning cargo. For a
+raw `cargo check` in a shell that has sccache:
+
+```powershell
+Remove-Item Env:RUSTC_WRAPPER
+```
+
+Remove those unsets when sccache forwards `@argfile`s without expanding them.
+
 ## The gate — `cargo xtask verify`
 
 Each step is scoped per-crate; that scoping **is** the xtask's logic.

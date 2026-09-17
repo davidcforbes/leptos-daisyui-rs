@@ -1,0 +1,7 @@
+# Track current stable. rustc 1.98.0's Windows rust-lld crashed linking the
+# large debug WASM host (exit 0xc0000005); 1.98.1 is the verified compiler.
+# rustup installs the listed target/components on the next cargo invocation.
+[toolchain]
+channel = "stable"
+targets = ["wasm32-unknown-unknown"]
+components = ["rustfmt", "clippy"]

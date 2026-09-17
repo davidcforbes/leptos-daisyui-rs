@@ -2,6 +2,12 @@
 default_to_workspace = false
 min_version = "0.37.0"
 
+# sccache 0.17+ expands rustc @argfiles; web-sys then hits Windows os error 206.
+# Empty is treated as unset by cargo, so the child rustc reads the @argfile.
+[env]
+RUSTC_WRAPPER = ""
+CARGO_BUILD_RUSTC_WRAPPER = ""
+
 # ============================================================================
 # Library Tasks
 # ============================================================================
