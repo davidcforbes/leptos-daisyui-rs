@@ -12,7 +12,8 @@
 
 use leptos::prelude::*;
 use leptos_daisyui_rs::patterns::{
-    HelpdeskBackend, HelpdeskFault, HelpdeskRole, InMemoryHelpdeskBackend, RequestContext, SEED_ME,
+    HelpdeskBackend, HelpdeskFault, HelpdeskRole, InMemoryHelpdeskBackend, RequestContext,
+    RoleCapabilities, SEED_ME,
 };
 use std::rc::Rc;
 
@@ -23,6 +24,10 @@ pub fn HelpdeskFixture(
     /// `false` mounts both roles with attachments withheld (ldui-8tlg).
     #[prop(optional, default = true)]
     attachments: bool,
+    /// A host-owned capability table for the Requester section (ldui-ftdy),
+    /// standing in for entitlements the host reads from elsewhere.
+    #[prop(optional)]
+    requester_capabilities: Option<RoleCapabilities>,
 ) -> impl IntoView {
     let mut backend = InMemoryHelpdeskBackend::seeded();
     if let Some(f) = fault {
@@ -61,6 +66,7 @@ pub fn HelpdeskFixture(
                 <leptos_daisyui_rs::patterns::Helpdesk
                     backend=backend.clone()
                     role=HelpdeskRole::Requester
+                    capabilities=requester_capabilities.map(Signal::stored)
                     context=ctx.clone()
                     current_user_id=Some(SEED_ME.to_owned())
                     now_ms=fixed_now

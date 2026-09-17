@@ -121,6 +121,9 @@ fn main() {
         let helpdesk_fixture_no_attachments = web_sys::window()
             .and_then(|window| window.location().pathname().ok())
             .is_some_and(|path| path.ends_with("/helpdesk-fixture-no-attachments"));
+        let helpdesk_fixture_read_all = web_sys::window()
+            .and_then(|window| window.location().pathname().ok())
+            .is_some_and(|path| path.ends_with("/helpdesk-fixture-read-all"));
         view! {
             <UiTokensPreamble />
             <UiAnimationsPreamble />
@@ -142,6 +145,21 @@ fn main() {
                     view! {
                         <helpdesk_fixture::HelpdeskFixture fault=leptos_daisyui_rs::patterns::HelpdeskFault::FailWrites />
                     }
+                        .into_any()
+                } else if helpdesk_fixture_read_all {
+                    // ldui-ftdy: the host owns entitlements; the Requester
+                    // section reads every ticket and may reply, but triage
+                    // stays gated. Built by struct update over the role's
+                    // default, which is how a consumer would write it.
+                    let table = leptos_daisyui_rs::patterns::RoleCapabilities {
+                        scope: leptos_daisyui_rs::patterns::TicketScope::All,
+                        triage: false,
+                        comment: true,
+                        ..leptos_daisyui_rs::patterns::RoleCapabilities::for_role(
+                            leptos_daisyui_rs::patterns::HelpdeskRole::Requester,
+                        )
+                    };
+                    view! { <helpdesk_fixture::HelpdeskFixture requester_capabilities=table /> }
                         .into_any()
                 } else if helpdesk_fixture_no_attachments {
                     view! { <helpdesk_fixture::HelpdeskFixture attachments=false /> }.into_any()

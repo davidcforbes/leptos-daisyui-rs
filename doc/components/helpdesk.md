@@ -55,6 +55,31 @@ fetch every ticket and hide the rest. **The role is a rendering contract, not a
 security boundary** — the backend still owns authorization, because a browser
 signal is not a permission.
 
+### The host may own the table (`ldui-ftdy`)
+
+Where entitlements already live elsewhere — 4iiz-Office reads them from Jira —
+the host hands the composite its table and the composite imposes nothing on
+top. `capabilities` overrides `for_role(role)` outright; `role` still names the
+mode for copy and hooks. Build it by struct update over the role's default so
+an unmentioned field keeps its built-in value:
+
+```rust
+use leptos::prelude::*;
+use leptos_daisyui_rs::patterns::{Helpdesk, HelpdeskRole, RoleCapabilities, TicketScope};
+
+let table = RoleCapabilities {
+    scope: TicketScope::All, // everyone reads the whole board
+    triage: false,           // status / assignee / priority stay gated
+    comment: true,           // and anyone may reply
+    ..RoleCapabilities::for_role(HelpdeskRole::Requester)
+};
+view! { <Helpdesk backend=backend role=HelpdeskRole::Requester capabilities=Some(Signal::stored(table)) /> }
+```
+
+The `/helpdesk-fixture-read-all` test-host variant mounts exactly this table
+and `a_host_owned_capability_table_overrides_the_role` proves it: the requester
+lists every ticket, gets the comment box, and gets no triage select.
+
 ## The backend trait
 
 Eight calls, each returning a `HelpdeskFuture<T>` (a boxed local future, since

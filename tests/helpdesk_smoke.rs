@@ -447,6 +447,54 @@ async fn a_host_can_withhold_attachments() {
     assert_no_browser_errors(&h, "no attachments").await;
 }
 
+/// ldui-ftdy: entitlements belong to the host. Given a table, the composite
+/// renders it and imposes nothing of its own: a Requester handed
+/// `{ scope: All, triage: false, comment: true }` sees every ticket the
+/// Support section sees, gets the comment box, and gets no triage select.
+/// The default route is the negative control (the requester there sees six).
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-helpdesk)"]
+async fn a_host_owned_capability_table_overrides_the_role() {
+    let h = harness_at(&format!("{PAGE}-read-all")).await;
+    begin_browser_error_capture(&h).await;
+    wait_for_selector(&h, &format!("{REQUESTER} [data-helpdesk-state=\"ready\"]")).await;
+    wait_for_selector(&h, &format!("{SUPPORT} [data-helpdesk-state=\"ready\"]")).await;
+    let r = snapshot(&h, REQUESTER).await;
+    let s = snapshot(&h, SUPPORT).await;
+    assert_eq!(
+        r["role"],
+        json!("requester"),
+        "the mode is still the requester's: {r}"
+    );
+    assert_eq!(
+        r["rows"], s["rows"],
+        "scope All: the requester lists every ticket support does: {r} vs {s}"
+    );
+    assert!(
+        r["rows"].as_u64().unwrap_or(0) > 6,
+        "and that is more than the six SEED_ME filed: {r}"
+    );
+    assert!(
+        !r["assigneeFilter"].as_bool().unwrap() && !r["mineOnly"].as_bool().unwrap(),
+        "the rest of the table is the requester default: {r}"
+    );
+
+    click(
+        &h,
+        &format!("{REQUESTER} [data-helpdesk-table] tbody tr:first-child"),
+    )
+    .await;
+    wait_for_selector(&h, &format!("{REQUESTER} [data-helpdesk-drawer-header]")).await;
+    wait_for_selector(&h, &format!("{REQUESTER} [data-helpdesk-comment-input]")).await;
+    let opened = snapshot(&h, REQUESTER).await;
+    assert_eq!(
+        opened["transition"],
+        json!(false),
+        "triage false: no status select even with every ticket visible: {opened}"
+    );
+    assert_no_browser_errors(&h, "host-owned capabilities").await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires demo dev server (cargo xtask test-helpdesk)"]
 async fn axe_clean_with_drawer_and_dialog_open() {

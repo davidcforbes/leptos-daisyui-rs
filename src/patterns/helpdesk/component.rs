@@ -58,6 +58,14 @@ pub fn Helpdesk(
     /// Which mode to render in.
     #[prop(into)]
     role: Signal<HelpdeskRole>,
+    /// The capability table to render with, when the host owns entitlements
+    /// (ldui-ftdy). `Some` overrides `RoleCapabilities::for_role(role)`
+    /// outright: a host that answers "who may see and do what" elsewhere
+    /// (4iiz-Office reads it from Jira) hands the answer in, and this
+    /// composite imposes nothing on top. `role` still names the mode for copy
+    /// and hooks. `None` (the default) keeps the two built-in tables.
+    #[prop(optional_no_strip)]
+    capabilities: Option<Signal<RoleCapabilities>>,
     /// Where a filed request is coming from.
     #[prop(into)]
     context: Signal<RequestContext>,
@@ -84,7 +92,14 @@ pub fn Helpdesk(
     #[prop(optional)] node_ref: NodeRef<leptos::html::Div>,
 ) -> impl IntoView {
     let backend = StoredValue::new_local(backend);
-    let caps = Signal::derive(move || RoleCapabilities::for_role(role.get()));
+    // The host's table wins when it supplies one; the role's built-in table
+    // is only the default (ldui-ftdy).
+    let caps = Signal::derive(move || {
+        capabilities.map_or_else(
+            || RoleCapabilities::for_role(role.get()),
+            |table| table.get(),
+        )
+    });
     let now = now_ms.unwrap_or_else(|| Signal::derive(js_now_ms));
     let dialog_open = open_request.unwrap_or_else(|| RwSignal::new(false));
 
