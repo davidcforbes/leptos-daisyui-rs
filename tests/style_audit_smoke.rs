@@ -144,6 +144,18 @@ fn demo_profile(font_family: String) -> StyleProfile {
             .with_color(24.0, 24.0, 27.0)
             .with_inset(),
         ShadowSpec::new(0.0, 1.0, 0.0, 0.10).with_inset(),
+        // daisyUI 5's resting `.toggle` (ldui-iilm.11): the comment above
+        // lists its single-layer form, but the rendered control carries two
+        // more layers the engine keeps after dropping the alpha-0 placeholder:
+        // a white `0 8px 0 -4px inset` highlight and a black `0 1px` drop that
+        // is NOT inset. Colour and inset both participate in matching, so the
+        // black inset entry above does not cover it. Framework-supplied, same
+        // reasoning as the input/select/checkbox entries.
+        ShadowSpec::new(0.0, 8.0, 0.0, 0.10)
+            .with_color(255.0, 255.0, 255.0)
+            .with_spread(-4.0)
+            .with_inset(),
+        ShadowSpec::new(0.0, 1.0, 0.0, 0.10),
     ]);
 
     // --- typography -------------------------------------------------------
@@ -161,9 +173,14 @@ fn demo_profile(font_family: String) -> StyleProfile {
     // hook EntityTable emits on both the `th` and the `td`; declaring the ROLE
     // rather than `.font-mono` keeps an accidental mono element reportable
     // (ldui-dpim). Only the family check is exempt: size still runs.
-    base.shadows(shadows)
-        .type_ramp(ramp)
-        .mono_selectors(["[data-entity-column-kind=\"identifier\"]"])
+    base.shadows(shadows).type_ramp(ramp).mono_selectors([
+        "[data-entity-column-kind=\"identifier\"]",
+        // The AI chat showcase's proof rows print record identifiers
+        // (knowledge entry ids, turn ids) in a mono face on purpose
+        // (ldui-iilm.11). Same rule as above: the ROLE is declared, not
+        // `.font-mono`, and size is still checked.
+        "[data-ai-chat-identifier]",
+    ])
 }
 
 /// Pages swept, with their current per-family violation ceilings.
@@ -424,14 +441,22 @@ const PAGES: &[(&str, &[(&str, usize)])] = &[
             (family::COMPONENT_DRIFT, 0),
         ],
     ),
-    // ldui-iilm.11: the AI chat workspace's two locale routes, swept for the
-    // first time. EVERY ratcheted family is committed at ZERO on purpose.
-    // These ceilings are MEASURED, never guessed: a plausible-looking non-zero
-    // number written before the lane ever ran would silently absorb whatever
-    // the first sweep finds, which is exactly what a ratchet exists to stop.
-    // The measurement step runs the lane and replaces each zero with the real
-    // count plus the justification that count needs. A zero that turns out to
-    // be right stays a zero.
+    // ldui-iilm.11: the AI chat workspace's two locale routes. Every zero
+    // below is MEASURED, not a placeholder. The first sweep read, on BOTH
+    // routes identically: internal 129, typography 41, depth 2,
+    // component-drift 1, shape 0, grid 0. None was ratcheted:
+    //   - internal 129 -> 0: fixed at source (list gaps raised to match
+    //     their rows' padding; see layout_audit_smoke for the three sites).
+    //   - typography 41 -> 0: the demo's proof rows print record ids in a
+    //     mono face on purpose; declared as a ROLE via mono_selectors
+    //     (`[data-ai-chat-identifier]`), the EntityColumn::identifier()
+    //     precedent. Size is still checked and reported nothing, so the
+    //     `text-xs` on those spans is on the ramp.
+    //   - depth 2 -> 0: daisyUI's resting `.toggle` layers, declared with the
+    //     other resting-control shadows above.
+    //   - component-drift 1 -> 0: the composer textarea gained a real
+    //     `label for=`; it was the panel's only control without one.
+    // No slack: the next violation on either route is the first.
     (
         "/components/ai-chat",
         &[

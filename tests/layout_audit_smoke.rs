@@ -125,14 +125,15 @@ const PAGES: &[(&str, usize, usize)] = &[
     ("/components/search_picker_dialog", 0, 0),
     ("/components/day-scheduler", 0, 0),
     ("/components/helpdesk", 0, 0),
-    // ldui-iilm.11: the AI chat workspace's two locale routes, swept for the
-    // first time. EVERY ratcheted family is committed at ZERO on purpose.
-    // These ceilings are MEASURED, never guessed: a plausible-looking non-zero
-    // number written before the lane ever ran would silently absorb whatever
-    // the first sweep finds, which is exactly what a ratchet exists to stop.
-    // The measurement step runs the lane and replaces each zero with the real
-    // count plus the justification that count needs. A zero that turns out to
-    // be right stays a zero.
+    // ldui-iilm.11: the AI chat workspace's two locale routes. 0/0 is
+    // MEASURED, not a placeholder: the first sweep read grid 0 and
+    // internal>external 129 on BOTH routes (identical, so structural, not
+    // copy). All 129 were fixed at source rather than ratcheted -- 12px
+    // `p-3` rows inside 8px `gap-2` lists in the knowledge rail and the
+    // demo's proof rows (now `gap-3`), 16px `p-4` honesty cards in a 12px
+    // grid (now `gap-4`), and the 8px `textarea-sm` under a 4px label gap
+    // (now `gap-2`). The third sweep read 0/0; the ES route moved in step
+    // with EN at every stage. No slack: the next violation is the first.
     ("/components/ai-chat", 0, 0),
     ("/components/ai-chat-es", 0, 0),
 ];

@@ -453,7 +453,7 @@ pub fn KnowledgeSourceRail(
         }
         Some(
             view! {
-                <ul class="flex flex-col gap-2">
+                <ul class="flex flex-col gap-3">
                     {r
                         .hits
                         .into_iter()
@@ -668,7 +668,7 @@ pub fn KnowledgeSourceRail(
             </label>
 
             <h3 class="text-sm font-semibold">{move || texts.get().corpus_label}</h3>
-            <ul class="flex flex-col gap-2" data-ai-chat-corpus-list="">{ingest_rows}</ul>
+            <ul class="flex flex-col gap-3" data-ai-chat-corpus-list="">{ingest_rows}</ul>
 
             <h3 class="text-sm font-semibold">{move || texts.get().memory_store_label}</h3>
             <label class="flex items-center gap-2 text-xs" for=memory_use_id>
@@ -741,7 +741,7 @@ pub fn KnowledgeSourceRail(
                     {kind_options}
                 </select>
             </label>
-            <label class="flex flex-col gap-1 text-xs" for=remember_id>
+            <label class="flex flex-col gap-2 text-xs" for=remember_id>
                 <span class="opacity-60">{move || texts.get().remember_label}</span>
                 <textarea
                     id=remember_id
@@ -782,10 +782,10 @@ pub fn KnowledgeSourceRail(
             }}
 
             <h3 class="text-sm font-semibold">{move || texts.get().personal_memory_label}</h3>
-            <ul class="flex flex-col gap-2" data-ai-chat-kb-list="">{memory_rows}</ul>
+            <ul class="flex flex-col gap-3" data-ai-chat-kb-list="">{memory_rows}</ul>
 
             <h3 class="text-sm font-semibold">{move || texts.get().office_knowledge_label}</h3>
-            <ul class="flex flex-col gap-2" data-ai-chat-kb-office-list="">{office_rows}</ul>
+            <ul class="flex flex-col gap-3" data-ai-chat-kb-office-list="">{office_rows}</ul>
         </aside>
     }
 }

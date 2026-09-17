@@ -276,6 +276,7 @@ pub fn AiChat(
     let id_tools = move || format!("aichat-{instance}-tools");
     let id_show_thinking = move || format!("aichat-{instance}-show-thinking");
     let id_show_tool_calls = move || format!("aichat-{instance}-show-tool-calls");
+    let id_composer = move || format!("aichat-{instance}-composer");
 
     // Auto-grow the composer to fit its content, up to `COMPOSER_MAX_HEIGHT_PX`
     // (beyond which it scrolls internally via the `overflow-y-auto` class).
@@ -700,14 +701,14 @@ pub fn AiChat(
                                 " \u{25be}"
                             </button>
                             <DropdownContent class="dropdown-content bg-base-100 rounded-box z-10 w-52 p-1 shadow border border-base-300">
-                                // `DropdownContent` renders a `<ul>`, and a
-                                // list may contain only `<li>`. Putting the
-                                // buttons in directly is an axe `list`
-                                // violation, which is how this was found.
-                                // `contents` makes the wrapper generate no
-                                // box, so the children rejoin the list's own
-                                // flow and the layout is unchanged.
-                                <li class="contents">
+                                // `DropdownContent` renders a `<div>` off-menu
+                                // (ldui-afan), so this wrapper is a `<div>` too:
+                                // an `<li>` outside a list is an axe `listitem`
+                                // violation, which is how the change was found
+                                // (ldui-q9zf). `contents` makes the wrapper
+                                // generate no box, so the children keep the
+                                // popover's own flow and the layout is unchanged.
+                                <div class="contents">
                                 <For each=move || scopes.get() key=|o| o.id.clone() let:opt>
                                     {
                                         let id = opt.id.clone();
@@ -728,7 +729,7 @@ pub fn AiChat(
                                         }
                                     }
                                 </For>
-                                </li>
+                                </div>
                             </DropdownContent>
                         </Dropdown>
                     </Show>
@@ -744,13 +745,13 @@ pub fn AiChat(
                                 "\u{2699}"
                             </button>
                             <DropdownContent class="dropdown-content bg-base-100 rounded-box z-10 w-72 p-3 shadow border border-base-300">
-                                // See the scope dropdown above: a `<ul>` may
-                                // contain only `<li>`. `space-y-2` moves onto
-                                // the wrapper rather than staying on the list,
-                                // because it spaces a parent's OWN children —
-                                // left on the `<ul>` it would space the single
-                                // wrapper against nothing.
-                                <li class="space-y-2">
+                                // See the scope dropdown above: the popover is
+                                // a `<div>`, so its wrapper is too. `space-y-2`
+                                // lives on the wrapper because it spaces a
+                                // parent's OWN children — on the popover it
+                                // would space the single wrapper against
+                                // nothing.
+                                <div class="space-y-2">
                                 <Show when=move || !backends.get().is_empty()>
                                     <label class="flex flex-col gap-1 text-xs" for=id_backend>
                                         <span class="opacity-60">{move || texts.get().backend}</span>
@@ -928,7 +929,7 @@ pub fn AiChat(
                                 >
                                     {move || texts.get().apply}
                                 </button>
-                                </li>
+                                </div>
                             </DropdownContent>
                         </Dropdown>
                     </Show>
@@ -1019,8 +1020,16 @@ pub fn AiChat(
 
             <div class="lds-aichat-input border-t border-base-300 p-3 flex flex-col gap-1">
                 <div class="flex gap-2">
+                    // The textarea's accessible name. sr-only: the placeholder
+                    // carries the visible hint, but a placeholder stops being a
+                    // name the moment text is typed (ldui-iilm.11, drift
+                    // input-outside-field).
+                    <label class="sr-only" for=id_composer>
+                        {move || texts.get().composer_placeholder}
+                    </label>
                     <textarea
                         node_ref=textarea_ref
+                        id=id_composer
                         data-ai-chat-composer=""
                         class="textarea textarea-bordered flex-1 resize-none max-h-[320px] overflow-y-auto"
                         rows="2"

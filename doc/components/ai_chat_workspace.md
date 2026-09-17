@@ -91,6 +91,7 @@ button-press away from a real server.
 | `data-ai-chat-live-base-input`, `-live-connect`, `-live-disconnect` | The base-URL field and the two buttons. |
 | `data-ai-chat-live-status`, `-live-base`, `-live-session` | Connection state, target and session id. |
 | `data-ai-chat-live-notice` | The last connection notice, when there is one. |
+| `data-ai-chat-identifier` | The proof rows' record ids (knowledge entries, turns). A declared mono ROLE in the style audit's `demo_profile`, the `EntityColumn::identifier()` precedent: the family check is exempt, the size check still runs. |
 
 ## Copy and localization
 

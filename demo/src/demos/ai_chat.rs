@@ -614,7 +614,7 @@ fn AiChatPage(
                      yet findable."
                 </p>
                 <div class="grid w-full grid-cols-1 gap-4 lg:grid-cols-2">
-                    <ul class="flex flex-col gap-2" data-testid="ai-chat-knowledge">
+                    <ul class="flex flex-col gap-3" data-testid="ai-chat-knowledge">
                         {move || {
                             let t = texts.get();
                             knowledge_rows(&t)
@@ -625,7 +625,7 @@ fn AiChatPage(
                                             class="flex items-center justify-between gap-3 rounded-box border border-base-300 bg-base-100 p-3 text-sm"
                                             data-ai-chat-knowledge-row=id
                                         >
-                                            <span class="font-mono text-xs opacity-60">{id}</span>
+                                            <span class="font-mono text-xs opacity-60" data-ai-chat-identifier="">{id}</span>
                                             <span>{label}</span>
                                         </li>
                                     }
@@ -633,7 +633,7 @@ fn AiChatPage(
                                 .collect_view()
                         }}
                     </ul>
-                    <ul class="flex flex-col gap-2" data-testid="ai-chat-curation">
+                    <ul class="flex flex-col gap-3" data-testid="ai-chat-curation">
                         {move || {
                             let t = texts.get();
                             curation_rows(&t)
@@ -644,7 +644,7 @@ fn AiChatPage(
                                             class="flex flex-col gap-1 rounded-box border border-base-300 bg-base-100 p-3 text-sm"
                                             data-ai-chat-curation-row=id
                                         >
-                                            <span class="font-mono text-xs opacity-60">{id}</span>
+                                            <span class="font-mono text-xs opacity-60" data-ai-chat-identifier="">{id}</span>
                                             <span class="text-xs opacity-70">{meaning}</span>
                                         </li>
                                     }
@@ -665,7 +665,7 @@ fn AiChatPage(
                      seen still renders, carrying the host's own code."
                 </p>
                 <ul
-                    class="grid w-full grid-cols-1 gap-3 lg:grid-cols-2"
+                    class="grid w-full grid-cols-1 gap-4 lg:grid-cols-2"
                     data-testid="ai-chat-honesty"
                 >
                     {move || {
@@ -704,7 +704,7 @@ fn AiChatPage(
                      questions: a completed turn may still have declined or been cut short."
                 </p>
                 <div class="grid w-full grid-cols-1 gap-4 lg:grid-cols-2">
-                    <ul class="flex flex-col gap-2" data-testid="ai-chat-lifecycle">
+                    <ul class="flex flex-col gap-3" data-testid="ai-chat-lifecycle">
                         {move || {
                             let t = texts.get();
                             lifecycle_rows(&t)
@@ -715,7 +715,7 @@ fn AiChatPage(
                                             class="flex items-center justify-between gap-3 rounded-box border border-base-300 bg-base-100 p-3 text-sm"
                                             data-ai-chat-lifecycle-row=id
                                         >
-                                            <span class="font-mono text-xs opacity-60">{id}</span>
+                                            <span class="font-mono text-xs opacity-60" data-ai-chat-identifier="">{id}</span>
                                             <span>{label}</span>
                                         </li>
                                     }
@@ -723,7 +723,7 @@ fn AiChatPage(
                                 .collect_view()
                         }}
                     </ul>
-                    <ul class="flex flex-col gap-2" data-testid="ai-chat-outcomes">
+                    <ul class="flex flex-col gap-3" data-testid="ai-chat-outcomes">
                         {outcome_rows()
                             .into_iter()
                             .map(|(id, meaning)| {
@@ -732,7 +732,7 @@ fn AiChatPage(
                                         class="flex flex-col gap-1 rounded-box border border-base-300 bg-base-100 p-3 text-sm"
                                         data-ai-chat-outcome-row=id
                                     >
-                                        <span class="font-mono text-xs opacity-60">{id}</span>
+                                        <span class="font-mono text-xs opacity-60" data-ai-chat-identifier="">{id}</span>
                                         <span class="text-xs opacity-70">{meaning}</span>
                                     </li>
                                 }
