@@ -105,7 +105,7 @@ impl TuningDraft {
     }
 
     /// The tuning payload for one card, with every lever the card's
-    /// [`TuningSchema`] does not declare left `None`.
+    /// [`TuningSchema`](super::TuningSchema) does not declare left `None`.
     ///
     /// The gate is why switching engines cannot smuggle the previous engine's
     /// levers into the next one's session: a Groq temperature is simply not
