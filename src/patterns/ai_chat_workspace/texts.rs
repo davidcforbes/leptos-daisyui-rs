@@ -153,9 +153,10 @@ pub struct AiChatWorkspaceTexts {
     /// The first run of the knowledge browser lane caught the apostrophe: the
     /// model held one character and the DOM held another, and only the exact
     /// comparison could see it. The rule, not that instance, is what
-    /// `markdown_pinned_copy_survives_smart_punctuation` in `tests.rs`
-    /// enforces — over every field
-    /// [`markdown_pinned_fields`](../tests.rs) names, in both tables.
+    /// `every_byte_pinned_field_survives_markdown_rendering` in
+    /// `tests.rs` enforces — over every field a browser suite pins as
+    /// a string literal, swept from the suite sources rather than listed
+    /// by hand, in both tables.
     pub grounded_not_found: String,
     /// Display name for `MemoryClass::Language`.
     pub kind_language: String,

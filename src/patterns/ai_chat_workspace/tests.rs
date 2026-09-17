@@ -820,27 +820,100 @@ fn no_text_claims_memories_are_extracted_automatically() {
     }
 }
 
-/// Every text field this crate compares BYTE FOR BYTE against what the
-/// markdown renderer produced, with the field name a failure should print.
+/// Fields a browser suite pins byte-exactly that are NOT rendered through
+/// markdown, with the reason each is exempt from the guard below.
 ///
-/// Membership is the whole point, so it is stated rather than inferred.
-/// A field belongs here when BOTH are true: something asserts it with
-/// equality (not `contains`) against rendered DOM text, AND the element it
-/// lands in is rendered through `crate::markdown::MarkdownView`.
+/// This is the only hand-maintained part of the sweep, and it is
+/// hand-maintained in the SAFE direction: the sweep finds every pin by
+/// itself, so forgetting an entry here fails the lane (a pin is guarded when
+/// it did not need to be) rather than passing it silently. An entry is
+/// justified only by the RENDER PATH the copy lands in, which no amount of
+/// source scanning can see.
 ///
-/// * `grounded_not_found` qualifies: `ai_chat_knowledge_smoke`'s test 4
-///   asserts the whole trimmed answer bubble equals it, and an assistant
-///   message is markdown (`is_markdown(&msg.role)` in
-///   `components/ai_chat/component.rs`).
-/// * `knowledge_changed` is byte-pinned too (`ai_chat_showcase_smoke`'s
-///   test 9) but is deliberately ABSENT: a `TranscriptAnnotation` renders
-///   through `AnnotationRow`'s plain `<span class="whitespace-pre-wrap">`,
-///   never through markdown, so nothing substitutes anything in it. Adding
-///   it would forbid punctuation that is perfectly safe there.
-/// * Every other browser assertion on copy is `contains`, which survives a
-///   substitution and therefore needs no guard.
-fn markdown_pinned_fields(t: &AiChatWorkspaceTexts) -> Vec<(&'static str, &str)> {
-    vec![("grounded_not_found", t.grounded_not_found.as_str())]
+/// `knowledge_changed` is the founding member and its exclusion is
+/// deliberate: it is byte-pinned by `ai_chat_showcase_smoke`, but a
+/// `TranscriptAnnotation` renders through `AnnotationRow`'s plain
+/// `<span class="whitespace-pre-wrap">` (`components/ai_chat/component.rs`),
+/// never through `MarkdownView`, so nothing substitutes anything in it.
+/// Guarding it would forbid punctuation that is perfectly safe there. If a
+/// later phase routes annotations through markdown, THIS LINE is what has to
+/// change.
+const NON_MARKDOWN_PINS: &[(&str, &str)] = &[(
+    "knowledge_changed",
+    "a TranscriptAnnotation renders through AnnotationRow's plain span, \
+     never through MarkdownView",
+)];
+
+/// Every browser suite's source, read from `tests/` at test time.
+///
+/// Reading the directory is what makes the sweep mechanical. An
+/// `include_str!` list of paths would rot exactly the way the old
+/// hand-maintained field list did: a suite added tomorrow would pin copy
+/// that nothing checks. `tests/vendor/` is skipped because it is not this
+/// crate's code.
+fn browser_suite_sources() -> Vec<(String, String)> {
+    fn walk(dir: &std::path::Path, out: &mut Vec<(String, String)>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if path.file_name().is_some_and(|n| n == "vendor") {
+                    continue;
+                }
+                walk(&path, out);
+            } else if path.extension().is_some_and(|e| e == "rs")
+                && let Ok(src) = std::fs::read_to_string(&path)
+            {
+                out.push((path.display().to_string(), src));
+            }
+        }
+    }
+
+    let mut out = Vec::new();
+    walk(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests"),
+        &mut out,
+    );
+    out.sort();
+    out
+}
+
+/// Every text field some browser suite pins as a whole string literal, with
+/// the suites that pin it.
+///
+/// A suite pins copy by writing it out and comparing it against DOM text, so
+/// the literal appearing in the suite's source IS the pin. The match is
+/// deliberately a superset of byte-exact comparison -- a `contains`
+/// assertion carrying a rewritten character is just as broken as an
+/// `assert_eq!`, and the doc that once claimed otherwise was wrong.
+///
+/// Two limits, both conservative and both covered by the positive control in
+/// the test below: values shorter than four characters are skipped (they
+/// collide with unrelated source text and pin nothing meaningful), and a
+/// suite that spells its copy with `\u{...}` escapes or assembles it with
+/// `format!` is not matched.
+fn byte_pinned_fields(
+    t: &AiChatWorkspaceTexts,
+    suites: &[(String, String)],
+) -> Vec<(&'static str, String, Vec<String>)> {
+    let mut found = Vec::new();
+    for (name, value) in t.fields() {
+        if value.chars().count() < 4 {
+            continue;
+        }
+        let literal = format!("\"{value}\"");
+        let pinners: Vec<String> = suites
+            .iter()
+            .filter(|(_, src)| src.contains(&literal))
+            .map(|(path, _)| path.clone())
+            .collect();
+        if !pinners.is_empty() {
+            found.push((name, value.to_owned(), pinners));
+        }
+    }
+    found
 }
 
 /// Why a candidate sentence cannot be compared byte-for-byte against its own
@@ -905,30 +978,14 @@ fn markdown_substitution_hazard(text: &str) -> Option<String> {
     None
 }
 
-/// Copy pinned byte-for-byte against the markdown renderer must contain
-/// nothing that renderer rewrites.
+/// The hazard checker itself: it must reject every rewrite the renderer
+/// performs, and must not reject copy that is genuinely safe.
 ///
-/// The failure this converts is specific: a one-character copy edit passes
-/// `cargo fmt`, `cargo clippy` and the whole unit lane, then fails
-/// `test-ai-chat-knowledge` eight minutes later on a byte mismatch nobody can
-/// see by reading either string. It is now a compile-time-fast unit failure
-/// naming the character and the reason.
+/// Without both halves, a checker that quietly stopped matching anything
+/// would look exactly like clean copy -- which is the failure mode this
+/// whole area exists to prevent one level up.
 #[test]
-fn markdown_pinned_copy_survives_smart_punctuation() {
-    for t in [AiChatWorkspaceTexts::default(), AiChatWorkspaceTexts::es()] {
-        for (name, value) in markdown_pinned_fields(&t) {
-            assert!(
-                markdown_substitution_hazard(value).is_none(),
-                "{}: {name} = {value:?} \u{2014} {}",
-                t.locale_id,
-                markdown_substitution_hazard(value).unwrap_or_default()
-            );
-        }
-    }
-
-    // The guard's own positive control. Without it, a checker that quietly
-    // stopped matching anything would look exactly like clean copy -- which
-    // is the failure mode this whole test exists to prevent one level up.
+fn markdown_substitution_hazard_detects_every_rewrite() {
     for bad in [
         "I couldn't find that in this folder.",
         "I could not find that \u{2019}here\u{2019}.",
@@ -946,8 +1003,6 @@ fn markdown_pinned_copy_survives_smart_punctuation() {
             "the guard must reject {bad:?}"
         );
     }
-    // ...and must not reject copy that is genuinely safe, or it would forbid
-    // every sentence and prove nothing.
     for good in [
         "I could not find that in this folder.",
         "No pude encontrar eso en esta carpeta.",
@@ -955,18 +1010,74 @@ fn markdown_pinned_copy_survives_smart_punctuation() {
     ] {
         assert_eq!(markdown_substitution_hazard(good), None, "{good:?}");
     }
+}
 
-    // `knowledge_changed` is byte-pinned by the browser suite but renders
-    // through a plain span, not markdown. Asserting its ABSENCE from the
-    // pinned list keeps that distinction deliberate: if a later phase routes
-    // annotations through markdown, this line is what has to change.
-    let en = AiChatWorkspaceTexts::default();
+/// Copy pinned byte-for-byte against the markdown renderer must contain
+/// nothing that renderer rewrites -- and the set of pinned copy is SWEPT,
+/// not remembered.
+///
+/// The failure this converts is specific: a one-character copy edit passes
+/// `cargo fmt`, `cargo clippy` and the whole unit lane, then fails
+/// `test-ai-chat-knowledge` eight minutes later on a byte mismatch nobody can
+/// see by reading either string. It is now a compile-time-fast unit failure
+/// naming the character, the reason and the suite that pins it.
+///
+/// The sweep is what replaced a hand-maintained list of field names. That
+/// list had no mechanical cross-check (unlike `FIELD_COUNT`), so a later
+/// phase that pinned a new field and forgot to add it got no failure at all
+/// -- just an assertion that mysteriously never matched. Now the pins are
+/// discovered from the suite sources, and the only thing an author states by
+/// hand is a RENDER-PATH exemption in [`NON_MARKDOWN_PINS`], which fails
+/// loudly when it goes stale.
+#[test]
+fn every_byte_pinned_field_survives_markdown_rendering() {
+    let suites = browser_suite_sources();
     assert!(
-        !markdown_pinned_fields(&en)
-            .iter()
-            .any(|(name, _)| *name == "knowledge_changed"),
-        "annotations are not markdown; see markdown_pinned_fields"
+        !suites.is_empty(),
+        "no browser suite source was read; the sweep would pass vacuously"
     );
+
+    let mut swept: std::collections::BTreeSet<&'static str> = std::collections::BTreeSet::new();
+    for t in [AiChatWorkspaceTexts::default(), AiChatWorkspaceTexts::es()] {
+        for (name, value, pinners) in byte_pinned_fields(&t, &suites) {
+            swept.insert(name);
+            if NON_MARKDOWN_PINS.iter().any(|(n, _)| *n == name) {
+                continue;
+            }
+            assert!(
+                markdown_substitution_hazard(&value).is_none(),
+                "{}: {name} = {value:?} is pinned by {pinners:?} \u{2014} {}. \
+                 Either reword the copy, or add the field to NON_MARKDOWN_PINS \
+                 with the render path that makes it safe.",
+                t.locale_id,
+                markdown_substitution_hazard(&value).unwrap_or_default()
+            );
+        }
+    }
+
+    // Positive control. A sweep that silently stopped matching anything is
+    // indistinguishable from clean copy, so it must still find the two pins
+    // that motivated this guard: one markdown (`grounded_not_found`, whose
+    // whole answer bubble `ai_chat_knowledge_smoke` compares) and one not
+    // (`knowledge_changed`, pinned by `ai_chat_showcase_smoke`).
+    for control in ["grounded_not_found", "knowledge_changed"] {
+        assert!(
+            swept.contains(control),
+            "the sweep no longer finds {control}; it is matching nothing and \
+             proving nothing (swept: {swept:?})"
+        );
+    }
+
+    // ...and every render-path exemption must still correspond to a real
+    // pin, so the list cannot accumulate entries nothing checks.
+    for (name, why) in NON_MARKDOWN_PINS {
+        assert!(!why.trim().is_empty(), "{name} is exempt with no reason");
+        assert!(
+            swept.contains(name),
+            "{name} is exempt from the markdown guard but no suite pins it \
+             any more; drop the NON_MARKDOWN_PINS entry"
+        );
+    }
 }
 
 /// Every quick action's prompt is real localized copy, not the same English
