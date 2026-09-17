@@ -17,7 +17,7 @@
 
 use crate::components::{
     Badge, BadgeColor, BadgeSize, BadgeStyle, CapacityBar, CapacityBarColor, Pressable,
-    StatDeltaTrend, Tooltip, capacity_bar_percent,
+    StatDeltaTrend, Tooltip, TooltipEdge, capacity_bar_percent,
 };
 use crate::merge_classes;
 use leptos::{html::Div, prelude::*};
@@ -830,6 +830,40 @@ fn kpi_item_fingerprint(item: &KpiItem) -> String {
     format!("{item:?}")
 }
 
+/// Which container edge a card's help trigger is pressed against, from the
+/// card's position in the strip (Office op-du33s).
+///
+/// daisyUI's tooltip is a statically placed pseudo-element with no collision
+/// detection, and `tooltip-top` is horizontally CENTERED on its trigger. A
+/// card sitting at the end of the strip therefore opened its help bubble
+/// past the strip's right edge, where the page clipped it. The strip knows
+/// the order of its own cards, so it declares the edge and
+/// [`tooltip_position_for_edge`](crate::components::tooltip_position_for_edge)
+/// picks the side -- no measurement, no observer, one class either way.
+///
+/// ⚠️ KNOWN BOUND. The strip's column count is a CONTAINER-QUERY decision
+/// (`@sm`/`@lg`/`@4xl`/`@5xl`; see [`KpiStripLayout`]), so Rust cannot see
+/// how many cards share a row. This covers the FIRST and LAST card, which
+/// are against an edge at every rung and are the cards the defect was
+/// reported on. A card that happens to land in the last column of an
+/// intermediate row of a WRAPPED scorecard is still centered; fixing that
+/// case needs per-rung `nth-child` rules in authored CSS, not a class this
+/// component can choose.
+pub const fn kpi_card_help_edge(index: usize, count: usize) -> TooltipEdge {
+    if count <= 1 {
+        // One card spans the strip: it touches both edges, and flipping
+        // would only move the overflow. `Both` keeps the preferred side.
+        return TooltipEdge::Both;
+    }
+    if index == 0 {
+        TooltipEdge::Left
+    } else if index + 1 == count {
+        TooltipEdge::Right
+    } else {
+        TooltipEdge::Interior
+    }
+}
+
 /// The measured floor for a card that must hold a two-line label, in CSS
 /// px.
 ///
@@ -1360,7 +1394,7 @@ fn kpi_card_accessible_name(
 /// @source inline("line-clamp-2 min-h-8");
 /// @source inline("font-semibold uppercase tracking-wide tabular-nums break-words italic");
 /// @source inline("text-base-content text-base-content/75 text-base-content/40 text-base-content/60 text-info text-success text-warning text-error");
-/// @source inline("tooltip tooltip-top relative inline-flex h-4 w-4 items-center justify-center rounded-full border sr-only");
+/// @source inline("tooltip tooltip-top tooltip-bottom tooltip-left tooltip-right relative inline-flex h-4 w-4 items-center justify-center rounded-full border sr-only");
 /// @source inline("self-start text-left underline underline-offset-2 rounded-field");
 /// @source inline("relative h-3 w-full overflow-hidden rounded-full bg-base-200");
 /// @source inline("absolute inset-y-0 left-0 top-0 h-full rounded-full w-0.5");
@@ -1431,6 +1465,16 @@ pub fn KpiCard(
     /// Additional CSS classes for the card's outer wrapper.
     #[prop(optional, into)]
     class: &'static str,
+
+    /// Which edge of its container this card sits against, so the help
+    /// tooltip opens INWARD instead of off the edge (Office op-du33s).
+    ///
+    /// Defaults to [`TooltipEdge::Interior`], which flips nothing: a card
+    /// rendered on its own is unchanged. [`KpiStrip`] supplies this from
+    /// each card's position through [`kpi_card_help_edge`]; a caller placing
+    /// cards by hand declares it the same way.
+    #[prop(optional, into)]
+    help_edge: Signal<TooltipEdge>,
 
     /// Activation callback, receiving the stable [`KpiItem::id`].
     ///
@@ -1623,8 +1667,10 @@ pub fn KpiCard(
         view! {
             // `relative z-2`: above a stretched hidden-label action control
             // (`z-1`), so hovering the "?" still opens the tooltip (op-zp4af);
-            // the tooltip itself escapes the card unclipped (op-k0kt2).
-            <Tooltip tip=help.clone() class="relative z-2 shrink-0">
+            // the tooltip itself escapes the card unclipped (op-k0kt2) and,
+            // on the first or last card of the strip, opens inward rather
+            // than off the container's edge (op-du33s).
+            <Tooltip tip=help.clone() edge=help_edge class="relative z-2 shrink-0">
                 <span
                     class="inline-flex h-4 w-4 items-center justify-center rounded-full border border-base-content/40 text-base-content/75 ld-text-small"
                     aria-hidden="true"
@@ -2017,8 +2063,26 @@ pub fn KpiStrip(
             // not just its id: an unchanged card then keeps its DOM (and its
             // focus), while a card whose data moved is rebuilt, which is
             // exactly what a non-reactive child needs.
-            <For each=move || items.get() key=kpi_item_fingerprint let:item>
+            // Each card is paired with the container edge it sits against
+            // (op-du33s), decided once per list by `kpi_card_help_edge`. The
+            // edge joins the reconciliation key because it is rendered: a
+            // card that becomes the last one when the list shrinks has to
+            // re-render to move its help tooltip.
+            <For
+                each=move || {
+                    let items = items.get();
+                    let count = items.len();
+                    items
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, item)| (item, kpi_card_help_edge(index, count)))
+                        .collect::<Vec<_>>()
+                }
+                key=|(item, edge)| (kpi_item_fingerprint(item), *edge)
+                let:entry
+            >
                 {
+                    let (item, help_edge) = entry;
                     // `on_activate` is an `Option`, and an optional component
                     // prop takes the INNER type, so the option is unwrapped
                     // here rather than forwarded. Both arms render the same
@@ -2030,13 +2094,22 @@ pub fn KpiStrip(
                                     item=item
                                     compact=compact
                                     texts=texts
+                                    help_edge=help_edge
                                     on_activate=on_activate
                                 />
                             }
                                 .into_any()
                         }
                         None => {
-                            view! { <KpiCard item=item compact=compact texts=texts /> }.into_any()
+                            view! {
+                                <KpiCard
+                                    item=item
+                                    compact=compact
+                                    texts=texts
+                                    help_edge=help_edge
+                                />
+                            }
+                                .into_any()
                         }
                     }
                 }
@@ -2155,14 +2228,146 @@ mod tests {
             "the structural forced-colors edge survives the move: {accent}"
         );
         let component = kpi_card_source();
+        // Whitespace-insensitive: rustfmt has broken this call across lines
+        // before, and a line-spanning literal made a behaviour-identical
+        // reformat read as a defect.
+        let flattened = component.split_whitespace().collect::<Vec<_>>().join(" ");
         assert!(
-            component.contains(r#"<Tooltip tip=help.clone() class="relative z-2 shrink-0">"#),
+            flattened.contains(r#"<Tooltip tip=help.clone()"#)
+                && flattened.contains(r#"class="relative z-2 shrink-0""#),
             "the help trigger paints above a stretched action control"
         );
         assert!(
             !component.contains("overflow-hidden"),
             "no branch of the card may clip: {component}"
         );
+    }
+
+    /// Office op-du33s: the strip's TRAILING card opened its help tooltip
+    /// off the container's right edge, because `tooltip-top` is centered on
+    /// a trigger that has no room to its right. The first and last cards
+    /// declare the edge they touch, and the bubble grows inward.
+    ///
+    /// BREAK: return `TooltipEdge::Interior` for `index + 1 == count`; the
+    /// trailing-card assertion fails with `tooltip-top`.
+    #[test]
+    fn the_trailing_cards_help_tooltip_opens_inward() {
+        use crate::components::{TooltipPosition, tooltip_position_for_edge};
+
+        // An eight-card strip: the ends touch an edge, the middle does not.
+        let edges: Vec<TooltipEdge> = (0..8).map(|i| kpi_card_help_edge(i, 8)).collect();
+        assert_eq!(edges[0], TooltipEdge::Left);
+        assert_eq!(edges[7], TooltipEdge::Right);
+        for (index, edge) in edges.iter().enumerate().take(7).skip(1) {
+            assert_eq!(
+                *edge,
+                TooltipEdge::Interior,
+                "card {index} is not against an edge"
+            );
+        }
+
+        // ... and that is the placement the component will actually emit.
+        assert_eq!(
+            tooltip_position_for_edge(&TooltipPosition::default(), edges[7]).as_str(),
+            "tooltip-left",
+            "the trailing card's bubble must grow back into the strip"
+        );
+        assert_eq!(
+            tooltip_position_for_edge(&TooltipPosition::default(), edges[0]).as_str(),
+            "tooltip-right"
+        );
+        assert_eq!(
+            tooltip_position_for_edge(&TooltipPosition::default(), edges[3]).as_str(),
+            "tooltip-top",
+            "an interior card keeps the preferred placement"
+        );
+    }
+
+    /// The degenerate strips. A single card touches BOTH edges, where no
+    /// flip buys room, so it keeps the preferred placement; a two-card strip
+    /// is all ends and no middle; an empty list never asks.
+    ///
+    /// BREAK: drop the `count <= 1` guard; the single-card assertion fails
+    /// with `Left` (and `kpi_card_help_edge(0, 0)` would claim the first
+    /// card of an empty strip is at the left edge).
+    #[test]
+    fn a_single_card_strip_touches_both_edges() {
+        use crate::components::{TooltipPosition, tooltip_position_for_edge};
+
+        assert_eq!(kpi_card_help_edge(0, 1), TooltipEdge::Both);
+        assert_eq!(kpi_card_help_edge(0, 0), TooltipEdge::Both);
+        assert_eq!(
+            tooltip_position_for_edge(&TooltipPosition::default(), TooltipEdge::Both).as_str(),
+            "tooltip-top",
+            "a strip-wide card keeps the preferred placement"
+        );
+        assert_eq!(kpi_card_help_edge(0, 2), TooltipEdge::Left);
+        assert_eq!(kpi_card_help_edge(1, 2), TooltipEdge::Right);
+    }
+
+    /// The wiring, not just the arithmetic: the card must hand its declared
+    /// edge to the `Tooltip`, the strip must compute one per card, and the
+    /// edge must reach the reconciliation key -- a card that becomes the
+    /// last one when the list shrinks has to re-render to move its bubble.
+    ///
+    /// BREAK: drop `edge=help_edge` from the card's `Tooltip`; the first
+    /// assertion fails.
+    #[test]
+    fn the_strip_declares_each_cards_edge_and_keys_on_it() {
+        let card = kpi_card_source();
+        let flattened = card.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            flattened.contains("<Tooltip tip=help.clone() edge=help_edge"),
+            "the help trigger must carry its declared edge: {flattened}"
+        );
+
+        let strip = module_source()
+            .split_once("pub fn KpiStrip(")
+            .expect("KpiStrip component source")
+            .1;
+        let strip = strip.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            strip.contains("kpi_card_help_edge(index, count)"),
+            "the strip decides the edge from each card's position: {strip}"
+        );
+        assert!(
+            strip.contains("key=|(item, edge)| (kpi_item_fingerprint(item), *edge)"),
+            "the rendered edge must be part of the reconciliation key: {strip}"
+        );
+        assert_eq!(
+            strip.matches("help_edge=help_edge").count(),
+            2,
+            "both the activatable and the read-only arm pass the edge"
+        );
+    }
+
+    /// The safelist has to carry every placement the flip can produce, or
+    /// the flipped class is simply missing from the stylesheet and the
+    /// bubble silently keeps its centered position.
+    ///
+    /// BREAK: remove `tooltip-left` from the documented `@source inline`
+    /// line; this fails naming it.
+    #[test]
+    fn the_safelist_covers_every_placement_the_flip_can_emit() {
+        use crate::components::TooltipPosition;
+
+        let line = module_source()
+            .lines()
+            .map(str::trim_start)
+            .find(|line| line.starts_with("/// @source inline(\"tooltip "))
+            .expect("the tooltip @source inline line");
+        for position in [
+            TooltipPosition::Top,
+            TooltipPosition::Bottom,
+            TooltipPosition::Left,
+            TooltipPosition::Right,
+        ] {
+            assert!(
+                line.contains(position.as_str()),
+                "@source inline is missing {}: {line}",
+                position.as_str()
+            );
+        }
     }
 
     /// Office op-zp4af: the production drill-down is the whole card with no

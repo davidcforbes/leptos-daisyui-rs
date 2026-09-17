@@ -66,6 +66,30 @@ pub fn selected_dataset_label<'a>(options: &'a [DatasetOption], selected: &str) 
         .map(|option| option.label.as_str())
 }
 
+/// The label the option keyed by `value` carries in the CURRENT option set
+/// (Office op-ufzyq).
+///
+/// Both `<option>` lists in [`DatasetSelector`] are keyed by value on purpose:
+/// a relabel must not recreate the row, because recreating it resets the
+/// browser's selection. The price of that reuse is that anything rendered
+/// INSIDE the row must be looked up again from the live set rather than read
+/// off the option the key was minted from -- otherwise "All Offices" stays
+/// English after a live EN -> ES switch. `None` means the value has left the
+/// set; the caller renders nothing for it.
+fn relabeled_option_label(options: &[DatasetOption], value: &str) -> Option<String> {
+    selected_dataset_label(options, value).map(str::to_owned)
+}
+
+/// Whether the option keyed by `value` is disabled in the CURRENT option set
+/// (Office op-ufzyq). An option that has left the set can no longer be
+/// chosen, so it reads as disabled rather than silently enabled.
+fn current_option_disabled(options: &[DatasetOption], value: &str) -> bool {
+    options
+        .iter()
+        .find(|option| option.value == value)
+        .is_none_or(|option| option.disabled)
+}
+
 /// A busy dataset replacement remains supersedable. Only an explicit caller
 /// gate disables the selector; `loading` controls busy semantics and progress
 /// presentation without trapping the user in the in-flight choice.
@@ -194,8 +218,24 @@ pub fn DatasetSelector(
                 <For
                     each=move || options.get()
                     key=|option| option.value.clone()
-                    children=move |option| view! {
-                        <option value=option.value disabled=option.disabled>{option.label}</option>
+                    children=move |option| {
+                        let value = option.value;
+                        // Keyed by value so a relabel reuses the row and the
+                        // selection survives; the text and `disabled` therefore
+                        // read the CURRENT option set, never the row the key was
+                        // minted from (op-ufzyq).
+                        let label_key = value.clone();
+                        let disabled_key = value.clone();
+                        view! {
+                            <option
+                                value=value
+                                disabled=move || options.with(|all| current_option_disabled(all, &disabled_key))
+                            >
+                                {move || options.with(|all| {
+                                    relabeled_option_label(all, &label_key).unwrap_or_default()
+                                })}
+                            </option>
+                        }
                     }
                 />
             </Select>
@@ -238,18 +278,19 @@ pub fn DatasetSelector(
                         key=|option| option.value.clone()
                         children=move |option| {
                             let value = option.value;
-                            let key = value.clone();
                             // Keep DOM identity by value, but derive mutable
-                            // metadata again when a same-key option changes.
-                            let current = Memo::new(move |_| options.with(|items| {
-                                items.iter().find(|item| item.value == key).cloned()
-                            }));
+                            // metadata again when a same-key option changes
+                            // (op-ufzyq): the same helpers as the compact
+                            // variant, so one pure test guards both lists.
+                            let label_key = value.clone();
+                            let disabled_key = value.clone();
                             view! {
-                                <option value=value disabled=move || current.with(|option| {
-                                    option.as_ref().is_none_or(|option| option.disabled)
-                                })>
-                                    {move || current.with(|option| {
-                                        option.as_ref().map(|option| option.label.clone()).unwrap_or_default()
+                                <option
+                                    value=value
+                                    disabled=move || options.with(|all| current_option_disabled(all, &disabled_key))
+                                >
+                                    {move || options.with(|all| {
+                                        relabeled_option_label(all, &label_key).unwrap_or_default()
                                     })}
                                 </option>
                             }
@@ -357,6 +398,124 @@ mod compact_tests {
         );
         assert!(branch.contains(r#"attr:data-dataset-selector-compact="true""#));
         assert!(branch.contains(r#"attr:data-resettable-filter="false""#));
+    }
+}
+
+#[cfg(test)]
+mod relabel_tests {
+    use super::{
+        DatasetOption, current_option_disabled, dataset_options_revision, relabeled_option_label,
+    };
+
+    /// The Office `OfficeScopeSelect` option set with its all-offices label in
+    /// one language: a live EN -> ES switch changes LABELS and nothing else.
+    fn offices(all_offices: &str) -> Vec<DatasetOption> {
+        vec![
+            DatasetOption::new("all", all_offices),
+            DatasetOption::new("raleigh", "Raleigh"),
+            DatasetOption::new("charlotte", "Charlotte").disabled(),
+        ]
+    }
+
+    /// Office op-ufzyq: the office select's first option still read "All
+    /// Offices" after a live EN -> ES switch. Both `<For>` lists are keyed by
+    /// value so a relabel REUSES the row (the selection must not reset), which
+    /// is exactly why the row's text has to be looked up from the current set.
+    ///
+    /// BREAK: make `relabeled_option_label` match on `label` instead of
+    /// `value` -- the "all" lookups answer `None`; or return the first option's
+    /// label regardless of `value` -- the "raleigh" assertion fails. What a
+    /// pure test CANNOT catch is the defect's original shape, the view
+    /// rendering `option.label` captured when the row was created, because
+    /// that code never called a lookup at all; the source contract below pins
+    /// the wiring, and the browser CHECK is: on the Office dashboard switch
+    /// EN -> ES live and the office select's first option reads
+    /// "Todas las oficinas".
+    #[test]
+    fn a_relabelled_option_keeps_its_value_and_shows_its_new_label() {
+        let english = offices("All Offices");
+        let spanish = offices("Todas las oficinas");
+
+        assert_eq!(
+            relabeled_option_label(&english, "all").as_deref(),
+            Some("All Offices")
+        );
+        assert_eq!(
+            relabeled_option_label(&spanish, "all").as_deref(),
+            Some("Todas las oficinas"),
+            "the row keyed \"all\" must show the label the CURRENT set carries"
+        );
+        assert_eq!(
+            relabeled_option_label(&spanish, "raleigh").as_deref(),
+            Some("Raleigh"),
+            "an unrelabelled sibling keeps its own label"
+        );
+
+        // The key set is unchanged by a relabel, so the `<For>` reuses every
+        // row and the `Select` re-assert never fires -- the reuse this test's
+        // reactive text exists to survive.
+        let english_keys: Vec<&str> = english.iter().map(|o| o.value.as_str()).collect();
+        let spanish_keys: Vec<&str> = spanish.iter().map(|o| o.value.as_str()).collect();
+        assert_eq!(english_keys, spanish_keys, "a relabel must not move a key");
+        assert_eq!(
+            dataset_options_revision(&english),
+            dataset_options_revision(&spanish),
+            "a relabel is not an option-set change for the re-assert"
+        );
+
+        // A value that has left the set renders nothing rather than a stale label.
+        assert_eq!(relabeled_option_label(&spanish, "durham"), None);
+    }
+
+    /// `disabled` follows the current set the same way the label does: a
+    /// same-key option that becomes unavailable disables its reused row, and
+    /// a value that has left the set reads disabled, never silently enabled.
+    /// BREAK: return `false` for a missing option -- the last assertion fails.
+    #[test]
+    fn a_reused_row_takes_its_disabled_state_from_the_current_set() {
+        let before = offices("All Offices");
+        let mut after = offices("All Offices");
+        after[1].disabled = true;
+
+        assert!(!current_option_disabled(&before, "raleigh"));
+        assert!(current_option_disabled(&after, "raleigh"));
+        assert!(current_option_disabled(&after, "charlotte"));
+        assert!(!current_option_disabled(&after, "all"));
+        assert!(
+            current_option_disabled(&after, "durham"),
+            "an option that left the set cannot be chosen"
+        );
+    }
+
+    /// The wiring a pure test cannot see: BOTH `<option>` lists must render
+    /// their text through `relabeled_option_label` over the live signal, and
+    /// neither may read `option.label` off the row it was created from. Only
+    /// the production half of this file (before the first test module) is
+    /// searched, so this test cannot satisfy itself.
+    #[test]
+    fn both_option_lists_render_their_label_from_the_current_option_set() {
+        let source = include_str!("dataset_selector.rs").replace("\r\n", "\n");
+        let (production, _) = source
+            .split_once("#[cfg(test)]")
+            .expect("the file has a test module");
+        assert_eq!(
+            production
+                .matches("relabeled_option_label(all, &label_key)")
+                .count(),
+            2,
+            "compact and card variants both look the label up from the live set"
+        );
+        assert_eq!(
+            production
+                .matches("current_option_disabled(all, &disabled_key)")
+                .count(),
+            2,
+            "compact and card variants both look `disabled` up from the live set"
+        );
+        assert!(
+            !production.contains("{option.label}"),
+            "no option renders the label captured when its row was created"
+        );
     }
 }
 

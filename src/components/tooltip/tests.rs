@@ -130,3 +130,149 @@ fn test_all_tooltip_colors_return_valid_classes() {
         assert_eq!(variant.as_str(), expected);
     }
 }
+
+// TooltipEdge / edge-aware placement tests (Office op-du33s)
+
+/// The defect: a `KpiStrip`'s trailing help trigger opened a horizontally
+/// centered `tooltip-top` bubble off the strip's right edge. A trigger
+/// against the right edge must grow LEFT, and one against the left edge must
+/// grow RIGHT, whatever placement was preferred.
+///
+/// BREAK: return `preferred` for `TooltipEdge::Right` in
+/// `tooltip_position_for_edge`; the first assertion fails with
+/// `tooltip-top`.
+#[test]
+fn a_centered_placement_flips_inward_at_a_container_edge() {
+    assert_eq!(
+        tooltip_position_for_edge(&TooltipPosition::Top, TooltipEdge::Right).as_str(),
+        "tooltip-left"
+    );
+    assert_eq!(
+        tooltip_position_for_edge(&TooltipPosition::Bottom, TooltipEdge::Right).as_str(),
+        "tooltip-left"
+    );
+    assert_eq!(
+        tooltip_position_for_edge(&TooltipPosition::Top, TooltipEdge::Left).as_str(),
+        "tooltip-right"
+    );
+    assert_eq!(
+        tooltip_position_for_edge(&TooltipPosition::Bottom, TooltipEdge::Left).as_str(),
+        "tooltip-right"
+    );
+}
+
+/// A horizontal placement that already grows toward the edge is the whole
+/// defect one step further on, so it flips too -- and one that already grows
+/// inward is left alone, which makes the function idempotent.
+///
+/// BREAK: make the `TooltipEdge::Left` arm return `TooltipPosition::Left`;
+/// the idempotence assertion fails.
+#[test]
+fn a_horizontal_placement_flips_away_from_its_edge_and_is_idempotent() {
+    assert_eq!(
+        tooltip_position_for_edge(&TooltipPosition::Left, TooltipEdge::Left).as_str(),
+        "tooltip-right"
+    );
+    assert_eq!(
+        tooltip_position_for_edge(&TooltipPosition::Right, TooltipEdge::Right).as_str(),
+        "tooltip-left"
+    );
+
+    for edge in [
+        TooltipEdge::Interior,
+        TooltipEdge::Left,
+        TooltipEdge::Right,
+        TooltipEdge::Both,
+    ] {
+        for preferred in [
+            TooltipPosition::Top,
+            TooltipPosition::Bottom,
+            TooltipPosition::Left,
+            TooltipPosition::Right,
+        ] {
+            let once = tooltip_position_for_edge(&preferred, edge);
+            let twice = tooltip_position_for_edge(&once, edge);
+            assert_eq!(once, twice, "not idempotent for {preferred:?} at {edge:?}");
+        }
+    }
+}
+
+/// `Interior` is the default and must be a pure pass-through, or adding the
+/// prop would silently move every existing tooltip in the portfolio.
+/// `Both` keeps the preferred side deliberately: in a container no wider
+/// than the trigger, a flip only moves the overflow to the other edge.
+///
+/// BREAK: give `TooltipEdge::Both` its own flip arm; the `Both` assertion
+/// fails.
+#[test]
+fn interior_and_both_leave_the_preferred_placement_untouched() {
+    assert_eq!(TooltipEdge::default(), TooltipEdge::Interior);
+    for preferred in [
+        TooltipPosition::Top,
+        TooltipPosition::Bottom,
+        TooltipPosition::Left,
+        TooltipPosition::Right,
+    ] {
+        assert_eq!(
+            tooltip_position_for_edge(&preferred, TooltipEdge::Interior),
+            preferred
+        );
+        assert_eq!(
+            tooltip_position_for_edge(&preferred, TooltipEdge::Both),
+            preferred
+        );
+    }
+}
+
+/// The resolved side is published as a bare word so a DOM oracle reads
+/// `data-tooltip-placement` instead of parsing merged utility classes, and
+/// the two spellings never drift apart.
+///
+/// BREAK: return `"top"` from `TooltipPosition::Left::as_placement`; the
+/// suffix assertion fails.
+#[test]
+fn the_placement_word_matches_its_class() {
+    for position in [
+        TooltipPosition::Top,
+        TooltipPosition::Bottom,
+        TooltipPosition::Left,
+        TooltipPosition::Right,
+    ] {
+        assert_eq!(
+            position.as_str(),
+            format!("tooltip-{}", position.as_placement())
+        );
+    }
+    for edge in [
+        TooltipEdge::Interior,
+        TooltipEdge::Left,
+        TooltipEdge::Right,
+        TooltipEdge::Both,
+    ] {
+        assert!(!edge.as_str().is_empty());
+    }
+}
+
+/// The component must emit exactly ONE `tooltip-*` position class: two
+/// equal-specificity position classes on one element would be resolved by
+/// stylesheet order, which is not something this crate controls.
+///
+/// BREAK: add a second literal `tooltip-top` to the component's
+/// `merge_classes!` call; the count assertion fails.
+#[test]
+fn the_component_emits_exactly_one_position_class() {
+    let source = include_str!("component.rs");
+    let markup = source
+        .split_once("-> impl IntoView {")
+        .expect("component body")
+        .1;
+    let literals = markup.matches("\"tooltip-").count();
+    assert_eq!(
+        literals, 0,
+        "the position class comes from the resolved placement, never a literal: {markup}"
+    );
+    assert!(
+        markup.contains("tooltip_position_for_edge(&position.get(), edge.get())"),
+        "the placement must be resolved through the edge-aware helper: {markup}"
+    );
+}
