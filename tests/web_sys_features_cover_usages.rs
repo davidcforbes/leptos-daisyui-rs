@@ -80,7 +80,7 @@ fn web_sys_usages(src: &str) -> BTreeSet<String> {
             continue;
         };
         for part in chunk[..end].split(',') {
-            let name = part.trim().split_whitespace().next().unwrap_or("");
+            let name = part.split_whitespace().next().unwrap_or("");
             let name = name.split(" as ").next().unwrap_or(name).trim();
             if name.is_empty() {
                 continue;
@@ -131,7 +131,10 @@ fn every_web_sys_type_used_in_src_has_a_cargo_feature() {
         };
         used.extend(web_sys_usages(&src));
     }
-    assert!(!used.is_empty(), "expected at least one web_sys:: usage in src/");
+    assert!(
+        !used.is_empty(),
+        "expected at least one web_sys:: usage in src/"
+    );
 
     let missing: Vec<_> = used.difference(&features).cloned().collect();
     assert!(
@@ -154,11 +157,7 @@ web-sys = { version = "0.3", features = [
     let feats = lib_web_sys_features(sample);
     assert_eq!(
         feats,
-        BTreeSet::from([
-            "Window".into(),
-            "FocusEvent".into(),
-            "console".into(),
-        ])
+        BTreeSet::from(["Window".into(), "FocusEvent".into(), "console".into(),])
     );
 }
 
