@@ -304,6 +304,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     value: "ai-chat",
                 },
                 ComponentItem {
+                    name: "AI Chat (ES)",
+                    href: "/components/ai-chat-es",
+                    value: "ai-chat-es",
+                },
+                ComponentItem {
                     name: "Charts",
                     href: "/components/charts",
                     value: "charts",

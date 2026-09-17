@@ -424,6 +424,36 @@ const PAGES: &[(&str, &[(&str, usize)])] = &[
             (family::COMPONENT_DRIFT, 0),
         ],
     ),
+    // ldui-iilm.11: the AI chat workspace's two locale routes, swept for the
+    // first time. EVERY ratcheted family is committed at ZERO on purpose.
+    // These ceilings are MEASURED, never guessed: a plausible-looking non-zero
+    // number written before the lane ever ran would silently absorb whatever
+    // the first sweep finds, which is exactly what a ratchet exists to stop.
+    // The measurement step runs the lane and replaces each zero with the real
+    // count plus the justification that count needs. A zero that turns out to
+    // be right stays a zero.
+    (
+        "/components/ai-chat",
+        &[
+            (family::TYPOGRAPHY, 0),
+            (family::SHAPE, 0),
+            (family::DEPTH, 0),
+            (family::GRID, 0),
+            (family::INTERNAL, 0),
+            (family::COMPONENT_DRIFT, 0),
+        ],
+    ),
+    (
+        "/components/ai-chat-es",
+        &[
+            (family::TYPOGRAPHY, 0),
+            (family::SHAPE, 0),
+            (family::DEPTH, 0),
+            (family::GRID, 0),
+            (family::INTERNAL, 0),
+            (family::COMPONENT_DRIFT, 0),
+        ],
+    ),
 ];
 
 async fn audit_page(path: &str, ceilings: &[(&str, usize)]) {
@@ -476,6 +506,12 @@ style_audit_test!(section_heading_style_is_within_ceiling, 8);
 style_audit_test!(search_picker_dialog_style_is_within_ceiling, 9);
 style_audit_test!(day_scheduler_style_is_within_ceiling, 10);
 style_audit_test!(helpdesk_style_is_within_ceiling, 11);
+
+// ldui-iilm.11. The macro takes an INDEX, so these two invocations -- not the
+// PAGES entries above -- are what actually sweeps the AI chat workspace's two
+// locale routes.
+style_audit_test!(ai_chat_style_is_within_ceiling, 12);
+style_audit_test!(ai_chat_es_style_is_within_ceiling, 13);
 
 /// Negative control: prove the sweep + merge actually detects things, across
 /// both the engine's style families and the daisyUI drift heuristics.

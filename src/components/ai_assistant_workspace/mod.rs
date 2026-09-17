@@ -5,11 +5,13 @@
 //! grant; unknown or incomplete host contracts fail closed.
 
 mod artifact;
+mod governance;
 mod model;
 mod settings;
 mod types;
 
 pub use artifact::*;
+pub use governance::*;
 pub use model::*;
 pub use settings::*;
 pub use types::*;

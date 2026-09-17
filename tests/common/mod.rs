@@ -485,6 +485,34 @@ async fn dispatch_key(h: &Harness, params: DispatchKeyEventParams, what: &str) {
         .unwrap_or_else(|e| panic!("dispatch {what}: {e}"));
 }
 
+/// Press plain Enter with real CDP key events and wait the settle delay.
+///
+/// The negative control for [`shift_enter`]: a composer that treats the two
+/// alike is only detectable by driving both through the same seam. A
+/// synthetic `dispatchEvent` would not do — a handler calling
+/// `preventDefault` on a non-cancelable event changes nothing observable.
+pub async fn press_enter(h: &Harness) {
+    let down = DispatchKeyEventParams::builder()
+        .r#type(DispatchKeyEventType::RawKeyDown)
+        .key("Enter")
+        .code("Enter")
+        .windows_virtual_key_code(13)
+        .native_virtual_key_code(13)
+        .build()
+        .expect("Enter key-down params");
+    dispatch_key(h, down, "Enter key-down").await;
+    let up = DispatchKeyEventParams::builder()
+        .r#type(DispatchKeyEventType::KeyUp)
+        .key("Enter")
+        .code("Enter")
+        .windows_virtual_key_code(13)
+        .native_virtual_key_code(13)
+        .build()
+        .expect("Enter key-up params");
+    dispatch_key(h, up, "Enter key-up").await;
+    tokio::time::sleep(std::time::Duration::from_millis(h.config().settle_ms)).await;
+}
+
 /// Press Shift+Enter with real CDP key events and wait the settle delay.
 pub async fn shift_enter(h: &Harness) {
     let shift_down = DispatchKeyEventParams::builder()

@@ -581,6 +581,31 @@ fn all_refusal_guidance_is_explicit_and_unknown_is_not_retryable() {
     );
 }
 
+#[test]
+fn refusal_next_action_round_trips_its_wire_string() {
+    let all = [
+        RefusalNextAction::RetryLater,
+        RefusalNextAction::OpenSettings,
+        RefusalNextAction::NewConversation,
+    ];
+    for action in all {
+        assert_eq!(
+            RefusalNextAction::parse(action.as_str()),
+            Some(action),
+            "{action:?} must round-trip through its wire string"
+        );
+    }
+    // The three strings are distinct, or a DOM hook built from them could
+    // not tell two different next steps apart.
+    let mut codes: Vec<&str> = all.iter().map(|a| a.as_str()).collect();
+    codes.sort_unstable();
+    codes.dedup();
+    assert_eq!(codes.len(), 3, "every action needs its own wire string");
+    // And an unrecognized string guides nowhere rather than somewhere wrong.
+    assert_eq!(RefusalNextAction::parse("RetryLater"), None);
+    assert_eq!(RefusalNextAction::parse(""), None);
+}
+
 fn connection_fixture(state: ConnectionState, shape: SignInShape) -> AssistantConnection {
     let device = (state == ConnectionState::Pending && shape == SignInShape::Device).then(|| {
         AssistantDeviceFlow {

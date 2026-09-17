@@ -18,6 +18,42 @@ pub enum MemoryClass {
     Unknown(String),
 }
 
+impl MemoryClass {
+    /// The stable wire string this class round-trips to, for a `data-*` hook
+    /// or a telemetry field.
+    ///
+    /// Never `{:?}`: `Debug` prints a Rust variant name a rename is free to
+    /// change, while this string is a contract a proof and a host both read.
+    /// Same idiom as `crate::patterns::ReasoningEffort::as_str`.
+    ///
+    /// `Unknown` returns the host's own id verbatim rather than a catch-all,
+    /// because the host vocabulary is wider than this enum: the real memory
+    /// service accepts `note`, `decision`, `summary`, `feedback` and
+    /// `question`, and refuses `lesson` and `principle` on write. Collapsing
+    /// them all to `"unknown"` would make a curated-kind refusal impossible
+    /// to attribute to the kind that caused it.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Language => "language",
+            Self::Tone => "tone",
+            Self::Verbosity => "verbosity",
+            Self::WorkingMethod => "working_method",
+            Self::Unknown(s) => s.as_str(),
+        }
+    }
+
+    /// Parses the host's wire id, preserving an unrecognized one verbatim.
+    pub fn parse(id: &str) -> Self {
+        match id {
+            "language" => Self::Language,
+            "tone" => Self::Tone,
+            "verbosity" => Self::Verbosity,
+            "working_method" => Self::WorkingMethod,
+            other => Self::Unknown(other.to_owned()),
+        }
+    }
+}
+
 /// Candidate, confirmed and withdrawn are distinct host-owned states.
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -30,6 +66,30 @@ pub enum MemoryState {
     Withdrawn,
     /// Unsupported memory state cannot authorize an interaction.
     Unknown(String),
+}
+
+impl MemoryState {
+    /// The stable wire string this state round-trips to, for a `data-*` hook
+    /// or a telemetry field. See [`MemoryClass::as_str`] for why this is not
+    /// `{:?}`, and why `Unknown` keeps the host's own id.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Candidate => "candidate",
+            Self::Confirmed => "confirmed",
+            Self::Withdrawn => "withdrawn",
+            Self::Unknown(s) => s.as_str(),
+        }
+    }
+
+    /// Parses the host's wire id, preserving an unrecognized one verbatim.
+    pub fn parse(id: &str) -> Self {
+        match id {
+            "candidate" => Self::Candidate,
+            "confirmed" => Self::Confirmed,
+            "withdrawn" => Self::Withdrawn,
+            other => Self::Unknown(other.to_owned()),
+        }
+    }
 }
 
 /// Explicit retention facts attached to a withdrawal acknowledgment.
@@ -423,20 +483,30 @@ pub enum CoverageState {
     /// Host-confirmed complete coverage of the stated interval and stage.
     Complete,
     /// Only part of the required inventory was covered.
-    Partial { /// Named cause.
-        reason: AssistantReason },
+    Partial {
+        /// Named cause.
+        reason: AssistantReason,
+    },
     /// The required inventory was missed.
-    Missed { /// Named cause.
-        reason: AssistantReason },
+    Missed {
+        /// Named cause.
+        reason: AssistantReason,
+    },
     /// This coverage lane has not been configured.
-    Unconfigured { /// Named cause.
-        reason: AssistantReason },
+    Unconfigured {
+        /// Named cause.
+        reason: AssistantReason,
+    },
     /// Available evidence cannot establish coverage.
-    Unassessable { /// Named cause.
-        reason: AssistantReason },
+    Unassessable {
+        /// Named cause.
+        reason: AssistantReason,
+    },
     /// Coverage is paused under the stated capacity policy.
-    CapacityPaused { /// Named cause.
-        reason: AssistantReason },
+    CapacityPaused {
+        /// Named cause.
+        reason: AssistantReason,
+    },
     /// Unsupported coverage cannot imply an all-clear.
     Unknown(String),
 }

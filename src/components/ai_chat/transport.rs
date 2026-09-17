@@ -39,10 +39,28 @@ use ai_chat_core::{ChatError, ChatRequest, ChatSettings, ChatTransport, StreamEv
 /// Service URL builders for ai-chat-engine's HTTP/SSE routes. `base` is the
 /// service origin (no trailing slash), e.g. `http://127.0.0.1:7317`.
 pub mod paths {
+    /// `GET` — the PRE-SESSION backend list: a `Vec<Capabilities>`, one per
+    /// engine the service advertises.
+    ///
+    /// The only route that answers before a session exists, and therefore
+    /// the only way a picker can be populated without opening one. Distinct
+    /// from [`session_capabilities`], which describes the ONE backend an
+    /// already-open session is bound to.
+    pub fn backends(base: &str) -> String {
+        format!("{base}/backends")
+    }
     /// `POST` — open a session (`wire::OpenSessionRequest` →
     /// `wire::OpenSessionResponse`).
     pub fn open_session(base: &str) -> String {
         format!("{base}/session")
+    }
+    /// `DELETE` — close the session and release its worker.
+    ///
+    /// Same URL as [`session_snapshot`]; the METHOD is what distinguishes
+    /// them, which is why this is a separate builder rather than a comment
+    /// on that one.
+    pub fn session_close(base: &str, id: &str) -> String {
+        format!("{base}/session/{id}")
     }
     /// `POST` — send a turn (`wire::SendRequest`).
     pub fn session_send(base: &str, id: &str) -> String {
@@ -53,10 +71,20 @@ pub mod paths {
         format!("{base}/session/{id}/events")
     }
     /// `GET` — the session backend's `ai_chat_core::Capabilities` JSON.
+    ///
+    /// **Not served by editmark-server.** That host answers the pre-session
+    /// [`backends`] route instead; this is an engine-service path a
+    /// different host may implement. A client that needs one session's
+    /// capabilities from editmark-server reads [`backends`] and matches on
+    /// the backend id it opened with.
     pub fn session_capabilities(base: &str, id: &str) -> String {
         format!("{base}/session/{id}/capabilities")
     }
     /// `GET` — `wire::SessionSnapshot` (transcript + waiting flag).
+    ///
+    /// **Not served by editmark-server.** There the transcript is only ever
+    /// the stream: a client that missed events cannot re-read them, so it
+    /// keeps its own transcript rather than resynchronising from the host.
     pub fn session_snapshot(base: &str, id: &str) -> String {
         format!("{base}/session/{id}")
     }
@@ -69,6 +97,11 @@ pub mod paths {
         format!("{base}/session/{id}/restart")
     }
     /// `POST` — apply `ChatSettings`.
+    ///
+    /// **Not served by editmark-server.** That host applies settings only at
+    /// session open, so a client re-opens the session (via
+    /// [`session_close`] then [`open_session`]) and must tell the actor the
+    /// conversation was reset rather than let them discover it.
     pub fn session_configure(base: &str, id: &str) -> String {
         format!("{base}/session/{id}/configure")
     }
@@ -317,6 +350,39 @@ mod tests {
         assert_eq!(
             paths::session_capabilities("http://x", "s1"),
             "http://x/session/s1/capabilities"
+        );
+    }
+
+    /// The pre-session route: no session id, because nothing is open yet.
+    #[test]
+    fn backends_path_is_the_pre_session_route() {
+        // editmark-server mounts the chat API under `/api/chat`, so the
+        // base carries that prefix and the builder appends only the route.
+        assert_eq!(
+            paths::backends("http://127.0.0.1:8099/api/chat"),
+            "http://127.0.0.1:8099/api/chat/backends"
+        );
+        assert_eq!(paths::backends("http://x"), "http://x/backends");
+        // It really is session-free: no open session's id can appear in it.
+        assert!(!paths::backends("http://x").contains("/session"));
+    }
+
+    /// Closing targets the session itself — the same URL the snapshot reads,
+    /// distinguished only by the `DELETE` method.
+    #[test]
+    fn session_close_path_targets_the_session_id() {
+        assert_eq!(
+            paths::session_close("http://127.0.0.1:8099/api/chat", "s1"),
+            "http://127.0.0.1:8099/api/chat/session/s1"
+        );
+        assert_eq!(
+            paths::session_close("http://x", "s1"),
+            "http://x/session/s1"
+        );
+        assert_eq!(
+            paths::session_close("http://x", "s1"),
+            paths::session_snapshot("http://x", "s1"),
+            "same URL as the snapshot: the METHOD is the difference"
         );
     }
 

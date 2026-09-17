@@ -150,6 +150,34 @@ pub enum RefusalNextAction {
     NewConversation,
 }
 
+impl RefusalNextAction {
+    /// The stable wire string this action round-trips to.
+    ///
+    /// A DOM hook or a telemetry field must never be built from `{:?}`
+    /// Debug formatting: `Debug` names a Rust variant and is free to change
+    /// with a rename, while this string is a contract. Same idiom as
+    /// `crate::patterns::ai_chat_workspace::ReasoningEffort::as_str`.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::RetryLater => "retry_later",
+            Self::OpenSettings => "open_settings",
+            Self::NewConversation => "new_conversation",
+        }
+    }
+
+    /// Parses a wire string produced by [`Self::as_str`]; anything else is
+    /// `None` rather than a guessed action, because guiding an actor to the
+    /// wrong next step is worse than guiding them nowhere.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "retry_later" => Some(Self::RetryLater),
+            "open_settings" => Some(Self::OpenSettings),
+            "new_conversation" => Some(Self::NewConversation),
+            _ => None,
+        }
+    }
+}
+
 impl RefusalReason {
     /// Returns distinct guidance; unknown refusals deliberately have none.
     pub fn next_action(&self) -> Option<RefusalNextAction> {

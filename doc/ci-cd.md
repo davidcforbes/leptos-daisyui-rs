@@ -267,6 +267,16 @@ wide/mobile zero-ceiling visual audits. These remain in the same lane.
 The supplementary HelpHint lane (`test-help-hint`, ldui-q25n) shares that
 catalog host and covers disclosure semantics, pointer/keyboard/trusted-touch
 interaction, independent instances, Escape isolation and listener cleanup.
+The AI chat workspace has two lanes on that same catalog host. `test-ai-chat`
+(ldui-iilm) drives the showcase document over the seeded in-memory fixture:
+engine selection, the settings rows each provider actually supports, turn
+lifecycle and terminal outcomes, the truncated and cancel-with-partial cases,
+and the transcript's role hooks. `test-ai-chat-knowledge` drives the knowledge
+fixture: corpus scope and query mode, ingest phases, the grounded and
+not-found postures with their citations, recall ranking and receipts, and the
+guardrail refusals. Its fixture documents are held away from live mode by a
+unit sweep — a lane-driven source that so much as names the live module fails,
+because a browser lane must never be one button-press from a real server.
 That catalog server is the real `wasm32-unknown-unknown` release build, so a
 second standalone `trunk build --release` would only repeat the same pipeline
 and is intentionally absent. It is a **separate task**, not part of the
@@ -513,6 +523,16 @@ containment is skipped rather than reported — that is nesting, not collision.
 
 `cargo xtask test-layout` runs it, and it is a step of `verify-full`.
 
+`/components/ai-chat` and `/components/ai-chat-es` joined `PAGES` under
+ldui-iilm.11 with **every ratcheted family committed at zero**. That is not a
+claim the pages are clean: a ceiling is MEASURED, and a plausible-looking
+number written before the lane ever ran would absorb whatever the first sweep
+finds, which is the one thing a ratchet exists to prevent. The measurement
+pass replaces each zero with the real count and the justification it needs.
+The ES route is a page in its own right, not a rendering of the EN one —
+localized copy changes line counts, and that is where a layout regression
+hides.
+
 Its profile must declare the showcase's intentional button shadows, just as
 `tests/style_audit_smoke.rs` does. The engine collects all enabled families
 even when this suite asserts only layout. Omitting those declarations can
@@ -582,6 +602,11 @@ Two things the suite asserts beyond the ceilings:
 
 `report_style_backlog` is the reporting-only pass the committed ceilings are
 filled from; run it explicitly after a deliberate change.
+
+The two AI chat workspace routes are listed here with the same zeros and for
+the same reason as in `test-layout`, and their GRID/INTERNAL entries must be
+kept in step with that suite's ceilings for the same page once both are
+measured.
 
 The rulebook — what each family means, the defect patterns behind them, and how
 to fix rather than ratchet — is `doc/visual-quality/`.

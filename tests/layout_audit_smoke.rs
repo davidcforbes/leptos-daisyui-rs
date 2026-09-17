@@ -125,6 +125,16 @@ const PAGES: &[(&str, usize, usize)] = &[
     ("/components/search_picker_dialog", 0, 0),
     ("/components/day-scheduler", 0, 0),
     ("/components/helpdesk", 0, 0),
+    // ldui-iilm.11: the AI chat workspace's two locale routes, swept for the
+    // first time. EVERY ratcheted family is committed at ZERO on purpose.
+    // These ceilings are MEASURED, never guessed: a plausible-looking non-zero
+    // number written before the lane ever ran would silently absorb whatever
+    // the first sweep finds, which is exactly what a ratchet exists to stop.
+    // The measurement step runs the lane and replaces each zero with the real
+    // count plus the justification that count needs. A zero that turns out to
+    // be right stays a zero.
+    ("/components/ai-chat", 0, 0),
+    ("/components/ai-chat-es", 0, 0),
 ];
 
 async fn audit_page(path: &str, max_grid: usize, max_internal: usize) {
@@ -195,6 +205,13 @@ audit_test!(section_heading_layout_is_clean, 10);
 audit_test!(search_picker_dialog_layout_is_clean, 11);
 audit_test!(day_scheduler_layout_is_clean, 12);
 audit_test!(helpdesk_layout_is_clean, 13);
+
+// ldui-iilm.11. Both halves, for both locale routes: a PAGES entry with no
+// invocation here is listed and never measured, and the ES route is a
+// separate page, not a rendering of the EN one -- localized copy changes line
+// counts, which is where a layout regression hides.
+audit_test!(ai_chat_layout_is_clean, 14);
+audit_test!(ai_chat_es_layout_is_clean, 15);
 
 /// Negative control: prove the sweep actually detects things.
 ///
