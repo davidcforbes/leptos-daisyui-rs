@@ -677,6 +677,45 @@ explicit check-before-do guard. If one is ever added, guard it with an
 idempotency check (per the guiding-principle doc) rather than building a
 checkpoint engine.
 
+## Disk: `target/` has no upper bound unless you give it one
+
+Cargo never garbage-collects `target/`. On 2026-09-19 this repo's had reached
+**200.77 GB** across 83,541 files, and none of it was stale — every artifact in
+`deps/` was under 14 days old, 67 GB of it written in the preceding two days.
+The shape of this repo is what drives it: a 120-component library, ~3500 tests
+and ~20 browser-suite binaries, each compiled for **two** targets (native and
+`wasm32-unknown-unknown`).
+
+Two settings now cap the growth, both chosen so the gate is unaffected:
+
+- **`[profile.dev] debug = "line-tables-only"`** (root `Cargo.toml`). `.o` was
+  103.78 GB and `.pdb` 16.57 GB of that total. Line tables keep file/line
+  numbers in panic backtraces — which is what a gate failure is actually read
+  from — and drop only the variable-level info a step debugger wants. Override
+  on the command line for a session that genuinely needs one.
+- **Wasm incremental off**, in three places so every route behaves the same:
+  `demo/.cargo/config.toml` (trunk runs cargo with `demo/` as its cwd, so a bare
+  `cd demo && trunk serve` reads it), `CARGO_INCREMENTAL=0` on xtask's trunk
+  child, and the same on the `clippy-lib-wasm` step. That one cache was
+  35.75 GB, for rebuilds Trunk's `../src` watch invalidates wholesale anyway.
+
+**`cargo xtask clean-cache`** reclaims the regenerable caches — both
+`incremental/` dirs, `target/doc`, `target/rust-analyzer` — and reports what it
+freed. It deliberately leaves `deps/` alone, so the dependency graph stays warm
+and the next build is not cold; a test asserts no path containing `deps` can be
+added to its list. Use `cargo clean` when the disk matters more than the
+rebuild.
+
+⚠️ **Do not delete inside `target/` while rust-analyzer or a build is live.**
+Windows puts a deleted-but-still-open directory into *delete pending*: the name
+survives, every create under it fails, and cargo reports it as
+`could not execute process rustc … (never executed) / The directory name is
+invalid. (os error 267)`. A cold `verify` immediately after such a cleanup
+failed 7/20 steps that way — 22 spawn failures, zero real errors — and the
+identical run on a settled tree was 20/20. The tell is that the failures land on
+*third-party* crates and carry no lint, type or assertion output. Re-run rather
+than investigate, exactly as with the stylesheet-stamp guard.
+
 ## Why no hosted CI
 
 Per the org mandate, CI/CD is local-only: the siblings this repo path-depends on

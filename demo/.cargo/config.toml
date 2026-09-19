@@ -1,0 +1,14 @@
+# Trunk invokes cargo with this directory as its cwd, so this file governs the
+# demo's wasm32 builds (and only those -- xtask's own native `clippy-demo` runs
+# from the repo root and does not read it).
+#
+# Incremental compilation is disabled here because the wasm incremental cache is
+# pure bulk with little payoff: on 2026-09-19 it held 35.75 GB, while the wasm
+# builds that matter are the browser lanes' full release-ish rebuilds, which
+# discard incremental state anyway whenever `../src` changes -- and Trunk
+# watches `../src`, so almost every demo rebuild is triggered by exactly that.
+#
+# xtask sets CARGO_INCREMENTAL=0 on the trunk child for the same reason, so a
+# lane run and a bare `cd demo && trunk serve` behave identically.
+[build]
+incremental = false

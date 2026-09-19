@@ -130,3 +130,20 @@ ldui-audit = { path = "audit" }
 # journeys in tests/common/mod.rs. Version-matched to pixelproof-web's own
 # chromiumoxide so the Page/command types unify.
 chromiumoxide = { version = "0.7", default-features = false, features = ["tokio-runtime"] }
+
+# Build-artifact size control. Without these, `target/` reached 200 GB in under
+# two weeks (2026-09-19): cargo's defaults are full debug info plus incremental,
+# and this repo compiles a 120-component library, ~3500 tests and ~20 browser
+# suites against TWO targets (native + wasm32). Cargo never garbage-collects
+# `target/`, so the only limit is disk.
+#
+# `line-tables-only` keeps file/line numbers in panic backtraces -- what the
+# gate's failures are actually read from -- while dropping the variable-level
+# debug info that a step debugger would want. `.pdb`/`.o` volume was the single
+# largest contributor (103 GB of `.o`, 16 GB of `.pdb`). Use a full `debug = true`
+# override on the command line for a session that genuinely needs a debugger.
+#
+# See `cargo xtask clean-cache`, which reclaims the regenerable caches without
+# forcing a cold rebuild of third-party deps.
+[profile.dev]
+debug = "line-tables-only"

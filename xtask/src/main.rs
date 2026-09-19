@@ -149,7 +149,7 @@ fn gate_steps() -> Vec<Step> {
         // `theme_export_import` and `color_customizer` until 4iiz-Office --
         // whose lint stage targets wasm -- would have hit them first (2026-09-15).
         // `--lib` because only the library compiles to wasm.
-        cmd(
+        cmd_env(
             "clippy-lib-wasm",
             "cargo",
             &[
@@ -166,6 +166,10 @@ fn gate_steps() -> Vec<Step> {
                 "warnings",
             ],
             None,
+            // The only other wasm32 producer in the gate; see the trunk child
+            // and `demo/.cargo/config.toml` for why the wasm incremental cache
+            // is not worth its disk.
+            &[("CARGO_INCREMENTAL", "0")],
         ),
         cmd(
             "clippy-demo",
@@ -1354,6 +1358,12 @@ impl DemoServer {
             // ambient setting and express the intent through Trunk's stable
             // color enum instead.
             .env_remove("NO_COLOR")
+            // The wasm incremental cache is pure bulk: 35.75 GB on 2026-09-19,
+            // for rebuilds that Trunk's own `../src` watch invalidates wholesale
+            // anyway. `demo/.cargo/config.toml` sets the same thing for a bare
+            // `cd demo && trunk serve`; this keeps a lane run identical to it,
+            // since cargo prefers the environment over that file.
+            .env("CARGO_INCREMENTAL", "0")
             .args(trunk_serve_args(port, html_target))
             .current_dir("demo")
             // Trunk reports asset-pipeline failures on stdout and keeps its
@@ -2340,6 +2350,90 @@ fn check_sibling_tokens_inner() -> Guard {
     }
 }
 
+/// Regenerable caches under `target/`, in the order `clean-cache` drops them.
+///
+/// Every entry is a *cache*: cargo, rustdoc or rust-analyzer rebuilds it on
+/// demand. Nothing here is a build output another step consumes, which is why
+/// `deps/` is deliberately absent — dropping that is a cold rebuild of every
+/// third-party crate, and is what `cargo clean` is for.
+const CACHE_DIRS: &[(&str, &str)] = &[
+    ("target/debug/incremental", "native incremental cache"),
+    (
+        "target/wasm32-unknown-unknown/debug/incremental",
+        "wasm incremental cache",
+    ),
+    ("target/rust-analyzer", "rust-analyzer's own target dir"),
+    ("target/doc", "generated rustdoc output"),
+];
+
+/// Total size of `path`'s contents, following no symlinks. Returns 0 for a
+/// path that does not exist, so a partially-clean tree is not an error.
+fn dir_size(path: &Path) -> u64 {
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .map(|e| match e.file_type() {
+            Ok(t) if t.is_dir() => dir_size(&e.path()),
+            Ok(t) if t.is_file() => e.metadata().map(|m| m.len()).unwrap_or(0),
+            _ => 0,
+        })
+        .sum()
+}
+
+fn gib(bytes: u64) -> f64 {
+    bytes as f64 / (1024.0 * 1024.0 * 1024.0)
+}
+
+/// Reclaim the regenerable caches under `target/` without forcing a cold
+/// rebuild of third-party dependencies.
+///
+/// Cargo never garbage-collects `target/`; on 2026-09-19 this repo's had
+/// reached 200.77 GB, of which 97.26 GB was incremental cache alone. The cost
+/// of running this is that the next build recompiles the workspace crates
+/// non-incrementally — `deps/` is untouched, so the dependency graph stays
+/// warm. Run `cargo clean` instead when the disk matters more than the rebuild.
+fn clean_cache() -> ExitCode {
+    let mut freed = 0u64;
+    let mut failed = 0u32;
+
+    for (rel, what) in CACHE_DIRS {
+        let path = Path::new(rel);
+        if !path.exists() {
+            println!("xtask clean-cache:   absent  {rel} ({what})");
+            continue;
+        }
+        let size = dir_size(path);
+        match std::fs::remove_dir_all(path) {
+            Ok(()) => {
+                freed += size;
+                println!(
+                    "xtask clean-cache:   removed {rel} — {:.2} GiB ({what})",
+                    gib(size)
+                );
+            }
+            Err(e) => {
+                failed += 1;
+                eprintln!(
+                    "xtask clean-cache:   FAILED  {rel} — {e} (a build or editor may hold it open)"
+                );
+            }
+        }
+    }
+
+    let remaining = dir_size(Path::new("target"));
+    println!(
+        "xtask clean-cache: freed {:.2} GiB; target/ is now {:.2} GiB",
+        gib(freed),
+        gib(remaining)
+    );
+    if failed > 0 {
+        eprintln!("xtask clean-cache: {failed} director(ies) could not be removed");
+    }
+    ExitCode::from(u8::try_from(failed).unwrap_or(u8::MAX))
+}
+
 fn check_sibling_tokens() -> ExitCode {
     match check_sibling_tokens_inner() {
         Guard::Skipped(why) => {
@@ -2539,6 +2633,7 @@ fn main() -> ExitCode {
             gen_tokens(check)
         }
         "check-sibling-tokens" => check_sibling_tokens(),
+        "clean-cache" => clean_cache(),
         "bump" => {
             let level = std::env::args().nth(2).unwrap_or_default();
             let dry = std::env::args().any(|a| a == "--dry-run");
@@ -2547,7 +2642,7 @@ fn main() -> ExitCode {
         other => {
             eprintln!("xtask: unknown subcommand {other:?}");
             eprintln!(
-                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-selectable-summary|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-snapshot-table-page-filter-actions|test-helpdesk|test-ai-chat|test-ai-chat-knowledge|test-server-table-column-tools|test-collapse-naming|test-data-table-fit|test-app-shell|test-field-context-scoping|test-entity-draft-row|test-softphone|test-help-hint|gen-tokens|check-sibling-tokens|bump>"
+                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-selectable-summary|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-snapshot-table-page-filter-actions|test-helpdesk|test-ai-chat|test-ai-chat-knowledge|test-server-table-column-tools|test-collapse-naming|test-data-table-fit|test-app-shell|test-field-context-scoping|test-entity-draft-row|test-softphone|test-help-hint|gen-tokens|check-sibling-tokens|clean-cache|bump>"
             );
             ExitCode::from(2)
         }
@@ -2557,6 +2652,33 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clean_cache_only_ever_drops_regenerable_caches() {
+        for (rel, _) in CACHE_DIRS {
+            assert!(
+                rel.starts_with("target/"),
+                "{rel} is outside target/ — clean-cache must never touch source or tooling state"
+            );
+            // `deps/` holds the compiled third-party graph. Dropping it is a
+            // cold rebuild, which is `cargo clean`'s job, not this lane's —
+            // the whole point of clean-cache is reclaiming disk while staying
+            // warm. Adding it here would silently turn a cheap command into a
+            // very expensive one.
+            assert!(
+                !rel.contains("deps"),
+                "{rel} would force a cold dependency rebuild; use cargo clean for that"
+            );
+        }
+    }
+
+    #[test]
+    fn dir_size_of_a_missing_path_is_zero_not_an_error() {
+        // clean-cache runs against a partially-clean tree constantly (a fresh
+        // checkout has no target/doc). A missing path must read as empty, or
+        // every second run reports a spurious failure.
+        assert_eq!(dir_size(Path::new("target/definitely-not-a-real-dir")), 0);
+    }
 
     #[test]
     fn summarize_all_pass_is_zero() {
