@@ -1,5 +1,4 @@
 /target
-.vercel
 
 # Ephemeral review/staging outputs (committed baselines live in
 # tests/visual/baselines; tests/vendor holds the reviewed vendor copies)

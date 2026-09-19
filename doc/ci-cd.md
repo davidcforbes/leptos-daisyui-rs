@@ -684,3 +684,17 @@ already sit alongside it under `C:\dev`, so a hosted runner would have to
 check out seven sibling repos via PATs to reproduce what a local `cargo xtask
 verify` does for free. The local runner is the source of truth; the optional
 pre-push hook is the only automation surface, and it is advisory.
+
+**`.github/` is deliberately empty and must stay that way.** The fork carried
+two workflows inherited from upstream until 2026-09-19: `rust.yml` (a `cargo
+clippy`/`cargo test` job that could never resolve this repo's eight sibling
+path-deps) and `depoly.yml`, a push-to-`main` job that built the demo and
+deployed it to **upstream's Vercel project** with `VERCEL_TOKEN`/`VERCEL_ORG_ID`
+/`VERCEL_PROJECT_ID` secrets this fork never held. Neither had ever run — the
+fork's Actions gate was never enabled, which is the only reason a push to `main`
+never attempted a third-party deploy. Both files were deleted along with
+`demo/vercel.json` and its `copy-file` link in `demo/index.html`. Vercel was
+never an authorized deployment target for this repo: it builds for local use
+only. Do not re-add hosted CI or any hosting-provider config when merging from
+upstream (see `UPSTREAM_CONTRIBUTIONS.md`, which already lists upstream's
+CI/deploy commits as deliberately skipped).
