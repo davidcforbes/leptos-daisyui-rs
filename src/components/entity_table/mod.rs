@@ -11,6 +11,8 @@ mod identity;
 mod model;
 mod multi_selection;
 mod paging;
+mod saved_filters;
+mod saved_filters_bar;
 mod selection;
 mod storage;
 mod types;
@@ -52,6 +54,7 @@ pub use multi_selection::{
     propose_entity_row_toggle,
 };
 pub use paging::EntityPagePlan;
+pub use saved_filters::{EntitySavedFilter, EntitySavedFilterTexts, EntitySavedFilters};
 pub use selection::EntityTableSelection;
 pub use storage::{decode_preferences, encode_preferences};
 pub use types::{

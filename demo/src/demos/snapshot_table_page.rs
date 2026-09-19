@@ -1,15 +1,16 @@
 use leptos::prelude::*;
 use leptos_daisyui_rs::components::{
-    BadgeColor, Button, EntityBadgePresentation, EntityCellEditor, EntityColumn,
-    EntityColumnChooserTrigger, EntityColumnFilter, EntityColumnFilterOption, EntityDate,
-    EntityDateFilter, EntityDateFilterProposal, EntityDraftCommit, EntityDraftRow,
-    EntityEditOutcome, EntityFocusRequest, EntityFocusRequestResolution,
-    EntityGroupCollapseProposal, EntityIconColor, EntityIconPresentation, EntityNullOrder,
-    EntityPageSize, EntityRowAction, EntityRowEmphasis, EntityRowGroup, EntityRowGrouping,
-    EntityTable, EntityTableDisplayProjection, EntityTableMultiSelection,
-    EntityTablePreferenceOwnership, EntityTablePreferencePersistence, EntityTablePreferences,
-    EntityTableProjectionScope, EntityTableSelection, EntityTableSelectionCause,
-    EntityTableSelectionProposal, EntityTableTexts, EntityTableViewportFit,
+    BadgeColor, Button, EntityAutoFilterTexts, EntityAutoFilters, EntityBadgePresentation,
+    EntityCellEditor, EntityColumn, EntityColumnChooserTrigger, EntityColumnFilter,
+    EntityColumnFilterOption, EntityDate, EntityDateFilter, EntityDateFilterProposal,
+    EntityDraftCommit, EntityDraftRow, EntityEditOutcome, EntityFocusRequest,
+    EntityFocusRequestResolution, EntityGroupCollapseProposal, EntityIconColor,
+    EntityIconPresentation, EntityNullOrder, EntityPageSize, EntityRowAction, EntityRowEmphasis,
+    EntityRowGroup, EntityRowGrouping, EntitySavedFilter, EntitySavedFilters, EntityTable,
+    EntityTableDisplayProjection, EntityTableMultiSelection, EntityTablePreferenceOwnership,
+    EntityTablePreferencePersistence, EntityTablePreferences, EntityTableProjectionScope,
+    EntityTableSelection, EntityTableSelectionCause, EntityTableSelectionProposal,
+    EntityTableTexts, EntityTableViewportFit,
 };
 use leptos_daisyui_rs::patterns::{
     ActionFeedbackContent, ActionFeedbackState, ActiveFilterChip, FilterBarTexts, FilterSchema,
@@ -79,6 +80,16 @@ fn columns() -> Vec<EntityColumn<FixtureRow>> {
         EntityColumn::text("status", "Status", |row: &FixtureRow| row.status.clone())
             .with_min_width(120),
     ]
+}
+
+/// `columns()` with the framework filter declarations the saved-filters
+/// fixture drives -- `client` is a text column, `status` a badge one, and
+/// `EntityAutoFilters` builds both controls from the declarations.
+fn filterable_columns() -> Vec<EntityColumn<FixtureRow>> {
+    columns()
+        .into_iter()
+        .map(|column| column.filterable())
+        .collect()
 }
 
 /// Small real-WASM fixture for the typed snapshot composition contract.
@@ -1713,6 +1724,78 @@ pub fn EntityTablePageSizeIdentityFixture() -> impl IntoView {
                     page_size_control_id="page-size-identity-explicit-override"
                 />
             </div>
+        </section>
+    }
+}
+
+/// Browser fixture for the controlled saved-filters bar: the badge list is a
+/// consumer-owned signal, so the test drives save/apply/delete through the
+/// proposals alone. Filter state is proven by the actual row count the table
+/// renders (not a debug field), and the active badge by `data-…-active`,
+/// whose value is compared from the bar's own accepted `current_values`.
+#[component]
+pub fn EntityTableSavedFiltersFixture() -> impl IntoView {
+    let data = RwSignal::new_local(rows("office-mx"));
+    // `StoredValue` because `EntityAutoFilters` is not `Send + Sync` (it holds
+    // `Rc`s) and every callback below must be: the handle is `Copy + Send`.
+    let auto = StoredValue::new_local(EntityAutoFilters::new(
+        &filterable_columns(),
+        data.into(),
+        "saved-filters-fixture",
+        EntityAutoFilterTexts::default(),
+    ));
+    let saved: RwSignal<Vec<EntitySavedFilter>, LocalStorage> = RwSignal::new_local(Vec::new());
+    // Exposed so the test can verify the badge row renders the CONSUMER-OWNED
+    // list, not anything the table cached.
+    let proposal_log: RwSignal<Vec<String>, LocalStorage> = RwSignal::new_local(Vec::new());
+
+    let on_save = Callback::new(move |(name, values): (String, Vec<(String, String)>)| {
+        proposal_log.update(|log| log.push(format!("save:{name}")));
+        saved.update(|list| {
+            list.retain(|filter| filter.name != name);
+            list.push(EntitySavedFilter { name, values });
+        });
+    });
+    let on_delete = Callback::new(move |name: String| {
+        proposal_log.update(|log| log.push(format!("delete:{name}")));
+        saved.update(|list| list.retain(|filter| filter.name != name));
+    });
+    let on_apply = Callback::new(move |filter: EntitySavedFilter| {
+        proposal_log.update(|log| log.push(format!("apply:{}", filter.name)));
+        auto.with_value(|auto| {
+            auto.clear_all();
+            for (column_id, value) in &filter.values {
+                if let Some(signal) = auto.value(column_id) {
+                    signal.set(value.clone());
+                }
+            }
+        });
+    });
+
+    let current = Signal::derive_local(move || auto.with_value(|auto| auto.current_values()));
+    let saved_filters =
+        EntitySavedFilters::new(saved.into(), current, on_save, on_delete, on_apply);
+
+    view! {
+        <section
+            id="entity-table-saved-filters-fixture"
+            class="mx-auto max-w-3xl space-y-6 bg-base-100 p-4"
+        >
+            <h1 class="ld-text-display font-semibold">"Saved filters"</h1>
+            <div data-testid="saved-filters-table">
+                <EntityTable
+                    data=auto.with_value(|auto| auto.rows())
+                    source_data=Signal::derive_local(move || data.get())
+                    columns=filterable_columns()
+                    column_filters=auto.with_value(|auto| auto.filters())
+                    row_key=Rc::new(|row: &FixtureRow| row.id.clone())
+                    dataset_identity="saved-filters"
+                    saved_filters=saved_filters
+                />
+            </div>
+            <output data-testid="saved-filters-proposal-log">
+                {move || proposal_log.get().join(",")}
+            </output>
         </section>
     }
 }

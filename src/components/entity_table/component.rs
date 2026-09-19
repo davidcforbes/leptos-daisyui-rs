@@ -40,6 +40,8 @@ use super::multi_selection::{
     propose_entity_row_toggle, resolve_entity_selection_mode,
 };
 use super::paging::{EntityPagePlan, entity_displayed_run_lengths};
+use super::saved_filters::EntitySavedFilters;
+use super::saved_filters_bar::saved_filters_bar;
 use super::selection::{
     EntityTableSelection, entity_row_aria_selected, entity_row_hover_class, entity_row_is_selected,
     entity_selection_proposal,
@@ -990,6 +992,12 @@ pub fn EntityTable<T>(
     /// The table owns placement and wrapping; the caller owns all behavior.
     #[prop(optional)]
     toolbar_actions: Option<Children>,
+    /// Optional controlled saved-filters bar (`ldui` opinionated filter row):
+    /// a left-justified **Save Filter** button plus one badge per consumer-owned
+    /// saved filter set, rendered inside the toolbar. Every save/delete/apply
+    /// is a proposal the consumer decides; `None` renders no bar.
+    #[prop(optional)]
+    saved_filters: Option<EntitySavedFilters>,
     /// Emits an atomic read-only projection whenever displayed rows, columns,
     /// ordering, paging, or canonical text change. Callers own storage, export
     /// encoding, authorization, and download behavior.
@@ -1306,6 +1314,12 @@ where
     let minted_control_id = next_entity_control_id();
     let table_control_id: Signal<String> =
         Signal::derive(move || resolve_entity_control_id(control_id.get(), &minted_control_id));
+    // Stable per-instance id prefix for the saved-filters bar and its dialog
+    // (`labelled_by` target, dialog field ids), minted with the same counter
+    // so two tables on one page never collide.
+    let saved_filters_bar_id = saved_filters
+        .as_ref()
+        .map(|_| format!("{}-saved-filters", next_entity_control_id()));
     let page_size_select_id: Signal<Option<String>> = Signal::derive(move || {
         Some(page_size_control_id.get().unwrap_or_else(|| {
             // A table that supplies neither prop keeps the exact id it has
@@ -2235,6 +2249,12 @@ where
                 inert=move || edit_locked.get()
                 aria-disabled=move || edit_locked.get().then_some("true")
             >
+                {saved_filters
+                    .map(|model| {
+                        let bar_id = saved_filters_bar_id
+                            .expect("a saved-filters bar always gets a minted id");
+                        saved_filters_bar(model, bar_id)
+                    })}
                 {toolbar_actions.map(|render_actions| view! {
                     <div class="contents" data-entity-toolbar-actions="true">
                         {render_actions()}

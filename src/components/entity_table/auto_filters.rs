@@ -297,6 +297,19 @@ impl<T: Clone + 'static> EntityAutoFilters<T> {
             value.set(String::new());
         }
     }
+
+    /// The current captured values as `(column_id, value)` pairs, one per
+    /// framework-built filter -- the shape
+    /// [`EntitySavedFilter::values`](super::EntitySavedFilter::values)
+    /// stores and applies. Empty values are included so a save reflects the
+    /// full filter state; consumers comparing to a saved set use the same
+    /// ordering this returns (declaration order).
+    pub fn current_values(&self) -> Vec<(String, String)> {
+        self.values
+            .iter()
+            .map(|(column_id, value)| ((*column_id).to_owned(), value.get()))
+            .collect()
+    }
 }
 
 impl<T: 'static> std::fmt::Debug for EntityAutoFilters<T> {
@@ -512,6 +525,83 @@ mod tests {
                 auto.rows().get().len(),
                 2,
                 "substring: 9 matches 19 as well"
+            );
+        });
+    }
+
+    #[test]
+    fn current_values_captures_every_column_in_declaration_order() {
+        let owner = Owner::new();
+        owner.with(|| {
+            let data = RwSignal::new_local(Rc::new(surveys()));
+            let columns = columns();
+            let auto = EntityAutoFilters::new(
+                &columns,
+                data.into(),
+                "nps",
+                EntityAutoFilterTexts::default(),
+            );
+
+            // Initially every value is empty, in declaration order.
+            assert_eq!(
+                auto.current_values(),
+                vec![
+                    ("client".to_owned(), String::new()),
+                    ("status".to_owned(), String::new()),
+                    ("score".to_owned(), String::new()),
+                ]
+            );
+
+            auto.value("status")
+                .expect("status filter")
+                .set("Open".to_owned());
+            auto.value("client")
+                .expect("client filter")
+                .set("acme".to_owned());
+            assert_eq!(
+                auto.current_values(),
+                vec![
+                    ("client".to_owned(), "acme".to_owned()),
+                    ("status".to_owned(), "Open".to_owned()),
+                    ("score".to_owned(), String::new()),
+                ],
+                "the shape saved filters store and badges compare,"
+            );
+
+            auto.clear_all();
+            assert!(auto.current_values().iter().all(|(_, v)| v.is_empty()));
+        });
+    }
+
+    #[test]
+    fn rows_react_to_an_external_set_through_a_stored_value_handle() {
+        // The controlled filter signal is settable from OUTSIDE the component
+        // (a saved-filters apply, a deep link) -- this is the shape the saved-
+        // filters fixture uses, with the `EntityAutoFilters` held in a
+        // `StoredValue` and its rows signal handed off once at build time.
+        let owner = Owner::new();
+        owner.with(|| {
+            let data = RwSignal::new_local(Rc::new(surveys()));
+            let auto = StoredValue::new_local(EntityAutoFilters::new(
+                &columns(),
+                data.into(),
+                "nps",
+                EntityAutoFilterTexts::default(),
+            ));
+            // Handed off once, like `data=auto.with_value(|a| a.rows())`.
+            let rows_signal = auto.with_value(|a| a.rows());
+            assert_eq!(rows_signal.get().len(), 3);
+
+            // The exact apply path: clear, then set just the named columns.
+            auto.with_value(|a| {
+                a.value("status")
+                    .expect("status filter")
+                    .set("Closed".to_owned())
+            });
+            assert_eq!(
+                rows_signal.get().len(),
+                1,
+                "a set from outside must narrow the derived rows"
             );
         });
     }

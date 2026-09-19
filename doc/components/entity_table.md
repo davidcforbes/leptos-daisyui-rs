@@ -546,6 +546,79 @@ Keep global search and controls that do not map to one column in the utility
 there; it does not duplicate column controls above the table. See
 [`client-snapshot-list.md`](../patterns/client-snapshot-list.md).
 
+## Saved filters
+
+The opinionated filter row pairs with an optional **saved filters** bar in the
+table toolbar. Pass `saved_filters=Some(EntitySavedFilters …)` and the table
+renders a left-justified **Save Filter** button plus one badge per saved set
+ahead of the caller's `toolbar_actions` and the column chooser. Clicking **Save
+Filter** opens a framework-owned dialog that names the CURRENT filter values;
+each saved name becomes a badge; clicking a badge proposes applying its values
+to the filter row, and a small `x` on the badge proposes deleting it. `None`
+renders no bar and no dialog.
+
+Every action is a **proposal**, like every other controlled `EntityTable`
+input. The consumer owns the saved list (`EntitySavedFilters::filters`), the
+live values the bar compares against (`EntitySavedFilters::current_values`,
+ordinarily derived from the page's `EntityAutoFilters::current_values`), and
+all three decisions:
+
+| Callback | Proposal | Consumer's acceptance |
+|---|---|---|
+| `on_save(name, values)` | Save the current values under `name`. | Rewrite `filters` with the new entry; reject duplicates by name. |
+| `on_delete(name)` | Delete the saved set named `name`. | Rewrite `filters` without it. |
+| `on_apply(filter)` | Apply this saved set to the filter row. | `EntityAutoFilters::clear_all()`, then set each `auto.value(column_id)` from `filter.values`. |
+
+The crate owns no storage. A page that wants persistence — for example the
+Office record-list pages saving per-user filter sets to Postgres — performs the
+write inside these callbacks, through its own server boundary, and the badge
+row reflects only what the consumer's signal reports. A rejected or
+still-pending write therefore leaves zero drift between the toolbar and the
+store.
+
+`EntitySavedFilter` carries the `name` and the captured
+`(column_id, value)` pairs in declaration order. Only the typed framework
+filters participate: a custom `EntityColumnFilter::new` renderer has no value
+signal to capture. The bar marks one badge active when its captured values
+exactly equal `current_values` (`EntitySavedFilters::active_name`), so the
+badge that produced the current row state is visibly distinct. Copy is
+consumer-localized through `EntitySavedFilterTexts` (`save_button`,
+`dialog_title`, `name_label`, `apply_filter`/`remove_filter` templates with a
+`{name}` placeholder, and the rest).
+
+```rust,no_run
+let saved = RwSignal::new_local(Vec::<EntitySavedFilter>::new());
+view! {
+    <EntityTable
+        // ...
+        column_filters=auto.filters()
+        data=auto.rows()
+        saved_filters=EntitySavedFilters::new(
+            saved.into(),
+            Signal::derive_local(move || auto.current_values()),
+            Callback::new(move |(name, values)| {
+                // persist, then accept:
+                saved.update(|list| list.push(EntitySavedFilter { name, values }));
+            }),
+            Callback::new(move |name| {
+                saved.update(|list| list.retain(|f| f.name != name));
+            }),
+            Callback::new(move |filter: EntitySavedFilter| {
+                auto.clear_all();
+                for (column_id, value) in &filter.values {
+                    if let Some(signal) = auto.value(column_id) {
+                        signal.set(value.clone());
+                    }
+                }
+            }),
+        )
+    />
+}
+```
+
+Add the dialog and badge classes to `input.css`:
+`@source inline("modal modal-backdrop modal-box modal-action badge badge-neutral badge-primary badge-md btn btn-sm btn-outline btn-ghost btn-xs btn-circle btn-primary input input-bordered");`
+
 ## Viewport-fit paging
 
 Fixed 25/50/100 paging remains the default. Opt in with

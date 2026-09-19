@@ -7815,3 +7815,174 @@ async fn compact_row_labels_clear_aa_contrast_on_a_narrow_viewport() {
     );
     assert_no_browser_errors(&harness, "compact row label contrast").await;
 }
+
+/// Browser proof for the controlled saved-filters bar: a **Save Filter**
+/// button names the current filter values in a dialog, the accepted set
+/// becomes a left-justified toolbar badge with a working `x`, clicking the
+/// badge re-applies its values to the filter row (proven by the rendered row
+/// count), and exactly one badge stays marked active -- the one whose saved
+/// values match the live filter row. The fixture's badge list is a
+/// consumer-owned signal, so the flow is end-to-end through the proposals.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
+async fn entity_table_saved_filters_bar_saves_applies_and_deletes() {
+    let harness = harness_at("/components/entity-table-saved-filters").await;
+    begin_browser_error_capture(&harness).await;
+    wait_for_selector(&harness, "[data-entity-saved-filters-bar]").await;
+
+    async fn snapshot(harness: &pixelproof_web::Harness) -> Value {
+        eval_json(
+            harness,
+            r#"(() => {
+                const table = document.querySelector('[data-testid="saved-filters-table"]');
+                const bar = table.querySelector('[data-entity-saved-filters-bar]');
+                const badges = Array.from(bar.querySelectorAll('[data-entity-saved-filter]'))
+                    .map(b => ({
+                        name: b.getAttribute('data-entity-saved-filter'),
+                        active: b.getAttribute('data-entity-saved-filter-active') === 'true',
+                    }));
+                // The rendered (filtered) row count is the observable proof
+                // of what the filter row currently holds. Row-keyed trs
+                // exclude the filter/empty header rows.
+                const rows = table.querySelectorAll('tbody tr[data-entity-row-key]').length;
+                const statusControl = table.querySelector('[data-entity-filter-control="status"]');
+                const clientControl = table.querySelector('[data-entity-filter-control="client"]');
+                return {
+                    badgeCount: badges.length,
+                    badges,
+                    rows,
+                    empty: bar.querySelector('[data-entity-saved-filters-empty]') !== null,
+                    statusValue: statusControl ? statusControl.value : null,
+                    statusPlacement: statusControl ? statusControl.getAttribute('data-entity-filter-placement') : null,
+                    clientValue: clientControl ? clientControl.value : null,
+                    leftAligned: bar.getBoundingClientRect().left <=
+                        table.querySelector('[data-entity-table-toolbar]').getBoundingClientRect().left + 4,
+                };
+            })()"#,
+        )
+        .await
+    }
+
+    // Initially: no saved filters, the empty hint shows, the bar is on the
+    // LEFT of the toolbar (before the caller actions / chooser), all 3 rows.
+    let initial = snapshot(&harness).await;
+    assert_eq!(initial["badgeCount"], json!(0), "starts empty: {initial}");
+    assert_eq!(
+        initial["empty"],
+        json!(true),
+        "empty hint renders: {initial}"
+    );
+    assert_eq!(initial["rows"], json!(3), "no filter: every row: {initial}");
+    assert!(
+        initial["leftAligned"].as_bool().unwrap_or(false),
+        "the bar is left-justified at the toolbar start: {initial}"
+    );
+
+    // The controlled value only changes after the control's own change event
+    // round-trips the proposal and the table re-renders its body. Wait on the
+    // OBSERVED state rather than sleeping a fixed beat, so a slow re-render
+    // cannot read a stale row count.
+    async fn wait_state(
+        harness: &pixelproof_web::Harness,
+        rows: i64,
+        status: Option<&str>,
+        badges: i64,
+    ) -> Value {
+        let mut last = snapshot(harness).await;
+        for _ in 0..40 {
+            let status_ok = match status {
+                Some(s) => last["statusValue"] == json!(s),
+                None => true,
+            };
+            if last["rows"] == json!(rows) && last["badgeCount"] == json!(badges) && status_ok {
+                return last;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            last = snapshot(harness).await;
+        }
+        panic!(
+            "saved-filter state never settled to rows={rows} status={status:?} badges={badges}: {last}"
+        );
+    }
+
+    // Set a filter value (status select -> "Urgent") through its own control.
+    // Dispatch both input and change so whichever the control listens to fires.
+    eval_json(
+        &harness,
+        r#"(() => {
+            const s = document.querySelector('[data-entity-filter-control="status"][data-entity-filter-placement="header"]');
+            s.value = 'Urgent';
+            s.dispatchEvent(new Event('input', { bubbles: true }));
+            s.dispatchEvent(new Event('change', { bubbles: true }));
+            return true;
+        })()"#,
+    )
+    .await;
+    let filtered = wait_state(&harness, 1, Some("Urgent"), 0).await;
+    assert_eq!(filtered["statusValue"], json!("Urgent"), "{filtered}");
+
+    // Save it under a name via the dialog.
+    click(&harness, "[data-entity-saved-filters-open]").await;
+    wait_for_selector(&harness, "[data-entity-saved-filters-name]").await;
+    let name_input = harness
+        .page()
+        .find_element("[data-entity-saved-filters-name]")
+        .await
+        .expect("saved-filter name input");
+    name_input.focus().await.expect("focus name input");
+    name_input.type_str("Urgent only").await.expect("type name");
+    click(&harness, "[data-entity-saved-filters-save]").await;
+    let saved = wait_state(&harness, 1, Some("Urgent"), 1).await;
+    assert_eq!(saved["badges"][0]["name"], json!("Urgent only"), "{saved}");
+    assert_eq!(
+        saved["badges"][0]["active"],
+        json!(true),
+        "the just-saved set matches the live filter row: {saved}"
+    );
+
+    // Clear the filter (select back to All = empty value) so the badge goes
+    // inactive. Same input+change dispatch as the set step, and the header
+    // placement selector so a responsive copy cannot absorb the gesture.
+    eval_json(
+        &harness,
+        r#"(() => {
+            const s = document.querySelector('[data-entity-filter-control="status"][data-entity-filter-placement="header"]');
+            s.value = '';
+            s.dispatchEvent(new Event('input', { bubbles: true }));
+            s.dispatchEvent(new Event('change', { bubbles: true }));
+            return true;
+        })()"#,
+    )
+    .await;
+    let cleared = wait_state(&harness, 3, Some(""), 1).await;
+    assert_eq!(
+        cleared["badges"][0]["active"],
+        json!(false),
+        "cleared row state no longer matches the saved set: {cleared}"
+    );
+
+    // Clicking the badge re-APPLIES the saved values to the filter row.
+    click(&harness, "[data-entity-saved-filter-apply='Urgent only']").await;
+    let applied = wait_state(&harness, 1, Some("Urgent"), 1).await;
+    assert_eq!(
+        applied["badges"][0]["active"],
+        json!(true),
+        "the applied badge becomes active again: {applied}"
+    );
+    assert_eq!(
+        applied["statusValue"],
+        json!("Urgent"),
+        "badge click fills the filter row: {applied}"
+    );
+
+    // The badge's small `x` deletes it; the list returns to empty.
+    click(&harness, "[data-entity-saved-filter-remove='Urgent only']").await;
+    let deleted = wait_state(&harness, 1, Some("Urgent"), 0).await;
+    assert_eq!(
+        deleted["empty"],
+        json!(true),
+        "empty hint returns: {deleted}"
+    );
+
+    assert_no_browser_errors(&harness, "EntityTable saved filters bar").await;
+}

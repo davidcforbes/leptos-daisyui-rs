@@ -77,6 +77,15 @@ and commit payload. Scope action selectors to the active wide/compact layout;
 both variants can exist in the DOM, and a broad selector can hit a hidden Save.
 For fill-parent tables, assert the slot reaches the page bottom and keeps its
 height and Auto capacity through filtering to one row and restoring all rows.
+The `EntityTable` saved-filters bar is controlled: `saved_filters=Some(...)`
+renders a left-justified Save Filter button plus badges in the toolbar, and
+every save/delete/apply is a proposal the consumer answers (persist there, then
+rewrite `filters`). Read `doc/components/entity_table.md#saved-filters`; the
+fixture is `EntityTableSavedFiltersFixture` and its release lane is
+`cargo xtask test-client-snapshot`. Saved-set identity and badge activeness key
+on declaration-order `(column_id, value)` pairs from
+`EntityAutoFilters::current_values`; applying a set clears then sets only the
+columns it names.
 
 For server-owned offset pages, use `ServerEntityTable` and read
 `doc/components/data_table.md#serverentitytable`; its focused release lane is

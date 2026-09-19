@@ -29,8 +29,9 @@ use snapshot_table_page::{
     EntityTableDraftRowFixture, EntityTableEmphasisFixture, EntityTableExternalFocusFixture,
     EntityTableGroupPagingFixture, EntityTableGroupingFixture, EntityTableMultiSelectionFixture,
     EntityTablePageSizeIdentityFixture, EntityTablePresentationFixture,
-    EntityTableSelectionFixture, EntityTableViewportFitFixture, SnapshotTablePageControlsFixture,
-    SnapshotTablePageFilterActionsFixture, SnapshotTablePageFixture,
+    EntityTableSavedFiltersFixture, EntityTableSelectionFixture, EntityTableViewportFitFixture,
+    SnapshotTablePageControlsFixture, SnapshotTablePageFilterActionsFixture,
+    SnapshotTablePageFixture,
 };
 
 fn main() {
@@ -76,6 +77,9 @@ fn main() {
         let selection_fixture = web_sys::window()
             .and_then(|window| window.location().pathname().ok())
             .is_some_and(|path| path.ends_with("/entity-table-selection"));
+        let saved_filters_fixture = web_sys::window()
+            .and_then(|window| window.location().pathname().ok())
+            .is_some_and(|path| path.ends_with("/entity-table-saved-filters"));
         let multi_selection_fixture = web_sys::window()
             .and_then(|window| window.location().pathname().ok())
             .is_some_and(|path| path.ends_with("/entity-table-multi-selection"));
@@ -290,6 +294,8 @@ fn main() {
                     view! { <EntityTableEmphasisFixture /> }.into_any()
                 } else if selection_fixture {
                     view! { <EntityTableSelectionFixture /> }.into_any()
+                } else if saved_filters_fixture {
+                    view! { <EntityTableSavedFiltersFixture /> }.into_any()
                 } else if page_size_identity_fixture {
                     view! { <EntityTablePageSizeIdentityFixture /> }.into_any()
                 } else if presentation_fixture {
