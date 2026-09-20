@@ -68,6 +68,15 @@ pub struct EntitySavedFilterTexts {
     /// Empty-state hint rendered when a saved-filters bar exists but no
     /// filters are saved yet. Default `"No saved filters"`.
     pub empty: String,
+    /// Visible caption rendered before the badge row, and — via a single
+    /// `aria-labelledby` id — the badge group's accessible name (Office
+    /// op-e6dsi). Default `"Saved filters"`.
+    ///
+    /// One string reaches the screen and the accessibility tree through the
+    /// same element, so a translation or a copy edit cannot leave a hidden
+    /// name disagreeing with the visible one. It is not rendered when no
+    /// filters are saved; the [`Self::empty`] hint stands alone there.
+    pub badges_label: String,
 }
 
 impl Default for EntitySavedFilterTexts {
@@ -82,6 +91,7 @@ impl Default for EntitySavedFilterTexts {
             apply_filter: "Apply filter {name}".to_owned(),
             remove_filter: "Remove filter {name}".to_owned(),
             empty: "No saved filters".to_owned(),
+            badges_label: "Saved filters".to_owned(),
         }
     }
 }
@@ -275,6 +285,10 @@ mod tests {
         assert_eq!(
             texts.remove_named("Urgent only"),
             "Remove filter Urgent only"
+        );
+        assert_eq!(
+            texts.badges_label, "Saved filters",
+            "the badge row's visible caption doubles as the group's accessible              name, so it must be real user-facing copy and translatable like              the rest"
         );
     }
 }

@@ -4032,3 +4032,31 @@ fn filter_mode_survives_clone_and_shows_in_debug() {
     assert_eq!(EntityResolvedFilterKind::Options.as_str(), "select");
     assert_eq!(EntityResolvedFilterKind::Text.as_str(), "text");
 }
+
+#[test]
+fn filter_accessor_falls_back_to_text_and_survives_clone() {
+    let plain = EntityColumn::text("name", "Name", |row: &Row| row.name.to_owned());
+    assert!(plain.filter_text.is_none(), "no filter text by default");
+    let sample = Row {
+        id: "a",
+        name: "Acme",
+        rank: 1,
+    };
+    assert_eq!(
+        (plain.filter_accessor())(&sample),
+        "Acme",
+        "without a declared filter text the accessor IS the exported text"
+    );
+
+    let split = EntityColumn::text("status", "Status", |_: &Row| "ST_OPEN".to_owned())
+        .with_filter_text(|_: &Row| "Open".to_owned());
+    assert_eq!((split.text)(&sample), "ST_OPEN", "export is unchanged");
+    assert_eq!(
+        (split.filter_accessor())(&sample),
+        "Open",
+        "the accessor prefers the declared filter text"
+    );
+    // A column is cloned into every row render; a filter accessor lost on
+    // clone would filter correctly once and by the exported value thereafter.
+    assert_eq!((split.clone().filter_accessor())(&sample), "Open");
+}

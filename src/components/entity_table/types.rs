@@ -1623,6 +1623,22 @@ pub struct EntityColumn<T> {
     pub kind: EntityColumnKind,
     /// Plain text used for default rendering and accessible/exported content.
     pub text: Rc<dyn Fn(&T) -> String>,
+    /// Optional separate text the framework-built filter row matches and
+    /// enumerates against, when a column *renders* something other than the
+    /// stable value [`Self::text`] exports (Office op-e6dsi).
+    ///
+    /// `None` — the default — means filtering uses [`Self::text`], which is
+    /// correct whenever the rendered and exported text agree. Set this only
+    /// when they do not: a column showing a localized label over a wire status
+    /// code, a formatted date over an ISO timestamp, a display name over an id.
+    /// Filtering on text the user cannot see is a silent wrong match — the
+    /// filter appears to work and quietly excludes rows — so the two accessors
+    /// exist to let a column filter by what it *shows* while still exporting
+    /// the key a downstream system needs.
+    ///
+    /// Read through [`Self::filter_accessor`], never directly, so the fallback
+    /// cannot be forgotten at a call site.
+    pub filter_text: Option<Rc<dyn Fn(&T) -> String>>,
     /// Optional rich renderer invoked with a borrowed typed row.
     pub renderer: Option<EntityCellRenderer<T>>,
     /// Optional framework-owned semantic badge or icon presentation.
@@ -1830,6 +1846,7 @@ impl<T> Clone for EntityColumn<T> {
             alignment: self.alignment,
             kind: self.kind,
             text: Rc::clone(&self.text),
+            filter_text: self.filter_text.as_ref().map(Rc::clone),
             renderer: self.renderer.as_ref().map(Rc::clone),
             presentation: self.presentation.clone(),
             comparator: self.comparator.as_ref().map(Rc::clone),
@@ -1887,6 +1904,7 @@ impl<T: 'static> EntityColumn<T> {
             alignment: EntityColumnAlignment::Auto,
             kind: EntityColumnKind::Text,
             text,
+            filter_text: None,
             renderer: None,
             presentation: None,
             comparator: None,
@@ -2044,6 +2062,41 @@ impl<T: 'static> EntityColumn<T> {
     pub fn render_with(mut self, render: impl Fn(&T) -> AnyView + 'static) -> Self {
         self.renderer = Some(Rc::new(render));
         self
+    }
+
+    /// Filters and enumerates this column by `filter_text` instead of the
+    /// exported [`Self::text`] (Office op-e6dsi).
+    ///
+    /// Use it when a column renders something other than the stable value it
+    /// exports. Without it, `filterable_options` lists the exported values and
+    /// `filterable_text` matches them, so a user typing what they can see
+    /// matches nothing and a select lists codes nobody recognizes — a wrong
+    /// result that reports itself as an empty one.
+    ///
+    /// ```rust,ignore
+    /// // Exports the wire code for downstream systems; filters by the label
+    /// // the operator actually reads.
+    /// EntityColumn::text("status", "Status", |r: &Job| r.status_code.clone())
+    ///     .with_filter_text(|r: &Job| localize(&r.status_code))
+    ///     .filterable_options()
+    /// ```
+    #[must_use]
+    pub fn with_filter_text(mut self, filter_text: impl Fn(&T) -> String + 'static) -> Self {
+        self.filter_text = Some(Rc::new(filter_text));
+        self
+    }
+
+    /// The accessor the filter row must use: [`Self::filter_text`] when the
+    /// column declared one, otherwise [`Self::text`].
+    ///
+    /// Every filter call site goes through this rather than reading either
+    /// field, so a new one cannot silently skip the fallback and filter on
+    /// invisible text.
+    #[must_use]
+    pub fn filter_accessor(&self) -> Rc<dyn Fn(&T) -> String> {
+        self.filter_text
+            .as_ref()
+            .map_or_else(|| Rc::clone(&self.text), Rc::clone)
     }
 
     /// Maps rows to a framework-owned badge; `None` falls back to plain text.

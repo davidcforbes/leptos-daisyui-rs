@@ -988,8 +988,19 @@ pub fn EntityTable<T>(
     /// Shows separate reset-sort and reset-columns actions.
     #[prop(optional, default = false)]
     show_reset_actions: bool,
-    /// Optional caller-rendered table utilities such as Export or Refresh.
-    /// The table owns placement and wrapping; the caller owns all behavior.
+    /// Optional caller-rendered controls placed **before** the saved-filters
+    /// bar, at the leading edge of the toolbar (Office op-e6dsi).
+    ///
+    /// [`Self::toolbar_actions`] renders *after* that bar, so without this slot
+    /// there is no way to put anything to the left of **Save Filter**. It is a
+    /// separate slot rather than a reordering because reordering
+    /// `toolbar_actions` would move Export and `+ New` on every table already
+    /// shipping.
+    #[prop(optional)]
+    toolbar_leading: Option<Children>,
+    /// Optional caller-rendered table utilities such as Export or Refresh,
+    /// rendered after the saved-filters bar. The table owns placement and
+    /// wrapping; the caller owns all behavior.
     #[prop(optional)]
     toolbar_actions: Option<Children>,
     /// Optional controlled saved-filters bar (`ldui` opinionated filter row):
@@ -2249,6 +2260,11 @@ where
                 inert=move || edit_locked.get()
                 aria-disabled=move || edit_locked.get().then_some("true")
             >
+                {toolbar_leading.map(|render_leading| view! {
+                    <div class="contents" data-entity-toolbar-leading="true">
+                        {render_leading()}
+                    </div>
+                })}
                 {saved_filters
                     .map(|model| {
                         let bar_id = saved_filters_bar_id

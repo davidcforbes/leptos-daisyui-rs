@@ -194,7 +194,7 @@ impl<T: Clone + 'static> EntityAutoFilters<T> {
                     // accessor and the (thread-local-storage) data signal in
                     // `StoredValue::new_local` makes the closure capture only
                     // `Copy` handles, which is the established pattern here.
-                    let text = StoredValue::new_local(Rc::clone(&column.text));
+                    let text = StoredValue::new_local(column.filter_accessor());
                     let source = StoredValue::new_local(data);
                     let options = Signal::derive(move || {
                         source.with_value(|source| {
@@ -215,7 +215,7 @@ impl<T: Clone + 'static> EntityAutoFilters<T> {
             values.push((column.id, value));
             predicates.push(AutoFilterPredicate {
                 kind,
-                text: Rc::clone(&column.text),
+                text: column.filter_accessor(),
                 value,
             });
         }
@@ -603,6 +603,73 @@ mod tests {
                 1,
                 "a set from outside must narrow the derived rows"
             );
+        });
+    }
+
+    /// A column that exports a wire code and renders a localized label must
+    /// MATCH the label. Matching the exported value instead is the
+    /// silent-wrong-match class this accessor exists to prevent: typing what is
+    /// on screen matches nothing, and reports itself as an ordinary empty
+    /// result rather than an error (Office op-e6dsi).
+    #[test]
+    fn a_filter_column_matches_its_filter_text_not_its_exported_text() {
+        let owner = Owner::new();
+        owner.with(|| {
+            let columns = vec![
+                EntityColumn::text("status", "Status", |row: &Survey| match row.status {
+                    // Exported/stable: the wire code a downstream system needs.
+                    "Open" => "ST_OPEN".to_owned(),
+                    _ => "ST_CLOSED".to_owned(),
+                })
+                .with_filter_text(|row: &Survey| row.status.to_owned())
+                .filterable_options(),
+            ];
+            let data = RwSignal::new_local(Rc::new(surveys()));
+            let filters = EntityAutoFilters::new(
+                &columns,
+                data.into(),
+                "survey",
+                EntityAutoFilterTexts::default(),
+            );
+            let value = filters
+                .value("status")
+                .expect("the declared column gets a filter value signal");
+
+            value.set("Open".to_owned());
+            assert_eq!(
+                filters.rows().get().len(),
+                2,
+                "matching must run against the filter text the user can read"
+            );
+
+            value.set("ST_OPEN".to_owned());
+            assert_eq!(
+                filters.rows().get().len(),
+                0,
+                "the exported code is no longer what the filter matches"
+            );
+        });
+    }
+
+    /// The fallback is the common case and must stay silent: a column that
+    /// never calls `with_filter_text` filters exactly as it did before the
+    /// accessor existed.
+    #[test]
+    fn a_column_without_filter_text_still_filters_by_its_exported_text() {
+        let owner = Owner::new();
+        owner.with(|| {
+            let data = RwSignal::new_local(Rc::new(surveys()));
+            let filters = EntityAutoFilters::new(
+                &columns(),
+                data.into(),
+                "survey",
+                EntityAutoFilterTexts::default(),
+            );
+            filters
+                .value("status")
+                .expect("status declares a filter")
+                .set("Open".to_owned());
+            assert_eq!(filters.rows().get().len(), 2);
         });
     }
 
