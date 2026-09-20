@@ -7816,6 +7816,143 @@ async fn compact_row_labels_clear_aa_contrast_on_a_narrow_viewport() {
     assert_no_browser_errors(&harness, "compact row label contrast").await;
 }
 
+/// Browser proof that the saved-filter badge row is NAMED by its visible
+/// caption (`op-e6dsi`), and that the caption is absent while nothing is
+/// saved.
+///
+/// The failure this exists to catch is silent: `aria-labelledby` pointing at
+/// an id that does not resolve leaves the group with NO accessible name, and
+/// nothing on screen looks wrong. So the assertion resolves the reference and
+/// compares the resulting name to the caption's own rendered text -- the two
+/// cannot agree by accident, and they cannot drift apart while one element
+/// supplies both.
+///
+/// Also asserts the negative for `toolbar_leading`: a table that passes no
+/// leading slot must emit no wrapper for it, so the nine consumer toolbars
+/// that never opt in keep their exact shape.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
+async fn entity_table_saved_filter_badges_are_named_by_their_visible_caption() {
+    let harness = harness_at("/components/entity-table-saved-filters").await;
+    begin_browser_error_capture(&harness).await;
+    wait_for_selector(&harness, "[data-entity-saved-filters-bar]").await;
+
+    async fn snapshot(harness: &pixelproof_web::Harness) -> Value {
+        eval_json(
+            harness,
+            r#"(() => {
+                const table = document.querySelector('[data-testid="saved-filters-table"]');
+                const bar = table.querySelector('[data-entity-saved-filters-bar]');
+                const caption = bar.querySelector('[data-entity-saved-filters-caption]');
+                const group = bar.querySelector('[data-entity-saved-filters-badges]');
+                // Resolve the reference the way an assistive technology would.
+                let resolvedName = null;
+                let referenceResolves = null;
+                if (group) {
+                    const id = group.getAttribute('aria-labelledby');
+                    const target = id ? document.getElementById(id) : null;
+                    referenceResolves = target !== null;
+                    resolvedName = target ? target.textContent.trim() : null;
+                }
+                return {
+                    hasCaption: caption !== null,
+                    captionText: caption ? caption.textContent.trim() : null,
+                    hasGroup: group !== null,
+                    groupRole: group ? group.getAttribute('role') : null,
+                    referenceResolves,
+                    resolvedName,
+                    // display:contents on a role container risks being dropped
+                    // from the accessibility tree, so the group must generate
+                    // a real box.
+                    groupDisplay: group ? getComputedStyle(group).display : null,
+                    badgeCount: bar.querySelectorAll('[data-entity-saved-filter]').length,
+                    leadingSlots: table.querySelectorAll('[data-entity-toolbar-leading]').length,
+                };
+            })()"#,
+        )
+        .await
+    }
+
+    // Nothing saved yet: the empty hint stands alone, with no caption naming
+    // an empty group.
+    let initial = snapshot(&harness).await;
+    assert_eq!(initial["badgeCount"], json!(0), "starts empty: {initial}");
+    assert_eq!(
+        initial["hasCaption"],
+        json!(false),
+        "no caption while nothing is saved: {initial}"
+    );
+    assert_eq!(
+        initial["hasGroup"],
+        json!(false),
+        "no badge group while nothing is saved: {initial}"
+    );
+    assert_eq!(
+        initial["leadingSlots"],
+        json!(0),
+        "a table passing no toolbar_leading must emit no wrapper for it: {initial}"
+    );
+
+    // Give the row a real filter value first, so the saved set is realistic,
+    // then name it through the framework dialog.
+    eval_json(
+        &harness,
+        r#"(() => {
+            const s = document.querySelector('[data-entity-filter-control="status"][data-entity-filter-placement="header"]');
+            s.value = 'Urgent';
+            s.dispatchEvent(new Event('input', { bubbles: true }));
+            s.dispatchEvent(new Event('change', { bubbles: true }));
+            return true;
+        })()"#,
+    )
+    .await;
+    click(&harness, "[data-entity-saved-filters-open]").await;
+    wait_for_selector(&harness, "[data-entity-saved-filters-name]").await;
+    let name_input = harness
+        .page()
+        .find_element("[data-entity-saved-filters-name]")
+        .await
+        .expect("saved-filter name input");
+    name_input.focus().await.expect("focus name input");
+    name_input.type_str("Named set").await.expect("type name");
+    click(&harness, "[data-entity-saved-filters-save]").await;
+    wait_for_selector(&harness, "[data-entity-saved-filters-caption]").await;
+
+    let saved = snapshot(&harness).await;
+    assert_eq!(saved["badgeCount"], json!(1), "one badge saved: {saved}");
+    assert_eq!(
+        saved["hasCaption"],
+        json!(true),
+        "the caption appears with the first badge: {saved}"
+    );
+    assert_eq!(saved["groupRole"], json!("group"), "grouped: {saved}");
+    assert_eq!(
+        saved["referenceResolves"],
+        json!(true),
+        "aria-labelledby must point at an id that EXISTS, or the group has no \
+         accessible name and nothing on screen looks wrong: {saved}"
+    );
+    assert_eq!(
+        saved["resolvedName"], saved["captionText"],
+        "the accessible name must BE the visible caption's text, so the two \
+         cannot drift apart: {saved}"
+    );
+    assert!(
+        saved["captionText"]
+            .as_str()
+            .is_some_and(|text| !text.is_empty()),
+        "the caption must carry real copy: {saved}"
+    );
+    assert_ne!(
+        saved["groupDisplay"],
+        json!("contents"),
+        "a role container with display:contents risks being dropped from the \
+         accessibility tree: {saved}"
+    );
+
+    assert_no_browser_errors(&harness, "saved-filter badge caption").await;
+}
+
 /// Browser proof for the controlled saved-filters bar: a **Save Filter**
 /// button names the current filter values in a dialog, the accepted set
 /// becomes a left-justified toolbar badge with a working `x`, clicking the
