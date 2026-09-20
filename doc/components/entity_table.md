@@ -1689,6 +1689,57 @@ same names (`ldui-myhh` / `ldui-5ano` / `ldui-r50n`). See
 [`doc/patterns/client-snapshot-list.md`](../patterns/client-snapshot-list.md#behavior-only-entitytable-passthroughs)
 for the full builder table and a worked example.
 
+## One `<tr>`, two presentations: never click by DOM order
+
+Every row emits **both** presentations into a single `<tr>`, and CSS alone
+decides which one a human sees:
+
+```rust
+<td colspan=N class="... lg:hidden" >{compact_view}</td>   // visible BELOW lg
+{wide_cells}                                               // class="hidden ... lg:table-cell"
+```
+
+This is deliberate — one `<tr>` per row means the DOM never holds a hidden
+duplicate *page* of rows, which is what a swap-the-whole-table approach costs.
+The consequence is that **every interactive control in a row exists twice**, and
+the compact copy comes first in DOM order.
+
+The trap is not the duplication; it is the asymmetry. Below `lg` the wide cells
+are `display: none`; at `lg` and up the compact `<td>` is. A human always clicks
+the visible control and it always works. **An automated click that resolves a
+control by DOM order, by "first match", or by accessible name takes the compact
+copy — which at desktop width has no box, so the click is a silent no-op.** No
+error, no console output, no event: indistinguishable from a dead handler. A
+consumer chasing this spent two rounds concluding a working button was broken,
+then a second wrong reading on top of it, before isolating the pair
+(2026-09-20).
+
+Pick the presentation by what is *live*, never by position:
+
+- The `<table>` carries `data-entity-table-compact="true"` exactly when the
+  compact `<td>` is the visible one. It is driven by `(max-width: 1023.98px)`,
+  the same boundary as Tailwind's `lg:`, so it and the cell classes cannot
+  disagree.
+- Or filter candidates by rendered geometry — a non-zero client rect — and
+  assert you matched exactly one. A query that yields two refs and takes `[0]`
+  is the bug.
+
+The same row has a second behaviour that reads as a defect from outside: a click
+whose target is inside an action cell **never activates the row**. Row
+activation begins with
+
+```rust
+if event_origin_is_action(event.target()) { return; }
+```
+
+which matches `closest("button, a, input, select, textarea, [role='button'],
+[data-entity-action='true']")`, and the whole action `<td>` carries
+`data-entity-action="true"`. So clicking the cell's padding or background — not
+just its button — is dropped, and the wide action `<td>` additionally calls
+`stop_propagation()`. That is intended: a row's button must not also activate
+its row. Test `on_row_activate` with a **single** click on a non-action column;
+there is no double-click handler.
+
 ## Verification
 
 The focused inner and browser lanes are:
