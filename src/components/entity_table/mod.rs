@@ -54,7 +54,12 @@ pub use multi_selection::{
     propose_entity_row_toggle,
 };
 pub use paging::EntityPagePlan;
-pub use saved_filters::{EntitySavedFilter, EntitySavedFilterTexts, EntitySavedFilters};
+pub use saved_filters::{
+    ENTITY_SAVED_FILTER_BADGE_CHARS, ENTITY_SAVED_FILTER_LIMIT, EntitySavedFilter,
+    EntitySavedFilterChange, EntitySavedFilterTerm, EntitySavedFilterTexts, EntitySavedFilters,
+    entity_saved_filter_badge_text, entity_saved_filter_compose_label,
+    entity_saved_filter_restore_plan, entity_saved_filter_terms, entity_saved_filters_apply,
+};
 pub use selection::EntityTableSelection;
 pub use storage::{decode_preferences, encode_preferences};
 pub use types::{

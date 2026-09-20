@@ -1689,6 +1689,122 @@ same names (`ldui-myhh` / `ldui-5ano` / `ldui-r50n`). See
 [`doc/patterns/client-snapshot-list.md`](../patterns/client-snapshot-list.md#behavior-only-entitytable-passthroughs)
 for the full builder table and a worked example.
 
+## Filtering by what a column renders (op-e6dsi)
+
+A column's `text` is its **stable exported value**; its filter text is **what
+the user reads**. They are usually the same string, and when they are not,
+filtering on the exported one is a silent wrong answer: the select lists codes
+nobody recognizes, typing what is on screen matches nothing, and both report
+themselves as an ordinary empty result rather than an error. Office found seven
+columns where a plain `.filterable()` had quietly dropped behaviour this way — a
+wire status code behind a localized label, chiefly.
+
+```rust,ignore
+EntityColumn::text("status", "Status", |r: &Job| r.status_code.clone())  // exports ST_OPEN
+    .with_filter_text(|r: &Job| localize(&r.status_code))                // filters "Open"
+    .filterable_options()
+```
+
+Rendering and the export projection keep using `text`; only the framework-built
+filter row reads the filter accessor. Both of its call sites — the option list
+and the predicate — go through `EntityColumn::filter_accessor()`, which falls
+back to `text`, so a future call site cannot skip the fallback and start
+filtering on invisible content.
+
+⚠️ **If the filter text depends on anything that can change after mount, use
+`with_filter_text_from` instead.** `EntityAutoFilters` takes its columns *once*.
+A closure that captured a language **by value** keeps returning that language
+forever while the cells move on, and the symptom is not an error — Office
+shipped this, and a Spanish reader was offered English values that matched no
+Spanish cell, so filtering returned **zero rows silently**. The reactive form
+takes the source signal as a parameter, so there is no by-value capture to
+freeze:
+
+```rust,ignore
+EntityColumn::text("status", "Status", |r: &Job| r.status_code.clone())
+    .with_filter_text_from(language, |r: &Job, lang| localize(&r.status_code, *lang))
+```
+
+## Term-structured saved filters (op-e6dsi)
+
+`EntitySavedFilter` stores `(column_id, value)` pairs; `EntitySavedFilterTerm`
+is the canonical view of one of them, and the helpers below are the shared
+rules so two tables in one product cannot disagree about what "already saved"
+means. All of it is **additive** — the name-keyed API (`apply_named`,
+`remove_named`, `active_name`) is unchanged.
+
+`entity_saved_filter_terms` canonicalizes, and all three of its rules are
+load-bearing:
+
+- **Blank is dropped**, so a *cleared* control and an *unset* control produce
+  the same saved filter. `value_of` therefore never reports an empty
+  constraint, and `EntitySavedFilter::from_values` returns `None` when nothing
+  survives — an empty filter row is not something to save.
+- **Last wins** for a repeated `column_id`.
+- **Sorted by column id.** This is what makes `PartialEq` meaningful, and
+  `PartialEq` is what makes duplicate detection work. Without it the same
+  filter row captured with its columns visited in a different order compares
+  unequal and silently saves twice.
+
+`entity_saved_filters_apply(saved, change)` is the one reducer every host
+applies; hosts persist its result rather than reimplementing the rules. A save
+of an existing filter is a no-op compared **by value, not by name**, and saving
+past `ENTITY_SAVED_FILTER_LIMIT` (5) **evicts the oldest rather than refusing** —
+a refusal needs somewhere to report itself and a badge row has nowhere.
+
+### Restoring is absolute, not additive
+
+`entity_saved_filter_restore_plan(filter, restorable_columns)` iterates the
+columns the table has **now**, not the filter's terms. That single choice
+answers schema drift in both directions:
+
+- a current column the filter does not constrain is explicitly set to `""`;
+- a term whose column no longer exists is simply absent — never looked up, so
+  it can neither error nor resurrect a dead column.
+
+Driving *every* restorable control is the point. Setting only the constrained
+ones restores filter A on top of a leftover filter B and yields a row neither
+of them saved, which reads to a user as a corrupt saved filter and is not.
+
+### Truncation cuts between parts, never through one
+
+`entity_saved_filter_badge_text(label, max_chars)` shortens to **grapheme
+clusters**, not `char`s: a `char` is a Unicode scalar value, so counting them
+splits a combining-accent or emoji ZWJ sequence mid-glyph. The result never
+exceeds the budget including the ellipsis, so a budget of 0 is an empty string
+rather than a lone `…`. Truncation is visual only — keep the full label as the
+badge's `title` and accessible name.
+
+`entity_saved_filter_compose_label(terms, max_chars)` applies the same rule one
+level up: it adds a term only while the **whole** term fits. Joining terms and
+truncating the join produced `client=Avery · statu` in Office's product, which
+reads as data corruption rather than as a shortened name.
+
+## The toolbar has two slots, on either side of the saved-filter bar
+
+`toolbar_leading` renders **before** the saved-filters bar; `toolbar_actions`
+renders **after** it, ahead of the framework's `+`. There was formerly no way
+to place anything to the left of **Save Filter**, and the fix is a second slot
+rather than a reordering, because reordering `toolbar_actions` would move
+Export and `+ New` on every table already shipping.
+
+## One caption names the badge group — and only the badge group
+
+The saved-filter badge row carries a **visible** caption (`badges_label`,
+default `"Saved filters"`) that supplies the group's accessible name through a
+single `aria-labelledby` id. One node's text reaches both the screen and the
+accessibility tree, so a translation or a copy edit cannot leave a hidden name
+disagreeing with the visible one — which is what a hidden `aria-label` beside a
+visible caption invites. It is not rendered when nothing is saved; the empty
+hint stands alone.
+
+⚠️ **Do not apply the same idea to the per-column filter row.** Office tried it
+there first and reverted: one shared caption would name all seven controls
+identically. That row needs no caption, because each control sits in a cell
+under its own header and the table structure already names it. The badge bar is
+genuinely one group with one name, which is the only reason a single caption is
+right there.
+
 ## One `<tr>`, two presentations: never click by DOM order
 
 Every row emits **both** presentations into a single `<tr>`, and CSS alone

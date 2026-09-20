@@ -113,6 +113,12 @@ wasm-bindgen-futures = "0.4"
 chrono = { version = "0.4", features = ["serde", "wasmbind"] }
 petgraph = "0.8"
 send_wrapper = "0.6"
+# Grapheme-cluster truncation for saved-filter badge labels. `chars()` counts
+# Unicode scalar values, so it splits a combining-accent sequence or an emoji
+# ZWJ sequence mid-glyph; a shared library cannot assume Latin-1 data the way
+# one product's CRM feed can (Office op-e6dsi). Already in the lock file
+# transitively, so this adds no download.
+unicode-segmentation = "1.13"
 editmark-mermaid = { path = "../editmark/editmark-mermaid" }
 editmark-core = { path = "../editmark/editmark-core" }
 

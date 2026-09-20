@@ -13,7 +13,7 @@ use leptos::html::{Input as HtmlInput, Select as HtmlSelect};
 use leptos::prelude::{
     AddAnyAttr, AnyView, Callable, Callback, ClassAttribute, CollectView, CustomAttribute,
     ElementChild, Get, GetUntracked, GetValue, GlobalAttributes, IntoAny, LocalStorage, NodeRef,
-    Signal, StoredValue, view,
+    Signal, StoredValue, With, view,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::cmp::Ordering;
@@ -24,6 +24,14 @@ use std::rc::Rc;
 
 /// A callback that renders one typed cell from a borrowed row.
 pub type EntityCellRenderer<T> = Rc<dyn Fn(&T) -> AnyView>;
+
+/// Plain-text accessor for a column: the stable text a column exports, and the
+/// optional separate text its filter matches ([`EntityColumn::filter_text`]).
+///
+/// An alias rather than the bare `Rc<dyn Fn(&T) -> String>` because the
+/// `Option<..>` form crosses `clippy::type_complexity` under the gate's
+/// `-D warnings`, the same reason the renderer and key aliases above exist.
+pub type EntityColumnText<T> = Rc<dyn Fn(&T) -> String>;
 
 /// A callback that maps a typed row to an ordinary semantic badge treatment.
 pub type EntityBadgeCell<T> = Rc<dyn Fn(&T) -> Option<EntityBadgePresentation>>;
@@ -1622,7 +1630,7 @@ pub struct EntityColumn<T> {
     /// additive class resolved by `EntityColumnKind::default_class`.
     pub kind: EntityColumnKind,
     /// Plain text used for default rendering and accessible/exported content.
-    pub text: Rc<dyn Fn(&T) -> String>,
+    pub text: EntityColumnText<T>,
     /// Optional separate text the framework-built filter row matches and
     /// enumerates against, when a column *renders* something other than the
     /// stable value [`Self::text`] exports (Office op-e6dsi).
@@ -1638,7 +1646,7 @@ pub struct EntityColumn<T> {
     ///
     /// Read through [`Self::filter_accessor`], never directly, so the fallback
     /// cannot be forgotten at a call site.
-    pub filter_text: Option<Rc<dyn Fn(&T) -> String>>,
+    pub filter_text: Option<EntityColumnText<T>>,
     /// Optional rich renderer invoked with a borrowed typed row.
     pub renderer: Option<EntityCellRenderer<T>>,
     /// Optional framework-owned semantic badge or icon presentation.
@@ -1887,7 +1895,7 @@ impl<T: 'static> EntityColumn<T> {
         header: impl Into<String>,
         text: impl Fn(&T) -> String + 'static,
     ) -> Self {
-        let text: Rc<dyn Fn(&T) -> String> = Rc::new(text);
+        let text: EntityColumnText<T> = Rc::new(text);
         let comparator_text = Rc::clone(&text);
         Self {
             id,
@@ -2073,6 +2081,11 @@ impl<T: 'static> EntityColumn<T> {
     /// matches nothing and a select lists codes nobody recognizes — a wrong
     /// result that reports itself as an empty one.
     ///
+    /// ⚠️ **If the filter text depends on anything that can change after mount
+    /// — language above all — use [`Self::with_filter_text_from`] instead.**
+    /// A closure here that captures a language by value freezes in it, and the
+    /// symptom is zero rows with no error.
+    ///
     /// ```rust,ignore
     /// // Exports the wire code for downstream systems; filters by the label
     /// // the operator actually reads.
@@ -2086,6 +2099,41 @@ impl<T: 'static> EntityColumn<T> {
         self
     }
 
+    /// Filter text derived from a **signal**, so language or label changes
+    /// that arrive after mount reach the filter (Office op-e6dsi).
+    ///
+    /// Prefer this over [`Self::with_filter_text`] whenever the filter text
+    /// depends on anything that can change while the table is mounted —
+    /// language above all. [`EntityAutoFilters`](super::EntityAutoFilters)
+    /// takes its columns **once**, so a closure that captured a language *by
+    /// value* keeps returning that language forever while the cells move on.
+    /// Office shipped exactly that: a page whose language arrived from its
+    /// bootstrap *after* mount offered a Spanish reader English values that
+    /// matched no Spanish cell, and filtering returned **zero rows with no
+    /// error** — a silent wrong answer, not a visible failure.
+    ///
+    /// Taking the source signal as a parameter is what prevents it: the
+    /// accessor is handed the current value on every call, so there is no
+    /// by-value capture to freeze.
+    ///
+    /// ```rust,ignore
+    /// // `language` is a Signal that the bootstrap updates after mount.
+    /// EntityColumn::text("status", "Status", |r: &Job| r.status_code.clone())
+    ///     .with_filter_text_from(language, |r: &Job, lang| localize(&r.status_code, *lang))
+    ///     .filterable_options()
+    /// ```
+    #[must_use]
+    pub fn with_filter_text_from<S: Send + Sync + 'static>(
+        mut self,
+        source: Signal<S>,
+        accessor: impl Fn(&T, &S) -> String + 'static,
+    ) -> Self {
+        self.filter_text = Some(Rc::new(move |row| {
+            source.with(|value| accessor(row, value))
+        }));
+        self
+    }
+
     /// The accessor the filter row must use: [`Self::filter_text`] when the
     /// column declared one, otherwise [`Self::text`].
     ///
@@ -2093,7 +2141,7 @@ impl<T: 'static> EntityColumn<T> {
     /// field, so a new one cannot silently skip the fallback and filter on
     /// invisible text.
     #[must_use]
-    pub fn filter_accessor(&self) -> Rc<dyn Fn(&T) -> String> {
+    pub fn filter_accessor(&self) -> EntityColumnText<T> {
         self.filter_text
             .as_ref()
             .map_or_else(|| Rc::clone(&self.text), Rc::clone)
