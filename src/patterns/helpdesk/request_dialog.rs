@@ -291,6 +291,24 @@ pub fn NewRequestDialog(
                         <p class="text-sm text-base-content/75" data-helpdesk-context="">
                             {context_line}
                         </p>
+                        // DELIBERATELY UNCONDITIONAL. An empty `role="alert"`
+                        // looks like a stray node and has been reported as one
+                        // (Office op-v2a7k, found on a live DOM pass), but
+                        // wrapping it in `<Show>` would make the accessible
+                        // behaviour WORSE: a live region has to be registered
+                        // by assistive technology before a mutation inside it
+                        // can be observed, so keep-empty-then-mutate is the
+                        // pattern that does not depend on the AT/browser
+                        // matrix, while insert-the-region-with-its-content is
+                        // the one with the known inconsistencies. An empty
+                        // live region is inert — it queues nothing and makes no
+                        // later announcement quieter. Two independently
+                        // vendored axe-core runs (this repo's browser lane and
+                        // Office's, 4.10.2 over 45 surfaces in EN and ES) have
+                        // never flagged it. Change this only with an auditor
+                        // rule id or a real screen-reader observation, AND a
+                        // test-helpdesk assertion that a submit error is still
+                        // announced — nothing pins that today.
                         <p class="text-sm text-error" role="alert" data-helpdesk-submit-error="">
                             {move || error.get().unwrap_or_default()}
                         </p>
