@@ -2254,6 +2254,27 @@ where
                     </section>
                 })
             }}
+            // The saved-filter row is PAGE furniture, not a table utility: it
+            // is the user's own named views, left-justified on its own line,
+            // and it does not belong in the right-justified cluster of table
+            // actions (Export, `+ New`, the column chooser). Sharing that row
+            // put a user's filter names in the quick-action area and let them
+            // compete for space with controls they have nothing to do with.
+            {saved_filters
+                .map(|model| {
+                    let bar_id = saved_filters_bar_id
+                        .expect("a saved-filters bar always gets a minted id");
+                    view! {
+                        <div
+                            class="flex w-full min-w-0 shrink-0 items-center justify-start"
+                            data-entity-saved-filters-row="true"
+                            inert=move || edit_locked.get()
+                            aria-disabled=move || edit_locked.get().then_some("true")
+                        >
+                            {saved_filters_bar(model, bar_id)}
+                        </div>
+                    }
+                })}
             <div
                 class="flex shrink-0 flex-wrap items-center justify-end gap-2"
                 data-entity-table-toolbar="true"
@@ -2265,12 +2286,6 @@ where
                         {render_leading()}
                     </div>
                 })}
-                {saved_filters
-                    .map(|model| {
-                        let bar_id = saved_filters_bar_id
-                            .expect("a saved-filters bar always gets a minted id");
-                        saved_filters_bar(model, bar_id)
-                    })}
                 {toolbar_actions.map(|render_actions| view! {
                     <div class="contents" data-entity-toolbar-actions="true">
                         {render_actions()}

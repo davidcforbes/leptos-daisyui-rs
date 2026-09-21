@@ -11,7 +11,10 @@
 
 use leptos::prelude::*;
 
-use super::saved_filters::{EntitySavedFilters, saved_filter_name_is_valid};
+use super::saved_filters::{
+    ENTITY_SAVED_FILTER_LIMIT, ENTITY_SAVED_FILTER_NAME_CHARS, EntitySavedFilters,
+    saved_filter_name_is_valid,
+};
 use crate::components::badge::Badge;
 use crate::components::button::{Button, ButtonType};
 use crate::components::modal::{Modal, ModalBox};
@@ -56,7 +59,10 @@ pub(crate) fn saved_filters_bar(model: EntitySavedFilters, bar_id: String) -> An
 
     view! {
         <div
-            class="flex shrink-0 flex-wrap items-center justify-start gap-2 mr-auto"
+            // `mr-auto` is gone with the move out of the toolbar: it existed
+            // only to push this left inside a `justify-end` cluster, and the
+            // row that now owns it is `justify-start`.
+            class="flex min-w-0 flex-wrap items-center justify-start gap-2"
             data-entity-saved-filters-bar="true"
         >
             <Button
@@ -87,6 +93,13 @@ pub(crate) fn saved_filters_bar(model: EntitySavedFilters, bar_id: String) -> An
                 let group_id = badges_label_id.clone();
                 let badges = saved
                     .into_iter()
+                    // The list is CONSUMER-owned: a host that persists its
+                    // own store without running `entity_saved_filters_apply`
+                    // can hand over more than the row is designed to hold, and
+                    // an unbounded badge row wraps and pushes the table down.
+                    // The reducer evicts oldest; this is the display backstop
+                    // for a host that never called it.
+                    .take(ENTITY_SAVED_FILTER_LIMIT)
                     .map(|saved_filter| {
                         let name = saved_filter.name.clone();
                         let apply_label = texts
@@ -176,6 +189,9 @@ pub(crate) fn saved_filters_bar(model: EntitySavedFilters, bar_id: String) -> An
                                 id=name_input_id.clone()
                                 class="input input-bordered w-full"
                                 type="text"
+                                // The affordance; `saved_filter_name_is_valid`
+                                // is the authority (see its constant).
+                                maxlength=ENTITY_SAVED_FILTER_NAME_CHARS.to_string()
                                 placeholder=move || texts.with(|t: &super::saved_filters::EntitySavedFilterTexts| t.name_placeholder.clone())
                                 prop:value=move || draft_name.get()
                                 on:input=move |event: web_sys::Event| {

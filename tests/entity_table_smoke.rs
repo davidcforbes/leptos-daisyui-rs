@@ -7867,6 +7867,10 @@ async fn entity_table_saved_filter_badges_are_named_by_their_visible_caption() {
                     groupDisplay: group ? getComputedStyle(group).display : null,
                     badgeCount: bar.querySelectorAll('[data-entity-saved-filter]').length,
                     leadingSlots: table.querySelectorAll('[data-entity-toolbar-leading]').length,
+                    // The saved-filter row is page furniture and must NOT sit
+                    // in the right-justified table-action cluster.
+                    insideToolbar: bar.closest('[data-entity-table-toolbar]') !== null,
+                    ownRow: bar.closest('[data-entity-saved-filters-row]') !== null,
                 };
             })()"#,
         )
@@ -7891,6 +7895,16 @@ async fn entity_table_saved_filter_badges_are_named_by_their_visible_caption() {
         initial["leadingSlots"],
         json!(0),
         "a table passing no toolbar_leading must emit no wrapper for it: {initial}"
+    );
+    assert_eq!(
+        initial["insideToolbar"],
+        json!(false),
+        "the saved-filter row is the user's own named views, not a table          utility, and must not share the quick-action cluster with Export /          + New / the column chooser: {initial}"
+    );
+    assert_eq!(
+        initial["ownRow"],
+        json!(true),
+        "it lives on its own left-justified row: {initial}"
     );
 
     // Give the row a real filter value first, so the saved set is realistic,
@@ -7937,11 +7951,10 @@ async fn entity_table_saved_filter_badges_are_named_by_their_visible_caption() {
         "the accessible name must BE the visible caption's text, so the two \
          cannot drift apart: {saved}"
     );
-    assert!(
-        saved["captionText"]
-            .as_str()
-            .is_some_and(|text| !text.is_empty()),
-        "the caption must carry real copy: {saved}"
+    assert_eq!(
+        saved["captionText"],
+        json!("Filters:"),
+        "the default caption is the page-level label for the row: {saved}"
     );
     assert_ne!(
         saved["groupDisplay"],

@@ -123,7 +123,7 @@ pub struct EntitySavedFilterTexts {
     pub empty: String,
     /// Visible caption rendered before the badge row, and — via a single
     /// `aria-labelledby` id — the badge group's accessible name (Office
-    /// op-e6dsi). Default `"Saved filters"`.
+    /// op-e6dsi). Default `"Filters:"`.
     ///
     /// One string reaches the screen and the accessibility tree through the
     /// same element, so a translation or a copy edit cannot leave a hidden
@@ -144,7 +144,7 @@ impl Default for EntitySavedFilterTexts {
             apply_filter: "Apply filter {name}".to_owned(),
             remove_filter: "Remove filter {name}".to_owned(),
             empty: "No saved filters".to_owned(),
-            badges_label: "Saved filters".to_owned(),
+            badges_label: "Filters:".to_owned(),
         }
     }
 }
@@ -242,7 +242,10 @@ impl std::fmt::Debug for EntitySavedFilters {
 
 /// A name is acceptable when it trims to non-empty.
 pub(crate) fn saved_filter_name_is_valid(name: &str) -> bool {
-    !name.trim().is_empty()
+    use unicode_segmentation::UnicodeSegmentation;
+
+    let trimmed = name.trim();
+    !trimmed.is_empty() && trimmed.graphemes(true).count() <= ENTITY_SAVED_FILTER_NAME_CHARS
 }
 
 /// Most saved filters one table keeps before the oldest is evicted.
@@ -255,6 +258,17 @@ pub const ENTITY_SAVED_FILTER_LIMIT: usize = 5;
 /// Longest badge label, in grapheme clusters, before
 /// [`entity_saved_filter_badge_text`] truncates.
 pub const ENTITY_SAVED_FILTER_BADGE_CHARS: usize = 40;
+
+/// Longest name a user may give a saved filter, in grapheme clusters.
+///
+/// Enforced in two places that must agree: the dialog's `maxlength`, which
+/// stops the typing, and [`saved_filter_name_is_valid`], which gates Save.
+/// The attribute alone is not enough -- it does not constrain a paste on
+/// every browser, and it is trivially removed from the DOM -- so the
+/// validity rule is the authority and the attribute is the affordance.
+/// Clusters, not `char`s, for the reason given on
+/// [`entity_saved_filter_badge_text`].
+pub const ENTITY_SAVED_FILTER_NAME_CHARS: usize = 20;
 
 /// One column's constraint inside a saved filter.
 ///
@@ -703,6 +717,37 @@ mod tests {
         );
     }
 
+    /// The dialog's `maxlength` is only an affordance -- it does not constrain
+    /// a paste on every browser and is trivially removed from the DOM -- so the
+    /// validity rule has to be the authority, or an over-long name reaches the
+    /// consumer's store and then the badge row.
+    #[test]
+    fn a_saved_filter_name_is_capped_and_the_rule_not_the_attribute_enforces_it() {
+        assert!(saved_filter_name_is_valid("Urgent only"));
+        assert!(!saved_filter_name_is_valid("   "), "blank is refused");
+        let exact = "a".repeat(ENTITY_SAVED_FILTER_NAME_CHARS);
+        assert!(saved_filter_name_is_valid(&exact), "the cap is inclusive");
+        let over = "a".repeat(ENTITY_SAVED_FILTER_NAME_CHARS + 1);
+        assert!(
+            !saved_filter_name_is_valid(&over),
+            "one past the cap is refused"
+        );
+        // Trimmed before measuring, so padding can neither smuggle a name past
+        // the cap nor fail a name that fits.
+        assert!(saved_filter_name_is_valid(&format!("  {exact}  ")));
+        // Clusters, not scalar values: an accented name of 20 clusters is legal
+        // even though it carries more `char`s than that.
+        let accented = "e\u{301}".repeat(ENTITY_SAVED_FILTER_NAME_CHARS);
+        assert!(
+            accented.chars().count() > ENTITY_SAVED_FILTER_NAME_CHARS,
+            "fixture must have more chars than clusters"
+        );
+        assert!(
+            saved_filter_name_is_valid(&accented),
+            "20 combining sequences are 20 graphemes and must be accepted"
+        );
+    }
+
     #[test]
     fn texts_defaults_and_substitution() {
         let texts = EntitySavedFilterTexts::default();
@@ -713,7 +758,7 @@ mod tests {
             "Remove filter Urgent only"
         );
         assert_eq!(
-            texts.badges_label, "Saved filters",
+            texts.badges_label, "Filters:",
             "the badge row's visible caption doubles as the group's accessible              name, so it must be real user-facing copy and translatable like              the rest"
         );
     }
