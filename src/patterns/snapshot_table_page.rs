@@ -28,6 +28,24 @@ fn snapshot_page_layout(
     }
 }
 
+/// The table slot's class once an optional side panel is known.
+///
+/// Without a panel the slot keeps EXACTLY the class `snapshot_page_layout`
+/// chose, so the fill_parent height chain (op-at7nn) is untouched for every
+/// page that does not opt in. With one it becomes a row -- and in fill mode the
+/// row must still carry `min-h-0 flex-1`, or the table inside loses its height
+/// budget and collapses with no error, the failure op-at7nn exists to prevent.
+fn snapshot_table_slot_class(
+    fill_slot_class: Option<&'static str>,
+    has_side_panel: bool,
+) -> Option<&'static str> {
+    match (fill_slot_class, has_side_panel) {
+        (class, false) => class,
+        (Some(_), true) => Some("flex min-h-0 flex-1 flex-col gap-4 lg:flex-row"),
+        (None, true) => Some("flex flex-col gap-4 lg:flex-row"),
+    }
+}
+
 /// One typed dataset option used by the canonical selector config.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SnapshotDatasetOption<V> {
@@ -433,6 +451,20 @@ pub fn SnapshotTablePage<R, V, E, M, K>(
     /// Optional full-width KPI content.
     #[prop(optional)]
     kpis: Option<Children>,
+    /// Optional column rendered beside the table, INSIDE this page's
+    /// section (Office op-trula).
+    ///
+    /// Exists because a page whose section heading lives inside
+    /// `SnapshotTablePage` cannot compose a table-plus-panel row itself:
+    /// the panel could only sit outside the component, below the whole
+    /// section. `None` -- the default -- renders exactly as before.
+    ///
+    /// Side by side from `lg` up; stacked below it, where a fixed column
+    /// would leave the table no room. The panel is `w-80` on the row and
+    /// scrolls internally rather than stretching the row, so a tall panel
+    /// cannot push a `fill_parent` table out of its height budget.
+    #[prop(optional)]
+    side_panel: Option<Children>,
     /// Controlled local-filter utility content.
     filters: Children,
     /// Optional framework-owned result count, Reset, and Save as Default
@@ -636,6 +668,14 @@ where
     let table_id = format!("{contract_id}-table");
     let (root_class, table_slot_class) =
         entity_table.with_value(|config| snapshot_page_layout(config.viewport_fit.as_ref()));
+    // A panel turns the table slot into a row; without one the slot keeps
+    // its exact class, so the fill_parent height chain (op-at7nn) is
+    // untouched for every page that does not opt in. With one, the row
+    // still carries `min-h-0 flex-1` in fill mode, and EntityTable's own
+    // root is `w-full min-w-0`, so it shrinks beside the panel instead of
+    // overflowing it.
+    let has_side_panel = side_panel.is_some();
+    let table_slot_class = snapshot_table_slot_class(table_slot_class, has_side_panel);
 
     view! {
         <section
@@ -723,6 +763,7 @@ where
                 id=table_id
                 class=table_slot_class
                 data-snapshot-page-slot="table"
+                data-snapshot-side-panel=has_side_panel.then_some("true")
                 data-snapshot-generation=move || generation_marker.get()
             >
                 <Show
@@ -783,6 +824,14 @@ where
                         }
                     })}
                 </Show>
+                {side_panel.map(|panel| view! {
+                    <aside
+                        class="w-full min-w-0 shrink-0 lg:w-80 lg:min-h-0 lg:overflow-auto"
+                        data-snapshot-page-slot="side-panel"
+                    >
+                        {panel()}
+                    </aside>
+                })}
             </div>
         </section>
     }
@@ -1035,6 +1084,33 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_side_panel_leaves_an_unset_slot_unchanged_and_keeps_the_fill_chain() {
+        // Unset: byte-identical to what snapshot_page_layout chose, in both modes.
+        for fill in [None, Some("flex min-h-0 flex-1 flex-col")] {
+            assert_eq!(snapshot_table_slot_class(fill, false), fill);
+        }
+        // Set, fill mode: the row must keep the height-chain classes, or the
+        // table inside collapses silently.
+        let row = snapshot_table_slot_class(Some("flex min-h-0 flex-1 flex-col"), true)
+            .expect("a panel always yields a class");
+        for required in ["flex", "min-h-0", "flex-1", "lg:flex-row"] {
+            assert!(
+                row.split_ascii_whitespace().any(|class| class == required),
+                "fill-mode side-panel row lost `{required}`: {row}"
+            );
+        }
+        // Set, natural mode: a row, but it must NOT stretch the page.
+        let natural = snapshot_table_slot_class(None, true).expect("a class");
+        assert!(natural.contains("lg:flex-row"));
+        assert!(
+            !natural
+                .split_ascii_whitespace()
+                .any(|class| class == "flex-1"),
+            "natural mode must not stretch: {natural}"
+        );
     }
 
     #[test]

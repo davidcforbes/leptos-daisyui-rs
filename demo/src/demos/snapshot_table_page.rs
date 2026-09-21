@@ -10,11 +10,11 @@ use leptos_daisyui_rs::components::{
     EntityTableDisplayProjection, EntityTableMultiSelection, EntityTablePreferenceOwnership,
     EntityTablePreferencePersistence, EntityTablePreferences, EntityTableProjectionScope,
     EntityTableSelection, EntityTableSelectionCause, EntityTableSelectionProposal,
-    EntityTableTexts, EntityTableViewportFit,
+    EntityTableTexts, EntityTableViewportFit, Modal, ModalBox,
 };
 use leptos_daisyui_rs::patterns::{
-    ActionFeedbackContent, ActionFeedbackState, ActiveFilterChip, FilterBarTexts, FilterSchema,
-    PageHeader, PageHeaderNavigationLayout, SnapshotData, SnapshotDatasetOption,
+    ActionFeedbackContent, ActionFeedbackState, ActiveFilterChip, FilterBar, FilterBarTexts,
+    FilterSchema, PageHeader, PageHeaderNavigationLayout, SnapshotData, SnapshotDatasetOption,
     SnapshotDatasetSelectorConfig, SnapshotDefaultSave, SnapshotDefaultSaveState,
     SnapshotDeltaDisposition, SnapshotDeltaHandle, SnapshotEntityTableConfig,
     SnapshotFilterActionsConfig, SnapshotLocalRowProjection, SnapshotRequestHandle,
@@ -782,6 +782,11 @@ pub fn SnapshotTablePageFilterActionsFixture() -> impl IntoView {
 
     let state = RwSignal::new_local(seeded_state());
     let plain_state = RwSignal::new_local(seeded_state());
+    // op-trula: a third page, so the side panel is proven against the SAME
+    // composite that `#snapshot-plain` proves unchanged.
+    let side_state = RwSignal::new_local(seeded_state());
+    // FilterBar collapse: empty at rest, like a consumer's error/status slot.
+    let collapse_status = RwSignal::new(String::new());
     let filter_mode = RwSignal::new("all");
     let local_rows = RwSignal::new_local(Option::<SnapshotLocalRowProjection<FixtureRow>>::None);
 
@@ -971,6 +976,63 @@ pub fn SnapshotTablePageFilterActionsFixture() -> impl IntoView {
                 entity_table=table_config().with_empty_row_range(empty_row_range)
                 action_key_label=Rc::new(|key: &String| key.clone())
             />
+
+            <SnapshotTablePage
+                contract_id="snapshot-side"
+                state=side_state.into()
+                header=Box::new(|| view! {
+                    <PageHeader
+                        title="Snapshot table with a side panel"
+                        subtitle="op-trula: a column beside the table, inside the section."
+                    />
+                }.into_any())
+                dataset_selector=selector_config()
+                filters=Box::new(|| view! { <div data-testid="side-filters"></div> }.into_any())
+                entity_table=table_config()
+                action_key_label=Rc::new(|key: &String| key.clone())
+                side_panel=Box::new(|| view! {
+                    <div class="rounded-box border border-base-300 p-4" data-testid="side-panel-content">
+                        "Client Coordinator"
+                    </div>
+                }.into_any())
+            />
+
+            // FilterBar whose only children are invisible at rest -- the
+            // consumer shape that read as an empty framed card. `relative`
+            // contains the absolutely positioned child so it cannot overlap
+            // (and intercept clicks on) the rest of this shared page.
+            <section class="relative space-y-2" data-testid="filter-bar-collapse-fixture">
+                <FilterBar>
+                    <p role="status" data-testid="collapse-status">
+                        {move || collapse_status.get()}
+                    </p>
+                    // Visible but OUT OF FLOW: must not hold the frame open.
+                    <span
+                        class="pointer-events-none absolute right-0 top-0 text-xs"
+                        data-testid="collapse-floating"
+                    >
+                        "floating"
+                    </span>
+                    // Closed daisyUI modal: laid out, viewport-sized, invisible.
+                    <Modal label="Collapse fixture dialog">
+                        <ModalBox>"closed"</ModalBox>
+                    </Modal>
+                </FilterBar>
+                <div class="flex gap-2">
+                    <Button
+                        attr:data-testid="collapse-show"
+                        on_click=Callback::new(move |_| collapse_status.set("Saved".to_owned()))
+                    >
+                        "Show status"
+                    </Button>
+                    <Button
+                        attr:data-testid="collapse-hide"
+                        on_click=Callback::new(move |_| collapse_status.set(String::new()))
+                    >
+                        "Hide status"
+                    </Button>
+                </div>
+            </section>
         </section>
     }
 }

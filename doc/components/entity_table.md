@@ -1780,6 +1780,34 @@ level up: it adds a term only while the **whole** term fits. Joining terms and
 truncating the join produced `client=Avery · statu` in Office's product, which
 reads as data corruption rather than as a shortened name.
 
+## A closed dialog still has a rect — measure what renders, not what exists
+
+The saved-filters name dialog is **always mounted**, closed or open, and so is
+every other `Modal` in this crate. daisyUI's closed `.modal` is
+`display: grid; position: fixed; inset: 0; visibility: hidden` — it
+deliberately **overrides** the native `dialog:not([open]) { display: none }` so
+that `transition: visibility .3s allow-discrete` can animate the close. That is
+correct: for a user the closed dialog is inert (`pointer-events: none`, out of
+focus order, out of the accessibility tree, out of flow).
+
+But `getBoundingClientRect()` ignores `visibility`, so every control inside a
+closed dialog reports a real, **viewport-anchored** rect. The backdrop is the
+worst: `.modal-backdrop` is `place-self: stretch` in that full-viewport grid, so
+its close `<button>` spans the entire screen and reports `bottom` equal to the
+viewport height — whether or not the page has scrolled.
+
+A test that collects "visible controls" as
+`querySelectorAll('input,select,button')` filtered by `width > 0 && height > 0`
+will therefore find controls that are not there, on **any** table that passes
+`saved_filters` and on any page mounting a `Modal`. This cost 4iiz-etl an A/B
+bisection to find (2026-09-20). Filter with
+`el.checkVisibility({ visibilityProperty: true })`, which excludes
+`visibility: hidden`, `display: none` ancestors and `content-visibility`.
+
+It is the same shape as [One `<tr>`, two presentations](#one-tr-two-presentations-never-click-by-dom-order):
+an element that exists and has a box but is not the one a human sees. The same
+filter resolves both.
+
 ## The toolbar has two slots, on either side of the saved-filter bar
 
 `toolbar_leading` renders **before** the saved-filters bar; `toolbar_actions`

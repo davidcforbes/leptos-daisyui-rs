@@ -16,6 +16,54 @@ pub fn filter_bar_class(class: &str) -> String {
         .join(" ")
 }
 
+/// Applied only by [`FilterBar`] itself -- the one place the
+/// `data-filter-bar-empty` attribute can be set -- so a consumer that reuses
+/// [`filter_bar_class`] on its own element is unaffected.
+const FILTER_BAR_COLLAPSE_CLASS: &str = "data-[filter-bar-empty=true]:gap-0 data-[filter-bar-empty=true]:border-0 data-[filter-bar-empty=true]:bg-transparent data-[filter-bar-empty=true]:p-0";
+
+/// Whether `element`'s subtree renders anything a user can see IN the frame.
+///
+/// A rect is not the same as "rendered", in three ways this has to survive:
+/// - an out-of-flow (`fixed`/`absolute`) element reports a rect but occupies
+///   no space here -- including an OPEN dialog, which is visible and
+///   viewport-sized, so its whole subtree is pruned regardless of state;
+/// - a `visibility: hidden` element keeps its rect, so visibility is checked,
+///   but its children are still walked because CSS lets a child override it;
+/// - a container's height can be nothing but row-gap between empty wrapped
+///   lines, so only a leaf, or an element carrying its own text, counts.
+fn filter_bar_subtree_shows_content(element: &web_sys::Element, window: &web_sys::Window) -> bool {
+    let Ok(Some(style)) = window.get_computed_style(element) else {
+        return false;
+    };
+    let position = style.get_property_value("position").unwrap_or_default();
+    if position == "fixed" || position == "absolute" {
+        return false;
+    }
+    let visible = style.get_property_value("visibility").unwrap_or_default() == "visible";
+    let rect = element.get_bounding_client_rect();
+    let has_box = rect.width() > 0.0 && rect.height() > 0.0;
+    if visible && has_box {
+        if element.child_element_count() == 0 {
+            return true;
+        }
+        let nodes = element.child_nodes();
+        for index in 0..nodes.length() {
+            if let Some(node) = nodes.item(index)
+                && node.node_type() == web_sys::Node::TEXT_NODE
+                && node
+                    .text_content()
+                    .is_some_and(|text| !text.trim().is_empty())
+            {
+                return true;
+            }
+        }
+    }
+    let children = element.children();
+    (0..children.length())
+        .filter_map(|index| children.item(index))
+        .any(|child| filter_bar_subtree_shows_content(&child, window))
+}
+
 /// Local result counts rendered by the controlled utility row.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FilterResultSummary {
@@ -296,10 +344,75 @@ pub fn FilterBar(
         })
     });
 
+    // The frame collapses when nothing inside it renders (Office op-e6dsi
+    // follow-up): at rest the row can hold only consumer content that is
+    // invisible until something happens -- an error alert, a status live
+    // region, an event stream -- and a bordered card around nothing reads as
+    // broken. Decided from rendered geometry, never from which props were
+    // passed, because a consumer's children are opaque to Rust. Written only
+    // when the answer changes, like LineChart's observer; the decision reads
+    // leaves, which the collapse does not resize, so it cannot oscillate.
+    let section_ref = NodeRef::<leptos::html::Section>::new();
+    let frame_empty = RwSignal::new(false);
+    Effect::new(move |_| {
+        use web_sys::wasm_bindgen::JsCast;
+
+        let Some(section) = section_ref.get() else {
+            return;
+        };
+        let Some(window) = web_sys::window() else {
+            return;
+        };
+        let recompute = {
+            let section = section.clone();
+            move || {
+                let children = section.children();
+                let shows = (0..children.length())
+                    .filter_map(|index| children.item(index))
+                    .any(|child| filter_bar_subtree_shows_content(&child, &window));
+                if frame_empty.get_untracked() == shows {
+                    // DEFERRED to the next frame. Collapsing changes this
+                    // section's own padding and border, and the section is
+                    // what the observer watches -- so writing inside the
+                    // observer's callback resizes an observed element during
+                    // delivery, and the browser reports "ResizeObserver loop
+                    // completed with undelivered notifications". The decision
+                    // still converges (it reads leaves, which the collapse
+                    // does not resize), but the error is real console noise
+                    // and trips error monitoring. A frame later the resize is
+                    // an ordinary observation, the recompute agrees, and it
+                    // stops. Found by the browser lane's error capture.
+                    request_animation_frame(move || frame_empty.set(!shows));
+                }
+            }
+        };
+        recompute();
+        let closure = web_sys::wasm_bindgen::closure::Closure::wrap(Box::new({
+            let recompute = recompute.clone();
+            move |_entries: js_sys::Array, _observer: web_sys::ResizeObserver| recompute()
+        })
+            as Box<dyn FnMut(js_sys::Array, web_sys::ResizeObserver)>);
+        match web_sys::ResizeObserver::new(closure.as_ref().unchecked_ref()) {
+            Ok(observer) => {
+                observer.observe(section.unchecked_ref::<web_sys::Element>());
+                // Same single-threaded-wasm rationale as LineChart's observer.
+                let guard = send_wrapper::SendWrapper::new((closure, observer));
+                on_cleanup(move || {
+                    let (closure, observer) = guard.take();
+                    observer.disconnect();
+                    drop(closure);
+                });
+            }
+            Err(_) => drop(closure),
+        }
+    });
+
     view! {
         <section
-            class=filter_bar_class(class)
+            node_ref=section_ref
+            class=format!("{} {FILTER_BAR_COLLAPSE_CLASS}", filter_bar_class(class))
             data-filter-bar="local"
+            data-filter-bar-empty=move || frame_empty.get().then_some("true")
             aria-label=move || texts.with(|texts| texts.region_label.clone())
         >
             {search.map(|search| view! {

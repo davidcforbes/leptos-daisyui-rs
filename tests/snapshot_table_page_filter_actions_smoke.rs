@@ -314,3 +314,167 @@ async fn filter_actions_supply_count_reset_and_save_without_a_consumer_filter_ba
 
     assert_no_browser_errors(&harness, "snapshot-table-page filter actions").await;
 }
+
+/// Browser proof for two layout changes that native tests cannot see
+/// (op-trula side panel; FilterBar empty-frame collapse). Both are geometry,
+/// so both are measured rather than inferred from markup.
+///
+/// SIDE PANEL. `#snapshot-side` passes one; `#snapshot-plain` and
+/// `#snapshot-actions` do not, and are the negative control that an unset
+/// panel changes nothing. Measured at 1440 wide, because the harness mounts
+/// narrower and `lg:flex-row` only applies from 1024.
+///
+/// COLLAPSE. The fixture FilterBar holds only an empty status line, a
+/// visible-but-`absolute` span, and a closed Modal. The frame must collapse
+/// while that is all it holds, re-expand when real text appears, and collapse
+/// again when it goes. The floating span is asserted VISIBLE, so a pass cannot
+/// come from it simply being absent: it is present, rendered, and correctly
+/// ignored because it is out of flow (the 4iiz-etl review's point -- an OPEN
+/// dialog is visible and viewport-sized too).
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-snapshot-table-page-filter-actions)"]
+async fn a_side_panel_sits_beside_the_table_and_an_empty_filter_frame_collapses() {
+    use pixelproof_web::ViewportSize;
+    use std::time::Duration;
+
+    let harness = harness_at("/components/snapshot-table-page-filter-actions").await;
+    begin_browser_error_capture(&harness).await;
+    harness
+        .set_viewport(ViewportSize::new(1440, 900))
+        .await
+        .expect("set a viewport wide enough for lg:flex-row");
+    wait_for_selector(
+        &harness,
+        "#snapshot-side [data-snapshot-page-slot=\"side-panel\"]",
+    )
+    .await;
+
+    let side = eval_json(
+        &harness,
+        r#"(() => {
+            const slot = sel => document.querySelector(`${sel} [data-snapshot-page-slot="table"]`);
+            const side = slot('#snapshot-side');
+            const table = side.querySelector('[data-entity-table]');
+            const panel = side.querySelector('[data-snapshot-page-slot="side-panel"]');
+            const t = table ? table.getBoundingClientRect() : null;
+            const p = panel ? panel.getBoundingClientRect() : null;
+            return {
+                flagged: side.getAttribute('data-snapshot-side-panel'),
+                hasContent: !!side.querySelector('[data-testid="side-panel-content"]'),
+                tableWidth: t ? t.width : null,
+                panelWidth: p ? p.width : null,
+                panelRightOfTable: t && p ? p.left >= t.right - 1 : null,
+                sameRow: t && p ? Math.abs(p.top - t.top) < 1 : null,
+                plainFlag: slot('#snapshot-plain').getAttribute('data-snapshot-side-panel'),
+                plainAside: !!slot('#snapshot-plain').querySelector('aside'),
+                actionsFlag: slot('#snapshot-actions').getAttribute('data-snapshot-side-panel'),
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(side["flagged"], json!("true"), "{side}");
+    assert_eq!(
+        side["hasContent"],
+        json!(true),
+        "panel content rendered: {side}"
+    );
+    assert!(
+        side["tableWidth"].as_f64().is_some_and(|w| w > 200.0),
+        "the table must keep real width beside the panel, not be squeezed out: {side}"
+    );
+    assert!(
+        side["panelWidth"]
+            .as_f64()
+            .is_some_and(|w| (300.0..=340.0).contains(&w)),
+        "the panel is the w-80 column: {side}"
+    );
+    assert_eq!(
+        side["panelRightOfTable"],
+        json!(true),
+        "side by side at lg: {side}"
+    );
+    assert_eq!(
+        side["sameRow"],
+        json!(true),
+        "top-aligned on one row: {side}"
+    );
+    // Negative controls: an unset panel changes nothing.
+    assert_eq!(side["plainFlag"], json!(null), "{side}");
+    assert_eq!(side["plainAside"], json!(false), "{side}");
+    assert_eq!(side["actionsFlag"], json!(null), "{side}");
+
+    async fn frame(harness: &pixelproof_web::Harness) -> Value {
+        eval_json(
+            harness,
+            r#"(() => {
+                const bar = document.querySelector(
+                    '[data-testid="filter-bar-collapse-fixture"] [data-filter-bar]');
+                const cs = getComputedStyle(bar);
+                const floating = document.querySelector('[data-testid="collapse-floating"]');
+                const f = floating.getBoundingClientRect();
+                const actionsBar = document.querySelector('#snapshot-actions [data-filter-bar]');
+                return {
+                    empty: bar.getAttribute('data-filter-bar-empty'),
+                    borderTop: cs.borderTopWidth,
+                    paddingTop: cs.paddingTop,
+                    height: bar.getBoundingClientRect().height,
+                    floatingVisible: f.width > 0 && f.height > 0
+                        && getComputedStyle(floating).visibility === 'visible',
+                    actionsEmpty: actionsBar ? actionsBar.getAttribute('data-filter-bar-empty') : 'absent',
+                };
+            })()"#,
+        )
+        .await
+    }
+
+    async fn frame_until(harness: &pixelproof_web::Harness, want_empty: bool) -> Value {
+        let mut last = frame(harness).await;
+        for _ in 0..60 {
+            if (last["empty"] == json!("true")) == want_empty {
+                return last;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            last = frame(harness).await;
+        }
+        panic!("filter frame never settled to empty={want_empty}: {last}");
+    }
+
+    // At rest: only invisible and out-of-flow content, so the frame collapses.
+    let rest = frame_until(&harness, true).await;
+    assert_eq!(
+        rest["floatingVisible"],
+        json!(true),
+        "the out-of-flow span must be PRESENT and VISIBLE, or this proves nothing: {rest}"
+    );
+    assert_eq!(
+        rest["borderTop"],
+        json!("0px"),
+        "no border when empty: {rest}"
+    );
+    assert_eq!(
+        rest["paddingTop"],
+        json!("0px"),
+        "no padding when empty: {rest}"
+    );
+    assert_eq!(
+        rest["actionsEmpty"],
+        json!(null),
+        "negative control: a filter row with a visible count/Reset/Save stays framed: {rest}"
+    );
+
+    // Real text appears: the frame comes back.
+    click(&harness, "[data-testid=\"collapse-show\"]").await;
+    let shown = frame_until(&harness, false).await;
+    assert_ne!(shown["borderTop"], json!("0px"), "framed again: {shown}");
+
+    // And goes again when the text does.
+    click(&harness, "[data-testid=\"collapse-hide\"]").await;
+    let hidden = frame_until(&harness, true).await;
+    assert_eq!(
+        hidden["borderTop"],
+        json!("0px"),
+        "collapses again: {hidden}"
+    );
+
+    assert_no_browser_errors(&harness, "side panel and filter-frame collapse").await;
+}
