@@ -111,6 +111,10 @@ pub use page_quick_actions::{
     PageQuickActionContent, PageQuickActionLabelVisibility, PageQuickActions,
 };
 pub use page_state_panel::{PageStatePanel, PageStatePanelTexts};
+pub use person_picker::{
+    PersonListbox, PersonPicker, PersonPickerTexts, PersonPresence, PickerPerson, matches_search,
+    nameable_selection, next_selection,
+};
 pub use record_header::{
     RecordActionFeedback, RecordAvatar, RecordBadge, RecordHeader, RecordHeaderState,
     RecordHeaderTexts, RecordMetaItem, RecordQuickAction, RecordQuickActionState, RecordStatus,
@@ -125,10 +129,6 @@ pub use search_picker_dialog::{
 pub use section_grid::{
     SECTION_GRID_BASE_CLASS, SECTION_GRID_CELL_CLASS, SectionGrid, SectionGridCell,
     SectionGridColumns, section_grid_cell_class, section_grid_class,
-};
-pub use person_picker::{
-    PersonPickerTexts, PersonPresence, PickerPerson, matches_search, nameable_selection,
-    next_selection,
 };
 pub use section_heading::{HeadingLevel, SectionHeading, SectionHeadingStatusPlacement};
 pub use selectable_summary::{

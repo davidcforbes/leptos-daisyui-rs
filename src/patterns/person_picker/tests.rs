@@ -26,8 +26,16 @@ fn next_selection_selects_toggles_off_and_switches() {
         Some("a".to_owned()),
         "select from none"
     );
-    assert_eq!(next_selection(Some("a"), "a"), None, "second click deselects");
-    assert_eq!(next_selection(Some("a"), "b"), Some("b".to_owned()), "switch");
+    assert_eq!(
+        next_selection(Some("a"), "a"),
+        None,
+        "second click deselects"
+    );
+    assert_eq!(
+        next_selection(Some("a"), "b"),
+        Some("b".to_owned()),
+        "switch"
+    );
     assert_eq!(
         next_selection(Some("gone"), "a"),
         Some("a".to_owned()),
