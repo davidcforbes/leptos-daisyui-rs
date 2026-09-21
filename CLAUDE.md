@@ -67,6 +67,8 @@ cargo xtask test-ai-chat-knowledge     # knowledge rail: corpora, ingest, ground
 cargo xtask test-admin-workbench       # KpiStrip ladders + the measured help-bubble side (ldui-k3ip, ldui-rzvv)
 cargo xtask gen-tokens [--check]     # regenerate styles/tokens.css from ui-tokens
 cargo xtask check-sibling-tokens     # preamble.rs's ui_tokens refs must exist on the sibling's DEFAULT branch
+cargo xtask test-person-picker       # PersonPicker listbox contract, wrapping, Unknown-vs-Offline, contrast
+cargo xtask clean-cache              # drop incremental/doc/rust-analyzer caches; keeps deps/ warm (~100 GB)
 # (list non-exhaustive and rot-prone — the dispatch match in
 #  xtask/src/main.rs is the self-updating source of truth; newer lanes include
 #  test-softphone, test-section-heading, test-search-picker-dialog, verify-pattern, check-demo, ...)
@@ -131,6 +133,19 @@ was the first label-select in the table, and after ldui-z0n1 moved that control
 the query returned the *status filter* while still passing. Use stable data
 hooks (`data-entity-page-size-control`, `data-entity-row-range`,
 `data-kpi-strip-layout`, `data-heatmap-cell`).
+
+**A rect is not "rendered".** daisyUI's closed `.modal` is `display: grid;
+position: fixed; inset: 0; visibility: hidden` -- it overrides the native
+`dialog:not([open]) { display: none }` so the close can animate -- and
+`getBoundingClientRect()` ignores `visibility`. So every control in a CLOSED
+`Modal` reports a real, viewport-anchored rect (the stretched backdrop button's
+`bottom` equals the viewport height, scrolled or not). Any "visible controls"
+query filtered by `width > 0 && height > 0` finds them; use
+`el.checkVisibility({ visibilityProperty: true })`. Same shape as EntityTable's
+hidden compact `<td>`. A test that mirrors an `ldui-audit` rule must READ the
+rule's constants from `audit/src/*.js` (see `audit_exempt_closest` in
+`tests/entity_table_smoke.rs`), never hand-copy them: a copied rule omitted an
+exemption and failed on correct markup.
 
 **`@container` collapses a content-sized parent.** `container-type: inline-size`
 makes an element's inline size independent of its contents, so a parent that
@@ -523,6 +538,15 @@ Direct2D desktop face. In Tailwind terms that is `1, 2, 3, 4, 6, 8, 12, 16, 24`.
 (`tests/layout_audit_smoke.rs`). Overlap is a hard failure; grid and
 internal-vs-external are ratcheted per page and may only be lowered. Full
 findings: [`doc/plans/2026-07-26-spacing-audit.md`](./doc/plans/2026-07-26-spacing-audit.md).
+
+### Muted text: `/75` or darker
+
+On the light theme `text-base-content/60` is 3.37:1 and `/70` is 4.36:1 --
+both fail WCAG AA for 14px normal text. `/75` (5.03:1) is the smallest step
+that passes and is already the crate's dominant muted step. A consumer's axe
+found the saved-filter caption at `/60` (3c35912). Run axe in EVERY state a
+component has: a caption that renders only after a save is invisible to an
+at-rest axe pass.
 
 ### daisyUI 5, not 4
 
