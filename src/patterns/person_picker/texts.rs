@@ -32,6 +32,8 @@ pub struct PersonPickerTexts {
     pub away: String,
     /// Presence word.
     pub offline: String,
+    /// Presence word for `Unknown` -- "not signed in", never "offline".
+    pub unknown: String,
 }
 
 impl Default for PersonPickerTexts {
@@ -51,6 +53,7 @@ impl Default for PersonPickerTexts {
             busy: "Busy".to_owned(),
             away: "Away".to_owned(),
             offline: "Offline".to_owned(),
+            unknown: "Not signed in".to_owned(),
         }
     }
 }
@@ -73,6 +76,7 @@ impl PersonPickerTexts {
             busy: "Ocupado".to_owned(),
             away: "Ausente".to_owned(),
             offline: "Desconectado".to_owned(),
+            unknown: "Sin iniciar sesión".to_owned(),
         }
     }
 
@@ -83,6 +87,7 @@ impl PersonPickerTexts {
             PersonPresence::Busy => &self.busy,
             PersonPresence::Away => &self.away,
             PersonPresence::Offline => &self.offline,
+            PersonPresence::Unknown => &self.unknown,
         }
     }
 }

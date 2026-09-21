@@ -128,14 +128,17 @@ fn PersonOption(
         "relative grid shrink-0 place-items-center rounded-full bg-neutral font-semibold text-neutral-content {}",
         IconTileSize::Md.as_str()
     );
-    let presence_dot = person.presence.map(|presence| {
-        view! {
-            <span
-                class=format!("absolute bottom-0 right-0 size-3 rounded-full {}", presence.dot_class())
-                aria-hidden="true"
-                data-person-presence=presence.as_str()
-            ></span>
-        }
+    // `Unknown` has no dot class, so it renders no dot; its word still shows.
+    let presence_dot = person.presence.and_then(|presence| {
+        presence.dot_class().map(|dot| {
+            view! {
+                <span
+                    class=format!("absolute bottom-0 right-0 size-3 rounded-full {dot}")
+                    aria-hidden="true"
+                    data-person-presence=presence.as_str()
+                ></span>
+            }
+        })
     });
 
     view! {

@@ -139,8 +139,24 @@ fn english_and_spanish_texts_differ_and_name_every_presence() {
         PersonPresence::Busy,
         PersonPresence::Away,
         PersonPresence::Offline,
+        PersonPresence::Unknown,
     ] {
         assert!(!en.presence(presence).is_empty());
         assert_ne!(en.presence(presence), es.presence(presence));
     }
+}
+
+/// op-wkppl: "has not signed in today" must never read as "went offline".
+/// Offline claims a known state and gets a dot; Unknown has no state to
+/// claim, so it gets no dot and a different word.
+#[test]
+fn unknown_is_not_offline() {
+    assert!(PersonPresence::Offline.dot_class().is_some());
+    assert_eq!(PersonPresence::Unknown.dot_class(), None);
+    let en = PersonPickerTexts::default();
+    assert_ne!(
+        en.presence(PersonPresence::Unknown),
+        en.presence(PersonPresence::Offline)
+    );
+    assert_eq!(en.presence(PersonPresence::Unknown), "Not signed in");
 }

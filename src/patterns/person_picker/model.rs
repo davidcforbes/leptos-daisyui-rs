@@ -27,18 +27,26 @@ pub enum PersonPresence {
     Busy,
     /// Temporarily away.
     Away,
-    /// Not signed in.
+    /// Was signed in; their session has ended (a closed tab).
     Offline,
+    /// No presence record AT ALL -- has not signed in today. Deliberately
+    /// distinct from `Offline`: rendering it as offline tells a leader that
+    /// someone who simply has not opened the app yet has gone offline,
+    /// which is confidently wrong data (4iiz-Office op-wkppl, where the
+    /// server emits it for every roster member without a heartbeat).
+    Unknown,
 }
 
 impl PersonPresence {
-    /// The dot's fill class.
-    pub fn dot_class(self) -> &'static str {
+    /// The dot's fill class, or `None` for no dot. `Unknown` gets NO dot: a
+    /// dot claims a known state, and there is none to claim.
+    pub fn dot_class(self) -> Option<&'static str> {
         match self {
-            Self::Available => "bg-success",
-            Self::Busy => "bg-error",
-            Self::Away => "bg-warning",
-            Self::Offline => "bg-base-300",
+            Self::Available => Some("bg-success"),
+            Self::Busy => Some("bg-error"),
+            Self::Away => Some("bg-warning"),
+            Self::Offline => Some("bg-base-300"),
+            Self::Unknown => None,
         }
     }
 
@@ -49,6 +57,7 @@ impl PersonPresence {
             Self::Busy => "busy",
             Self::Away => "away",
             Self::Offline => "offline",
+            Self::Unknown => "unknown",
         }
     }
 }

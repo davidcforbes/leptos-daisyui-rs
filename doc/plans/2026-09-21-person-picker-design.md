@@ -73,8 +73,13 @@ pub struct PickerPerson {
     pub presence: Option<PersonPresence>,
 }
 
-pub enum PersonPresence { Available, Busy, Away, Offline }
+pub enum PersonPresence { Available, Busy, Away, Offline, Unknown }
 ```
+
+`Unknown` was added after Office verified the assumption below against
+its wire enum: it means *no presence record at all* (has not signed in
+today), which is not `Offline` (a session that ended). It renders **no
+dot** and the word "Not signed in", so it can never read as offline.
 
 Initials are supplied, not derived: correct initials across every culture's names
 is hard, and the consumer already has them.
@@ -173,10 +178,13 @@ no `role="listbox"` with zero options.
   `member_view` override is removed, and role-based gating (`in_class`) stays in
   Office as business logic. This repo ships migration notes; it does not edit
   Office.
-- **Unverified assumption:** Conversations' presence maps onto `Available /
-  Busy / Away / Offline`. Confirm with Office before they migrate that page; if
-  it carries a state these four cannot express, extend the enum here rather than
-  let the page reintroduce a custom card.
+- **Presence, verified 2026-09-21 against Office's `PresenceAvailabilityDto`**
+  (`Available / Away / Offline / Unknown`): `Unknown` was missing and has
+  been added (above). `Busy` stays -- Office's UI offers it as a user choice
+  and is confirming what it stores. Office's *focus* dimension (`Viewing /
+  Replying`) is what someone is DOING, not whether they are available, and
+  must never become an availability state; whether PersonPicker gets a
+  caption slot for it is an open decision, not part of this design.
 
 ## Testing
 

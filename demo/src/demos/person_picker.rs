@@ -40,7 +40,13 @@ fn roster() -> Vec<PickerPerson> {
             "CD",
             Some(PersonPresence::Away),
         ),
-        person("dmitri", "Dmitri Volkov", "Phoenix", "DV", None),
+        person(
+            "dmitri",
+            "Dmitri Volkov",
+            "Phoenix",
+            "DV",
+            Some(PersonPresence::Unknown),
+        ),
         // Wrapping fixtures: these must fold onto new lines, never scroll
         // sideways.
         person(
