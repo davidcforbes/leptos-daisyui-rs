@@ -991,7 +991,7 @@ pub fn SnapshotTablePageFilterActionsFixture() -> impl IntoView {
                 entity_table=table_config()
                 action_key_label=Rc::new(|key: &String| key.clone())
                 side_panel=Box::new(|| view! {
-                    <div class="rounded-box border border-base-300 p-4" data-testid="side-panel-content">
+                    <div class="w-[360px] rounded-box border border-base-300 p-4" data-testid="side-panel-content">
                         "Client Coordinator"
                     </div>
                 }.into_any())

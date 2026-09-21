@@ -460,8 +460,11 @@ pub fn SnapshotTablePage<R, V, E, M, K>(
     /// section. `None` -- the default -- renders exactly as before.
     ///
     /// Side by side from `lg` up; stacked below it, where a fixed column
-    /// would leave the table no room. The panel is `w-80` on the row and
-    /// scrolls internally rather than stretching the row, so a tall panel
+    /// would leave the table no room. From `lg` the column takes its
+    /// CONTENT's width -- a slot must not impose one, or a fixed-width panel
+    /// such as `PersonPicker` (360px) overflows it, and a panel collapsed to
+    /// its rail leaves a dead column (4iiz-Office measured 40px and 276px).
+    /// It scrolls internally rather than stretching the row, so a tall panel
     /// cannot push a `fill_parent` table out of its height budget.
     #[prop(optional)]
     side_panel: Option<Children>,
@@ -826,7 +829,7 @@ where
                 </Show>
                 {side_panel.map(|panel| view! {
                     <aside
-                        class="w-full min-w-0 shrink-0 lg:w-80 lg:min-h-0 lg:overflow-auto"
+                        class="w-full min-w-0 shrink-0 lg:w-auto lg:min-h-0 lg:overflow-auto"
                         data-snapshot-page-slot="side-panel"
                     >
                         {panel()}

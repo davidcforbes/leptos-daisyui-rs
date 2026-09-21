@@ -385,8 +385,8 @@ async fn a_side_panel_sits_beside_the_table_and_an_empty_filter_frame_collapses(
     assert!(
         side["panelWidth"]
             .as_f64()
-            .is_some_and(|w| (300.0..=340.0).contains(&w)),
-        "the panel is the w-80 column: {side}"
+            .is_some_and(|w| (355.0..=365.0).contains(&w)),
+        "the column takes its CONTENT's width (the fixture panel is 360px); a slot          must not impose a width, or a 360px PersonPicker scrolls sideways in it: {side}"
     );
     assert_eq!(
         side["panelRightOfTable"],
