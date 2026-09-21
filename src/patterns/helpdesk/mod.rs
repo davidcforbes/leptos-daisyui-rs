@@ -3,6 +3,7 @@
 //! See `doc/plans/2026-09-14-helpdesk-composite-design.md` for the design
 //! and `doc/components/helpdesk.md` for the consumer guide.
 
+mod assignee;
 mod backend;
 mod component;
 mod drawer;
@@ -13,6 +14,10 @@ mod request_dialog;
 mod state;
 mod texts;
 
+pub use assignee::{
+    AssigneeChoice, UNASSIGNED_KEY, assignee_items, assignee_key, assignee_match_count,
+    assignee_query_matches, sorted_assignable,
+};
 pub use backend::{HelpdeskBackend, HelpdeskFuture};
 pub use component::Helpdesk;
 pub use drawer::{TicketDetailDrawer, TriageAction};
@@ -28,4 +33,4 @@ pub use state::{
     Bucket, BucketCounts, NewTicketCaps, NewTicketError, RoleCapabilities, TicketFilter,
     bucket_counts, relative_age, validate_new_ticket,
 };
-pub use texts::HelpdeskTexts;
+pub use texts::{HelpdeskAssigneeTexts, HelpdeskTexts};

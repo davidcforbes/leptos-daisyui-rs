@@ -1,18 +1,29 @@
 //! The ticket detail drawer: header, meta, description, attachments,
 //! comments and (support only) the triage selects.
 
+use super::assignee::{
+    AssigneeChoice, UNASSIGNED_KEY, assignee_items, assignee_key, assignee_match_count,
+};
 use super::model::*;
 use super::state::{RoleCapabilities, relative_age};
-use super::texts::HelpdeskTexts;
+use super::texts::{HelpdeskAssigneeTexts, HelpdeskTexts};
 use crate::components::{
     Badge, BadgeColor, Button, ButtonColor, ButtonSize, ButtonStyle, Drawer, DrawerContent,
-    DrawerOverlay, DrawerPlacement, DrawerSide, DrawerToggle, Select, SelectOption, Textarea,
+    DrawerOverlay, DrawerPlacement, DrawerSide, DrawerToggle, KeyedResultListSelectionProposal,
+    ResultListItem, Select, SelectOption, Textarea,
 };
 use crate::patterns::{
-    RecordBadge, RecordHeader, RecordMetaItem, RecordQuickAction, RecordStatus, RecordStatusTone,
+    ConfirmableSearchPickerDialog, RecordBadge, RecordHeader, RecordMetaItem, RecordQuickAction,
+    RecordStatus, RecordStatusTone, SearchPickerStatus,
 };
 use leptos::ev;
 use leptos::prelude::*;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Per-instance sequence for the assignee picker's `control_id`, so two
+/// drawers on one document (a support and a requester composite) never
+/// share dialog ids.
+static HELPDESK_ASSIGN_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// A triage action requested from the drawer. The composite owns the
 /// backend call and the optimistic-then-authoritative update.
@@ -105,6 +116,9 @@ pub fn TicketDetailDrawer(
     /// All rendered copy.
     #[prop(optional, into, default = Signal::stored(HelpdeskTexts::default()))]
     texts: Signal<HelpdeskTexts>,
+    /// Copy for the searchable assignee picker (`ldui-purt`).
+    #[prop(optional, into, default = Signal::stored(HelpdeskAssigneeTexts::default()))]
+    assignee_texts: Signal<HelpdeskAssigneeTexts>,
     /// The current time, for age formatting.
     #[prop(into)]
     now_ms: Signal<i64>,
@@ -119,6 +133,42 @@ pub fn TicketDetailDrawer(
     let comment_draft = RwSignal::new(String::new());
     let ticket = Signal::derive(move || detail.get().map(|d| d.ticket));
     let triage = Signal::derive(move || capabilities.get().triage);
+
+    // The searchable assignee picker (ldui-purt). A ~300-person directory in
+    // a native select was unsorted and unsearchable; assigning is a write, so
+    // it goes through the confirmable picker (select, then confirm), keyed by
+    // person id so two people sharing a display name stay distinct.
+    let assignable = Signal::derive(move || meta.get().map(|m| m.assignable).unwrap_or_default());
+    let assign_control_id = format!(
+        "helpdesk-assign-{}",
+        HELPDESK_ASSIGN_SEQ.fetch_add(1, Ordering::Relaxed)
+    );
+    let assign_open = RwSignal::new(false);
+    let assign_query = RwSignal::new(String::new());
+    let assign_selected = RwSignal::new(None::<String>);
+    let assign_items = Signal::derive(move || {
+        let unassigned = assignee_texts.get().unassigned_option;
+        assignable.with(|people| assign_query.with(|q| assignee_items(people, q, &unassigned)))
+    });
+    let assign_count = Signal::derive(move || {
+        let n = assignable.with(|people| assign_query.with(|q| assignee_match_count(people, q)));
+        Some(assignee_texts.get().match_count(n))
+    });
+    let open_assign = move || {
+        assign_query.set(String::new());
+        let current = ticket
+            .get_untracked()
+            .and_then(|t| t.assignee)
+            .map_or_else(|| UNASSIGNED_KEY.to_owned(), |p| assignee_key(&p.id));
+        assign_selected.set(Some(current));
+        assign_open.set(true);
+    };
+    // Closing the drawer closes a picker left open over it.
+    Effect::new(move |_| {
+        if !open.get() {
+            assign_open.set(false);
+        }
+    });
 
     let header = move || {
         let t = ticket.get()?;
@@ -160,7 +210,36 @@ pub fn TicketDetailDrawer(
         comment_draft.set(String::new());
     };
 
+    // Rendered OUTSIDE the drawer's <aside>: the aside closes the drawer on
+    // any Escape keydown, so an Escape meant for the picker would bubble into
+    // it and close both.
+    let picker = view! {
+        <ConfirmableSearchPickerDialog
+            open=assign_open
+            control_id=assign_control_id
+            title=Signal::derive(move || assignee_texts.get().dialog_title)
+            query=assign_query
+            status=Signal::stored(SearchPickerStatus::Ready)
+            items=assign_items
+            selected_key=assign_selected
+            result_count=assign_count
+            on_query_change=Callback::new(move |q: String| assign_query.set(q))
+            on_selection_change=Callback::new(move |proposal: KeyedResultListSelectionProposal| {
+                assign_selected.set(proposal.key);
+            })
+            on_confirm=Callback::new(move |item: ResultListItem<AssigneeChoice>| {
+                assign_open.set(false);
+                on_action.run(TriageAction::Assign {
+                    assignee_id: item.payload.assignee_id(),
+                });
+            })
+            on_close=Callback::new(move |_| assign_open.set(false))
+            texts=Signal::derive(move || assignee_texts.get().picker)
+        />
+    };
+
     view! {
+        {picker}
         <Drawer
             placement=DrawerPlacement::End
             open=open
@@ -221,23 +300,45 @@ pub fn TicketDetailDrawer(
                                     </For>
                                 </Select>
                             </label>
-                            <label class="flex flex-col gap-2">
+                            <div class="flex flex-col gap-2" data-helpdesk-assign="">
                                 <span class="text-sm font-medium">{move || texts.get().assignee}</span>
-                                <Select
-                                    value=Signal::derive(move || {
-                                        ticket.get().and_then(|t| t.assignee.map(|p| p.id)).unwrap_or_default()
-                                    })
-                                    on_change=Callback::new(move |id: String| {
-                                        on_action.run(TriageAction::Assign { assignee_id: (!id.is_empty()).then_some(id) })
-                                    })
-                                    attr:data-helpdesk-assign=""
-                                >
-                                    <SelectOption attr:value="">{move || texts.get().unassigned}</SelectOption>
-                                    <For each=move || meta.get().map(|m| m.assignable).unwrap_or_default() key=|p| p.id.clone() let:p>
-                                        <SelectOption attr:value=p.id.clone()>{p.display_name.clone()}</SelectOption>
-                                    </For>
-                                </Select>
-                            </label>
+                                <div class="flex items-center gap-2">
+                                    <span
+                                        class="min-w-0 flex-1 break-words text-sm"
+                                        data-helpdesk-assignee-name=""
+                                    >
+                                        {move || {
+                                            ticket
+                                                .get()
+                                                .and_then(|t| t.assignee.map(|p| p.display_name))
+                                                .unwrap_or_else(|| texts.get().unassigned)
+                                        }}
+                                    </span>
+                                    <Show
+                                        when=move || !assignable.with(Vec::is_empty)
+                                        fallback=move || {
+                                            view! {
+                                                <span
+                                                    class="text-sm text-base-content/75"
+                                                    data-helpdesk-assign-unavailable=""
+                                                >
+                                                    {move || assignee_texts.get().unavailable}
+                                                </span>
+                                            }
+                                        }
+                                    >
+                                        <Button
+                                            size=ButtonSize::Sm
+                                            style=ButtonStyle::Outline
+                                            on_click=Callback::new(move |_| open_assign())
+                                            attr:aria-label=move || assignee_texts.get().change_label
+                                            attr:data-helpdesk-assign-open=""
+                                        >
+                                            {move || assignee_texts.get().change}
+                                        </Button>
+                                    </Show>
+                                </div>
+                            </div>
                             <label class="flex flex-col gap-2">
                                 <span class="text-sm font-medium">{move || texts.get().priority}</span>
                                 <Select

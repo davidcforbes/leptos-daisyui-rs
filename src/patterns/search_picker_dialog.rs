@@ -906,6 +906,14 @@ pub fn ConfirmableSearchPickerDialog<T>(
     #[prop(optional, into)]
     confirm_error: Signal<Option<String>>,
 
+    /// Optional caller-built announcement of how many results match, e.g.
+    /// "4 people match" (`ldui-purt`). Rendered into an always-mounted polite
+    /// live region inside the dialog -- a region outside it would sit in the
+    /// inert background of a modal -- so assistive technology hears the
+    /// narrowing as the user types. `None` leaves the region empty.
+    #[prop(optional, into)]
+    result_count: Signal<Option<String>>,
+
     /// Additional CSS classes for the dialog element.
     #[prop(optional, into)]
     class: &'static str,
@@ -1128,6 +1136,15 @@ where
                         />
                     </Field>
                 </ModalSearchRow>
+
+                <p
+                    class="sr-only"
+                    role="status"
+                    aria-live="polite"
+                    data-confirmable-search-picker-count="true"
+                >
+                    {move || result_count.get().unwrap_or_default()}
+                </p>
 
                 {move || {
                     decision
@@ -1691,6 +1708,7 @@ mod tests {
                         state_texts: Signal::stored(PageStatePanelTexts::default()),
                         error_detail: Signal::stored(None),
                         confirm_error: Signal::stored(None),
+                        result_count: Signal::stored(None),
                         class: "",
                         node_ref: NodeRef::new(),
                     });

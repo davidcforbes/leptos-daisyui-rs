@@ -28,10 +28,16 @@ pub fn HelpdeskFixture(
     /// standing in for entitlements the host reads from elsewhere.
     #[prop(optional)]
     requester_capabilities: Option<RoleCapabilities>,
+    /// `true` empties the assignable directory (ldui-purt).
+    #[prop(optional)]
+    no_directory: bool,
 ) -> impl IntoView {
     let mut backend = InMemoryHelpdeskBackend::seeded();
     if let Some(f) = fault {
         backend = backend.with_fault(f);
+    }
+    if no_directory {
+        backend = backend.without_directory();
     }
     let calls_backend = backend.clone();
     crate::debug::register_signal("helpdesk_calls", move || {

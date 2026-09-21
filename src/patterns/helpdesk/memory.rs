@@ -272,9 +272,14 @@ impl InMemoryHelpdeskBackend {
                     unavailable_reason: None,
                     statuses: statuses(),
                     priorities: priorities(),
+                    // Deliberately unsorted, with one lower-case name, so the
+                    // picker's sort is observable (ldui-purt).
                     assignable: vec![
                         Person::new(SEED_ME, name_of(SEED_ME)),
                         Person::new(SEED_YOU, name_of(SEED_YOU)),
+                        Person::new("w-zoe", "Zoe Park"),
+                        Person::new("w-ana", "ana Ruiz"),
+                        Person::new("w-ben", "Ben Adler"),
                     ],
                     kinds: vec![TicketKind::Bug, TicketKind::Request],
                 },
@@ -289,6 +294,14 @@ impl InMemoryHelpdeskBackend {
     /// Inject a fault: every subsequent call is shaped by it.
     pub fn with_fault(self, fault: HelpdeskFault) -> Self {
         self.inner.borrow_mut().fault = Some(fault);
+        self
+    }
+
+    /// Empty the assignable directory, standing in for a host whose directory
+    /// read failed (ldui-purt): the drawer must say so rather than offer an
+    /// empty picker.
+    pub fn without_directory(self) -> Self {
+        self.inner.borrow_mut().meta.assignable.clear();
         self
     }
 

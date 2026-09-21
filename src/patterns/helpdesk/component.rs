@@ -1,12 +1,13 @@
 //! The `Helpdesk` composite: buckets, filters, the ticket table, the detail
 //! drawer and the New Request dialog, wired to a host-supplied backend.
 
+use super::assignee::sorted_assignable;
 use super::backend::HelpdeskBackend;
 use super::drawer::{TicketDetailDrawer, TriageAction, priority_color, status_tone};
 use super::model::*;
 use super::request_dialog::NewRequestDialog;
 use super::state::{Bucket, RoleCapabilities, TicketFilter, bucket_counts, relative_age};
-use super::texts::HelpdeskTexts;
+use super::texts::{HelpdeskAssigneeTexts, HelpdeskTexts};
 use crate::components::{
     Badge, BadgeColor, BadgeSize, Button, ButtonColor, ButtonSize, EntityAutoFilterTexts,
     EntityAutoFilters, EntityColumn, EntityColumnChooserTrigger, EntityTable, Icon, IconSize,
@@ -75,6 +76,10 @@ pub fn Helpdesk(
     /// All rendered copy.
     #[prop(optional, into, default = Signal::stored(HelpdeskTexts::default()))]
     texts: Signal<HelpdeskTexts>,
+    /// Copy for the drawer's searchable assignee picker (`ldui-purt`). A
+    /// separate struct so adding it broke no host's `HelpdeskTexts` literal.
+    #[prop(optional, into, default = Signal::stored(HelpdeskAssigneeTexts::default()))]
+    assignee_texts: Signal<HelpdeskAssigneeTexts>,
     /// Set true to open the New Request dialog directly (an F2 launcher).
     #[prop(optional)]
     open_request: Option<RwSignal<bool>>,
@@ -535,7 +540,7 @@ pub fn Helpdesk(
                         attr:data-helpdesk-filter-assignee=""
                     >
                         <SelectOption attr:value="">{move || texts.get().any_assignee}</SelectOption>
-                        <For each=move || meta.get().map(|m| m.assignable).unwrap_or_default() key=|p| p.id.clone() let:p>
+                        <For each=move || meta.get().map(|m| sorted_assignable(&m.assignable)).unwrap_or_default() key=|p| p.id.clone() let:p>
                             <SelectOption attr:value=p.id.clone()>{p.display_name.clone()}</SelectOption>
                         </For>
                     </Select>
@@ -633,6 +638,7 @@ pub fn Helpdesk(
                 meta=meta
                 capabilities=caps
                 texts=texts
+                assignee_texts=assignee_texts
                 now_ms=now
                 feedback=feedback
                 on_close=Callback::new(move |_| close_detail())

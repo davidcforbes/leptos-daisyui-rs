@@ -128,6 +128,9 @@ fn main() {
         let helpdesk_fixture_read_all = web_sys::window()
             .and_then(|window| window.location().pathname().ok())
             .is_some_and(|path| path.ends_with("/helpdesk-fixture-read-all"));
+        let helpdesk_fixture_no_directory = web_sys::window()
+            .and_then(|window| window.location().pathname().ok())
+            .is_some_and(|path| path.ends_with("/helpdesk-fixture-no-directory"));
         view! {
             <UiTokensPreamble />
             <UiAnimationsPreamble />
@@ -167,6 +170,8 @@ fn main() {
                         .into_any()
                 } else if helpdesk_fixture_no_attachments {
                     view! { <helpdesk_fixture::HelpdeskFixture attachments=false /> }.into_any()
+                } else if helpdesk_fixture_no_directory {
+                    view! { <helpdesk_fixture::HelpdeskFixture no_directory=true /> }.into_any()
                 } else if ai_chat_failures {
                     view! { <ai_chat_fixture::AiChatFixture scripted=true /> }.into_any()
                 } else if ai_chat_groq_no_key {

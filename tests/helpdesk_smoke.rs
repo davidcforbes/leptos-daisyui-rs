@@ -663,3 +663,221 @@ async fn filter_row_narrows_rows_and_add_row_opens_the_dialog() {
     }
     assert_no_browser_errors(&h, "filter row + add row").await;
 }
+
+/// The assignee picker's observable state inside `root` (ldui-purt).
+async fn assign_snapshot(h: &pixelproof_web::Harness, root: &str) -> Value {
+    eval_json(
+        h,
+        &format!(
+            r#"(() => {{
+                const root = document.querySelector('{root}');
+                const box = root.querySelector('[data-confirmable-search-picker-dialog]');
+                const dialog = box ? box.closest('dialog') : null;
+                const rows = Array.from(root.querySelectorAll(
+                    '[data-confirmable-search-picker-results] [data-result-key]'));
+                const count = root.querySelector('[data-confirmable-search-picker-count]');
+                return {{
+                    dialogOpen: dialog ? dialog.open : null,
+                    rows: rows.map(r => r.textContent.trim()),
+                    keys: rows.map(r => r.getAttribute('data-result-key')),
+                    count: count?.textContent?.trim() ?? null,
+                    countLive: count?.getAttribute('aria-live') ?? null,
+                    selectedKey: root.querySelector('[data-confirmable-search-picker-summary]')
+                        ?.getAttribute('data-selected-key') ?? null,
+                    searchFocused: document.activeElement ===
+                        root.querySelector('[data-confirmable-search-picker-search]'),
+                    changeFocused: document.activeElement ===
+                        root.querySelector('[data-helpdesk-assign-open]'),
+                    assignee: root.querySelector('[data-helpdesk-assignee-name]')
+                        ?.textContent?.trim() ?? null,
+                    changePresent: root.querySelector('[data-helpdesk-assign-open]') !== null,
+                    unavailable: root.querySelector('[data-helpdesk-assign-unavailable]')
+                        ?.textContent?.trim() ?? null,
+                    nativeSelect: root.querySelector('select[data-helpdesk-assign]') !== null,
+                    drawerOpen: root.querySelector('[data-helpdesk-drawer]')
+                        ?.getAttribute('data-helpdesk-drawer-open') ?? null,
+                }};
+            }})()"#
+        ),
+    )
+    .await
+}
+
+/// Type into the picker's search field the way a user does: set the value,
+/// then fire `input`, which the controlled query listens to.
+async fn set_assign_query(h: &pixelproof_web::Harness, root: &str, text: &str) {
+    eval_json(
+        h,
+        &format!(
+            r#"(() => {{
+                const input = document.querySelector('{root} [data-confirmable-search-picker-search]');
+                input.value = '{text}';
+                input.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                return true;
+            }})()"#
+        ),
+    )
+    .await;
+}
+
+/// Poll until `root`'s picker renders exactly `n` result rows (the harness
+/// exposes no `wait_for_function`; same 60 s budget as `wait_for_selector`).
+async fn wait_for_result_rows(h: &pixelproof_web::Harness, root: &str, n: usize) {
+    for _ in 0..600 {
+        let rows = assign_snapshot(h, root).await["rows"]
+            .as_array()
+            .map(Vec::len)
+            .unwrap_or(usize::MAX);
+        if rows == n {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    panic!(
+        "picker never rendered {n} rows: {}",
+        assign_snapshot(h, root).await
+    );
+}
+
+async fn open_support_drawer(h: &pixelproof_web::Harness) {
+    wait_for_selector(h, &format!("{SUPPORT} [data-helpdesk-state=\"ready\"]")).await;
+    click(
+        h,
+        &format!("{SUPPORT} [data-helpdesk-table] tbody tr:first-child"),
+    )
+    .await;
+    wait_for_selector(h, &format!("{SUPPORT} [data-helpdesk-assign]")).await;
+}
+
+/// ldui-purt, Office op-ne1h9: the ~300-person native select became a
+/// searchable, sorted, keyboard-operable confirmable picker. The seed
+/// directory is deliberately unsorted with a lower-case name, so the order
+/// asserted here exists only if the component sorted it.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-helpdesk)"]
+async fn assignee_picker_sorts_narrows_announces_and_assigns() {
+    let h = harness_at(PAGE).await;
+    begin_browser_error_capture(&h).await;
+    open_support_drawer(&h).await;
+    let closed = assign_snapshot(&h, SUPPORT).await;
+    assert_eq!(
+        closed["nativeSelect"],
+        json!(false),
+        "no native select: {closed}"
+    );
+
+    click(&h, &format!("{SUPPORT} [data-helpdesk-assign-open]")).await;
+    wait_for_selector(
+        &h,
+        &format!("{SUPPORT} [data-confirmable-search-picker-search]:focus"),
+    )
+    .await;
+    let opened = assign_snapshot(&h, SUPPORT).await;
+    assert_eq!(opened["dialogOpen"], json!(true), "{opened}");
+    assert_eq!(
+        opened["rows"],
+        json!([
+            "Unassigned",
+            "ana Ruiz",
+            "Ben Adler",
+            "Chris Forbes",
+            "Dana Torres",
+            "Zoe Park"
+        ]),
+        "unassigned first, then people sorted case-insensitively: {opened}"
+    );
+    assert_eq!(opened["count"], json!("5 people match"), "{opened}");
+    assert_eq!(opened["countLive"], json!("polite"), "{opened}");
+
+    set_assign_query(&h, SUPPORT, "ar").await;
+    wait_for_result_rows(&h, SUPPORT, 1).await;
+    let narrowed = assign_snapshot(&h, SUPPORT).await;
+    assert_eq!(
+        narrowed["rows"],
+        json!(["Zoe Park"]),
+        "typing narrows: {narrowed}"
+    );
+    assert_eq!(
+        narrowed["count"],
+        json!("1 person matches"),
+        "the narrowed count is announced: {narrowed}"
+    );
+
+    // Arrow keys work from the search field and move the selection only.
+    h.press_key_sequence(&[Key::ArrowDown])
+        .await
+        .expect("ArrowDown");
+    wait_for_selector(
+        &h,
+        &format!(
+            "{SUPPORT} [data-confirmable-search-picker-summary][data-selected-key=\"person:w-zoe\"]"
+        ),
+    )
+    .await;
+    let selected = assign_snapshot(&h, SUPPORT).await;
+    assert_eq!(selected["searchFocused"], json!(true), "{selected}");
+    let before = backend_calls(&h).await.to_string();
+    assert!(
+        !before.contains("w-zoe"),
+        "selecting is not a write: {before}"
+    );
+
+    click(
+        &h,
+        &format!("{SUPPORT} [data-confirmable-search-picker-confirm]"),
+    )
+    .await;
+    wait_for_selector(
+        &h,
+        &format!("{SUPPORT} [data-helpdesk-action-feedback-state=\"success\"]"),
+    )
+    .await;
+    let calls = backend_calls(&h).await.to_string();
+    assert!(
+        calls.contains("Assign") && calls.contains("w-zoe"),
+        "confirm wrote the keyed person: {calls}"
+    );
+    let assigned = assign_snapshot(&h, SUPPORT).await;
+    assert_eq!(assigned["dialogOpen"], json!(false), "{assigned}");
+    assert_eq!(assigned["assignee"], json!("Zoe Park"), "{assigned}");
+
+    // Escape closes the picker, not the drawer under it, and focus returns
+    // to the control that opened it. A real key press: Modal answers the
+    // native `cancel` event, which a synthetic keydown never fires.
+    click(&h, &format!("{SUPPORT} [data-helpdesk-assign-open]")).await;
+    wait_for_selector(
+        &h,
+        &format!("{SUPPORT} [data-confirmable-search-picker-search]:focus"),
+    )
+    .await;
+    h.press_key_sequence(&[Key::Escape]).await.expect("Escape");
+    wait_for_selector(&h, &format!("{SUPPORT} [data-helpdesk-assign-open]:focus")).await;
+    let escaped = assign_snapshot(&h, SUPPORT).await;
+    assert_eq!(escaped["dialogOpen"], json!(false), "{escaped}");
+    assert_eq!(
+        escaped["drawerOpen"],
+        json!("true"),
+        "Escape in the picker must not close the drawer: {escaped}"
+    );
+    assert_eq!(escaped["changeFocused"], json!(true), "{escaped}");
+    assert_no_browser_errors(&h, "assignee picker").await;
+}
+
+/// ldui-purt: a host whose directory read failed renders the drawer's
+/// Unavailable state, never an empty picker. `/helpdesk-fixture` itself is
+/// the negative control (the test above opens a populated picker).
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-helpdesk)"]
+async fn assignee_picker_reports_an_unavailable_directory() {
+    let h = harness_at(&format!("{PAGE}-no-directory")).await;
+    begin_browser_error_capture(&h).await;
+    open_support_drawer(&h).await;
+    let s = assign_snapshot(&h, SUPPORT).await;
+    assert_eq!(
+        s["unavailable"],
+        json!("Directory unavailable"),
+        "an empty directory says so: {s}"
+    );
+    assert_eq!(s["changePresent"], json!(false), "nothing to open: {s}");
+    assert_no_browser_errors(&h, "assignee directory unavailable").await;
+}

@@ -172,6 +172,7 @@ changes, it silently starts describing something else.
 | `data-helpdesk-add-row` | The table toolbar's `+` action (opens the New Request dialog; distinct from the header's `data-helpdesk-new-request`). |
 | `data-helpdesk-drawer`, `-drawer-open`, `-drawer-header`, `-drawer-close` | Detail drawer. |
 | `data-helpdesk-triage`, `-transition`, `-assign`, `-priority` | Support-only triage controls. |
+| `data-helpdesk-assign-open`, `-assignee-name`, `-assign-unavailable` | The assignee picker's trigger, the current assignee, and the empty-directory state. The picker itself is a `ConfirmableSearchPickerDialog` (`data-confirmable-search-picker-*`). |
 | `data-helpdesk-comments`, `-comment`, `-comment-input`, `-comment-submit` | Comment thread. |
 | `data-helpdesk-action-feedback`, `-action-feedback-state` | `idle` \| `pending` \| `success` \| `error`. |
 | `data-helpdesk-new-request`, `-dialog`, `-kind`, `-summary`, `-description`, `-context`, `-images`, `-submit`, `-submit-error`, `-cancel`, `-toast` | New Request dialog. |
@@ -220,3 +221,30 @@ not; a support transition writes *and* the requester drawer has no status
 select. It also covers the two faults by pathname
 (`/helpdesk-fixture-not-configured`, `/helpdesk-fixture-fail-writes`) and runs
 vendored axe-core with the drawer and the dialog open.
+
+## The assignee picker (`ldui-purt`)
+
+The drawer's assignee control is a searchable picker, not a native select. A
+host directory of hundreds of people arrives in whatever order its source
+returns; a select of it was unsorted and unsearchable (4iiz-Office, op-ne1h9).
+
+- **Change** opens a `ConfirmableSearchPickerDialog`: typing narrows
+  (case-insensitive substring), arrow keys move the selection from the search
+  field, and **Assign** writes. Selecting is never a write, because assigning
+  is one; the dialog's own contract guarantees that.
+- The list is **sorted by display name, case-insensitively**, then by id, so
+  the host need not sort. **Unassigned** is the first choice.
+- Rows are keyed by person id (`person:<id>`), so two people with the same
+  display name stay distinct.
+- The match count is announced in a polite live region inside the dialog.
+- Escape closes the picker and not the drawer, and focus returns to
+  **Change**.
+- An **empty `assignable`** renders `data-helpdesk-assign-unavailable` in
+  place of the trigger. A host whose directory read failed should hand back
+  an empty list rather than fail `meta()`, which would take the whole
+  helpdesk down.
+
+Copy lives in `HelpdeskAssigneeTexts`, passed as `assignee_texts`, a
+**separate struct** from `HelpdeskTexts` because hosts build `HelpdeskTexts`
+by full struct literal, and a new field there breaks every such host. A host
+that has not localised it yet gets the English defaults.

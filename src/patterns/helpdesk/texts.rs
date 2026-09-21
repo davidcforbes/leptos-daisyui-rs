@@ -1,6 +1,7 @@
 //! All copy the `Helpdesk` composite renders, in one struct built by literal.
 
 use super::model::{TicketKind, TicketPriority};
+use crate::patterns::ConfirmableSearchPickerDialogTexts;
 
 /// Every string the composite, its drawer and its dialog render. `Default`
 /// is English; a host overrides individual fields by struct-update syntax.
@@ -231,10 +232,90 @@ impl HelpdeskTexts {
     }
 }
 
+/// Copy for the drawer's searchable assignee picker (`ldui-purt`).
+///
+/// A separate struct rather than new [`HelpdeskTexts`] fields because hosts
+/// build `HelpdeskTexts` by full struct literal (4iiz-Office's Spanish
+/// branch does), and a new field there is a compile break in every such
+/// host. A host that has not localised this yet gets the English default.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HelpdeskAssigneeTexts {
+    /// Visible label of the button that opens the picker.
+    pub change: String,
+    /// Accessible name of that button; should contain [`Self::change`].
+    pub change_label: String,
+    /// Shown instead of the button when the host's directory returned no
+    /// one to assign (a failed or empty directory read).
+    pub unavailable: String,
+    /// The picker's "no assignee" choice. Its own word rather than
+    /// [`HelpdeskTexts::unassigned`], which is a table-cell placeholder
+    /// (an em dash) nobody could search for.
+    pub unassigned_option: String,
+    /// The picker dialog's title.
+    pub dialog_title: String,
+    /// Announced when exactly one person matches.
+    pub match_count_one: String,
+    /// Announced for any other number of matches; `{count}` substituted.
+    pub match_count_other: String,
+    /// The picker dialog's own chrome: search label, Confirm, Cancel, the
+    /// selected-person summary.
+    pub picker: ConfirmableSearchPickerDialogTexts,
+}
+
+impl Default for HelpdeskAssigneeTexts {
+    fn default() -> Self {
+        Self {
+            change: "Change".into(),
+            change_label: "Change assignee".into(),
+            unavailable: "Directory unavailable".into(),
+            unassigned_option: "Unassigned".into(),
+            dialog_title: "Assign ticket".into(),
+            match_count_one: "1 person matches".into(),
+            match_count_other: "{count} people match".into(),
+            picker: ConfirmableSearchPickerDialogTexts {
+                search_label: "Search people".into(),
+                search_placeholder: "Type a name…".into(),
+                selected_label: "Assign to".into(),
+                selected_none: "No one selected yet.".into(),
+                confirm: "Assign".into(),
+                confirm_pending: "Assigning…".into(),
+                confirm_blocked_no_selection: "Choose a person to continue.".into(),
+                confirm_blocked_unresolved:
+                    "That person is no longer in the directory; choose another.".into(),
+                ..ConfirmableSearchPickerDialogTexts::default()
+            },
+        }
+    }
+}
+
+impl HelpdeskAssigneeTexts {
+    /// The live announcement for `count` matching people.
+    pub fn match_count(&self, count: usize) -> String {
+        if count == 1 {
+            self.match_count_one.clone()
+        } else {
+            self.match_count_other
+                .replace("{count}", &count.to_string())
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::patterns::helpdesk::model::{TicketKind, TicketPriority};
+
+    #[test]
+    fn assignee_match_count_is_singular_only_for_one() {
+        let t = HelpdeskAssigneeTexts::default();
+        assert_eq!(t.match_count(1), "1 person matches");
+        assert_eq!(t.match_count(0), "0 people match");
+        assert_eq!(t.match_count(12), "12 people match");
+        assert!(
+            t.change_label.contains(&t.change),
+            "label-in-name (WCAG 2.5.3)"
+        );
+    }
 
     #[test]
     fn names_resolve() {
