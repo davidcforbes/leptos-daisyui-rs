@@ -14,6 +14,7 @@ mod macros;
 mod page_header;
 mod page_quick_actions;
 mod page_state_panel;
+mod person_picker;
 mod record_header;
 mod search_picker_dialog;
 mod section_grid;
@@ -124,6 +125,10 @@ pub use search_picker_dialog::{
 pub use section_grid::{
     SECTION_GRID_BASE_CLASS, SECTION_GRID_CELL_CLASS, SectionGrid, SectionGridCell,
     SectionGridColumns, section_grid_cell_class, section_grid_class,
+};
+pub use person_picker::{
+    PersonPickerTexts, PersonPresence, PickerPerson, matches_search, nameable_selection,
+    next_selection,
 };
 pub use section_heading::{HeadingLevel, SectionHeading, SectionHeadingStatusPlacement};
 pub use selectable_summary::{
