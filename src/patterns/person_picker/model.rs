@@ -15,6 +15,12 @@ pub struct PickerPerson {
     pub initials: String,
     /// Optional availability.
     pub presence: Option<PersonPresence>,
+    /// Optional one-line caption of what the person is DOING right now
+    /// ("Replying to #4127"). Deliberately separate from `presence`: doing
+    /// is not availability, and must never become a presence state
+    /// (4iiz-Office's `Viewing / Replying` focus dimension). Text, not
+    /// markup, so a page cannot change the card's shape.
+    pub activity: Option<String>,
 }
 
 /// Availability. Rendered as a dot AND a word -- a dot alone is

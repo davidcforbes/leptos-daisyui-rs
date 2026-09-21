@@ -8,6 +8,7 @@ fn person(id: &str, name: &str, secondary: &str) -> PickerPerson {
         secondary: secondary.to_owned(),
         initials: "XX".to_owned(),
         presence: None,
+        activity: None,
     }
 }
 

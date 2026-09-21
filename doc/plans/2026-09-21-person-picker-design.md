@@ -71,6 +71,7 @@ pub struct PickerPerson {
     pub secondary: String,                // office, role
     pub initials: String,                 // passed in; not derived
     pub presence: Option<PersonPresence>,
+    pub activity: Option<String>,         // what they are DOING (added 2026-09-21)
 }
 
 pub enum PersonPresence { Available, Busy, Away, Offline, Unknown }
@@ -183,8 +184,13 @@ no `role="listbox"` with zero options.
   been added (above). `Busy` stays -- Office's UI offers it as a user choice
   and is confirming what it stores. Office's *focus* dimension (`Viewing /
   Replying`) is what someone is DOING, not whether they are available, and
-  must never become an availability state; whether PersonPicker gets a
-  caption slot for it is an open decision, not part of this design.
+  must never become an availability state. **Decided 2026-09-21:** it is a
+  separate optional `activity` caption -- plain text, never markup, so the
+  card's shape stays fixed -- shown under the secondary line.
+- **`Busy` is not supplied by Office:** its shell's Availability control
+  stores nothing (a local signal no request or column reads). Office's
+  complete set is `Available / Away / Offline / Unknown`. `Busy` remains in
+  the enum for other consumers.
 
 ## Testing
 

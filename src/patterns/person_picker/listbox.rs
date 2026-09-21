@@ -116,6 +116,7 @@ fn PersonOption(
             None => secondary.clone(),
         })
     };
+    let activity = person.activity.clone();
     let click_id = id.clone();
     let on_click = move |_: ev::MouseEvent| {
         focused.set(Some(click_id.clone()));
@@ -157,6 +158,16 @@ fn PersonOption(
                     {person.name.clone()}
                 </span>
                 <span class=move || secondary_class(is_selected.get())>{secondary}</span>
+                {activity.map(|activity| {
+                    view! {
+                        <span
+                            class=move || secondary_class(is_selected.get())
+                            data-person-activity="true"
+                        >
+                            {activity}
+                        </span>
+                    }
+                })}
             </span>
             <span class="shrink-0" aria-hidden="true" data-person-check="true">
                 {move || {

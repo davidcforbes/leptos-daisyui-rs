@@ -14,10 +14,20 @@ fn person(
         secondary: secondary.to_owned(),
         initials: initials.to_owned(),
         presence,
+        activity: None,
     }
 }
 
 fn roster() -> Vec<PickerPerson> {
+    // What someone is DOING, separate from whether they are available.
+    let mut ben = person(
+        "ben",
+        "Ben Ortiz",
+        "Austin",
+        "BO",
+        Some(PersonPresence::Busy),
+    );
+    ben.activity = Some("Replying to conversation #4127".to_owned());
     vec![
         person(
             "ana",
@@ -26,13 +36,7 @@ fn roster() -> Vec<PickerPerson> {
             "AL",
             Some(PersonPresence::Available),
         ),
-        person(
-            "ben",
-            "Ben Ortiz",
-            "Austin",
-            "BO",
-            Some(PersonPresence::Busy),
-        ),
+        ben,
         person(
             "cara",
             "Cara Diaz",
