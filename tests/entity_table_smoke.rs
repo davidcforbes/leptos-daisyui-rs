@@ -12,6 +12,20 @@ use pixelproof_web::{Key, ViewportSize};
 use serde_json::{Value, json};
 use std::time::Duration;
 
+/// `EXEMPT_CLOSEST` from `audit/src/drift.js`, read from the rule's own
+/// source so a browser guard mirroring the rule cannot disagree with it.
+fn audit_exempt_closest() -> String {
+    let source = include_str!("../audit/src/drift.js");
+    let line = source
+        .lines()
+        .find(|line| line.trim_start().starts_with("const EXEMPT_CLOSEST"))
+        .expect("drift.js declares EXEMPT_CLOSEST");
+    line.split('\'')
+        .nth(1)
+        .expect("EXEMPT_CLOSEST is a single-quoted string")
+        .to_owned()
+}
+
 async fn eval_json(harness: &pixelproof_web::Harness, expression: &str) -> Value {
     harness
         .page()
@@ -7985,6 +7999,28 @@ async fn entity_table_saved_filter_badges_are_named_by_their_visible_caption() {
         saved["saveDisabled"],
         json!(false),
         "with a filter set, Save Filter is enabled: {saved}"
+    );
+    // ldui-u2mx: drift.js's button-without-btn rule, using the rule's OWN
+    // exemption list read from its source -- a hand-copied list is how this
+    // guard first failed on the dialog backdrop, which the real rule exempts.
+    let exempt = audit_exempt_closest();
+    let bare = eval_json(
+        &harness,
+        &format!(
+            r#"(() => [...document.querySelectorAll('[data-entity-saved-filters-bar] button')]
+                .filter(b => !b.classList.contains('btn')
+                    && !b.closest({exempt:?})
+                    && !b.hasAttribute('data-pressable'))
+                .map(b => b.outerHTML.slice(0, 80)))()"#
+        ),
+    )
+    .await;
+    assert_eq!(
+        bare,
+        json!([]),
+        "every button in the bar carries .btn or data-pressable or sits in an \
+         exempt ancestor, or ldui-audit counts it as button-without-btn drift on \
+         every consumer page (ldui-u2mx): {bare}"
     );
     assert_eq!(
         saved["hasCaption"],

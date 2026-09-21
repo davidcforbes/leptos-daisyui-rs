@@ -125,9 +125,17 @@ pub(crate) fn saved_filters_bar(model: EntitySavedFilters, bar_id: String) -> An
                                 attr:data-entity-saved-filter=name_for_badge
                                 attr:data-entity-saved-filter-active=is_active.then_some("true")
                             >
+                                // A deliberately unstyled action: `btn` would
+                                // fight the badge's own look. `data-pressable`
+                                // is the sanctioned marker for exactly that, and
+                                // exempts it from ldui-audit's
+                                // button-without-btn rule (ldui-u2mx), which
+                                // otherwise counted it once per saved filter on
+                                // every consumer page.
                                 <button
                                     type="button"
                                     class="cursor-pointer"
+                                    data-pressable="true"
                                     aria-label=apply_label
                                     data-entity-saved-filter-apply=name_for_apply.clone()
                                     on:click=move |_| on_apply.run(saved_for_apply.clone())
