@@ -7898,6 +7898,7 @@ async fn entity_table_saved_filter_badges_are_named_by_their_visible_caption() {
                     groupDisplay: group ? getComputedStyle(group).display : null,
                     badgeCount: bar.querySelectorAll('[data-entity-saved-filter]').length,
                     leadingSlots: table.querySelectorAll('[data-entity-toolbar-leading]').length,
+                    saveDisabled: bar.querySelector('[data-entity-saved-filters-open]').disabled,
                     // The saved-filter row is page furniture and must NOT sit
                     // in the right-justified table-action cluster.
                     insideToolbar: bar.closest('[data-entity-table-toolbar]') !== null,
@@ -7937,6 +7938,12 @@ async fn entity_table_saved_filter_badges_are_named_by_their_visible_caption() {
         json!(true),
         "it lives on its own left-justified row: {initial}"
     );
+    assert_eq!(
+        initial["saveDisabled"],
+        json!(true),
+        "with no filter set there is nothing to save, so Save Filter is disabled \
+         rather than opening a dialog that stores nothing: {initial}"
+    );
 
     // Contrast AT REST: the empty-state hint is what renders now.
     let rest_contrast = bar_contrast(&harness).await;
@@ -7974,6 +7981,11 @@ async fn entity_table_saved_filter_badges_are_named_by_their_visible_caption() {
 
     let saved = snapshot(&harness).await;
     assert_eq!(saved["badgeCount"], json!(1), "one badge saved: {saved}");
+    assert_eq!(
+        saved["saveDisabled"],
+        json!(false),
+        "with a filter set, Save Filter is enabled: {saved}"
+    );
     assert_eq!(
         saved["hasCaption"],
         json!(true),

@@ -14,7 +14,7 @@ use leptos::prelude::*;
 
 use super::saved_filters::{
     ENTITY_SAVED_FILTER_LIMIT, ENTITY_SAVED_FILTER_NAME_CHARS, EntitySavedFilters,
-    saved_filter_name_is_valid,
+    saved_filter_can_save, saved_filter_name_is_valid,
 };
 use crate::components::badge::Badge;
 use crate::components::button::{Button, ButtonType};
@@ -42,7 +42,11 @@ pub(crate) fn saved_filters_bar(model: EntitySavedFilters, bar_id: String) -> An
     let confirm_save = Callback::new(move |()| {
         let name = draft_name.get_untracked();
         let name = name.trim().to_owned();
-        if !saved_filter_name_is_valid(&name) {
+        // Also guarded here: the filters could be cleared while the dialog
+        // is open, and the Save button's disabled state is advisory.
+        if !saved_filter_name_is_valid(&name)
+            || !current_values.with_untracked(|values| saved_filter_can_save(values))
+        {
             return;
         }
         on_save.run((name, current_values.get_untracked()));
@@ -69,6 +73,9 @@ pub(crate) fn saved_filters_bar(model: EntitySavedFilters, bar_id: String) -> An
             <Button
                 class="btn-sm btn-outline"
                 attr:data-entity-saved-filters-open="true"
+                disabled=Signal::derive(move || {
+                    !current_values.with(|values| saved_filter_can_save(values))
+                })
                 attr:aria-label=move || texts.with(|t: &super::saved_filters::EntitySavedFilterTexts| t.save_button.clone())
                 on_click=Callback::new(move |_| open_dialog.run(()))
             >
@@ -219,7 +226,11 @@ pub(crate) fn saved_filters_bar(model: EntitySavedFilters, bar_id: String) -> An
                             <Button
                                 class="btn-primary"
                                 button_type=ButtonType::Submit
-                                disabled=Signal::derive(move || !saved_filter_name_is_valid(&draft_name.get()))
+                                disabled=Signal::derive(move || {
+                                    !saved_filter_name_is_valid(&draft_name.get())
+                                        || !current_values
+                                            .with(|values| saved_filter_can_save(values))
+                                })
                                 attr:data-entity-saved-filters-save="true"
                             >
                                 {move || texts.with(|t: &super::saved_filters::EntitySavedFilterTexts| t.save.clone())}

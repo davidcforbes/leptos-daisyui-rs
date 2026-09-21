@@ -241,6 +241,14 @@ impl std::fmt::Debug for EntitySavedFilters {
 }
 
 /// A name is acceptable when it trims to non-empty.
+/// Whether the current filter row has anything to save: at least one
+/// non-blank value survives canonicalization. When it does not, Save Filter
+/// is disabled -- opening a dialog that takes a name and then stores nothing
+/// is a control that cannot succeed (4iiz-Office).
+pub(crate) fn saved_filter_can_save(values: &[(String, String)]) -> bool {
+    !entity_saved_filter_terms(values.iter().cloned()).is_empty()
+}
+
 pub(crate) fn saved_filter_name_is_valid(name: &str) -> bool {
     use unicode_segmentation::UnicodeSegmentation;
 
@@ -746,6 +754,21 @@ mod tests {
             saved_filter_name_is_valid(&accented),
             "20 combining sequences are 20 graphemes and must be accepted"
         );
+    }
+
+    #[test]
+    fn save_filter_needs_something_to_save() {
+        let pairs = |v: &[(&str, &str)]| {
+            v.iter()
+                .map(|(c, x)| ((*c).to_owned(), (*x).to_owned()))
+                .collect::<Vec<_>>()
+        };
+        assert!(!saved_filter_can_save(&[]), "an empty row saves nothing");
+        assert!(
+            !saved_filter_can_save(&pairs(&[("status", "  "), ("client", "")])),
+            "blank values are dropped, so an all-blank row saves nothing"
+        );
+        assert!(saved_filter_can_save(&pairs(&[("status", "Urgent")])));
     }
 
     #[test]
