@@ -38,7 +38,7 @@ pub fn HorizontalStackedBar(
 ) -> impl IntoView {
     if categories.is_empty() || series.is_empty() {
         return view! {
-            <div class="text-sm text-base-content/50 italic">"No data"</div>
+            <div class="text-sm text-base-content/75 italic">"No data"</div>
         }
         .into_any();
     }
@@ -68,7 +68,7 @@ pub fn HorizontalStackedBar(
                     view! {
                         <div class="flex items-center gap-1.5">
                             <span class=format!("inline-block w-3 h-3 rounded-sm {color}")></span>
-                            <span class="text-xs text-base-content/70">{name}</span>
+                            <span class="text-xs text-base-content/75">{name}</span>
                         </div>
                     }
                 }).collect::<Vec<_>>()}
@@ -103,13 +103,13 @@ pub fn HorizontalStackedBar(
                 <div class="min-w-0">
                     <div class="text-sm font-medium truncate">{cat}</div>
                     {subtitle.map(|s| view! {
-                        <div class="text-[11px] text-base-content/50 truncate">{s}</div>
+                        <div class="text-[11px] text-base-content/75 truncate">{s}</div>
                     })}
                 </div>
                 <div class="flex w-full h-6 rounded-md overflow-hidden bg-base-200">
                     {segments}
                 </div>
-                <div class="text-xs text-base-content/60 text-right truncate">
+                <div class="text-xs text-base-content/75 text-right truncate">
                     {right.unwrap_or_default()}
                 </div>
             </div>

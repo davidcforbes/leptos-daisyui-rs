@@ -188,7 +188,7 @@ pub fn KanbanColumnView(
 
                     // Empty state
                     <Show when=move || column.get().cards.is_empty()>
-                        <div class="text-center text-base-content/50 py-8">
+                        <div class="text-center text-base-content/75 py-8">
                             "No cards"
                         </div>
                     </Show>

@@ -228,7 +228,7 @@ fn tree_item(node: FlatNode, ctx: Ctx) -> AnyView {
             <button
                 type="button"
                 data-pressable="true"
-                class="shrink-0 w-4 h-4 flex items-center justify-center text-base-content/50 hover:text-base-content"
+                class="shrink-0 w-4 h-4 flex items-center justify-center text-base-content/75 hover:text-base-content"
                 aria-hidden="true"
                 tabindex="-1"
                 on:click=move |ev| {
@@ -418,7 +418,7 @@ fn tree_item(node: FlatNode, ctx: Ctx) -> AnyView {
 /// @source inline("outline-none focus:ring-2 focus:ring-primary/50 list-none m-0 p-0");
 /// @source inline("flex items-center gap-2 py-1 pr-2 rounded cursor-pointer select-none");
 /// @source inline("bg-primary/10 text-primary bg-base-200");
-/// @source inline("shrink-0 w-4 h-4 flex items-center justify-center text-base-content/50 hover:text-base-content");
+/// @source inline("shrink-0 w-4 h-4 flex items-center justify-center text-base-content/75 hover:text-base-content");
 /// @source inline("loading loading-spinner loading-xs w-3 h-3 transition-transform rotate-90");
 /// @source inline("inline-block w-4 shrink-0 text-sm truncate");
 /// ```

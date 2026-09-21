@@ -1395,7 +1395,7 @@ fn kpi_card_accessible_name(
 /// @source inline("flex flex-col items-center gap-1 gap-2 p-3 p-4 min-w-0 shrink-0");
 /// @source inline("line-clamp-2 min-h-8");
 /// @source inline("font-semibold uppercase tracking-wide tabular-nums break-words italic");
-/// @source inline("text-base-content text-base-content/75 text-base-content/40 text-base-content/60 text-info text-success text-warning text-error");
+/// @source inline("text-base-content text-base-content/75 text-info text-success text-warning text-error");
 /// @source inline("tooltip tooltip-top tooltip-bottom tooltip-left tooltip-right relative inline-flex h-4 w-4 items-center justify-center rounded-full border sr-only");
 /// @source inline("self-start text-left underline underline-offset-2 rounded-field");
 /// @source inline("relative h-3 w-full overflow-hidden rounded-full bg-base-200");
@@ -1550,7 +1550,7 @@ pub fn KpiCard(
         if available {
             format!("{size} font-semibold tabular-nums break-words {value_status_class}")
         } else {
-            format!("{size} font-semibold tabular-nums break-words italic text-base-content/60")
+            format!("{size} font-semibold tabular-nums break-words italic text-base-content/75")
         }
     };
 

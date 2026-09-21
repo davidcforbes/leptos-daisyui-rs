@@ -189,7 +189,7 @@ pub fn Softphone(
                                 }).collect_view()}
                             </Select>
                     </Show>
-                    <p class="text-sm text-base-content/70 [overflow-wrap:anywhere]" data-softphone-number-blocked="true">{move || state.with(|s| s.selected_number().and_then(|p| p.blocked_reason.clone()))}</p>
+                    <p class="text-sm text-base-content/75 [overflow-wrap:anywhere]" data-softphone-number-blocked="true">{move || state.with(|s| s.selected_number().and_then(|p| p.blocked_reason.clone()))}</p>
                 </div>
             </div>
             <div class="flex flex-col gap-2 border-y border-base-300 bg-base-200 p-5">

@@ -520,7 +520,7 @@ pub fn FilterSidebar(
                                     {move || search_label.get()}
                                 </label>
                                 <span class="pointer-events-none absolute left-2.5 top-1/2 \
-                                             -translate-y-1/2 text-[13px] text-base-content/45">
+                                             -translate-y-1/2 text-[13px] text-base-content/75">
                                     <Icon name="search" size=IconSize::XSmall />
                                 </span>
                                 <input

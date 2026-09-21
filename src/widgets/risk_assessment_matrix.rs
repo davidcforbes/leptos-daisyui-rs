@@ -68,14 +68,14 @@ pub fn RiskAssessmentMatrix(
                     <table class="w-full border-collapse">
                         <thead>
                             <tr>
-                                <th class="text-xs text-base-content/50 p-1 w-20"></th>
-                                <th class="text-xs text-center text-base-content/60 p-1 font-medium">"Low"</th>
-                                <th class="text-xs text-center text-base-content/60 p-1 font-medium">"Medium"</th>
-                                <th class="text-xs text-center text-base-content/60 p-1 font-medium">"High"</th>
+                                <th class="text-xs text-base-content/75 p-1 w-20"></th>
+                                <th class="text-xs text-center text-base-content/75 p-1 font-medium">"Low"</th>
+                                <th class="text-xs text-center text-base-content/75 p-1 font-medium">"Medium"</th>
+                                <th class="text-xs text-center text-base-content/75 p-1 font-medium">"High"</th>
                             </tr>
                             <tr>
                                 <th></th>
-                                <th colspan="3" class="text-xs text-center text-base-content/40 pb-1 font-normal">"Likelihood \u{2192}"</th>
+                                <th colspan="3" class="text-xs text-center text-base-content/75 pb-1 font-normal">"Likelihood \u{2192}"</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -98,7 +98,7 @@ pub fn RiskAssessmentMatrix(
                                 }).collect();
                                 view! {
                                     <tr>
-                                        <td class="text-xs text-base-content/60 font-medium p-1 align-middle">{label}</td>
+                                        <td class="text-xs text-base-content/75 font-medium p-1 align-middle">{label}</td>
                                         {cells}
                                     </tr>
                                 }
@@ -106,7 +106,7 @@ pub fn RiskAssessmentMatrix(
                         </tbody>
                     </table>
                 </div>
-                <div class="text-xs text-base-content/40 text-center">"\u{2191} Impact"</div>
+                <div class="text-xs text-base-content/75 text-center">"\u{2191} Impact"</div>
             </CardBody>
         </Card>
     }

@@ -5724,6 +5724,38 @@ async fn entity_table_row_groups_are_accessible_and_never_inflate_counts() {
         "{exported}"
     );
 
+    // drift.js's button-without-btn rule, with its OWN exemption list, over
+    // every button in the grouped table. Found by a consumer because the
+    // text-scan guard excludes entity_table/ (ldui-n7zn).
+    let exempt = audit_exempt_closest();
+    let drift = eval_json(
+        &harness,
+        &format!(
+            r#"(() => {{
+                const buttons = [...document.querySelectorAll('#entity-grouping-table button')];
+                return {{
+                    toggles: document.querySelectorAll('#entity-grouping-table [data-entity-group-toggle]').length,
+                    bare: buttons
+                        .filter(b => !b.classList.contains('btn')
+                            && !b.closest({exempt:?})
+                            && !b.hasAttribute('data-pressable'))
+                        .map(b => b.outerHTML.slice(0, 90)),
+                }};
+            }})()"#
+        ),
+    )
+    .await;
+    assert!(
+        drift["toggles"].as_u64().unwrap_or(0) > 0,
+        "the fixture must render group toggles, or this check proves nothing: {drift}"
+    );
+    assert_eq!(
+        drift["bare"],
+        json!([]),
+        "every button in a grouped table carries .btn or data-pressable or sits in an \
+         exempt ancestor, or ldui-audit counts it as drift on every consumer page: {drift}"
+    );
+
     assert_no_browser_errors(&harness, "EntityTable row grouping").await;
 }
 

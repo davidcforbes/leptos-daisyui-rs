@@ -484,7 +484,7 @@ pub fn DataTable(
                                                     Some((col, SortDirection::Descending)) if col == idx => {
                                                         Some(view! { <span class="text-xs">{"\u{25BC}"}</span> })
                                                     }
-                                                    _ => Some(view! { <span class="text-xs text-base-content/30">{"\u{25B4}\u{25BE}"}</span> })
+                                                    _ => Some(view! { <span class="text-xs text-base-content/75">{"\u{25B4}\u{25BE}"}</span> })
                                                 }
                                             }}
                                         </div>
@@ -523,7 +523,7 @@ pub fn DataTable(
                                 ).len();
                                 Either::Left(view! {
                                     <tr>
-                                        <td colspan=col_count.to_string() class="text-center text-base-content/40 py-8">
+                                        <td colspan=col_count.to_string() class="text-center text-base-content/75 py-8">
                                             "No data available."
                                         </td>
                                     </tr>
@@ -619,7 +619,7 @@ pub fn DataTable(
             </div>
 
             // Footer: row count + pagination
-            <div class="flex items-center justify-between text-sm text-base-content/60 px-1">
+            <div class="flex items-center justify-between text-sm text-base-content/75 px-1">
                 <span>
                     {move || {
                         let total = total_rows.get();

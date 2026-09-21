@@ -59,7 +59,7 @@ pub fn PropertyList(
                 let mono = p.mono;
                 view! {
                     <div class="flex items-start justify-between gap-4 px-3 py-2">
-                        <span class="text-xs text-base-content/60 shrink-0 mt-0.5">{label}</span>
+                        <span class="text-xs text-base-content/75 shrink-0 mt-0.5">{label}</span>
                         <span class="text-right break-all flex items-center gap-1.5 justify-end">
                             {match badge_cls {
                                 Some(cls) => view! { <span class=cls>{value.clone()}</span> }.into_any(),
@@ -71,7 +71,7 @@ pub fn PropertyList(
                                 }.into_any(),
                             }}
                             {locked.then(|| view! {
-                                <span class="text-[10px] text-base-content/40" title="Append-only field">"\u{1F512}"</span>
+                                <span class="text-[10px] text-base-content/75" title="Append-only field">"\u{1F512}"</span>
                             })}
                         </span>
                     </div>

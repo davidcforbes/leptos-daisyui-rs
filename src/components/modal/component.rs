@@ -618,7 +618,7 @@ pub fn ModalStatusRow(
         <div
             node_ref=node_ref
             class=move || merge_classes!(
-                "flex items-center gap-2 py-2 text-sm text-base-content/70",
+                "flex items-center gap-2 py-2 text-sm text-base-content/75",
                 class
             )
         >

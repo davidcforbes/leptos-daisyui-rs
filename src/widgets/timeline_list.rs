@@ -179,10 +179,10 @@ pub fn TimelineList(
                                 >
                                     <span class="block text-sm leading-tight">{e.title}</span>
                                     {e.subtitle.map(|s| view! {
-                                        <span class="block text-xs text-base-content/60">{s}</span>
+                                        <span class="block text-xs text-base-content/75">{s}</span>
                                     })}
                                     {e.description.map(|d| view! {
-                                        <span class="block text-xs text-base-content/50">{d}</span>
+                                        <span class="block text-xs text-base-content/75">{d}</span>
                                     })}
                                 </Pressable>
                             }
@@ -191,10 +191,10 @@ pub fn TimelineList(
                         None => view! {
                             <p class="text-sm leading-tight">{e.title}</p>
                             {e.subtitle.map(|s| view! {
-                                <p class="text-xs text-base-content/60">{s}</p>
+                                <p class="text-xs text-base-content/75">{s}</p>
                             })}
                             {e.description.map(|d| view! {
-                                <p class="text-xs text-base-content/50">{d}</p>
+                                <p class="text-xs text-base-content/75">{d}</p>
                             })}
                         }
                             .into_any(),

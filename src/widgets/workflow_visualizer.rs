@@ -106,7 +106,7 @@ pub fn WorkflowVisualizer(
                                 </span>
                                 <span class=badge_class>{status_label}</span>
                                 {assignee.map(|a| view! {
-                                    <span class="text-xs text-base-content/50">{a}</span>
+                                    <span class="text-xs text-base-content/75">{a}</span>
                                 })}
                             </div>
                         </li>

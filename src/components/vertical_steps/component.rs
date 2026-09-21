@@ -56,7 +56,7 @@ use leptos::{html::Ol, prelude::*};
 /// @source inline("flex flex-col items-center gap-3 w-4 shrink-0 rounded-full w-4 h-4 w-0.5 flex-1 mt-1");
 /// @source inline("bg-success bg-accent bg-base-100 bg-base-300 bg-warning bg-error border-2 border-success border-accent border-base-300 border-warning border-error animate-pulse");
 /// @source inline("flex-1 pb-6 text-sm font-semibold text-base-content sr-only");
-/// @source inline("text-xs text-base-content/70 text-base-content/50 font-mono mt-1 mt-2");
+/// @source inline("text-xs text-base-content/75 font-mono mt-1 mt-2");
 /// @source inline("btn btn-xs btn-outline");
 /// ```
 /// The `ld-vstep-rail`/`ld-vstep-flow-dash` classes that draw the animated
@@ -130,9 +130,9 @@ pub fn VerticalSteps(
                                     <span class="sr-only">{format!("{status_label}: ")}</span>
                                     {title}
                                 </p>
-                                <p class="text-xs text-base-content/70 mt-1">{body}</p>
+                                <p class="text-xs text-base-content/75 mt-1">{body}</p>
                                 <Show when=move || has_tech>
-                                    <p class="text-xs font-mono text-base-content/50 mt-1">
+                                    <p class="text-xs font-mono text-base-content/75 mt-1">
                                         {tech.clone()}
                                     </p>
                                 </Show>

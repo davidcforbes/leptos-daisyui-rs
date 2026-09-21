@@ -66,7 +66,7 @@ fn Destination(
             <div class="flex flex-col gap-2">
                 <p class="text-sm font-medium">{move || texts.get().saved_numbers}</p>
                 <Show when=move || state.get().call.client.phones.is_empty()>
-                    <p class="text-sm text-base-content/70">{move || texts.get().no_numbers}</p>
+                    <p class="text-sm text-base-content/75">{move || texts.get().no_numbers}</p>
                 </Show>
                 <div class="flex flex-col gap-2">
                     {move || phones.get().into_iter().map(|phone| {
@@ -79,7 +79,7 @@ fn Destination(
                                 on_click=Callback::new(move |_| emit(state, on_command, action.clone()))>
                                 <span class="min-w-0 [overflow-wrap:anywhere]">{format!("{} · {}", phone.label, phone.number)}</span>
                             </Button>
-                            {phone.blocked_reason.map(|reason| view! { <p class="text-sm text-base-content/70 [overflow-wrap:anywhere]" data-call-number-blocked="true">{reason}</p> })}
+                            {phone.blocked_reason.map(|reason| view! { <p class="text-sm text-base-content/75 [overflow-wrap:anywhere]" data-call-number-blocked="true">{reason}</p> })}
                             </div>
                         }
                     }).collect_view()}
@@ -134,7 +134,7 @@ fn Destination(
                         </Field>
                     </Show>
                     <p class="text-sm font-medium [overflow-wrap:anywhere]">{move || state.get().number_update.and_then(|u| u.selected_target()).map(|t| t.label).unwrap_or_default()}</p>
-                    <p class="text-sm text-base-content/70 [overflow-wrap:anywhere]" data-call-confirmed-number="true">{move || state.get().number_update.and_then(|u| u.selected_target()).map(|t| t.saved_number).unwrap_or_default()}</p>
+                    <p class="text-sm text-base-content/75 [overflow-wrap:anywhere]" data-call-confirmed-number="true">{move || state.get().number_update.and_then(|u| u.selected_target()).map(|t| t.saved_number).unwrap_or_default()}</p>
                     <Button attr:data-call-action="save-number"
                         disabled=Signal::derive(move || !state.with(|s| s.number_update.as_ref().is_some_and(|u| s.can_dispatch(&ClientCallAction::SaveNumber { field_id: u.field_id.clone(), number: s.destination.clone() }))))
                         on_click=Callback::new(move |_| {
@@ -143,8 +143,8 @@ fn Destination(
                                 emit(state, on_command, ClientCallAction::SaveNumber { field_id: update.field_id, number: current.destination });
                             }
                         })>{move || if state.get().number_update.is_some_and(|u| u.pending) { texts.get().saving } else { texts.get().save_number }}</Button>
-                    <p class="text-sm text-base-content/70 [overflow-wrap:anywhere]">{move || state.get().number_update.and_then(|u| u.blocked_reason)}</p>
-                    <p class="text-sm text-base-content/70 [overflow-wrap:anywhere]">{move || state.get().number_update.and_then(|u| u.selected_target()).and_then(|t| t.blocked_reason)}</p>
+                    <p class="text-sm text-base-content/75 [overflow-wrap:anywhere]">{move || state.get().number_update.and_then(|u| u.blocked_reason)}</p>
+                    <p class="text-sm text-base-content/75 [overflow-wrap:anywhere]">{move || state.get().number_update.and_then(|u| u.selected_target()).and_then(|t| t.blocked_reason)}</p>
                     <p class="text-sm text-error [overflow-wrap:anywhere]" role="status">{move || state.get().number_update.and_then(|u| u.error)}</p>
                 </div>
             </Show>
@@ -153,7 +153,7 @@ fn Destination(
                 on_click=Callback::new(move |_| emit(state, on_command, ClientCallAction::Dial { number: state.get_untracked().destination }))>
                 {move || texts.get().call}
             </Button>
-            <p class="text-sm text-base-content/70 [overflow-wrap:anywhere]">{move || state.get().dial_blocked_reason}</p>
+            <p class="text-sm text-base-content/75 [overflow-wrap:anywhere]">{move || state.get().dial_blocked_reason}</p>
         </div>
     }
 }
@@ -177,7 +177,7 @@ fn Guidance(
             <div class="flex min-w-0 flex-col gap-2">
                 <h3 class="text-lg font-semibold">{move || guidance.get().title}</h3>
                 <p class="whitespace-pre-wrap text-sm">{move || guidance.get().body}</p>
-                <p class="text-xs text-base-content/70">{move || guidance.get().source}</p>
+                <p class="text-xs text-base-content/75">{move || guidance.get().source}</p>
             </div>
             <div role="status" class="flex flex-col gap-2 text-sm" data-call-script-status="true">
                 {move || match guidance.get().state {
@@ -195,7 +195,7 @@ fn Guidance(
                         <li class="flex min-w-0 flex-col gap-2" data-call-beat=beat.id>
                             <h4 class="text-sm font-semibold">{format!("{}. {}", index + 1, beat.title)}</h4>
                             <p class="whitespace-pre-wrap text-sm">{beat.say}</p>
-                            {beat.no_file_detail.then(|| view! { <p class="text-sm text-base-content/70" data-call-no-file-detail="true">{move || texts.get().script_no_file_detail}</p> })}
+                            {beat.no_file_detail.then(|| view! { <p class="text-sm text-base-content/75" data-call-no-file-detail="true">{move || texts.get().script_no_file_detail}</p> })}
                         </li>
                     }).collect_view()}
                 </ol>
@@ -208,7 +208,7 @@ fn Guidance(
                         {move || texts.get().regenerate}
                     </Button>
                     <p role="status" class="text-sm">{move || guidance.get().regeneration.map(|r| texts.get().regeneration(r.state))}</p>
-                    <p class="text-sm text-base-content/70">{move || guidance.get().regeneration.and_then(|r| r.blocked_reason)}</p>
+                    <p class="text-sm text-base-content/75">{move || guidance.get().regeneration.and_then(|r| r.blocked_reason)}</p>
                     <p role="status" class="text-sm text-error">{move || guidance.get().regeneration.and_then(|r| r.error)}</p>
                 </div>
             </Show>
@@ -246,7 +246,7 @@ fn WrapUp(
         <section class="flex min-w-0 flex-col gap-4" aria-label=move || texts.get().wrap_up data-call-wrap-up="true">
             <div class="flex flex-col gap-2">
                 <h3 class="text-lg font-semibold">{move || texts.get().wrap_up}</h3>
-                <p class="text-sm text-base-content/70">{move || texts.get().wrap_up_hint}</p>
+                <p class="text-sm text-base-content/75">{move || texts.get().wrap_up_hint}</p>
             </div>
             <Field label=Signal::derive(move || Some(texts.get().outcome)) required=true label_class="whitespace-normal">
                 <Select class="w-full min-w-0" node_ref=select_ref attr:data-call-field="outcome" attr:required=true disabled=locked
@@ -291,7 +291,7 @@ fn WrapUp(
             <div class="flex flex-col gap-2">
                 <p role="status" class="text-sm text-error [overflow-wrap:anywhere]">{move || wrap.get().error}</p>
                 <Show when=move || !state.with(ClientCallWorkspaceState::finished)>
-                    <p class="text-sm text-base-content/70">{move || texts.get().finish_hint}</p>
+                    <p class="text-sm text-base-content/75">{move || texts.get().finish_hint}</p>
                 </Show>
                 <Button color=ButtonColor::Primary class="w-full" attr:data-call-action="save-wrap-up"
                     disabled=Signal::derive(move || !state.with(|s| s.wrap_up.as_ref().and_then(ClientCallWrapUp::payload).is_some_and(|payload| s.can_dispatch(&ClientCallAction::SaveWrapUp(payload)))))
@@ -350,9 +350,9 @@ pub fn ClientCallWorkspace(
             class=crate::merge_classes!("@container w-full min-w-0 max-w-5xl rounded-box border border-base-300 bg-base-100 text-base-content [&_.label]:gap-2 [&_.label]:whitespace-normal [&_.label]:[overflow-wrap:anywhere] [&_.btn]:gap-2 [&_.input]:shadow-none [&_.select]:shadow-none [&_.textarea]:shadow-none", class)>
             <header class="flex items-start justify-between gap-4 border-b border-base-300 p-5">
                 <div class="flex min-w-0 flex-col gap-2 [overflow-wrap:anywhere]">
-                    <p class="text-sm font-medium text-base-content/70">{move || texts.get().label}</p>
+                    <p class="text-sm font-medium text-base-content/75">{move || texts.get().label}</p>
                     <h2 class="text-xl font-semibold">{move || state.get().call.client.name}</h2>
-                    <p class="text-sm text-base-content/70">{move || state.get().call.client.subtitle}</p>
+                    <p class="text-sm text-base-content/75">{move || state.get().call.client.subtitle}</p>
                 </div>
                 <Button style=ButtonStyle::Ghost class="shrink-0" attr:data-call-action="dismiss"
                     disabled=Signal::derive(move || !state.with(|s| s.can_dispatch(&ClientCallAction::Dismiss)))

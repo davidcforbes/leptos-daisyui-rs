@@ -45,7 +45,7 @@ pub fn VersionHistoryList(
 
     let body_view = if entries.is_empty() {
         view! {
-            <p class="text-xs text-base-content/50 italic">"No version history yet."</p>
+            <p class="text-xs text-base-content/75 italic">"No version history yet."</p>
         }
         .into_any()
     } else {
@@ -81,9 +81,9 @@ pub fn VersionHistoryList(
                                 </TimelineItemMiddle>
                                 <TimelineItemEnd>
                                     <p class="text-sm leading-tight font-medium">{title}</p>
-                                    <p class="text-xs text-base-content/60">{e.timestamp_label}</p>
+                                    <p class="text-xs text-base-content/75">{e.timestamp_label}</p>
                                     {summary.map(|s| view! {
-                                        <p class="text-xs text-base-content/50">{s}</p>
+                                        <p class="text-xs text-base-content/75">{s}</p>
                                     })}
                                 </TimelineItemEnd>
                             </TimelineItem>

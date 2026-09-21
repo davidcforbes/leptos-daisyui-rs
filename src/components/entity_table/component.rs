@@ -3638,9 +3638,15 @@ fn render_group_section<T: Clone + 'static>(
     let toggle_controls = body_id.clone();
     let heading_content = if collapsible_groups {
         view! {
+            // A disclosure toggle deliberately styled as a heading row; `.btn`
+            // would impose daisyUI's height, padding and weight. `data-pressable`
+            // is the audit's sanctioned marker for that, so button-without-btn
+            // stops counting it once per grouped table (4iiz-Office, the
+            // entity_table/ blind spot tracked as ldui-n7zn).
             <button
                 type="button"
                 class="ld-focus-ring flex min-w-0 items-center gap-2 rounded-field px-1 text-left"
+                data-pressable="true"
                 data-entity-group-toggle=group_key.clone()
                 aria-expanded=(!collapsed).to_string()
                 aria-controls=toggle_controls

@@ -55,7 +55,7 @@ pub fn PipelineKanban(columns: Vec<KanbanColumn>) -> impl IntoView {
                 view! {
                     <div class="flex-1 min-w-[170px]">
                         <div class="rounded-md px-3 py-1.5 mb-2 text-center" style=header_style>
-                            <span class="text-[11px] font-semibold text-base-content/60">
+                            <span class="text-[11px] font-semibold text-base-content/75">
                                 {format!("{} ({})", col.title, count)}
                             </span>
                         </div>
@@ -93,7 +93,7 @@ pub fn PipelineKanban(columns: Vec<KanbanColumn>) -> impl IntoView {
                                                     // rendering is untouched; the bar needs an f64.
                                                     let cov_value = f64::from(cov);
                                                     view! {
-                                                        <span class="text-[9px] text-base-content/50 mt-1">
+                                                        <span class="text-[9px] text-base-content/75 mt-1">
                                                             {format!("Coverage: {}% | Defects: {}", cov, d)}
                                                         </span>
                                                         <Progress
@@ -105,7 +105,7 @@ pub fn PipelineKanban(columns: Vec<KanbanColumn>) -> impl IntoView {
                                                     }.into_any()
                                                 }
                                                 (_, _, Some(sub)) => view! {
-                                                    <span class="text-[9px] text-base-content/50 mt-1">{sub}</span>
+                                                    <span class="text-[9px] text-base-content/75 mt-1">{sub}</span>
                                                 }.into_any(),
                                                 _ => ().into_any(),
                                             }}

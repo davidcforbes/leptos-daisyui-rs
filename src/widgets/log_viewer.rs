@@ -35,7 +35,7 @@ impl LogLevel {
     /// CSS class for the log message text color.
     fn text_class(&self) -> &'static str {
         match self {
-            LogLevel::Debug => "text-base-content/50",
+            LogLevel::Debug => "text-base-content/75",
             LogLevel::Info => "text-base-content",
             LogLevel::Warn => "text-warning",
             LogLevel::Error => "text-error",
@@ -147,7 +147,7 @@ pub fn LogViewer(
             // Filter controls
             <Show when=move || show_filters>
                 <div class="flex flex-wrap gap-3 items-center p-2 bg-base-200 rounded-lg">
-                    <label class="text-xs font-semibold text-base-content/60 uppercase tracking-wide">"Filters"</label>
+                    <label class="text-xs font-semibold text-base-content/75 uppercase tracking-wide">"Filters"</label>
 
                     // Level filter
                     <Select
@@ -182,7 +182,7 @@ pub fn LogViewer(
                     </Select>
 
                     // Entry count — total filtered, not just rendered slice.
-                    <span class="text-xs text-base-content/50 ml-auto">
+                    <span class="text-xs text-base-content/75 ml-auto">
                         {move || format!("Showing {} entries (virtual-scrolled)", filtered_entries.get().len())}
                     </span>
                 </div>
@@ -209,7 +209,7 @@ pub fn LogViewer(
                     let (start, slice, trailing) = visible_entries.get();
                     if filtered_entries.get().is_empty() {
                         Either::Left(view! {
-                            <div class="text-center text-base-content/40 py-8">
+                            <div class="text-center text-base-content/75 py-8">
                                 "No log entries match the current filters."
                             </div>
                         })
@@ -229,7 +229,7 @@ pub fn LogViewer(
                                         class="flex items-start gap-2 border-b border-base-content/5 last:border-0"
                                         style:height=format!("{}px", ROW_HEIGHT_PX)
                                     >
-                                        <span class="text-base-content/40 shrink-0 w-40">{entry.timestamp}</span>
+                                        <span class="text-base-content/75 shrink-0 w-40">{entry.timestamp}</span>
                                         <span class=badge_class>{level_label}</span>
                                         <span class="text-info/70 shrink-0 w-24 truncate" title=source_title>{source_text}</span>
                                         <span class=text_class>{entry.message}</span>

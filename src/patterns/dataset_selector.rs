@@ -305,7 +305,7 @@ pub fn DatasetSelector(
                 })}
                 {status.map(|status| status())}
                 {shows_caption.then(|| view! {
-                    <span class="text-xs text-base-content/70" data-dataset-selector-status="true">
+                    <span class="text-xs text-base-content/75" data-dataset-selector-status="true">
                         {move || {
                             let selected = selected.get();
                             let label = options.with(|options| {

@@ -19,7 +19,7 @@ pub fn JsonTreeViewer(
 ) -> impl IntoView {
     if json.trim().is_empty() {
         return view! {
-            <span class="text-xs text-base-content/50">"(empty)"</span>
+            <span class="text-xs text-base-content/75">"(empty)"</span>
         }
         .into_any();
     }
@@ -45,7 +45,7 @@ fn JsonNode(value: Value, depth: usize, #[prop(default = false)] collapsed: bool
     let indent = format!("padding-left: {}px", depth * 12);
     match value {
         Value::Null => view! {
-            <span class="text-xs font-mono text-base-content/50" style=indent>"null"</span>
+            <span class="text-xs font-mono text-base-content/75" style=indent>"null"</span>
         }
         .into_any(),
         Value::Bool(b) => view! {
@@ -80,7 +80,7 @@ fn JsonNode(value: Value, depth: usize, #[prop(default = false)] collapsed: bool
                             {arr.iter().enumerate().map(|(i, v)| {
                                 view! {
                                     <div class="flex gap-1">
-                                        <span class="text-xs font-mono text-base-content/50">{format!("{}:", i)}</span>
+                                        <span class="text-xs font-mono text-base-content/75">{format!("{}:", i)}</span>
                                         <JsonNode value=v.clone() depth=depth+1 collapsed=true/>
                                     </div>
                                 }

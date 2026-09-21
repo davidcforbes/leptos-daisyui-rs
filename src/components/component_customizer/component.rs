@@ -90,7 +90,7 @@ pub fn ComponentCustomizer() -> impl IntoView {
 
     view! {
         <div class="space-y-6">
-            <p class="text-sm text-base-content/70">
+            <p class="text-sm text-base-content/75">
                 "Fine-tune individual component styles. These override global theme settings."
             </p>
 
@@ -252,7 +252,7 @@ pub fn ComponentCustomizer() -> impl IntoView {
 
             // Preview Section
             <div class="border border-base-300 rounded-lg p-6 space-y-4 bg-base-100">
-                <h4 class="text-sm font-bold uppercase text-base-content/60 mb-4">"Live Preview"</h4>
+                <h4 class="text-sm font-bold uppercase text-base-content/75 mb-4">"Live Preview"</h4>
 
                 <div class="space-y-4">
                     <div>

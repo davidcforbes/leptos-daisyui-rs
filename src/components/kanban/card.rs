@@ -89,7 +89,7 @@ pub fn KanbanCardView(
 
             // Description (if present)
             <Show when=move || card.get().description.is_some()>
-                <p class="text-xs text-base-content/70 mb-2">
+                <p class="text-xs text-base-content/75 mb-2">
                     {move || card.get().description.clone().unwrap_or_default()}
                 </p>
             </Show>

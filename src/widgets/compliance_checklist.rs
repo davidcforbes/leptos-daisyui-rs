@@ -25,7 +25,7 @@ fn status_glyph(status: &str) -> (&'static str, &'static str) {
         "pass" => ("\u{2713}", "text-emerald-500"),
         "warn" => ("\u{25B3}", "text-amber-500"),
         "fail" => ("\u{2717}", "text-red-500"),
-        _ => ("\u{2014}", "text-base-content/40"),
+        _ => ("\u{2014}", "text-base-content/75"),
     }
 }
 
@@ -57,7 +57,7 @@ pub fn ComplianceChecklist(
             <CardBody class="p-4 space-y-3">
                 <div class="flex items-center justify-between">
                     <h3 class="font-semibold text-sm">{title}</h3>
-                    <span class="text-xs text-base-content/50">{format!("{passed}/{total} passed")}</span>
+                    <span class="text-xs text-base-content/75">{format!("{passed}/{total} passed")}</span>
                 </div>
 
                 <div class="space-y-2">
@@ -73,7 +73,7 @@ pub fn ComplianceChecklist(
                 </div>
 
                 <div class="space-y-1">
-                    <div class="flex items-center justify-between text-xs text-base-content/60">
+                    <div class="flex items-center justify-between text-xs text-base-content/75">
                         <span>"Overall"</span>
                         <span class="font-mono">{format!("{:.1}%", pct)}</span>
                     </div>

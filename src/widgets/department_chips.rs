@@ -23,7 +23,7 @@ pub fn DepartmentChips(
 ) -> impl IntoView {
     let body_view = if departments.is_empty() {
         view! {
-            <p class="text-xs text-base-content/50 italic">"No departments assigned."</p>
+            <p class="text-xs text-base-content/75 italic">"No departments assigned."</p>
         }
         .into_any()
     } else {

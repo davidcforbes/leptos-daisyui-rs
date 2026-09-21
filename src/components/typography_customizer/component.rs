@@ -105,7 +105,7 @@ pub fn TypographyCustomizer() -> impl IntoView {
 
     view! {
         <div class="space-y-6">
-            <p class="text-sm text-base-content/70">
+            <p class="text-sm text-base-content/75">
                 "Customize fonts, sizes, and type scales. Changes apply instantly."
             </p>
 
@@ -305,7 +305,7 @@ pub fn TypographyCustomizer() -> impl IntoView {
 
             // Typography Preview
             <div class="border border-base-300 rounded-lg p-6 space-y-4 bg-base-200/30">
-                <h4 class="text-sm font-bold uppercase text-base-content/60 mb-4">"Preview"</h4>
+                <h4 class="text-sm font-bold uppercase text-base-content/75 mb-4">"Preview"</h4>
 
                 <div class="space-y-2">
                     <p class="text-3xl font-bold">"Heading 1"</p>

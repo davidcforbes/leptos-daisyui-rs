@@ -26,7 +26,7 @@ pub fn DefectSeverityBar(segments: Vec<DefectSegment>) -> impl IntoView {
             <CardBody class="p-4">
                 {if total == 0 {
                     view! {
-                        <div class="text-center text-xs text-base-content/50 py-2">
+                        <div class="text-center text-xs text-base-content/75 py-2">
                             "No open defects"
                         </div>
                     }.into_any()

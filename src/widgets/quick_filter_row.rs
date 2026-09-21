@@ -142,7 +142,7 @@ pub fn QuickFilterRow(
                 let selected = d.selected;
                 view! {
                     <label class="flex flex-col gap-2">
-                        <span class="text-xs text-base-content/60 mb-0.5">{d.label}</span>
+                        <span class="text-xs text-base-content/75 mb-0.5">{d.label}</span>
                         <select
                             class="select select-bordered select-sm"
                             prop:value=move || selected.get()

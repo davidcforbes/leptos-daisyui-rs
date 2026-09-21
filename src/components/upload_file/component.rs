@@ -47,7 +47,7 @@ pub fn UploadFile(
                 <div class="flex flex-col items-center gap-4">
                     <svg
                         xmlns="http://www.w3.org/2000/svg"
-                        class="h-12 w-12 text-base-content/50"
+                        class="h-12 w-12 text-base-content/75"
                         fill="none"
                         viewBox="0 0 24 24"
                         stroke="currentColor"
@@ -67,7 +67,7 @@ pub fn UploadFile(
                             if !file.is_empty() {
                                 view! {
                                     <div class="mt-2">
-                                        <p class="text-sm text-base-content/70">
+                                        <p class="text-sm text-base-content/75">
                                             "Selected: " {file}
                                         </p>
                                     </div>

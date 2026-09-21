@@ -120,9 +120,9 @@ pub fn TreeView(
                         let chevron = if has_children {
                             let is_expanded = expanded_signal.get_untracked();
                             let chevron_class = if is_expanded {
-                                "inline-block w-4 text-base-content/50 rotate-90"
+                                "inline-block w-4 text-base-content/75 rotate-90"
                             } else {
-                                "inline-block w-4 text-base-content/50"
+                                "inline-block w-4 text-base-content/75"
                             };
                             view! {
                                 <span class=chevron_class>

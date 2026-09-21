@@ -37,35 +37,26 @@
 //! otherwise scan-invisible) button must be added there deliberately, with a
 //! reason -- it cannot silently pass by resembling an existing one.
 //!
-//! ## What is out of scope
+//! ## Scope
 //!
-//! `entity_table/`, `data_table/`, `modal/` and `patterns/search_picker_dialog.rs`
-//! carry their own unmarked bare buttons as of this writing and are excluded
-//! from the scan (`ldui-2e7a`'s scope explicitly stayed out of concurrent work
-//! there). Widening this guard to cover them is follow-up work for whoever
-//! closes those gaps, not a reason to leave the rest of the crate unguarded
-//! meanwhile -- same reasoning as `svg_paint_routing.rs`'s "a scanner scoped to
-//! less than the defect class is scoped to less than the defect class."
+//! All of `src/`. Until `ldui-n7zn` (2026-09-21) `entity_table/`,
+//! `data_table/`, `modal/` and `patterns/search_picker_dialog.rs` were
+//! excluded, and the cost of that was real: two bare buttons in
+//! `entity_table/` (the saved-filter apply button, ldui-u2mx, and the
+//! group-heading toggle) reached CONSUMERS' `ldui-audit` runs -- 4iiz-etl
+//! and 4iiz-Office -- before this repo ever saw them. Removing the
+//! exclusions surfaced ten more buttons, none of them a real defect: each
+//! is named in [`SCAN_BLIND_SPOT_ALLOWLIST`] with the reason.
 
 use std::fs;
 use std::path::{Path, PathBuf};
-
-/// Directories/files excluded from this scan because they are out of
-/// `ldui-2e7a`'s scope (concurrent work elsewhere, or a documented separate
-/// gap). Relative to `src/`.
-const EXCLUDED: [&str; 4] = [
-    "components/entity_table",
-    "components/data_table",
-    "components/modal",
-    "patterns/search_picker_dialog.rs",
-];
 
 /// Buttons this text scan cannot correctly judge: the exemption is ancestry
 /// (`EXEMPT_CLOSEST`), a dynamic class function the scanner cannot evaluate,
 /// or the button is `#[cfg(test)]`-only fixture code that never ships to a
 /// consumer. Each entry is `(file suffix relative to src/, a substring
 /// unique to that button's opening tag, the reason it is exempt)`.
-const SCAN_BLIND_SPOT_ALLOWLIST: [(&str, &str, &str); 3] = [
+const SCAN_BLIND_SPOT_ALLOWLIST: [(&str, &str, &str); 7] = [
     (
         "components/toolbar/component.rs",
         "class:menu-active=checked",
@@ -84,6 +75,33 @@ const SCAN_BLIND_SPOT_ALLOWLIST: [(&str, &str, &str); 3] = [
         "inside #[cfg(test)] mod tests as a placeholder toolbar_actions fixture \
          -- never compiled into the shipped library, so never reaches a consumer",
     ),
+    (
+        "components/modal/component.rs",
+        "<button>{move || texts.get().backdrop_close}",
+        "ModalBackdrop's close button sits inside the <form class=\"modal-backdrop\"> \
+         it renders -- EXEMPT_CLOSEST's `.modal-backdrop` covers it (confirmed in a \
+         browser by the saved-filters drift assertion, 2026-09-21)",
+    ),
+    (
+        "components/entity_table/component.rs",
+        "data-entity-column-chooser=\"true\"",
+        "carries `btn` in both variants of its `move || match` class, but that \
+         sits past the scanner's 20-line window behind a long explanatory comment",
+    ),
+    (
+        "components/data_table/controls.rs",
+        "class=button_class",
+        "DataTableControls lives in a private module; its only caller passes \
+         DataTableClasses::pagination_button, whose default \"btn btn-sm\" is pinned \
+         by a test in data_table/types.rs -- a variable the scan cannot evaluate",
+    ),
+    (
+        "components/data_table/server_component.rs",
+        "classes.pagination_button",
+        "every pagination button merges DataTableClasses::pagination_button, whose \
+         default \"btn btn-sm\" is pinned by a test in data_table/types.rs -- a \
+         variable the scan cannot evaluate",
+    ),
 ];
 
 fn rs_files(root: &Path, out: &mut Vec<PathBuf>) {
@@ -98,11 +116,6 @@ fn rs_files(root: &Path, out: &mut Vec<PathBuf>) {
             out.push(p);
         }
     }
-}
-
-fn is_excluded(rel: &Path) -> bool {
-    let rel_str = rel.to_string_lossy().replace('\\', "/");
-    EXCLUDED.iter().any(|ex| rel_str.starts_with(ex))
 }
 
 /// True if `window` (the opening tag plus a short lookahead) demonstrates
@@ -147,9 +160,6 @@ fn every_library_button_carries_btn_or_pressable_or_is_allowlisted() {
     let mut offenders = Vec::new();
     for p in &files {
         let rel = p.strip_prefix(repo.join("src")).unwrap_or(p);
-        if is_excluded(rel) {
-            continue;
-        }
         let Ok(src) = fs::read_to_string(p) else {
             continue;
         };

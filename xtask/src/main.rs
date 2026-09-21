@@ -336,6 +336,21 @@ fn gate_steps() -> Vec<Step> {
             ],
             None,
         ),
+        // ldui-zy37: muted text below /75 fails WCAG AA at the library's
+        // sizes. Crate-wide, because every per-component fix before it let the
+        // lesson stop at one component.
+        cmd(
+            "test-muted-text",
+            "cargo",
+            &[
+                "test",
+                "-p",
+                "leptos-daisyui-rs",
+                "--test",
+                "no_sub_aa_muted_text",
+            ],
+            None,
+        ),
         // Guards every `web_sys::Type` / `web_sys::console` use in `src/`
         // against a matching Cargo feature on the library's `web-sys`
         // dependency. Missing features fail as `E0425`/`E0433` ("cannot find
@@ -2756,6 +2771,7 @@ mod tests {
                 "test-ld-class-coverage",
                 "test-ai-assistant-contract",
                 "test-bare-buttons",
+                "test-muted-text",
                 "test-web-sys-features",
             ]
         );
@@ -3556,6 +3572,7 @@ pub fn r() -> f32 { radius::CARD }
                 "test-ld-class-coverage",
                 "test-ai-assistant-contract",
                 "test-bare-buttons",
+                "test-muted-text",
                 "test-web-sys-features",
             ]
         );
