@@ -764,6 +764,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     value: "page_quick_actions",
                 },
                 ComponentItem {
+                    name: "Person Picker",
+                    href: "/components/person_picker",
+                    value: "person_picker",
+                },
+                ComponentItem {
                     name: "Record Header",
                     href: "/components/record_header",
                     value: "record_header",

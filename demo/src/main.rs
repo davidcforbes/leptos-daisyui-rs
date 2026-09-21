@@ -172,6 +172,7 @@ fn AppInner() -> impl IntoView {
                     <Route path=path!("/nav_rail") view=NavRailDemo />
                     <Route path=path!("/page_quick_actions") view=PageQuickActionsDemo />
                     <Route path=path!("/pagination") view=PaginationDemo />
+                    <Route path=path!("/person_picker") view=PersonPickerDemo />
                     <Route path=path!("/persona") view=PersonaDemo />
                     <Route path=path!("/phase_progress") view=PhaseProgressDemo />
                     <Route path=path!("/progress") view=ProgressDemo />
