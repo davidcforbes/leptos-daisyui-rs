@@ -639,6 +639,21 @@ fn selectable_summary_step() -> Step {
     }
 }
 
+/// Focused browser proof for `PersonPicker`
+/// (`doc/plans/2026-09-21-person-picker-design.md`): the listbox keyboard
+/// contract with toggle-off, one reachable card under search, both x
+/// controls, Unknown distinct from Offline, the activity caption, wrapping at
+/// a fixed 360px, and AA contrast at rest and with a selection.
+fn person_picker_step() -> Step {
+    Step {
+        name: "test-person-picker",
+        run: Run::BrowserSuite {
+            test: "person_picker_smoke",
+            html_target: None,
+        },
+    }
+}
+
 /// Focused browser proof for `BarChart`'s signed divergence and accessible
 /// contract (ldui-y2ed): bars extending from a zero baseline in both
 /// directions, the hidden category/value table, roving keyboard focus, and
@@ -2608,6 +2623,7 @@ fn main() -> ExitCode {
         "test-bar-chart-divergence" => run_steps(&[bar_chart_step()]),
         "test-heatmap-matrix" => run_steps(&[heatmap_step()]),
         "test-selectable-summary" => run_steps(&[selectable_summary_step()]),
+        "test-person-picker" => run_steps(&[person_picker_step()]),
         "test-section-heading" => run_steps(&[section_heading_step()]),
         "test-search-picker-dialog" => run_steps(&[search_picker_dialog_step()]),
         "test-page-quick-actions" => run_steps(&[page_quick_actions_step()]),
@@ -2642,7 +2658,7 @@ fn main() -> ExitCode {
         other => {
             eprintln!("xtask: unknown subcommand {other:?}");
             eprintln!(
-                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-selectable-summary|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-snapshot-table-page-filter-actions|test-helpdesk|test-ai-chat|test-ai-chat-knowledge|test-server-table-column-tools|test-collapse-naming|test-data-table-fit|test-app-shell|test-field-context-scoping|test-entity-draft-row|test-softphone|test-help-hint|gen-tokens|check-sibling-tokens|clean-cache|bump>"
+                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-selectable-summary|test-person-picker|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-snapshot-table-page-filter-actions|test-helpdesk|test-ai-chat|test-ai-chat-knowledge|test-server-table-column-tools|test-collapse-naming|test-data-table-fit|test-app-shell|test-field-context-scoping|test-entity-draft-row|test-softphone|test-help-hint|gen-tokens|check-sibling-tokens|clean-cache|bump>"
             );
             ExitCode::from(2)
         }
