@@ -2,7 +2,8 @@
 //! filter row: a **Save Filter** button, its name dialog, and one badge per
 //! saved set.
 //!
-//! The bar renders *inside the table toolbar*, left-justified, when
+//! The bar renders on its OWN left-justified row above the table toolbar
+//! (never inside the toolbar's right-justified action cluster), when
 //! `EntityTable::saved_filters` is `Some`. Everything it does is a proposal
 //! against [`super::saved_filters::EntitySavedFilters`] -- the consumer owns
 //! the list and the live values and decides; this module owns only the
@@ -79,7 +80,7 @@ pub(crate) fn saved_filters_bar(model: EntitySavedFilters, bar_id: String) -> An
                 if saved.is_empty() {
                     return view! {
                         <span
-                            class="text-sm text-base-content/60"
+                            class="text-sm text-base-content/75"
                             data-entity-saved-filters-empty="true"
                         >
                             {move || texts.with(|t: &super::saved_filters::EntitySavedFilterTexts| t.empty.clone())}
@@ -146,7 +147,7 @@ pub(crate) fn saved_filters_bar(model: EntitySavedFilters, bar_id: String) -> An
                 view! {
                     <span
                         id=caption_id
-                        class="text-sm text-base-content/60"
+                        class="text-sm text-base-content/75"
                         data-entity-saved-filters-caption="true"
                     >
                         {move || texts.with(|t: &super::saved_filters::EntitySavedFilterTexts| t.badges_label.clone())}

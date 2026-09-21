@@ -7837,6 +7837,37 @@ async fn entity_table_saved_filter_badges_are_named_by_their_visible_caption() {
     begin_browser_error_capture(&harness).await;
     wait_for_selector(&harness, "[data-entity-saved-filters-bar]").await;
 
+    /// axe `color-contrast` scoped to the saved-filters bar.
+    async fn bar_contrast(harness: &pixelproof_web::Harness) -> Value {
+        eval_json(
+            harness,
+            r#"(async () => {
+                const report = await axe.run(
+                    document.querySelector('[data-entity-saved-filters-bar]'),
+                    {
+                        runOnly: { type: 'rule', values: ['color-contrast'] },
+                        resultTypes: ['violations'],
+                    },
+                );
+                return report.violations.map(v => ({
+                    id: v.id,
+                    nodes: v.nodes.slice(0, 5).map(node => ({
+                        target: node.target,
+                        summary: node.failureSummary,
+                    })),
+                    count: v.nodes.length,
+                }));
+            })()"#,
+        )
+        .await
+    }
+    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
+        .expect("load vendored axe-core");
+    let _page_report = axe
+        .run(harness.page())
+        .await
+        .expect("inject and run axe-core");
+
     async fn snapshot(harness: &pixelproof_web::Harness) -> Value {
         eval_json(
             harness,
@@ -7907,6 +7938,15 @@ async fn entity_table_saved_filter_badges_are_named_by_their_visible_caption() {
         "it lives on its own left-justified row: {initial}"
     );
 
+    // Contrast AT REST: the empty-state hint is what renders now.
+    let rest_contrast = bar_contrast(&harness).await;
+    assert_eq!(
+        rest_contrast,
+        json!([]),
+        "axe color-contrast must pass on the saved-filters bar at rest (the \
+         empty hint shipped at text-base-content/60, 3.37:1): {rest_contrast}"
+    );
+
     // Give the row a real filter value first, so the saved set is realistic,
     // then name it through the framework dialog.
     eval_json(
@@ -7961,6 +8001,15 @@ async fn entity_table_saved_filter_badges_are_named_by_their_visible_caption() {
         json!("contents"),
         "a role container with display:contents risks being dropped from the \
          accessibility tree: {saved}"
+    );
+
+    // Contrast AFTER SAVING: the caption only exists now, so this is the only
+    // point it can be measured (4iiz-etl's axe found it at 3.37:1).
+    let saved_contrast = bar_contrast(&harness).await;
+    assert_eq!(
+        saved_contrast,
+        json!([]),
+        "axe color-contrast must pass on the saved-filters caption: {saved_contrast}"
     );
 
     assert_no_browser_errors(&harness, "saved-filter badge caption").await;
