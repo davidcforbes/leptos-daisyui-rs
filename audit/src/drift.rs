@@ -1,6 +1,7 @@
 //! daisyUI component-drift heuristics: a second, small in-page sweep separate
 //! from the engine's generic style sweep. The engine (`pixelproof-style-audit`)
-//! knows no framework, only values; these four rules are daisyUI knowledge —
+//! knows no framework, only values; these five rules are daisyUI and WCAG
+//! knowledge —
 //! "a raw `<button>` without `.btn`", "a raw `<table>` without `.table`" —
 //! so they live here rather than in the engine.
 //!
@@ -98,6 +99,20 @@ mod tests {
     /// its auditable marker; the button rule must recognize it so a designed
     /// unstyled action never counts as drift (and the counts drop honestly,
     /// not via exemption comments). Genuinely raw buttons keep flagging.
+    #[test]
+    fn target_size_rule_implements_both_halves_of_sc_2_5_8() {
+        let js = drift_js("main");
+        assert!(js.contains("target-too-small"), "the rule is embedded");
+        assert!(
+            js.contains("const TARGET_MIN = 24;"),
+            "the AA minimum is 24px"
+        );
+        assert!(
+            js.contains("circleHitsRect"),
+            "the spacing exception is implemented, not a bare size check"
+        );
+    }
+
     #[test]
     fn button_rule_recognizes_the_pressable_marker() {
         let js = drift_js("main");

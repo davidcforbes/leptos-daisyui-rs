@@ -188,7 +188,7 @@ pub fn SelectableSummaryDemo() -> impl IntoView {
             </Section>
 
             <Section title="Narrow column -- the grid follows the GROUP's width, not the window's">
-                <div class="max-w-md" data-testid="selectable-summary-narrow">
+                <div class="w-full max-w-md" data-testid="selectable-summary-narrow">
                     <SelectableSummaryGroup
                         label="Data quality checks, narrow column"
                         items=Signal::derive(diagnostic_checks)

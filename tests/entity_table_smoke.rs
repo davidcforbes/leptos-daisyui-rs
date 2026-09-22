@@ -8265,3 +8265,73 @@ async fn entity_table_saved_filters_bar_saves_applies_and_deletes() {
 
     assert_no_browser_errors(&harness, "EntityTable saved filters bar").await;
 }
+
+/// 4iiz-Office op-rhlde: a vertical scroll inside the table's own region
+/// (viewport-fit makes it a real scroller; any `scrollIntoView` of a row
+/// control can move a non-fit one too) must not carry the column labels out
+/// of view while the body stays. The header is sticky to the region's top
+/// and paints above the body cells that scroll under it.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
+async fn column_labels_stay_pinned_when_the_region_scrolls() {
+    let harness = harness_at("/components/entity-table-viewport-fit").await;
+    wait_for_selector(
+        &harness,
+        "#entity-viewport-fit-fixture [data-entity-table-grid] tbody tr",
+    )
+    .await;
+    begin_browser_error_capture(&harness).await;
+    click(&harness, "[data-testid='viewport-fit-rows-17']").await;
+    click(&harness, "[data-testid='viewport-fit-short']").await;
+    tokio::time::sleep(Duration::from_millis(400)).await;
+
+    let pinned = eval_json(
+        &harness,
+        r#"(async () => {
+            const region = document.querySelector('#entity-viewport-fit-fixture [data-entity-focus-region]');
+            const thead = region.querySelector('[data-entity-table-grid] thead');
+            const label = thead.querySelector('th[data-entity-column]');
+            const regionTop = () => region.getBoundingClientRect().top + region.clientTop;
+            const before = thead.getBoundingClientRect().top - regionTop();
+            region.scrollTop = 48;
+            await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+            const box = label.getBoundingClientRect();
+            const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+            return {
+                scrolls: region.scrollHeight > region.clientHeight,
+                scrollTop: region.scrollTop,
+                before: Math.round(before),
+                after: Math.round(thead.getBoundingClientRect().top - regionTop()),
+                labelOnTop: hit !== null && label.contains(hit),
+                position: getComputedStyle(thead).position,
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(
+        pinned["scrolls"],
+        json!(true),
+        "fixture must scroll: {pinned}"
+    );
+    assert_eq!(
+        pinned["scrollTop"],
+        json!(48),
+        "the region really scrolled, so the check below is not vacuous: {pinned}"
+    );
+    // At rest the header sits below the table's 1px top border; stuck, it
+    // sits at the region's content edge. Either way it never leaves the top.
+    let before = pinned["before"].as_i64().unwrap_or(99);
+    let after = pinned["after"].as_i64().unwrap_or(99);
+    assert!((0..=1).contains(&before), "{pinned}");
+    assert!(
+        (0..=1).contains(&after) && after <= before,
+        "the header stays at the region's top after a 48px scroll: {pinned}"
+    );
+    assert_eq!(
+        pinned["labelOnTop"],
+        json!(true),
+        "the column label paints above the body rows scrolling under it: {pinned}"
+    );
+    assert_eq!(pinned["position"], json!("sticky"), "{pinned}");
+    assert_no_browser_errors(&harness, "sticky entity table header").await;
+}

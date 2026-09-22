@@ -2143,10 +2143,16 @@ where
         )
     };
 
+    // `isolate`: the sticky header's z-10 (op-rhlde) must rank only against
+    // this table's own rows. Without a stacking context here it competed at
+    // page level and painted over the column chooser's z-[2] dropdown, which
+    // opens down across the header, so a real click on a menu item hit a
+    // column label instead. A consumer's toolbar dropdown at z-[1] would
+    // have lost too.
     let region_class = if viewport_fit_enabled {
-        "min-h-0 w-full flex-1 overflow-auto rounded-box border border-table-grid bg-base-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+        "isolate min-h-0 w-full flex-1 overflow-auto rounded-box border border-table-grid bg-base-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
     } else {
-        "w-full overflow-x-auto rounded-box border border-table-grid bg-base-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+        "isolate w-full overflow-x-auto rounded-box border border-table-grid bg-base-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
     };
 
     view! {
@@ -2748,8 +2754,17 @@ where
                         (!compact_filter_layout.get())
                             .then(|| view! { <StableTableColGroup tracks=stable_tracks /> })
                     }}
+                    // Sticky to the scroll region's top (4iiz-Office op-rhlde):
+                    // viewport-fit makes the region a real vertical scroller,
+                    // and a scrollIntoView on any row control can scroll a
+                    // non-fit one, which carried the column labels out of view
+                    // while the body stayed. z-10 keeps the labels above the
+                    // body rows that scroll under them (the region is
+                    // `isolate`, so that ranking never leaves the table);
+                    // the cells already
+                    // paint opaque table-header / table-filter backgrounds.
                     <thead
-                        class="hidden lg:table-header-group"
+                        class="hidden lg:table-header-group lg:sticky lg:top-0 lg:z-10"
                         inert=move || edit_locked.get()
                         aria-disabled=move || edit_locked.get().then_some("true")
                     >

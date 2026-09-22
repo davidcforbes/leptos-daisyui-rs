@@ -1902,3 +1902,13 @@ a vendored axe-core audit with the chooser open, style oracles, and the
 `client-snapshot` ownership marker. Native tests retain explicit coverage of
 the legacy local-storage compatibility path and generation-bound row
 projections.
+
+## Sticky column labels
+
+The desktop `<thead>` is `position: sticky; top: 0` inside the table's own
+scroll region, above the body rows. In viewport-fit mode the region is a real
+vertical scroller; in the default mode it only scrolls vertically when
+something inside it asks to (a `scrollIntoView` on a row control), which is
+exactly when losing the labels reads as "the header row is missing"
+(4iiz-Office op-rhlde). Page scroll is unaffected: sticky binds to the nearest
+scroll container, which is the region, not the window.

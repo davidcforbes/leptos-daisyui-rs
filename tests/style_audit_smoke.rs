@@ -670,3 +670,66 @@ async fn report_style_backlog() {
         println!("{}", report.describe(path));
     }
 }
+
+/// Negative control for drift's `target-too-small` rule (WCAG 2.2 SC 2.5.8,
+/// 4iiz-Office op-7ndp7). Both halves of the SC must hold: two undersized
+/// targets crowding each other flag, while an undersized target with clear
+/// space around it (the spacing exception) and a full 24x24 target do not.
+/// A size-only check would flag the spaced one, which is exactly the
+/// false positive that would drown a dense UI's real findings.
+#[tokio::test]
+#[ignore = "needs the demo dev server (trunk serve in demo/)"]
+async fn drift_flags_crowded_undersized_targets_but_honours_spacing() {
+    let h = harness_at("/components/button").await;
+    let font = body_font_family(&h).await;
+    let profile = demo_profile(font);
+
+    let injected: bool = h
+        .page()
+        .evaluate(
+            r#"
+            (() => {
+              const host = document.createElement('div');
+              host.id = 'ldui-audit-target-probe';
+              host.style.cssText = 'display:flex;gap:64px;padding:48px;align-items:center';
+              const tiny = 'min-height:0;height:16px;width:16px;padding:0';
+              host.innerHTML =
+                '<span style="display:flex;gap:0">' +
+                  '<button class="btn" id="tt-crowded-a" style="' + tiny + '">a</button>' +
+                  '<button class="btn" id="tt-crowded-b" style="' + tiny + '">b</button>' +
+                '</span>' +
+                '<button class="btn" id="tt-spaced" style="' + tiny + '">c</button>' +
+                '<button class="btn" id="tt-full" style="min-height:0;height:24px;width:24px;padding:0">d</button>';
+              document.querySelector('main').appendChild(host);
+              return true;
+            })()
+            "#,
+        )
+        .await
+        .expect("probe injection failed")
+        .into_value()
+        .unwrap_or(false);
+    assert!(injected, "probe was not injected");
+
+    let report = ldui_audit::audit_page(&h, &profile, &Default::default())
+        .await
+        .expect("audit_page");
+    let flagged: Vec<String> = report
+        .families
+        .iter()
+        .filter(|f| f.family == family::COMPONENT_DRIFT)
+        .flat_map(|f| f.violations.iter())
+        .filter(|v| v.detail.contains("target-too-small"))
+        .map(|v| v.selector.clone())
+        .collect();
+    let has = |id: &str| flagged.iter().any(|s| s.contains(id));
+    assert!(
+        has("tt-crowded-a") && has("tt-crowded-b"),
+        "two touching 16px targets must both flag: {flagged:?}"
+    );
+    assert!(
+        !has("tt-spaced"),
+        "a 16px target with clear space is the SC's spacing exception: {flagged:?}"
+    );
+    assert!(!has("tt-full"), "24x24 meets the minimum: {flagged:?}");
+}

@@ -28,7 +28,7 @@ const visible = el => {
 // Hard cap, mirroring the engine's sweep (`pixelproof-style-audit`'s
 // `sweep.rs`): without one a pathological page — a form-heavy consumer screen
 // with thousands of unlabelled inputs — builds a multi-megabyte JSON string
-// and the CDP round-trip appears to hang. All four rules feed the single
+// and the CDP round-trip appears to hang. All five rules feed the single
 // `component-drift` family, so one list shares the engine's per-family cap.
 // Truncation is reported, never silent.
 const MAX_PER_CATEGORY = 200;
@@ -131,6 +131,59 @@ for (const el of els) {
         ' has no fieldset ancestor, wrapping label, or label[for]'
       );
     }
+  }
+}
+
+// 5. target-too-small: WCAG 2.2 SC 2.5.8 Target Size (Minimum), level AA.
+// axe-core does not run it by default (it sits outside axe's default tags),
+// so a consumer's clean axe pass says nothing about it (4iiz-Office op-7ndp7:
+// a primary per-row action measured 18px tall on every row).
+//
+// The SC is size OR spacing, and this implements both halves rather than a
+// bare size check, which would flag every correctly spaced compact control:
+// a target under 24x24 CSS px passes when a 24px-diameter circle centred on
+// its bounding box intersects no other target and no other undersized
+// target's circle. The SC's inline exception (a link in a sentence) is out of
+// scope because plain links are not collected -- only buttons, `.btn`-styled
+// links and ARIA buttons, which is where a dense UI's action targets live.
+const TARGET_MIN = 24;
+const RADIUS = TARGET_MIN / 2;
+const targets = els.filter(el => {
+  if (!(el.tagName === 'BUTTON' || el.matches('a.btn[href], [role="button"]'))) return false;
+  if (el.disabled || el.closest('[aria-hidden="true"], [inert], [data-ld-audit-exempt]')) return false;
+  const r = el.getBoundingClientRect();
+  // `.sr-only` and zero-size plumbing are 1px boxes nobody can aim at.
+  return r.width > 1 && r.height > 1;
+}).map(el => {
+  const r = el.getBoundingClientRect();
+  return {
+    el, r,
+    cx: r.left + r.width / 2,
+    cy: r.top + r.height / 2,
+    small: r.width < TARGET_MIN - 0.5 || r.height < TARGET_MIN - 0.5,
+  };
+});
+// A target nested in another target (an icon <span role="button"> inside a
+// <button>) is one hit area, not two neighbours.
+const related = (a, b) => a.el.contains(b.el) || b.el.contains(a.el);
+const circleHitsRect = (t, r) => {
+  const dx = Math.max(r.left - t.cx, 0, t.cx - r.right);
+  const dy = Math.max(r.top - t.cy, 0, t.cy - r.bottom);
+  return dx * dx + dy * dy < RADIUS * RADIUS;
+};
+for (const t of targets) {
+  if (!t.small) continue;
+  const crowded = targets.some(o => {
+    if (o === t || related(o, t)) return false;
+    if (circleHitsRect(t, o.r)) return true;
+    return o.small && Math.hypot(o.cx - t.cx, o.cy - t.cy) < TARGET_MIN;
+  });
+  if (crowded) {
+    push(
+      path(t.el),
+      'target-too-small: ' + Math.round(t.r.width) + 'x' + Math.round(t.r.height) +
+      'px target is under 24x24 and a neighbour sits inside its 24px spacing circle (WCAG 2.5.8)'
+    );
   }
 }
 
