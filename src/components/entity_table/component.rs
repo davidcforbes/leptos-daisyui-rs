@@ -3298,8 +3298,14 @@ where
                 inert=move || edit_locked.get()
                 aria-disabled=move || edit_locked.get().then_some("true")
             >
+                // ldui-5oce: one row, three regions -- rows-per-page LEFT, the
+                // pager CENTERED under the table (an `auto` track between two
+                // equal `1fr` tracks is centered regardless of what the flanks
+                // hold), the row range RIGHT. Below the `@2xl` container width
+                // the three cannot fit (at 390px the label overlapped the pager
+                // by 16px), so the pager drops to its own centered second row.
                 <div
-                    class="flex min-w-0 items-center justify-between gap-2"
+                    class="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center gap-2 @2xl:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]"
                     data-entity-table-footer-controls="true"
                 >
                     // Stable hook for tests and consumers. Positional queries such as
@@ -3308,7 +3314,7 @@ where
                     // footer, so the first label-select in the table is now the
                     // status filter and those queries silently read the wrong
                     // element. Identity should not depend on document order.
-                    <label data-entity-page-size-control="true" class="flex min-w-0 items-center gap-2 text-sm text-base-content/75">
+                    <label data-entity-page-size-control="true" class="col-start-1 row-start-1 flex min-w-0 items-center justify-self-start gap-2 text-sm text-base-content/75">
                         <span class="hidden min-w-0 @sm:inline">{move || texts.with(|texts| texts.rows_per_page.clone())}</span>
                         <Select
                             // Intrinsic sizing plus a 144px floor leaves the native arrow
@@ -3359,8 +3365,8 @@ where
                             }).collect_view()}
                         </Select>
                     </label>
-                <div data-entity-table-pagination="true" class="flex-none">
-                <Pagination class="max-w-full flex items-center justify-end gap-1">
+                <div data-entity-table-pagination="true" class="col-span-2 col-start-1 row-start-2 flex-none justify-self-center @2xl:col-span-1 @2xl:col-start-2 @2xl:row-start-1">
+                <Pagination class="max-w-full flex items-center justify-center gap-1">
                     <Button
                         class="join-item btn-sm btn-square gap-0"
                         attr:data-entity-page="previous"
@@ -3448,10 +3454,10 @@ where
                     </Button>
                 </Pagination>
                 </div>
-                </div>
-                // The truthful range gets its own stable row, leaving the
-                // page-size selector and compact pager together above it.
-                <span class="grid max-w-full flex-none justify-end tabular-nums">
+                // ldui-5oce (owner ruling): the truthful range shares the same
+                // footer-controls row as the page-size selector and the
+                // centered pager, right-justified in the row's third column.
+                <span class="col-start-2 row-start-1 grid max-w-full flex-none justify-self-end justify-end tabular-nums @2xl:col-start-3">
                     <span
                         data-entity-row-range="true"
                         class="col-start-1 row-start-1 text-sm text-base-content/75"
@@ -3497,6 +3503,7 @@ where
                         }).collect_view()
                     }}
                 </span>
+                </div>
             </div>
             })}
         </section>

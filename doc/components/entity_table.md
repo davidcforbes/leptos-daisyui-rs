@@ -158,15 +158,19 @@ the DOM or keep duplicate pagination state.
 />
 ```
 
-## Toolbar and footer placement (ldui-z0n1)
+## Toolbar and footer placement (ldui-z0n1, ldui-5oce)
 
 `EntityTable` follows the established desktop table grammar: toolbar actions
 and the column chooser render **above** the table; pagination metadata
 renders **below** it. The rows-per-page control lives in the footer, not the
-top toolbar -- the footer's DOM order is Rows per page, then the
-`{start}-{end} of {total}` row-range text, then Previous/page-number/Next.
-The top toolbar (`toolbar_actions` and the column chooser) never contains the
-page-size control. This is purely a placement move: the page-size select's
+top toolbar; the top toolbar (`toolbar_actions` and the column chooser) never
+contains the page-size control.
+
+The footer is a single row with three regions (owner ruling, 4iiz-Office
+production, 2026-09-22 -- the standard `EntityTable` configuration, not a
+per-page option): rows-per-page **left**, the pager **centered** under the
+table, and the `{start}-{end} of {total}` row-range text **right-justified**
+on that same row. This is purely a placement move: the page-size select's
 `id`/`name` derivation (`page_size_control_id`, or the process-unique
 default from `next_entity_page_size_id` when omitted, ldui-kl55), the
 `label[for]` association, the controlled/uncontrolled preference callback,

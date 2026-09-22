@@ -4957,18 +4957,20 @@ async fn page_size_select_gets_unique_identity_without_an_override_and_honors_on
     assert_no_browser_errors(&harness, "EntityTable page-size select identity").await;
 }
 
-/// ldui-z0n1: the rows-per-page control must render in the footer row,
-/// immediately before the row-range text, and never in the top toolbar --
-/// toolbar actions and the column chooser stay above the table; pagination
-/// metadata (rows-per-page, row range, Previous/page/Next) stays below it.
-/// This proves placement and DOM order by position/containment, not by
-/// class names. The select's id/name derivation, controlled preference
-/// callback, and localized copy are unchanged and are covered separately by
+/// ldui-z0n1 placed rows-per-page, pagination and the row range in the
+/// footer, never the top toolbar. ldui-5oce (owner ruling, 4iiz-Office
+/// production, 2026-09-22) then made that footer ONE row with three regions:
+/// rows-per-page LEFT, the pager CENTERED under the table, and the
+/// "Showing x-y of z" row range RIGHT-JUSTIFIED on that same row -- the
+/// standard `EntityTable` configuration, not a per-page option. This proves
+/// placement and containment by position/geometry, not by class names. The
+/// select's id/name derivation, controlled preference callback, and
+/// localized copy are unchanged and are covered separately by
 /// `page_size_select_gets_unique_identity_without_an_override_and_honors_one`
 /// and `controlled_preferences_reorder_columns_and_compose_sort_clauses`.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
-async fn rows_per_page_renders_in_footer_before_row_range_and_never_in_toolbar() {
+async fn rows_per_page_pager_and_row_range_share_one_footer_row_pager_centered() {
     let harness = harness_at("/components/client-snapshot-list").await;
     wait_for_selector(&harness, "[data-entity-table-grid] tbody tr").await;
     begin_browser_error_capture(&harness).await;
@@ -4982,9 +4984,14 @@ async fn rows_per_page_renders_in_footer_before_row_range_and_never_in_toolbar()
             const group = footer.firstElementChild;
             const groupChildren = Array.from(group.children);
             const label = groupChildren[0];
+            const pagination = groupChildren[1];
+            const rowRangeCaption = groupChildren[2];
             const rowRangeSpan = footer.querySelector('[data-entity-row-range]');
-            const pagination = footer.querySelector('[data-entity-table-pagination]');
             const select = label.querySelector('select');
+            const r = el => el.getBoundingClientRect();
+            const tableRect = r(root);
+            const pagerRect = r(pagination);
+            const rangeRect = r(rowRangeSpan);
             return {
                 toolbarHasSelect: toolbar.querySelector('select') !== null,
                 toolbarHasLabel: toolbar.querySelector('label') !== null,
@@ -4994,8 +5001,19 @@ async fn rows_per_page_renders_in_footer_before_row_range_and_never_in_toolbar()
                 labelWrapsSelect: select !== null && label.contains(select),
                 rowRangeText: rowRangeSpan.textContent.trim(),
                 paginationHasJoinClass: pagination.querySelector('.join') !== null,
-                paginationIsAfterGroup: group.children[1] === pagination,
-                sameRow: Math.abs(label.getBoundingClientRect().top - pagination.getBoundingClientRect().top) <= 0.5,
+                rowRangeIsThirdChild: group.children[2] === rowRangeCaption,
+                // The row is `items-center`: the text span is shorter than the
+                // pager buttons, so tops legitimately differ. Compare centers.
+                sameRow: (() => {
+                    const mid = rect => (rect.top + rect.bottom) / 2;
+                    return Math.abs(mid(r(label)) - mid(pagerRect)) <= 1 &&
+                        Math.abs(mid(rangeRect) - mid(pagerRect)) <= 1;
+                })(),
+                pagerCenterOffsetFromTableCenter: Math.abs(
+                    (pagerRect.left + pagerRect.right) / 2 -
+                    (tableRect.left + tableRect.right) / 2
+                ),
+                rangeRightOffsetFromTableRight: Math.abs(rangeRect.right - tableRect.right),
             };
         })()"#,
     )
@@ -5013,13 +5031,13 @@ async fn rows_per_page_renders_in_footer_before_row_range_and_never_in_toolbar()
     );
     assert_eq!(
         layout["groupChildCount"],
-        json!(2),
-        "the footer's leading group must contain the rows-per-page label and pagination: {layout}"
+        json!(3),
+        "the footer row must hold rows-per-page, the pager, and the row range: {layout}"
     );
     assert_eq!(
         layout["labelTag"],
         json!("label"),
-        "the first footer-group child must be the rows-per-page label: {layout}"
+        "the first footer-row child must be the rows-per-page label: {layout}"
     );
     assert_eq!(
         layout["rowRangeTag"],
@@ -5035,7 +5053,7 @@ async fn rows_per_page_renders_in_footer_before_row_range_and_never_in_toolbar()
         layout["rowRangeText"]
             .as_str()
             .is_some_and(|text| text.contains(" of ")),
-        "the second footer-group child must be the row-range text: {layout}"
+        "the third footer-row child must be the row-range text: {layout}"
     );
     assert_eq!(
         layout["paginationHasJoinClass"],
@@ -5043,11 +5061,25 @@ async fn rows_per_page_renders_in_footer_before_row_range_and_never_in_toolbar()
         "the pagination wrapper must contain the Pagination join: {layout}"
     );
     assert_eq!(
-        layout["paginationIsAfterGroup"],
+        layout["rowRangeIsThirdChild"],
         json!(true),
-        "pagination must follow rows-per-page within the same control row: {layout}"
+        "the row range must sit in the footer row's third region: {layout}"
     );
     assert_eq!(layout["sameRow"], json!(true), "{layout}");
+    assert!(
+        layout["pagerCenterOffsetFromTableCenter"]
+            .as_f64()
+            .unwrap_or(f64::MAX)
+            <= 4.0,
+        "the pager must be centered under the table (ldui-5oce): {layout}"
+    );
+    assert!(
+        layout["rangeRightOffsetFromTableRight"]
+            .as_f64()
+            .unwrap_or(f64::MAX)
+            <= 4.0,
+        "the row-range summary's right edge must align with the table's right edge (ldui-5oce): {layout}"
+    );
 
     assert_no_browser_errors(&harness, "EntityTable footer rows-per-page placement").await;
 }
@@ -6773,7 +6805,12 @@ async fn grouped_pages_keep_a_fitting_group_whole_and_stay_truthful() {
             const original = heading.getAttribute('style');
             const beforeHeight = heading.getBoundingClientRect().height;
             const beforeBottom = lastBottom();
-            heading.style.height = `${beforeHeight + 64}px`;
+            // Expand past the region's remaining slack, whatever the footer's
+            // height leaves it (ldui-5oce shortened the footer by a row, and a
+            // fixed 64px stopped reaching the region's bottom).
+            const slack = Math.max(0, region.getBoundingClientRect().bottom - beforeBottom);
+            const expansion = Math.ceil(slack) + 64;
+            heading.style.height = `${beforeHeight + expansion}px`;
             void heading.offsetHeight;
             const expandedHeight = heading.getBoundingClientRect().height;
             const expandedBottom = lastBottom();
@@ -6783,6 +6820,7 @@ async fn grouped_pages_keep_a_fitting_group_whole_and_stay_truthful() {
             void heading.offsetHeight;
             return {
                 beforeHeight,
+                expansion,
                 expandedHeight,
                 beforeBottom,
                 expandedBottom,
@@ -6800,7 +6838,9 @@ async fn grouped_pages_keep_a_fitting_group_whole_and_stay_truthful() {
     assert_eq!(clipping_probe["caught"], json!(true), "{clipping_probe}");
     assert!(
         clipping_probe["expandedHeight"].as_f64().unwrap()
-            >= clipping_probe["beforeHeight"].as_f64().unwrap() + 63.0,
+            >= clipping_probe["beforeHeight"].as_f64().unwrap()
+                + clipping_probe["expansion"].as_f64().unwrap()
+                - 1.0,
         "the negative control did not expand a real group heading: {clipping_probe}"
     );
     assert!(
