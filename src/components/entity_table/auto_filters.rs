@@ -58,9 +58,11 @@ pub struct EntityAutoFilterTexts {
     /// Accessible name of one filter control; `{column}` is replaced by the
     /// column header. Default `"Filter {column}"`.
     pub label: String,
-    /// Placeholder inside a text filter. Default `"Filter…"`.
+    /// Placeholder inside a text filter; `{column}` is replaced by the
+    /// column header, same as [`Self::label`]. Default `"Filter…"`.
     pub placeholder: String,
-    /// The reset option of an option-list filter. Default `"All"`.
+    /// The reset option of an option-list filter; `{column}` is replaced by
+    /// the column header, same as [`Self::label`]. Default `"All"`.
     pub all: String,
 }
 
@@ -72,6 +74,15 @@ impl Default for EntityAutoFilterTexts {
             all: "All".to_owned(),
         }
     }
+}
+
+/// Substitutes `{column}` in an [`EntityAutoFilterTexts`] template with the
+/// given column header. Applied uniformly to `label`, `placeholder`, and
+/// `all` so a page whose vocabulary is "phases" can read "Filter phases" /
+/// "Filter phases…" / "All phases" instead of a bare "All" on the reset
+/// option (4iiz-etl bd_4iiz-etl-fbhe, via ldui-v6ca).
+pub fn entity_auto_filter_text(template: &str, column_header: &str) -> String {
+    template.replace("{column}", column_header)
 }
 
 /// Whether one cell passes one framework-built filter value.
@@ -171,13 +182,15 @@ impl<T: Clone + 'static> EntityAutoFilters<T> {
             let control_id = format!("{prefix}-{}-filter", column.id);
             let header = column.header.clone();
             let label = Signal::derive(move || {
-                texts.with(|texts| texts.label.replace("{column}", &header))
+                texts.with(|texts| entity_auto_filter_text(&texts.label, &header))
             });
             let on_change = Callback::new(move |next: String| value.set(next));
             let filter = match kind {
                 EntityResolvedFilterKind::Text => {
-                    let placeholder =
-                        Signal::derive(move || texts.with(|texts| texts.placeholder.clone()));
+                    let header = column.header.clone();
+                    let placeholder = Signal::derive(move || {
+                        texts.with(|texts| entity_auto_filter_text(&texts.placeholder, &header))
+                    });
                     EntityColumnFilter::text(
                         column.id,
                         control_id,
@@ -205,7 +218,10 @@ impl<T: Clone + 'static> EntityAutoFilters<T> {
                             })
                         })
                     });
-                    let all = Signal::derive(move || texts.with(|texts| texts.all.clone()));
+                    let header = column.header.clone();
+                    let all = Signal::derive(move || {
+                        texts.with(|texts| entity_auto_filter_text(&texts.all, &header))
+                    });
                     EntityColumnFilter::select(
                         column.id, control_id, label, value, all, options, on_change,
                     )
@@ -419,6 +435,27 @@ mod tests {
         assert_eq!(
             EntityColumnFilterMode::default(),
             EntityColumnFilterMode::None
+        );
+    }
+
+    #[test]
+    fn column_text_substitutes_column_into_every_template_including_placeholder_and_all() {
+        assert_eq!(
+            entity_auto_filter_text("Filter {column}", "Phase"),
+            "Filter Phase"
+        );
+        assert_eq!(
+            entity_auto_filter_text("Filter {column}…", "Phase"),
+            "Filter Phase…"
+        );
+        assert_eq!(
+            entity_auto_filter_text("All {column}", "phases"),
+            "All phases"
+        );
+        assert_eq!(
+            entity_auto_filter_text("All", "phases"),
+            "All",
+            "a template with no placeholder is returned unchanged"
         );
     }
 
