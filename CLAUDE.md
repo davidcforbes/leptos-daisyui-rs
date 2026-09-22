@@ -147,6 +147,19 @@ rule's constants from `audit/src/*.js` (see `audit_exempt_closest` in
 `tests/entity_table_smoke.rs`), never hand-copy them: a copied rule omitted an
 exemption and failed on correct markup.
 
+**Geometry assertions: compare centers in an `items-center` row, and size a
+negative control from measured slack.** Two probes that passed on correct
+markup or proved nothing (ldui-5oce): a "same row" check comparing `top`s
+failed by ~6px because a text span is shorter than a button group and the row
+centers them; a clipping negative control that expanded a heading by a fixed
+64px kept passing after the footer lost a row, because the region had gained
+~28px of slack and the constant no longer reached its bottom. Measure
+`(top+bottom)/2`, and expand by `regionBottom - lastRowBottom + margin`, then
+assert the expansion actually happened. The `EntityTable` footer itself is an
+owner ruling, not a per-page option: rows-per-page left, pager centered (an
+`auto` grid track between two `minmax(0,1fr)` flanks), row range right, with
+the pager on its own centered row below `@2xl`.
+
 **`@container` collapses a content-sized parent.** `container-type: inline-size`
 makes an element's inline size independent of its contents, so a parent that
 sizes to content — a bare `<div>` in a `flex` row, or `max-w-*` with no width —
