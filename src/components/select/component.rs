@@ -201,8 +201,17 @@ pub fn Select(
             aria-invalid=aria_invalid
             node_ref=node_ref
             class=move || {
+                // ldui-tfx7: clip the label at the CONTENT box. daisyUI 5.5
+                // opts `.select` into `appearance: base-select` where Chrome
+                // supports it, and there the selected label is drawn by an
+                // internal part that ignores the select's `text-overflow`;
+                // daisyUI's `overflow: hidden` clips at the PADDING box, so
+                // a label wider than a narrow column painted across the
+                // 28px trailing padding and under the arrow. Clipping at the
+                // content box keeps it clear of the arrow in both appearance
+                // modes. A `multiple` select keeps daisyUI's scrolling.
                 merge_classes!(
-                    "select ld-focus-ring",
+                    "select ld-focus-ring [&:not([multiple])]:overflow-clip [&:not([multiple])]:[overflow-clip-margin:content-box]",
                 style.get().as_str(),
                 color.get().as_str(),
                 size.get().as_str(),

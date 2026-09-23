@@ -1814,6 +1814,7 @@ dependencies = [
  "chrono",
  "editmark-core",
  "editmark-mermaid",
+ "image",
  "js-sys",
  "ldui-audit",
  "leptos",

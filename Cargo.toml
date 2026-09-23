@@ -136,6 +136,9 @@ ldui-audit = { path = "audit" }
 # journeys in tests/common/mod.rs. Version-matched to pixelproof-web's own
 # chromiumoxide so the Page/command types unify.
 chromiumoxide = { version = "0.7", default-features = false, features = ["tokio-runtime"] }
+# PNG decode for per-pixel region assertions (tests/entity_table_smoke.rs,
+# ldui-tfx7). Already in the graph via pixelproof-compare; same major, PNG only.
+image = { version = "0.25", default-features = false, features = ["png"] }
 
 # Build-artifact size control. Without these, `target/` reached 200 GB in under
 # two weeks (2026-09-19): cargo's defaults are full debug info plus incremental,

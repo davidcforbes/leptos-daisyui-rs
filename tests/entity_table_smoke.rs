@@ -1208,6 +1208,201 @@ async fn page_size_label_clearance(harness: &pixelproof_web::Harness, labels: &[
     .await
 }
 
+/// ldui-tfx7: a select's label never paints under its native arrow, at any
+/// SelectSize, however narrow the column (pixel comparison, see body).
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
+async fn select_labels_never_paint_under_the_native_arrow_at_any_size() {
+    // ldui-tfx7 (4iiz-etl bd_4iiz-etl-2m7u): in a narrow column the auto-
+    // filter select's label ran across the trailing padding and under the
+    // arrow. The arrow is background paint and daisyUI 5.5's base-select
+    // label is internal, so no DOM sweep can see the collision -- compare
+    // PIXELS. For every SelectSize, two selects built from the REAL rendered
+    // filter control's class list (so this exercises the component and the
+    // served stylesheet, not a copy of either) sit side by side: one with a
+    // label far wider than the column, one with an empty label. Their
+    // trailing-padding strips, which hold the arrow and nothing else, must be
+    // pixel-identical. Negative control: restore daisyUI's own
+    // `overflow: hidden` on the long one and the strips must DIFFER, or the
+    // detector cannot see text at all.
+    let harness = harness_at("/components/client-snapshot-list").await;
+    wait_for_selector(&harness, "select[data-entity-filter-kind=\"select\"]").await;
+    begin_browser_error_capture(&harness).await;
+
+    const SIZES: [&str; 5] = [
+        "select-xs",
+        "select-sm",
+        "select-md",
+        "select-lg",
+        "select-xl",
+    ];
+    let setup = eval_json(
+        &harness,
+        r#"(() => {
+            const real = document.querySelector('select[data-entity-filter-kind="select"]');
+            const base = [...real.classList].filter(c => !/^select-(xs|sm|md|lg|xl)$/.test(c));
+            const host = document.createElement('div');
+            host.id = 'tfx7-probe';
+            host.style.cssText = 'position:fixed;left:0;top:0;z-index:2147483647;background:#fff;' +
+                'padding:16px;display:grid;grid-template-columns:120px 120px;row-gap:16px;column-gap:24px';
+            const sizes = ['select-xs','select-sm','select-md','select-lg','select-xl'];
+            const make = (size, text, id) => {
+                const s = document.createElement('select');
+                s.className = [...base, size].join(' ');
+                s.id = id;
+                s.style.cssText = 'width:120px;min-width:120px;max-width:120px';
+                const o = document.createElement('option');
+                o.textContent = text;
+                s.appendChild(o);
+                return s;
+            };
+            for (const size of sizes) {
+                host.append(
+                    make(size, 'Any Criticality level for every job', `tfx7-long-${size}`),
+                    make(size, '', `tfx7-empty-${size}`),
+                );
+            }
+            document.body.appendChild(host);
+            return { base: base.join(' '), appearance: getComputedStyle(real).appearance };
+        })()"#,
+    )
+    .await;
+    assert!(
+        setup["base"]
+            .as_str()
+            .is_some_and(|classes| classes.contains("select")),
+        "the probe must copy the real filter select's classes: {setup}"
+    );
+    let parked = chromiumoxide::cdp::browser_protocol::input::DispatchMouseEventParams::builder()
+        .r#type(chromiumoxide::cdp::browser_protocol::input::DispatchMouseEventType::MouseMoved)
+        .x(1200.0)
+        .y(760.0)
+        .build()
+        .expect("park-pointer params");
+    harness
+        .page()
+        .execute(parked)
+        .await
+        .expect("park the pointer away from the probe");
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // The largest per-channel difference between two same-size PNGs.
+    // Byte equality is too strict: the arrow's anti-aliasing differs by 1/255
+    // between two otherwise identical selects (measured, ldui-tfx7), while a
+    // glyph pixel against the fill differs by well over 100. A MEAN-based
+    // score is too loose: a few pixels of a letter vanish in a 25x26 strip.
+    fn max_channel_diff(a: &[u8], b: &[u8]) -> u8 {
+        let a = image::load_from_memory(a).expect("decode strip").to_rgba8();
+        let b = image::load_from_memory(b).expect("decode strip").to_rgba8();
+        assert_eq!(
+            a.dimensions(),
+            b.dimensions(),
+            "strips must be the same size"
+        );
+        a.pixels()
+            .zip(b.pixels())
+            .flat_map(|(p, q)| (0..3).map(move |c| p.0[c].abs_diff(q.0[c])))
+            .max()
+            .unwrap_or(0)
+    }
+    /// Above anti-aliasing noise, far below any glyph-on-fill contrast.
+    const TEXT_DIFF: u8 = 48;
+
+    // On a mismatch, keep both strips so the failure carries its evidence.
+    fn keep_evidence(name: &str, long: &[u8], empty: &[u8]) -> String {
+        let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("tfx7");
+        let _ = std::fs::create_dir_all(&dir);
+        let long_path = dir.join(format!("{name}-long.png"));
+        let empty_path = dir.join(format!("{name}-empty.png"));
+        let _ = std::fs::write(&long_path, long);
+        let _ = std::fs::write(&empty_path, empty);
+        format!("{} / {}", long_path.display(), empty_path.display())
+    }
+
+    async fn strip(harness: &pixelproof_web::Harness, id: &str) -> (Vec<u8>, Value) {
+        let geometry = eval_json(
+            harness,
+            &format!(
+                r#"(() => {{
+                    const s = document.getElementById('{id}');
+                    const r = s.getBoundingClientRect();
+                    const cs = getComputedStyle(s);
+                    const pr = parseFloat(cs.paddingRight);
+                    const bw = parseFloat(cs.borderRightWidth);
+                    return {{
+                        x: Math.ceil(r.right - pr + 1),
+                        y: Math.ceil(r.top + 3),
+                        w: Math.floor(pr - bw - 2),
+                        h: Math.floor(r.height - 6),
+                        overflow: cs.overflow,
+                        clipMargin: cs.overflowClipMargin,
+                    }};
+                }})()"#
+            ),
+        )
+        .await;
+        let rect = pixelproof_web::Rect {
+            x: geometry["x"].as_f64().expect("x") as f32,
+            y: geometry["y"].as_f64().expect("y") as f32,
+            w: geometry["w"].as_f64().expect("w") as f32,
+            h: geometry["h"].as_f64().expect("h") as f32,
+        };
+        let png = harness
+            .screenshot_region(rect)
+            .await
+            .expect("capture the trailing-padding strip");
+        (png, geometry)
+    }
+
+    for size in SIZES {
+        let (long, long_geometry) = strip(&harness, &format!("tfx7-long-{size}")).await;
+        let (empty, _) = strip(&harness, &format!("tfx7-empty-{size}")).await;
+        assert_eq!(
+            long_geometry["overflow"],
+            json!("clip"),
+            "{size}: the select clips its label: {long_geometry}"
+        );
+        let (_, empty_geometry) = strip(&harness, &format!("tfx7-empty-{size}")).await;
+        let diff = max_channel_diff(&long, &empty);
+        assert!(
+            diff <= TEXT_DIFF,
+            "{size}: a label wider than the column painted into the arrow's padding \
+             (max channel diff {diff} > {TEXT_DIFF} vs an empty select): long={long_geometry} \
+             empty={empty_geometry} evidence={} setup={setup}",
+            keep_evidence(size, &long, &empty)
+        );
+    }
+
+    // Negative control: daisyUI's stock clipping (padding box) must be SEEN
+    // painting text into the strip, or the comparison above proves nothing.
+    eval_json(
+        &harness,
+        r#"(() => {
+            const s = document.getElementById('tfx7-long-select-xs');
+            s.style.overflow = 'hidden';
+            s.style.overflowClipMargin = '0px';
+            return true;
+        })()"#,
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let (stock_long, stock_geometry) = strip(&harness, "tfx7-long-select-xs").await;
+    let (stock_empty, _) = strip(&harness, "tfx7-empty-select-xs").await;
+    let stock_diff = max_channel_diff(&stock_long, &stock_empty);
+    assert!(
+        stock_diff > TEXT_DIFF,
+        "negative control: with padding-box clipping the long label must paint into the strip, \
+         otherwise this detector cannot see text: {stock_geometry} setup={setup}"
+    );
+
+    eval_json(
+        &harness,
+        "(() => { document.getElementById('tfx7-probe').remove(); return true; })()",
+    )
+    .await;
+    assert_no_browser_errors(&harness, "select arrow clearance at every size").await;
+}
+
 /// ldui-ova3: the native arrow occupies the select's trailing padding. The
 /// framework control must leave readable text width for bounded Auto labels,
 /// including a three-digit fitted capacity, without changing selection state.
