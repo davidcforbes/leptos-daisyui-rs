@@ -8939,3 +8939,87 @@ async fn debounced_text_filter_applies_after_quiet_or_enter_and_never_renders_ap
 
     assert_no_browser_errors(&harness, "EntityTable debounced text filter").await;
 }
+
+/// ldui-q7yl (4iiz-Office production): selecting a primary/secondary cell and
+/// copying it must give the VISIBLE text once. The cell keeps an `sr-only`
+/// accessible copy beside its aria-hidden visible lines, and a selection used
+/// to take both ("Andrea Loesa\nAndrea Loesa"). Negative control: making that
+/// copy selectable again must bring the duplicate back, or this test cannot
+/// see the defect.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
+async fn copying_a_primary_secondary_cell_copies_the_visible_text_once() {
+    let harness = harness_at("/components/entity-table-presentation").await;
+    wait_for_selector(
+        &harness,
+        "#entity-table-presentation-fixture td[data-entity-column='contact'] [data-entity-semantic-cell='primary-secondary']",
+    )
+    .await;
+    begin_browser_error_capture(&harness).await;
+
+    const SELECT: &str = r##"(() => {
+        const cell = document.querySelector(
+            "#entity-table-presentation-fixture [data-entity-row-key='presentation-1'] td[data-entity-column='contact']"
+        );
+        const wrapper = cell.querySelector('[data-entity-semantic-cell="primary-secondary"]');
+        const primary = wrapper.querySelector('[data-entity-primary-secondary-line="primary"]').textContent.trim();
+        const range = document.createRange();
+        range.selectNodeContents(cell);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        const copied = selection.toString();
+        selection.removeAllRanges();
+        const visible = wrapper.querySelector(':scope > [aria-hidden="true"]').innerText;
+        return {
+            primary,
+            copied,
+            visible,
+            occurrences: copied.split(primary).length - 1,
+        };
+    })()"##;
+
+    let copy = eval_json(&harness, SELECT).await;
+    assert!(
+        !copy["primary"].as_str().unwrap_or_default().is_empty(),
+        "{copy}"
+    );
+    assert_eq!(
+        copy["occurrences"],
+        json!(1),
+        "the name must be copied once: {copy}"
+    );
+    assert_eq!(
+        copy["copied"].as_str().map(str::trim),
+        copy["visible"].as_str().map(str::trim),
+        "the copied text is the visible text: {copy}"
+    );
+
+    // Negative control: a selectable accessible copy duplicates the name.
+    eval_json(
+        &harness,
+        r#"(() => {
+            document.querySelectorAll('#entity-table-presentation-fixture [data-entity-accessible-text]')
+                .forEach(el => { el.style.userSelect = 'text'; });
+            return true;
+        })()"#,
+    )
+    .await;
+    let duplicated = eval_json(&harness, SELECT).await;
+    assert!(
+        duplicated["occurrences"].as_i64().unwrap_or(0) >= 2,
+        "negative control: a selectable sr-only copy must duplicate the name, \
+         or this test cannot see the defect: {duplicated}"
+    );
+    eval_json(
+        &harness,
+        r#"(() => {
+            document.querySelectorAll('#entity-table-presentation-fixture [data-entity-accessible-text]')
+                .forEach(el => { el.style.userSelect = ''; });
+            return true;
+        })()"#,
+    )
+    .await;
+
+    assert_no_browser_errors(&harness, "primary/secondary cell copy").await;
+}

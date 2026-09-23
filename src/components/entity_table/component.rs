@@ -5294,7 +5294,14 @@ fn render_primary_secondary_cell(
                     }
                 })}
             </span>
-            <span class="sr-only">{accessible_text}</span>
+            // ldui-q7yl: `select-none` keeps this screen-reader copy out of a
+            // mouse selection. Without it, selecting a cell and copying
+            // pasted the name twice ("Andrea Loesa\nAndrea Loesa"), because
+            // the visible lines and this span both hold the text. Assistive
+            // tech still reads it; user-select does not affect the a11y tree.
+            <span class="sr-only select-none" data-entity-accessible-text="true">
+                {accessible_text}
+            </span>
         </span>
     }
     .into_any()
