@@ -359,6 +359,11 @@ pub struct AiChatWorkspaceTexts {
     pub as_of_label: String,
     /// Field label in front of the evidence rail's query-mode attribution.
     pub query_attribution_label: String,
+    /// Summary of the Rail layout's evidence disclosure (ldui-d5ss).
+    pub rail_evidence_disclosure: String,
+    /// Summary of the Rail layout's knowledge-and-memory disclosure
+    /// (ldui-d5ss).
+    pub rail_knowledge_disclosure: String,
 }
 
 impl Default for AiChatWorkspaceTexts {
@@ -520,6 +525,8 @@ impl Default for AiChatWorkspaceTexts {
             facts_label: "Facts behind this answer".into(),
             as_of_label: "As of".into(),
             query_attribution_label: "Queried by".into(),
+            rail_evidence_disclosure: "Evidence for this answer".into(),
+            rail_knowledge_disclosure: "Knowledge and memory".into(),
         }
     }
 }
@@ -528,7 +535,7 @@ impl AiChatWorkspaceTexts {
     /// The number of fields on this struct; kept in sync with the struct and
     /// [`Self::fields`] by hand, and asserted equal to both by
     /// `en_and_es_texts_are_complete_and_differ` in `tests.rs`.
-    pub const FIELD_COUNT: usize = 143;
+    pub const FIELD_COUNT: usize = 145;
 
     /// Spanish copy, with full orthographic accents (not a transliteration).
     pub fn es() -> Self {
@@ -695,6 +702,8 @@ impl AiChatWorkspaceTexts {
             facts_label: "Datos detr\u{e1}s de esta respuesta".into(),
             as_of_label: "Al d\u{ed}a".into(),
             query_attribution_label: "Consultado por".into(),
+            rail_evidence_disclosure: "Evidencia de esta respuesta".into(),
+            rail_knowledge_disclosure: "Conocimiento y memoria".into(),
         }
     }
 
@@ -1056,6 +1065,14 @@ impl AiChatWorkspaceTexts {
             (
                 "query_attribution_label",
                 self.query_attribution_label.as_str(),
+            ),
+            (
+                "rail_evidence_disclosure",
+                self.rail_evidence_disclosure.as_str(),
+            ),
+            (
+                "rail_knowledge_disclosure",
+                self.rail_knowledge_disclosure.as_str(),
             ),
         ]
     }

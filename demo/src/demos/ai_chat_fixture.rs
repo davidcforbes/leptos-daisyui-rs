@@ -29,10 +29,10 @@ use leptos::prelude::*;
 use leptos_daisyui_rs::components::AiChatTexts;
 use leptos_daisyui_rs::components::ai_assistant_workspace::{AssistantAccess, RefusalNextAction};
 use leptos_daisyui_rs::patterns::{
-    AiChatWorkspace, AiChatWorkspaceTexts, AvailabilityReasonCode, ChatPosture,
-    ChatWorkspaceBackend, ChatWorkspaceFault, FixtureClock, InMemoryChatWorkspaceBackend,
-    KnowledgeSelection, PromptMatcher, ProviderTuning, ReasoningEffort, TurnScript,
-    desktop_provider_catalogue, lifecycle_id, outcome_id,
+    AiChatWorkspace, AiChatWorkspaceLayout, AiChatWorkspaceTexts, AvailabilityReasonCode,
+    ChatPosture, ChatWorkspaceBackend, ChatWorkspaceFault, FixtureClock,
+    InMemoryChatWorkspaceBackend, KnowledgeSelection, PromptMatcher, ProviderTuning,
+    ReasoningEffort, TurnScript, desktop_provider_catalogue, lifecycle_id, outcome_id,
 };
 use std::rc::Rc;
 use wasm_bindgen_futures::spawn_local;
@@ -160,6 +160,15 @@ pub fn AiChatFixture(
     /// timer happened to fire last.
     #[prop(optional, default = true)]
     oracle: bool,
+    /// The workspace's body arrangement (ldui-d5ss).
+    #[prop(optional)]
+    layout: AiChatWorkspaceLayout,
+    /// Drives `show_knowledge_rail` (ldui-d5ss).
+    #[prop(optional, default = true)]
+    knowledge_rail: bool,
+    /// Drives `show_evidence_rail` (ldui-d5ss).
+    #[prop(optional, default = true)]
+    evidence_rail: bool,
 ) -> impl IntoView {
     let mut backend = InMemoryChatWorkspaceBackend::seeded();
     if let Some(c) = clock {
@@ -405,6 +414,9 @@ pub fn AiChatFixture(
                     texts=texts
                     chat_texts=chat_texts
                     show_quick_actions=quick_actions
+                    layout=layout
+                    show_knowledge_rail=knowledge_rail
+                    show_evidence_rail=evidence_rail
                     now_ms=Signal::from(clock)
                     initial_knowledge=knowledge
                     on_refusal_action=on_refusal_action

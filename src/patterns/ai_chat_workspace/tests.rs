@@ -1306,3 +1306,20 @@ fn no_lane_touches_the_live_server() {
          scan is not covering the tree the live backend lives in"
     );
 }
+
+/// ldui-d5ss: an omitted rail removes its grid track, so the conversation
+/// always owns `1fr` -- never the 16rem track the missing rail left behind --
+/// and the default layout is today's Workbench.
+#[test]
+fn workbench_grid_drops_the_track_of_an_omitted_rail() {
+    use super::component::{AiChatWorkspaceLayout, workbench_grid_class};
+    assert!(workbench_grid_class(true, true).contains("lg:grid-cols-[16rem_1fr_16rem]"));
+    assert!(workbench_grid_class(true, false).contains("lg:grid-cols-[16rem_1fr]"));
+    assert!(workbench_grid_class(false, true).contains("lg:grid-cols-[1fr_16rem]"));
+    assert!(!workbench_grid_class(false, false).contains("lg:grid-cols"));
+    assert_eq!(
+        AiChatWorkspaceLayout::default(),
+        AiChatWorkspaceLayout::Workbench
+    );
+    assert_eq!(AiChatWorkspaceLayout::Rail.as_str(), "rail");
+}

@@ -21,7 +21,8 @@ use client_snapshot_list::ClientSnapshotListDemo;
 use leptos::mount::mount_to_body;
 use leptos::prelude::*;
 use leptos_daisyui_rs::patterns::{
-    AvailabilityReasonCode, ChatWorkspaceFault, FixtureClock, SEED_CHAT_NOW_MS,
+    AiChatWorkspaceLayout, AvailabilityReasonCode, ChatWorkspaceFault, FixtureClock,
+    SEED_CHAT_NOW_MS,
 };
 use leptos_daisyui_rs::test_mode;
 use leptos_daisyui_rs::tokens::{UiAnimationsPreamble, UiTokensPreamble};
@@ -115,6 +116,7 @@ fn main() {
         let ai_chat_budget = ai_chat_path().ends_with("/ai-chat-fixture-budget-exhausted");
         let ai_chat_cancel = ai_chat_path().ends_with("/ai-chat-fixture-cancel");
         let ai_chat_knowledge = ai_chat_path().ends_with("/ai-chat-fixture-knowledge");
+        let ai_chat_rail = ai_chat_path().ends_with("/ai-chat-fixture-rail");
         let ai_chat_fixture = ai_chat_path().ends_with("/ai-chat-fixture");
         let helpdesk_fixture = web_sys::window()
             .and_then(|window| window.location().pathname().ok())
@@ -284,6 +286,37 @@ fn main() {
                             oracle=false
                             fault=ChatWorkspaceFault::MemoryStoreOffline
                         />
+                    }
+                        .into_any()
+                } else if ai_chat_rail {
+                    // ldui-d5ss: three workspaces, each in a 375 px host on a
+                    // wide viewport -- the 4iiz-Office AssistantRail shape.
+                    // Rail with both disclosures, Rail with both rails omitted
+                    // (Office has no corpus), and Workbench as the NEGATIVE
+                    // control: its viewport breakpoint fires here, so its
+                    // conversation must collapse or the width measurement
+                    // cannot see the defect at all.
+                    view! {
+                        <div class="flex flex-col gap-8">
+                            <div class="w-[375px]" data-ai-chat-rail-host="rail">
+                                <ai_chat_fixture::AiChatFixture
+                                    case="rail"
+                                    layout=AiChatWorkspaceLayout::Rail
+                                />
+                            </div>
+                            <div class="w-[375px]" data-ai-chat-rail-host="bare">
+                                <ai_chat_fixture::AiChatFixture
+                                    case="bare"
+                                    oracle=false
+                                    layout=AiChatWorkspaceLayout::Rail
+                                    knowledge_rail=false
+                                    evidence_rail=false
+                                />
+                            </div>
+                            <div class="w-[375px]" data-ai-chat-rail-host="workbench">
+                                <ai_chat_fixture::AiChatFixture case="workbench" oracle=false />
+                            </div>
+                        </div>
                     }
                         .into_any()
                 } else if ai_chat_fixture {

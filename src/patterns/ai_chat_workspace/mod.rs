@@ -33,9 +33,9 @@ pub use backend::{
     WorkspaceRefusal,
 };
 pub use component::{
-    AiChatWorkspace, ReopenReason, WATCHDOG_MS, cancel_notice, is_terminal, notice_text,
-    published_capabilities, reopen_announces_switch, reopen_notice, settings_for, tick_turn_id,
-    watchdog_should_fire,
+    AiChatWorkspace, AiChatWorkspaceLayout, ReopenReason, WATCHDOG_MS, cancel_notice, is_terminal,
+    notice_text, published_capabilities, reopen_announces_switch, reopen_notice, settings_for,
+    tick_turn_id, watchdog_should_fire,
 };
 pub use engine_header::{
     EngineHeader, UsageFigures, WATCHDOG_FAILURE_KIND, cost_line, engine_is_metered,

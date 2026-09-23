@@ -2702,3 +2702,170 @@ async fn axe_clean_with_settings_drawer_refusal_and_es_locale() {
 
     assert_no_browser_errors(&h, "es axe").await;
 }
+
+/// ldui-d5ss (4iiz-Office production): in a 375 px host on a wide viewport,
+/// the Rail layout gives the conversation the host's width, its rails sit
+/// behind closed disclosures, nothing overflows, and a host can omit both
+/// rails. The Workbench instance on the same document is the negative
+/// control: its `lg` VIEWPORT breakpoint fires in the same 375 px host, so
+/// its conversation collapses -- if it did not, the width assertions above
+/// would prove nothing.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-ai-chat)"]
+async fn rail_layout_gives_the_conversation_the_host_width_in_a_narrow_rail() {
+    let h = harness_at("/ai-chat-fixture-rail").await;
+    h.set_viewport(pixelproof_web::ViewportSize::new(1600, 1000))
+        .await
+        .expect("wide viewport, so the lg breakpoint fires");
+    wait_for_selector(
+        &h,
+        "[data-ai-chat-rail-host='rail'] [data-ai-chat-composer]",
+    )
+    .await;
+    wait_for_selector(
+        &h,
+        "[data-ai-chat-rail-host='bare'] [data-ai-chat-composer]",
+    )
+    .await;
+    wait_for_selector(
+        &h,
+        "[data-ai-chat-rail-host='workbench'] [data-ai-chat-composer]",
+    )
+    .await;
+    begin_browser_error_capture(&h).await;
+
+    let measure = eval_json(
+        &h,
+        r#"(() => {
+            const one = kind => {
+                const host = document.querySelector(`[data-ai-chat-rail-host="${kind}"]`);
+                const root = host.querySelector('[data-ai-chat-workspace]');
+                const conv = root.querySelector('[data-ai-chat-workspace-conversation]');
+                const composer = root.querySelector('[data-ai-chat-composer]');
+                const disclosures = [...root.querySelectorAll('[data-ai-chat-rail-disclosure]')];
+                return {
+                    layout: root.dataset.aiChatWorkspaceLayout,
+                    host: host.getBoundingClientRect().width,
+                    conversation: conv.getBoundingClientRect().width,
+                    composer: composer.getBoundingClientRect().width,
+                    overflow: root.scrollWidth - root.clientWidth,
+                    hostOverflow: host.scrollWidth - host.clientWidth,
+                    disclosures: disclosures.map(d => d.dataset.aiChatRailDisclosure),
+                    disclosuresOpen: disclosures.some(d => d.open),
+                    knowledgeRail: !!root.querySelector('[data-ai-chat-rail-disclosure="knowledge"] *'),
+                };
+            };
+            return { rail: one('rail'), bare: one('bare'), workbench: one('workbench') };
+        })()"#,
+    )
+    .await;
+
+    for case in ["rail", "bare"] {
+        let m = &measure[case];
+        assert_eq!(m["layout"], json!("rail"), "{case}: {measure}");
+        assert!(
+            m["conversation"].as_f64().unwrap_or(0.0) >= 300.0,
+            "{case}: the conversation must take the host's width (>= 300px): {measure}"
+        );
+        assert!(
+            m["composer"].as_f64().unwrap_or(0.0) >= 250.0,
+            "{case}: the composer must be usable (>= 250px): {measure}"
+        );
+        assert!(
+            m["overflow"].as_f64().unwrap_or(f64::MAX) <= 1.0
+                && m["hostOverflow"].as_f64().unwrap_or(f64::MAX) <= 1.0,
+            "{case}: nothing may overflow the 375px host: {measure}"
+        );
+    }
+    assert_eq!(
+        measure["rail"]["disclosures"],
+        json!(["evidence", "knowledge"]),
+        "Rail puts both rails behind disclosures, evidence first: {measure}"
+    );
+    assert_eq!(
+        measure["rail"]["disclosuresOpen"],
+        json!(false),
+        "the disclosures start closed so the rail reads as a chat: {measure}"
+    );
+    assert_eq!(
+        measure["bare"]["disclosures"],
+        json!([]),
+        "show_knowledge_rail/show_evidence_rail = false omit both: {measure}"
+    );
+
+    // Negative control: the Workbench grid in the same host is the
+    // production defect -- a conversation squeezed to almost nothing.
+    assert_eq!(
+        measure["workbench"]["layout"],
+        json!("workbench"),
+        "{measure}"
+    );
+    assert!(
+        measure["workbench"]["conversation"]
+            .as_f64()
+            .unwrap_or(f64::MAX)
+            < 100.0,
+        "negative control: Workbench in a 375px host must still collapse the \
+         conversation, or this test cannot see the defect: {measure}"
+    );
+
+    // Opening the knowledge disclosure reveals the rail inside the host.
+    click(
+        &h,
+        "[data-ai-chat-rail-host='rail'] [data-ai-chat-rail-disclosure='knowledge'] summary",
+    )
+    .await;
+    let opened = eval_json(
+        &h,
+        r#"(() => {
+            const root = document.querySelector('[data-ai-chat-rail-host="rail"] [data-ai-chat-workspace]');
+            const d = root.querySelector('[data-ai-chat-rail-disclosure="knowledge"]');
+            return { open: d.open, overflow: root.scrollWidth - root.clientWidth };
+        })()"#,
+    )
+    .await;
+    assert_eq!(opened["open"], json!(true), "{opened}");
+    assert!(
+        opened["overflow"].as_f64().unwrap_or(f64::MAX) <= 1.0,
+        "the opened knowledge rail fits the 375px host: {opened}"
+    );
+
+    assert_no_browser_errors(&h, "ai chat workspace rail layout").await;
+}
+
+/// ldui-iay0: the composer's accessible name is the SAME text its
+/// placeholder shows -- the template with `{assistant}` substituted --
+/// never the raw template a screen reader would read out literally.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-ai-chat)"]
+async fn composer_label_is_the_substituted_placeholder_not_the_template() {
+    let h = harness_at(PAGE).await;
+    wait_for_selector(&h, "[data-ai-chat-composer]").await;
+    begin_browser_error_capture(&h).await;
+    let composer = eval_json(
+        &h,
+        r#"(() => {
+            const ta = document.querySelector('[data-ai-chat-composer]');
+            const label = document.querySelector(`label[for="${ta.id}"]`);
+            return {
+                placeholder: ta.getAttribute('placeholder'),
+                label: label ? label.textContent.trim() : null,
+                labels: ta.labels ? ta.labels.length : 0,
+            };
+        })()"#,
+    )
+    .await;
+    let placeholder = composer["placeholder"].as_str().unwrap_or_default();
+    let label = composer["label"].as_str().unwrap_or_default();
+    assert!(!placeholder.is_empty(), "{composer}");
+    assert!(
+        !label.contains("{assistant}") && !placeholder.contains("{assistant}"),
+        "no raw template may reach the page: {composer}"
+    );
+    assert_eq!(
+        label, placeholder,
+        "the label names the composer with the shown text: {composer}"
+    );
+    assert_eq!(composer["labels"], json!(1), "{composer}");
+    assert_no_browser_errors(&h, "ai chat composer label").await;
+}

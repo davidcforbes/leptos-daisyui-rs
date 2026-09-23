@@ -1024,8 +1024,19 @@ pub fn AiChat(
                     // carries the visible hint, but a placeholder stops being a
                     // name the moment text is typed (ldui-iilm.11, drift
                     // input-outside-field).
-                    <label class="sr-only" for=id_composer>
-                        {move || texts.get().composer_placeholder}
+                    // ldui-iay0: the SAME text the placeholder shows -- the
+                    // template substituted ({assistant} -> the engine's
+                    // name), or the host's own placeholder -- never the raw
+                    // `composer_placeholder` template.
+                    <label class="sr-only" for=id_composer data-ai-chat-composer-label="">
+                        {move || {
+                            let p = placeholder.get();
+                            if p.is_empty() {
+                                composer_placeholder_for(&assistant.get(), &texts.get())
+                            } else {
+                                p
+                            }
+                        }}
                     </label>
                     <textarea
                         node_ref=textarea_ref

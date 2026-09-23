@@ -93,6 +93,38 @@ button-press away from a real server.
 | `data-ai-chat-live-notice` | The last connection notice, when there is one. |
 | `data-ai-chat-identifier` | The proof rows' record ids (knowledge entries, turns). A declared mono ROLE in the style audit's `demo_profile`, the `EntityColumn::identifier()` precedent: the family check is exempt, the size check still runs. |
 
+## Layout: Workbench or Rail (ldui-d5ss)
+
+`layout: AiChatWorkspaceLayout` is chosen once, at mount; switching it would
+remount the conversation.
+
+- **`Workbench`** (the default) is the three-column body: knowledge rail,
+  conversation, evidence rail side by side from the `lg` breakpoint. That is a
+  VIEWPORT breakpoint, so it is only right when the workspace has the page's
+  width. In a 375 px rail on a 1624 px window it still fires, and the grid
+  resolves to 256 px | 1.6 px | 256 px -- the 4iiz-Office production defect
+  this layout choice exists to fix.
+- **`Rail`** is one column at the HOST's width: the conversation first, then
+  the turn's evidence and the knowledge/memory controls behind closed
+  disclosures (`<details>`, labelled by `rail_evidence_disclosure` and
+  `rail_knowledge_disclosure`). Use it for side rails, drawers and any container
+  narrower than about 64rem.
+
+`show_knowledge_rail` and `show_evidence_rail` (both `Signal<bool>`, default
+`true`) omit a rail entirely, in either layout. Use them for a host with no
+corpus or memory store, rather than showing controls that cannot do anything. In
+Workbench an omitted rail also drops its grid track, so the conversation always
+owns `1fr` (`workbench_grid_class`).
+
+```rust,ignore
+<AiChatWorkspace
+    backend=backend
+    layout=AiChatWorkspaceLayout::Rail
+    show_knowledge_rail=false
+    show_evidence_rail=false
+/>
+```
+
 ## Copy and localization
 
 All rendered text comes from `AiChatWorkspaceTexts`, supplied as a `Signal` so
@@ -112,6 +144,14 @@ pinned set is swept from the browser-suite sources rather than listed by hand
 field cannot be silently missed.
 
 ## DOM hooks
+
+- `data-ai-chat-workspace-layout` on the root: `workbench` or `rail`.
+- `data-ai-chat-workspace-body` on the body: the same two values.
+- `data-ai-chat-workspace-conversation` on the conversation panel.
+- `data-ai-chat-rail-disclosure` on each Rail disclosure: `evidence` or
+  `knowledge`.
+- `data-ai-chat-composer-label` on the composer's `sr-only` label, whose text
+  is the substituted placeholder (ldui-iay0), never the raw template.
 
 Stable `data-*` attributes, for tests and for host CSS. **Query by these, never
 by document position** — a positional selector does not fail when the layout

@@ -279,7 +279,8 @@ fn js_now_ms() -> i64 {
 /// ## CSS
 /// ```css
 /// @source inline("rounded-box border border-base-300 bg-base-100 p-4 gap-2 gap-3 gap-4");
-/// @source inline("grid grid-cols-1 lg:grid-cols-[16rem_1fr_16rem] h-[32rem] min-h-0 w-full");
+/// @source inline("grid grid-cols-1 lg:grid-cols-[16rem_1fr_16rem] lg:grid-cols-[16rem_1fr] lg:grid-cols-[1fr_16rem] h-[32rem] min-h-0 w-full min-w-0");
+/// @source inline("collapse collapse-arrow collapse-title collapse-content");
 /// @source inline("select select-sm select-bordered checkbox checkbox-sm range range-xs");
 /// ```
 #[component]
@@ -337,6 +338,25 @@ pub fn AiChatWorkspace(
     /// panel's own.
     #[prop(optional, into, default = Signal::stored(true))]
     show_quick_actions: Signal<bool>,
+    /// How the body is arranged (ldui-d5ss). [`AiChatWorkspaceLayout::Workbench`]
+    /// (the default) is today's three columns at the `lg` VIEWPORT breakpoint,
+    /// for a page that gives the workspace the page's width.
+    /// [`AiChatWorkspaceLayout::Rail`] is for a NARROW host -- a side rail or
+    /// drawer -- where a viewport breakpoint says nothing about the space the
+    /// workspace actually has: the conversation takes the full width and the
+    /// evidence and knowledge rails sit below it behind disclosures. Chosen
+    /// once at mount; switching would remount the conversation.
+    #[prop(optional)]
+    layout: AiChatWorkspaceLayout,
+    /// Whether to render the knowledge/memory rail at all (ldui-d5ss).
+    /// Defaults to `true`. A host with no corpus and no memory store turns it
+    /// off rather than showing a rail of controls that cannot do anything.
+    #[prop(optional, into, default = Signal::stored(true))]
+    show_knowledge_rail: Signal<bool>,
+    /// Whether to render the evidence rail at all (ldui-d5ss). Defaults to
+    /// `true`.
+    #[prop(optional, into, default = Signal::stored(true))]
+    show_evidence_rail: Signal<bool>,
     /// Extra classes merged onto the root.
     #[prop(optional, into)]
     class: &'static str,
@@ -917,12 +937,95 @@ pub fn AiChatWorkspace(
         })
     };
 
+    let knowledge_rail = StoredValue::new_local(move || {
+        view! {
+            <KnowledgeSourceRail
+                sources=sources
+                selection=selection
+                on_select=on_knowledge_select
+                on_reindex=on_reindex
+                on_memory_flags=on_memory_flags
+                on_recall=on_recall
+                on_remember=on_remember
+                on_memory_state=on_memory_state
+                receipt=receipt
+                memory_offline=memory_offline
+                refusal=memory_refusal
+                draft=knowledge_draft
+                texts=texts
+                id_prefix=rail_prefix.clone()
+            />
+        }
+    });
+    let evidence_rail =
+        move || view! { <EvidenceRail turn=turn selection=selection texts=texts /> };
+    // Built once: exactly one layout arm below renders it.
+    let conversation = view! {
+        <div
+            class="h-[32rem] min-h-0 min-w-0 overflow-hidden rounded-box border border-base-300 bg-base-100"
+            data-ai-chat-workspace-conversation=""
+        >
+            {panel}
+        </div>
+    };
+    let body = match layout {
+        AiChatWorkspaceLayout::Workbench => view! {
+            // The column template follows the rails actually present, so an
+            // omitted rail never leaves the conversation in a 16rem track.
+            <div
+                class=move || workbench_grid_class(show_knowledge_rail.get(), show_evidence_rail.get())
+                data-ai-chat-workspace-body="workbench"
+            >
+                <Show when=move || show_knowledge_rail.get()>
+                    {knowledge_rail.with_value(|rail| rail())}
+                </Show>
+                {conversation}
+                <Show when=move || show_evidence_rail.get()>{evidence_rail}</Show>
+            </div>
+        }
+        .into_any(),
+        AiChatWorkspaceLayout::Rail => view! {
+            // One column at the HOST's width: the conversation first, then
+            // the turn's evidence and the knowledge/memory controls behind
+            // disclosures, closed by default so the rail reads as a chat.
+            <div class="flex w-full min-w-0 flex-col gap-3" data-ai-chat-workspace-body="rail">
+                {conversation}
+                <Show when=move || show_evidence_rail.get()>
+                    <details
+                        class="collapse collapse-arrow min-w-0 rounded-box border border-base-300 bg-base-100"
+                        data-ai-chat-rail-disclosure="evidence"
+                    >
+                        <summary class="collapse-title text-sm font-semibold">
+                            {move || texts.with(|t| t.rail_evidence_disclosure.clone())}
+                        </summary>
+                        <div class="collapse-content min-w-0">{evidence_rail}</div>
+                    </details>
+                </Show>
+                <Show when=move || show_knowledge_rail.get()>
+                    <details
+                        class="collapse collapse-arrow min-w-0 rounded-box border border-base-300 bg-base-100"
+                        data-ai-chat-rail-disclosure="knowledge"
+                    >
+                        <summary class="collapse-title text-sm font-semibold">
+                            {move || texts.with(|t| t.rail_knowledge_disclosure.clone())}
+                        </summary>
+                        <div class="collapse-content min-w-0">
+                            {knowledge_rail.with_value(|rail| rail())}
+                        </div>
+                    </details>
+                </Show>
+            </div>
+        }
+        .into_any(),
+    };
+
     view! {
         <div
             node_ref=node_ref
             class=move || {
-                merge_classes!("lds-aichat-workspace flex w-full flex-col gap-4", class)
+                merge_classes!("lds-aichat-workspace flex w-full min-w-0 flex-col gap-4", class)
             }
+            data-ai-chat-workspace-layout=layout.as_str()
             data-ai-chat-workspace=""
             data-ai-chat-workspace-engine=move || engine_id.get()
             data-ai-chat-workspace-locale=move || texts.get().locale_id
@@ -946,28 +1049,44 @@ pub fn AiChatWorkspace(
                     id_prefix=bar_prefix.clone()
                 />
             </Show>
-            <div class="grid w-full grid-cols-1 gap-4 lg:grid-cols-[16rem_1fr_16rem]">
-                <KnowledgeSourceRail
-                    sources=sources
-                    selection=selection
-                    on_select=on_knowledge_select
-                    on_reindex=on_reindex
-                    on_memory_flags=on_memory_flags
-                    on_recall=on_recall
-                    on_remember=on_remember
-                    on_memory_state=on_memory_state
-                    receipt=receipt
-                    memory_offline=memory_offline
-                    refusal=memory_refusal
-                    draft=knowledge_draft
-                    texts=texts
-                    id_prefix=rail_prefix
-                />
-                <div class="h-[32rem] min-h-0 overflow-hidden rounded-box border border-base-300 bg-base-100">
-                    {panel}
-                </div>
-                <EvidenceRail turn=turn selection=selection texts=texts />
-            </div>
+            {body}
         </div>
+    }
+}
+
+/// How [`AiChatWorkspace`] arranges its body (ldui-d5ss).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AiChatWorkspaceLayout {
+    /// Knowledge rail, conversation and evidence rail side by side from the
+    /// `lg` VIEWPORT breakpoint. For a host that gives the workspace the
+    /// page's width -- it is a viewport rule, so in a narrow container on a
+    /// wide screen it still fires, and the conversation is squeezed to
+    /// almost nothing (the 4iiz-Office production defect behind ldui-d5ss).
+    #[default]
+    Workbench,
+    /// One column at the host's width: the conversation first, the evidence
+    /// and knowledge rails below it behind disclosures. For side rails,
+    /// drawers and any container narrower than roughly 64rem.
+    Rail,
+}
+
+impl AiChatWorkspaceLayout {
+    /// Stable data-hook value (`data-ai-chat-workspace-layout`).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Workbench => "workbench",
+            Self::Rail => "rail",
+        }
+    }
+}
+
+/// The Workbench body's grid classes for the rails actually present: an
+/// omitted rail removes its track, so the conversation always owns `1fr`.
+pub fn workbench_grid_class(knowledge: bool, evidence: bool) -> &'static str {
+    match (knowledge, evidence) {
+        (true, true) => "grid w-full min-w-0 grid-cols-1 gap-4 lg:grid-cols-[16rem_1fr_16rem]",
+        (true, false) => "grid w-full min-w-0 grid-cols-1 gap-4 lg:grid-cols-[16rem_1fr]",
+        (false, true) => "grid w-full min-w-0 grid-cols-1 gap-4 lg:grid-cols-[1fr_16rem]",
+        (false, false) => "grid w-full min-w-0 grid-cols-1 gap-4",
     }
 }
