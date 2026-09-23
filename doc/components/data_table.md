@@ -763,6 +763,15 @@ vocabulary is required and no filter control or proposal path exists.
 Runtime audits can read `data-server-filter-vocabulary` as `authoritative`,
 `current-slice`, `disabled`, or `invalid`.
 
+### Saved filters (ldui-bw2p)
+
+`ServerTableColumnTools::with_saved_filters(EntitySavedFilters)` mounts the same
+controlled saved-filters bar `EntityTable` uses. The bar sits at the LEFT of the
+column-tools row, on the same row as the caller's actions and the chooser, and
+renders only while filtering is enabled. The host owns the saved list, the live
+`current_values` and `on_apply`: a server table applies a saved filter by
+proposing a query with those filters. Hook: `[data-server-saved-filters]`.
+
 ### Cursor pagination
 
 Use `ServerTablePagination::cursor(ServerCursorPagination::controlled(...))`

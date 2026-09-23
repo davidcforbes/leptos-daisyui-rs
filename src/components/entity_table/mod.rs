@@ -15,6 +15,8 @@ mod paging;
 mod row_actions;
 mod saved_filters;
 mod saved_filters_bar;
+// ldui-bw2p: ServerDataTable mounts the same bar in its column-tools row.
+pub(crate) use saved_filters_bar::saved_filters_bar;
 mod selection;
 mod storage;
 mod types;

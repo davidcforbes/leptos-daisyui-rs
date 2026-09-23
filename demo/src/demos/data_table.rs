@@ -724,6 +724,18 @@ pub fn DataTableDemo() -> impl IntoView {
         ));
         crate::debug_state::set("server_datatable.query", query_debug);
     };
+    // ldui-bw2p: saved filters on the server table, controlled by the page.
+    let server_saved_filters = RwSignal::new_local(Vec::<EntitySavedFilter>::new());
+    let server_filter_values = Signal::derive_local(move || {
+        let mut values: Vec<(String, String)> = server_query
+            .get()
+            .filters
+            .iter()
+            .map(|(column, value)| ((*column).to_owned(), value.clone()))
+            .collect();
+        values.sort();
+        values
+    });
     let propose_server_query = move |mut query: TableQuery| {
         server_proposal_count.update(|count| *count += 1);
         if !server_accept_changes.get_untracked() {
@@ -2515,6 +2527,36 @@ pub fn DataTableDemo() -> impl IntoView {
                         1,
                     )
                         .with_chooser_trigger(EntityColumnChooserTrigger::Icon)
+                        .with_saved_filters(EntitySavedFilters::new(
+                            server_saved_filters.into(),
+                            server_filter_values,
+                            Callback::new(move |(name, values): (String, Vec<(String, String)>)| {
+                                server_saved_filters.update(|saved| {
+                                    saved.retain(|filter| filter.name != name);
+                                    saved.push(EntitySavedFilter { name, values });
+                                });
+                            }),
+                            Callback::new(move |name: String| {
+                                server_saved_filters
+                                    .update(|saved| saved.retain(|filter| filter.name != name));
+                            }),
+                            Callback::new(move |filter: EntitySavedFilter| {
+                                // Saved column ids back to the table's static keys.
+                                let filters = filter
+                                    .values
+                                    .iter()
+                                    .filter_map(|(column, value)| {
+                                        ["role", "status"]
+                                            .into_iter()
+                                            .find(|key| *key == column)
+                                            .map(|key| (key, value.clone()))
+                                    })
+                                    .collect();
+                                propose_server_query(
+                                    server_query.get_untracked().with_filters(filters),
+                                );
+                            }),
+                        ))
                         .with_toolbar_actions(move || {
                             view! {
                                 <Button

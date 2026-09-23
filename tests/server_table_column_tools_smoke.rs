@@ -2577,3 +2577,75 @@ async fn every_framework_owned_table_control_has_a_stable_identity() {
 
     assert_no_browser_errors(&harness, "server-table control identity").await;
 }
+
+/// ldui-bw2p (4iiz-Office production): the server table's Save Filter sits on
+/// the SAME row as its column tools -- the saved-filters bar left, the
+/// caller's actions and the chooser right -- as `EntityTable`'s quick-action
+/// row does. Centres are compared because the row is `items-center` and the
+/// controls differ in height. Negative control: forcing the bar onto its own
+/// line (the old separate `mb-2` row) must move Save Filter by more than the
+/// tolerance, or this check cannot see the defect.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires release demo server (cargo xtask test-server-table-column-tools)"]
+async fn server_save_filter_shares_the_column_tools_row() {
+    let harness = harness_at("/components/data-table").await;
+    wait_for_selector(&harness, "#server-table [data-entity-saved-filters-open]").await;
+    begin_browser_error_capture(&harness).await;
+
+    const MEASURE: &str = r#"(() => {
+        const root = document.querySelector('#server-table');
+        const save = root.querySelector('[data-entity-saved-filters-open]');
+        const chooser = root.querySelector('[data-server-column-chooser]');
+        const row = root.querySelector('[data-server-column-tools]');
+        const mid = el => { const r = el.getBoundingClientRect(); return (r.top + r.bottom) / 2; };
+        const rootRect = root.getBoundingClientRect();
+        return {
+            saveMid: mid(save),
+            chooserMid: mid(chooser),
+            sameRowContainer: row.contains(save) && row.contains(chooser),
+            saveLeftOffset: save.getBoundingClientRect().left - rootRect.left,
+            chooserRightOffset: rootRect.right - chooser.getBoundingClientRect().right,
+            saveBeforeChooser: save.getBoundingClientRect().right < chooser.getBoundingClientRect().left,
+        };
+    })()"#;
+
+    let layout = eval_json(&harness, MEASURE).await;
+    let gap = (layout["saveMid"].as_f64().unwrap() - layout["chooserMid"].as_f64().unwrap()).abs();
+    assert_eq!(layout["sameRowContainer"], json!(true), "{layout}");
+    assert!(
+        gap <= 1.0,
+        "Save Filter must share the chooser's row (centre gap {gap}px): {layout}"
+    );
+    assert_eq!(
+        layout["saveBeforeChooser"],
+        json!(true),
+        "bar left, tools right: {layout}"
+    );
+    assert!(
+        layout["saveLeftOffset"].as_f64().unwrap_or(f64::MAX) <= 24.0
+            && layout["chooserRightOffset"].as_f64().unwrap_or(f64::MAX) <= 24.0,
+        "the bar starts at the table's left edge and the chooser ends at its right: {layout}"
+    );
+
+    // Negative control: the pre-fix shape, the bar alone on its own line.
+    eval_json(
+        &harness,
+        "(() => { document.querySelector('#server-table [data-server-saved-filters]').style.flexBasis = '100%'; return true; })()",
+    )
+    .await;
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    let split = eval_json(&harness, MEASURE).await;
+    let split_gap =
+        (split["saveMid"].as_f64().unwrap() - split["chooserMid"].as_f64().unwrap()).abs();
+    assert!(
+        split_gap > 1.0,
+        "negative control: a bar on its own line must be detected (gap {split_gap}px): {split}"
+    );
+    eval_json(
+        &harness,
+        "(() => { document.querySelector('#server-table [data-server-saved-filters]').style.flexBasis = ''; return true; })()",
+    )
+    .await;
+
+    assert_no_browser_errors(&harness, "server table saved filters row").await;
+}

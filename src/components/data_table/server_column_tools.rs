@@ -21,10 +21,10 @@
 use crate::components::data_table::resize::{effective_min_width, resized_width};
 use crate::components::data_table::types::{Column, TableRow};
 use crate::components::entity_table::{
-    EntityColumn, EntityColumnChooserTrigger, EntityColumnMove, EntityTablePreferenceOwnership,
-    EntityTablePreferencePersistence, EntityTablePreferences, decode_preferences,
-    encode_preferences, move_column, normalize_preferences, ordered_columns, reset_columns,
-    toggle_hidden_column,
+    EntityColumn, EntityColumnChooserTrigger, EntityColumnMove, EntitySavedFilters,
+    EntityTablePreferenceOwnership, EntityTablePreferencePersistence, EntityTablePreferences,
+    decode_preferences, encode_preferences, move_column, normalize_preferences, ordered_columns,
+    reset_columns, toggle_hidden_column,
 };
 use leptos::prelude::*;
 use std::collections::HashMap;
@@ -76,6 +76,7 @@ pub struct ServerTableColumnTools {
     pub(crate) chooser_trigger: Signal<EntityColumnChooserTrigger>,
     pub(crate) texts: Signal<ServerTableColumnToolsTexts>,
     pub(crate) toolbar_actions: Option<Children>,
+    pub(crate) saved_filters: Option<EntitySavedFilters>,
 }
 
 impl ServerTableColumnTools {
@@ -90,6 +91,7 @@ impl ServerTableColumnTools {
             chooser_trigger: Signal::stored(EntityColumnChooserTrigger::default()),
             texts: Signal::stored(ServerTableColumnToolsTexts::default()),
             toolbar_actions: None,
+            saved_filters: None,
         }
     }
 
@@ -127,6 +129,22 @@ impl ServerTableColumnTools {
         render: impl FnOnce() -> AnyView + Send + 'static,
     ) -> Self {
         self.toolbar_actions = Some(Box::new(render));
+        self
+    }
+
+    /// Mounts the framework's controlled saved-filters bar (Save Filter plus
+    /// the saved-filter badges) at the LEFT of this table's column-tools row,
+    /// on the same row as the caller's actions and the chooser -- the layout
+    /// `EntityTable`'s quick-action row uses (ldui-bw2p, upstreamed from
+    /// 4iiz-Office op-4jdbd / op-29a2n).
+    ///
+    /// Everything the bar does is a PROPOSAL against the supplied
+    /// [`EntitySavedFilters`]: the host owns the saved list, the live
+    /// `current_values` it is compared with, and the `on_apply` that drives
+    /// the host's own controlled filter state. The table only renders it, and
+    /// only while `ServerQueryCapabilities::filtering_enabled()`.
+    pub fn with_saved_filters(mut self, saved_filters: EntitySavedFilters) -> Self {
+        self.saved_filters = Some(saved_filters);
         self
     }
 }

@@ -36,7 +36,9 @@ use crate::components::data_table::{
     page_size_control_id, resolve_control_id, search_control_id, selection_header_control_id,
     selection_row_control_id,
 };
-use crate::components::entity_table::{EntityColumnChooserTrigger, EntityColumnMove};
+use crate::components::entity_table::{
+    EntityColumnChooserTrigger, EntityColumnMove, saved_filters_bar,
+};
 use crate::components::menu::{Menu, MenuCheckItem};
 use crate::components::select::Select;
 use crate::components::table::{Table, TableSize};
@@ -1684,33 +1686,41 @@ pub fn ServerDataTable(
     // `None` when the caller omitted `column_tools`, which keeps every
     // downstream site (`effective_columns`, the chooser markup below) a
     // plain no-op -- historical rendering is unchanged.
-    let (column_tools_state, column_tools_trigger, column_tools_texts, column_tools_actions) =
-        match column_tools {
-            Some(tools) => {
-                let ServerTableColumnTools {
-                    preference_ownership,
-                    schema_version,
-                    prebuilt_state,
-                    chooser_trigger,
-                    texts,
-                    toolbar_actions,
-                } = tools;
-                (
-                    Some(prebuilt_state.unwrap_or_else(|| {
-                        ServerColumnToolsState::new(preference_ownership, schema_version, columns)
-                    })),
-                    chooser_trigger,
-                    texts,
-                    toolbar_actions,
-                )
-            }
-            None => (
-                None,
-                Signal::stored(EntityColumnChooserTrigger::default()),
-                Signal::stored(ServerTableColumnToolsTexts::default()),
-                None,
-            ),
-        };
+    let (
+        column_tools_state,
+        column_tools_trigger,
+        column_tools_texts,
+        column_tools_actions,
+        column_tools_saved_filters,
+    ) = match column_tools {
+        Some(tools) => {
+            let ServerTableColumnTools {
+                preference_ownership,
+                schema_version,
+                prebuilt_state,
+                chooser_trigger,
+                texts,
+                toolbar_actions,
+                saved_filters,
+            } = tools;
+            (
+                Some(prebuilt_state.unwrap_or_else(|| {
+                    ServerColumnToolsState::new(preference_ownership, schema_version, columns)
+                })),
+                chooser_trigger,
+                texts,
+                toolbar_actions,
+                saved_filters,
+            )
+        }
+        None => (
+            None,
+            Signal::stored(EntityColumnChooserTrigger::default()),
+            Signal::stored(ServerTableColumnToolsTexts::default()),
+            None,
+            None,
+        ),
+    };
     // Column-width overrides from dragging a header divider, keyed by
     // column id. Shared between the header (writer) and body (reader) so
     // resized columns stay aligned. With column tools, accepted preferences
@@ -2116,6 +2126,16 @@ pub fn ServerDataTable(
     });
     let sorting_enabled = query_capabilities.sorting_enabled() && has_query_callback;
     let filtering_enabled = query_capabilities.filtering_enabled();
+    // ldui-bw2p: the saved-filters bar renders only where a filter row
+    // exists to save, with a minted id for its dialog.
+    let saved_filters_leading = column_tools_saved_filters
+        .filter(|_| filtering_enabled)
+        .map(|model| {
+            (
+                model,
+                format!("{}-saved-filters", next_data_table_control_id()),
+            )
+        });
     let column_filters = RwSignal::new(query_state.get_untracked().filters().clone());
     let effective_columns = Signal::derive(move || {
         let mut effective = columns.get();
@@ -2941,6 +2961,19 @@ pub fn ServerDataTable(
 
             {column_tools_state.map(|state| view! {
                 <div class="mb-3 flex flex-wrap items-center justify-end gap-2" data-server-column-tools="true">
+                    // ldui-bw2p: ONE row, like EntityTable's quick-action
+                    // row -- the saved-filters bar LEFT (`mr-auto` pushes
+                    // everything after it right), the caller's actions and
+                    // the chooser RIGHT. A separate row above put Save Filter
+                    // ~40px higher than the tools (4iiz-Office production).
+                    {saved_filters_leading.map(|(model, bar_id)| view! {
+                        <div
+                            class="mr-auto flex min-w-0 flex-wrap items-center gap-2"
+                            data-server-saved-filters="true"
+                        >
+                            {saved_filters_bar(model, bar_id)}
+                        </div>
+                    })}
                     {column_tools_actions.map(|render_actions| view! {
                         <div class="contents" data-server-toolbar-actions="true">
                             {render_actions()}
