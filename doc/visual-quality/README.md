@@ -76,6 +76,7 @@ Keyboard focus: [Sortable header ink disappears on focus](sort-header-focus-cont
 | [`native-select-label-arrow-overlap.md`](./native-select-label-arrow-overlap.md) | automated (browser geometry assertion) | layout / legibility | A native select's label paints beneath its browser-owned arrow because fixed width leaves too little content space |
 | [`kpi-chip-squeezes-label.md`](./kpi-chip-squeezes-label.md) | automated (browser geometry assertion) | layout / legibility | A bounded KPI status chip stays intact by crushing its short sibling label into a clipped column |
 | [`low-contrast-kpi-status-chip.md`](./low-contrast-kpi-status-chip.md) | automated (fresh-build GREEN pending) | color / legibility | A soft semantic KPI chip keeps its tint but paints small status words at only 1.69:1 contrast |
+| [`disabled-without-reason.md`](./disabled-without-reason.md) | automated | component-drift | A greyed-out action that never says why; state-disabled controls (pager boundary, loading, the selected option) are exempt |
 
 See `../ci-cd.md` for how `cargo xtask test-style` / `test-layout` / `verify`
 run these suites, and `../../audit/src/lib.rs` for the `ldui-audit` crate

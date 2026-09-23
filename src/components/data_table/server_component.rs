@@ -3399,7 +3399,7 @@ fn ServerCursorPaginationControls(
         <div
             class="max-w-full flex flex-wrap items-center justify-end gap-1"
         >
-            <div class="join max-w-full flex flex-wrap items-center justify-end gap-1">
+            <div class="join max-w-full flex flex-wrap items-center justify-end gap-1" data-pagination="true">
                 <button
                     type="button"
                     class=merge_classes!(classes.pagination_button, "join-item")
@@ -3456,7 +3456,7 @@ fn ServerPaginationControls(
 
     view! {
         <div class="max-w-full flex flex-wrap items-center justify-end gap-1">
-            <div class="join max-w-full flex flex-wrap items-center justify-end gap-1">
+            <div class="join max-w-full flex flex-wrap items-center justify-end gap-1" data-pagination="true">
                 // Previous button
                 <button
                     class=merge_classes!(classes.pagination_button, "join-item")

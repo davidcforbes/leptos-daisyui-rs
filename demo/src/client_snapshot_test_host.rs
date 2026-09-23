@@ -27,11 +27,11 @@ use leptos_daisyui_rs::test_mode;
 use leptos_daisyui_rs::tokens::{UiAnimationsPreamble, UiTokensPreamble};
 use snapshot_table_page::{
     EntityTableDraftRowFixture, EntityTableEmphasisFixture, EntityTableExternalFocusFixture,
-    EntityTableGroupPagingFixture, EntityTableGroupingFixture, EntityTableMultiSelectionFixture,
-    EntityTablePageSizeIdentityFixture, EntityTablePresentationFixture,
-    EntityTableSavedFiltersFixture, EntityTableSelectionFixture, EntityTableViewportFitFixture,
-    SnapshotTablePageControlsFixture, SnapshotTablePageFilterActionsFixture,
-    SnapshotTablePageFixture,
+    EntityTableFilterRowFixture, EntityTableGroupPagingFixture, EntityTableGroupingFixture,
+    EntityTableMultiSelectionFixture, EntityTablePageSizeIdentityFixture,
+    EntityTablePresentationFixture, EntityTableSavedFiltersFixture, EntityTableSelectionFixture,
+    EntityTableViewportFitFixture, SnapshotTablePageControlsFixture,
+    SnapshotTablePageFilterActionsFixture, SnapshotTablePageFixture,
 };
 
 fn main() {
@@ -95,6 +95,9 @@ fn main() {
         let external_focus_fixture = web_sys::window()
             .and_then(|window| window.location().pathname().ok())
             .is_some_and(|path| path.ends_with("/entity-table-external-focus"));
+        let filter_row_fixture = web_sys::window()
+            .and_then(|window| window.location().pathname().ok())
+            .is_some_and(|path| path.ends_with("/entity-table-filter-row"));
         // The BASE `/ai-chat-fixture` suffix is matched LAST of the ai-chat
         // family, so every `/ai-chat-fixture-<fault>` document below is
         // tested BEFORE it — `ends_with` would otherwise swallow them all,
@@ -287,6 +290,8 @@ fn main() {
                     view! { <ai_chat_fixture::AiChatFixture /> }.into_any()
                 } else if helpdesk_fixture {
                     view! { <helpdesk_fixture::HelpdeskFixture /> }.into_any()
+                } else if filter_row_fixture {
+                    view! { <EntityTableFilterRowFixture /> }.into_any()
                 } else if external_focus_fixture {
                     view! { <EntityTableExternalFocusFixture /> }.into_any()
                 } else if group_paging_fixture {

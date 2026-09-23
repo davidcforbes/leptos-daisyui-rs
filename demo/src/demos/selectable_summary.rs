@@ -72,7 +72,11 @@ fn status_matrix() -> Vec<SelectableSummaryItem> {
         SelectableSummaryItem::new("error", "Error", 48).status(SelectableSummaryStatus::Error),
         SelectableSummaryItem::unmeasured("unavailable", "Unavailable")
             .description("No measurement at all"),
-        SelectableSummaryItem::new("disabled", "Disabled", 3).disabled(true),
+        // A disabled option says why (ldui-p82h); the description is what
+        // the card's aria-describedby resolves to.
+        SelectableSummaryItem::new("disabled", "Disabled", 3)
+            .disabled(true)
+            .description("Read-only in this environment"),
     ]
 }
 

@@ -56,7 +56,10 @@ pub fn ButtonDemo() -> impl IntoView {
                 <Button color=ButtonColor::Primary active=true>
                     "Active"
                 </Button>
-                <Button color=ButtonColor::Primary disabled=true>
+                <Button
+                    color=ButtonColor::Primary
+                    disabled_reason="Shown disabled for the state showcase"
+                >
                     "Disabled"
                 </Button>
                 <Button color=ButtonColor::Primary class="loading">
@@ -206,6 +209,7 @@ pub fn ButtonDemo() -> impl IntoView {
                             attr:id="button-type-submit-disabled"
                             button_type=ButtonType::Submit
                             disabled=true
+                            disabled_reason="Shown disabled for the type showcase"
                         >
                             "type=submit, disabled"
                         </Button>

@@ -65,7 +65,11 @@ fn dashboard_kpis() -> Vec<KpiItem> {
         KpiItem::new("payments-collected", "Payments collected", "$92,400")
             .status(KpiStatus::Success)
             .baseline(KpiBaseline::against(92400.0, 81000.0).label("12-week avg / $81,000"))
-            .action(KpiAction::new("View details").disabled(true)),
+            .action(
+                KpiAction::new("View details")
+                    .disabled(true)
+                    .disabled_reason("Details are not available for this period"),
+            ),
         // Unavailable value, still aligned with its neighbours.
         KpiItem::new("last-sync", "Last sync", "").unavailable(),
     ]

@@ -883,7 +883,8 @@ mod tests {
         );
         assert_eq!(
             table.column_chooser_trigger.get_untracked(),
-            EntityColumnChooserTrigger::Text
+            EntityColumnChooserTrigger::Icon,
+            "ldui-q85o: the gear is the default chooser trigger"
         );
     }
 

@@ -182,6 +182,7 @@ fn AppInner() -> impl IntoView {
                     <Route path=path!("/rating") view=RatingDemo />
                     <Route path=path!("/record_header") view=RecordHeaderDemo />
                     <Route path=path!("/result-list") view=ResultListDemo />
+                    <Route path=path!("/row-action-presets") view=RowActionPresetsDemo />
                     <Route path=path!("/search_picker_dialog") view=SearchPickerDialogDemo />
                     <Route path=path!("/section_heading") view=SectionHeadingDemo />
                     <Route path=path!("/select") view=SelectDemo />

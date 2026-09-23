@@ -65,6 +65,8 @@ cargo xtask test-helpdesk              # Helpdesk composite: board, drawer, New 
 cargo xtask test-ai-chat               # AiChatWorkspace showcase over the seeded fixture (ldui-iilm)
 cargo xtask test-ai-chat-knowledge     # knowledge rail: corpora, ingest, grounding, recall, guardrails (ldui-iilm.7)
 cargo xtask test-admin-workbench       # KpiStrip ladders + the measured help-bubble side (ldui-k3ip, ldui-rzvv)
+cargo xtask test-focus-ring            # .ld-focus-ring colour present from frame 0; only the offset animates (ldui-reod)
+cargo xtask test-row-action-presets    # row-action + Export presets: glyphs, names, tooltips, disabled_reason (ldui-bmqj, ldui-e6x8, ldui-p82h)
 cargo xtask gen-tokens [--check]     # regenerate styles/tokens.css from ui-tokens
 cargo xtask check-sibling-tokens     # preamble.rs's ui_tokens refs must exist on the sibling's DEFAULT branch
 cargo xtask test-person-picker       # PersonPicker listbox contract, wrapping, Unknown-vs-Offline, contrast
@@ -158,7 +160,20 @@ centers them; a clipping negative control that expanded a heading by a fixed
 assert the expansion actually happened. The `EntityTable` footer itself is an
 owner ruling, not a per-page option: rows-per-page left, pager centered (an
 `auto` grid track between two `minmax(0,1fr)` flanks), row range right, with
-the pager on its own centered row below `@2xl`.
+the pager on its own centered row below `@2xl`. So is the quick-action row
+(ldui-q85o): LEFT Save Filter (always enabled; an empty click is a no-op) then
+up to five saved-filter badges with their `x` and no "Filters:" caption;
+RIGHT `+ New`, the consumer's actions (Export = the download icon), the gear.
+
+**A disabled action says why (ldui-p82h).** `Button::disabled_reason` (a
+`Signal<String>`; blank = enabled) is the one mechanism: it disables, wires
+`aria-describedby` to a hidden hint, and sets `title`. The audit's
+`disabled-without-reason` rule fails any disabled control without a resolving
+description; only STATE-disabled controls are exempt (a pager's current page
+and boundary arrows under `[data-pagination]`, `.loading`/`aria-busy`, the
+selected option of a single-select group) -- see
+`doc/visual-quality/disabled-without-reason.md`. Never fix a finding by
+raising a ceiling.
 
 **`@container` collapses a content-sized parent.** `container-type: inline-size`
 makes an element's inline size independent of its contents, so a parent that

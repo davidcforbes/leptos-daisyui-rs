@@ -403,6 +403,9 @@ pub fn ClientSnapshotListDemo() -> impl IntoView {
                 sort_clause: "prioridad {priority}: {column} {direction}".to_owned(),
                 reset_sort: "Restablecer orden".to_owned(),
                 reset_columns: "Restablecer columnas".to_owned(),
+                reset_sort_reason: "Ya está en el orden del sistema".to_owned(),
+                reset_columns_reason: "Las columnas ya están en sus valores predeterminados"
+                    .to_owned(),
                 previous: "Anterior".to_owned(),
                 next: "Siguiente".to_owned(),
                 row_range: "Mostrando {start}-{end} de {total}".to_owned(),

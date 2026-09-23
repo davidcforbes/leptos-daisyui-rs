@@ -1488,11 +1488,12 @@ fn primary_secondary_reflects_a_columns_signal_replacement() {
     });
 }
 
+/// ldui-q85o: the quick-action row's right cluster ends in the gear.
 #[test]
-fn column_chooser_trigger_defaults_to_localized_text() {
+fn column_chooser_trigger_defaults_to_the_gear_icon() {
     assert_eq!(
         EntityColumnChooserTrigger::default(),
-        EntityColumnChooserTrigger::Text
+        EntityColumnChooserTrigger::Icon
     );
 }
 
@@ -1634,7 +1635,10 @@ fn every_controlled_filter_renders_its_description_as_title_and_aria_description
     let renderers = source
         .matches("let renderer = Rc::new(move |placement, description")
         .count();
-    assert_eq!(renderers, 3, "text, select and date renderers");
+    assert_eq!(
+        renderers, 4,
+        "text, debounced text (ldui-ga96), select and date renderers"
+    );
     let title = ["attr:", "title=description"].concat();
     let aria = ["attr:", "aria-description=description"].concat();
     assert_eq!(source.matches(&title).count(), renderers);

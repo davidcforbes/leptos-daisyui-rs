@@ -7985,10 +7985,22 @@ async fn entity_table_saved_filter_badges_are_named_by_their_visible_caption() {
                     badgeCount: bar.querySelectorAll('[data-entity-saved-filter]').length,
                     leadingSlots: table.querySelectorAll('[data-entity-toolbar-leading]').length,
                     saveDisabled: bar.querySelector('[data-entity-saved-filters-open]').disabled,
-                    // The saved-filter row is page furniture and must NOT sit
-                    // in the right-justified table-action cluster.
+                    groupAriaLabel: group ? group.getAttribute('aria-label') : null,
+                    // ldui-q85o: the bar is the LEFT cluster of the one
+                    // quick-action row; the table actions are its RIGHT cluster.
                     insideToolbar: bar.closest('[data-entity-table-toolbar]') !== null,
-                    ownRow: bar.closest('[data-entity-saved-filters-row]') !== null,
+                    inLeadingCluster: bar.closest('[data-entity-quick-actions-leading]') !== null,
+                    saveIsFirstControl: (() => {
+                        const row = bar.closest('[data-entity-table-toolbar]');
+                        const first = row ? row.querySelector('button, a, input, select') : null;
+                        return first !== null && first.hasAttribute('data-entity-saved-filters-open');
+                    })(),
+                    trailingAfterLeading: (() => {
+                        const lead = bar.closest('[data-entity-quick-actions-leading]');
+                        const trail = lead ? lead.parentElement.querySelector('[data-entity-quick-actions-trailing]') : null;
+                        if (!lead || !trail) return null;
+                        return trail.getBoundingClientRect().left >= lead.getBoundingClientRect().right - 0.5;
+                    })(),
                 };
             })()"#,
         )
@@ -8014,21 +8026,55 @@ async fn entity_table_saved_filter_badges_are_named_by_their_visible_caption() {
         json!(0),
         "a table passing no toolbar_leading must emit no wrapper for it: {initial}"
     );
+    // ldui-q85o (owner ruling, 2026-09-22): ONE quick-action row. Save Filter
+    // and the badges are its left cluster; + New / Export / Choose columns are
+    // its right cluster.
     assert_eq!(
         initial["insideToolbar"],
-        json!(false),
-        "the saved-filter row is the user's own named views, not a table          utility, and must not share the quick-action cluster with Export /          + New / the column chooser: {initial}"
+        json!(true),
+        "the saved-filters bar shares the one quick-action row: {initial}"
     );
     assert_eq!(
-        initial["ownRow"],
+        initial["inLeadingCluster"],
         json!(true),
-        "it lives on its own left-justified row: {initial}"
+        "it is the row's left cluster: {initial}"
     );
+    assert_eq!(
+        initial["saveIsFirstControl"],
+        json!(true),
+        "Save Filter is the row's first control: {initial}"
+    );
+    assert_eq!(
+        initial["trailingAfterLeading"],
+        json!(true),
+        "the table actions sit to the right of the saved-filters cluster: {initial}"
+    );
+    // ldui-q85o (owner ruling, 2026-09-22): Save Filter is ALWAYS enabled; a
+    // click with nothing to save is a no-op rather than a disabled control
+    // that would need a reason (ldui-p82h).
     assert_eq!(
         initial["saveDisabled"],
-        json!(true),
-        "with no filter set there is nothing to save, so Save Filter is disabled \
-         rather than opening a dialog that stores nothing: {initial}"
+        json!(false),
+        "Save Filter stays enabled with no filter set: {initial}"
+    );
+    click(&harness, "[data-entity-saved-filters-open]").await;
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    let noop = eval_json(
+        &harness,
+        r#"(() => {
+            const form = document.querySelector('[data-entity-saved-filters-form]');
+            const dialog = form ? form.closest('dialog') : null;
+            return {
+                dialogFound: dialog !== null,
+                dialogOpen: dialog ? dialog.open : null,
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(
+        noop,
+        json!({ "dialogFound": true, "dialogOpen": false }),
+        "a click with nothing to save must not open the dialog: {noop}"
     );
 
     // Contrast AT REST: the empty-state hint is what renders now.
@@ -8063,7 +8109,7 @@ async fn entity_table_saved_filter_badges_are_named_by_their_visible_caption() {
     name_input.focus().await.expect("focus name input");
     name_input.type_str("Named set").await.expect("type name");
     click(&harness, "[data-entity-saved-filters-save]").await;
-    wait_for_selector(&harness, "[data-entity-saved-filters-caption]").await;
+    wait_for_selector(&harness, "[data-entity-saved-filters-badges]").await;
 
     let saved = snapshot(&harness).await;
     assert_eq!(saved["badgeCount"], json!(1), "one badge saved: {saved}");
@@ -8094,27 +8140,18 @@ async fn entity_table_saved_filter_badges_are_named_by_their_visible_caption() {
          exempt ancestor, or ldui-audit counts it as button-without-btn drift on \
          every consumer page (ldui-u2mx): {bare}"
     );
+    // ldui-q85o: no visible caption -- beside Save Filter the badges are
+    // self-explanatory -- but the group keeps an accessible name.
     assert_eq!(
         saved["hasCaption"],
-        json!(true),
-        "the caption appears with the first badge: {saved}"
+        json!(false),
+        "no visible Filters caption in the quick-action row: {saved}"
     );
     assert_eq!(saved["groupRole"], json!("group"), "grouped: {saved}");
     assert_eq!(
-        saved["referenceResolves"],
-        json!(true),
-        "aria-labelledby must point at an id that EXISTS, or the group has no \
-         accessible name and nothing on screen looks wrong: {saved}"
-    );
-    assert_eq!(
-        saved["resolvedName"], saved["captionText"],
-        "the accessible name must BE the visible caption's text, so the two \
-         cannot drift apart: {saved}"
-    );
-    assert_eq!(
-        saved["captionText"],
-        json!("Filters:"),
-        "the default caption is the page-level label for the row: {saved}"
+        saved["groupAriaLabel"],
+        json!("Saved filters"),
+        "the badge group is named by aria-label with no caption to point at: {saved}"
     );
     assert_ne!(
         saved["groupDisplay"],
@@ -8122,14 +8159,28 @@ async fn entity_table_saved_filter_badges_are_named_by_their_visible_caption() {
         "a role container with display:contents risks being dropped from the \
          accessibility tree: {saved}"
     );
+    let badge_remove = eval_json(
+        &harness,
+        r#"(() => {
+            const badge = document.querySelector('[data-entity-saved-filter="Named set"]');
+            const x = badge ? badge.querySelector('[data-entity-saved-filter-remove]') : null;
+            return { hasX: x !== null, xLabel: x ? x.getAttribute('aria-label') : null };
+        })()"#,
+    )
+    .await;
+    assert_eq!(
+        badge_remove,
+        json!({ "hasX": true, "xLabel": "Remove filter Named set" }),
+        "each badge carries its own x: {badge_remove}"
+    );
 
-    // Contrast AFTER SAVING: the caption only exists now, so this is the only
-    // point it can be measured (4iiz-etl's axe found it at 3.37:1).
+    // Contrast AFTER SAVING: the badge row only exists now (4iiz-etl's axe
+    // found the old caption at 3.37:1).
     let saved_contrast = bar_contrast(&harness).await;
     assert_eq!(
         saved_contrast,
         json!([]),
-        "axe color-contrast must pass on the saved-filters caption: {saved_contrast}"
+        "axe color-contrast must pass on the saved-filters badges: {saved_contrast}"
     );
 
     assert_no_browser_errors(&harness, "saved-filter badge caption").await;
@@ -8374,4 +8425,322 @@ async fn column_labels_stay_pinned_when_the_region_scrolls() {
     );
     assert_eq!(pinned["position"], json!("sticky"), "{pinned}");
     assert_no_browser_errors(&harness, "sticky entity table header").await;
+}
+
+/// The three texts of every framework-built filter cell on the filter-row
+/// fixture, read from the rendered controls by their stable hooks: the
+/// `<label>`'s sr-only name, the text input's placeholder, and the select's
+/// first ("All") option. Plus the identity facts a locale swap must not move.
+async fn filter_row_copy(harness: &pixelproof_web::Harness) -> Value {
+    eval_json(
+        harness,
+        r#"(() => {
+            const root = document.querySelector('#entity-table-filter-row-fixture');
+            const client = root.querySelector('[data-entity-filter-control="client"]');
+            const status = root.querySelector('[data-entity-filter-control="status"]');
+            return {
+                clientId: client.id,
+                clientKind: client.dataset.entityFilterKind,
+                clientApply: client.dataset.entityFilterApply,
+                clientLabel: client.closest('label').querySelector('span.sr-only').textContent.trim(),
+                clientPlaceholder: client.getAttribute('placeholder'),
+                clientValue: client.value,
+                statusId: status.id,
+                statusKind: status.dataset.entityFilterKind,
+                statusLabel: status.closest('label').querySelector('span.sr-only').textContent.trim(),
+                statusAll: status.querySelector('option').textContent.trim(),
+                statusValue: status.value,
+                headers: Array.from(root.querySelectorAll('thead tr:first-child th[data-entity-column]'))
+                    .map(th => [th.dataset.entityColumn, th.textContent.trim()]),
+                rows: root.querySelectorAll('tbody tr[data-entity-row-key]').length,
+                rendered: root.querySelector('[data-testid="entity-filter-row-rendered-rows"]').textContent.trim(),
+            };
+        })()"#,
+    )
+    .await
+}
+
+/// ldui-xgj8: the framework-built filter cells must read the LIVE column
+/// header. Office swaps its shell to Spanish by rebuilding its columns
+/// signal and its `EntityAutoFilterTexts`; before this the `{column}` half
+/// stayed English ("Filtrar Work type") because `EntityAutoFilters` froze
+/// the header at construction. Identity (control ids, a value typed before
+/// the swap) must survive the swap unchanged.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
+async fn entity_auto_filters_read_the_column_header_live_after_a_locale_swap() {
+    let harness = harness_at("/components/entity-table-filter-row").await;
+    begin_browser_error_capture(&harness).await;
+    wait_for_selector(
+        &harness,
+        "#entity-table-filter-row-fixture [data-entity-filter-control='status']",
+    )
+    .await;
+
+    let english = filter_row_copy(&harness).await;
+    assert_eq!(
+        english["clientId"],
+        json!("filter-row-fixture-client-filter"),
+        "{english}"
+    );
+    assert_eq!(
+        english["statusId"],
+        json!("filter-row-fixture-status-filter"),
+        "{english}"
+    );
+    assert_eq!(english["clientKind"], json!("text"), "{english}");
+    assert_eq!(english["statusKind"], json!("select"), "{english}");
+    assert_eq!(english["clientLabel"], json!("Filter Client"), "{english}");
+    assert_eq!(
+        english["clientPlaceholder"],
+        json!("Filter Client…"),
+        "{english}"
+    );
+    assert_eq!(english["statusLabel"], json!("Filter Status"), "{english}");
+    assert_eq!(english["statusAll"], json!("All (Status)"), "{english}");
+    assert_eq!(english["rows"], json!(3), "{english}");
+
+    // A value chosen BEFORE the swap: the select proposes, the auto path
+    // accepts, one row survives.
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => {
+                const status = document.querySelector('#entity-table-filter-row-fixture [data-entity-filter-control="status"]');
+                status.value = 'Urgent';
+                status.dispatchEvent(new Event('change', { bubbles: true }));
+                return status.value;
+            })()"#,
+        )
+        .await,
+        json!("Urgent")
+    );
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    let narrowed = filter_row_copy(&harness).await;
+    assert_eq!(narrowed["statusValue"], json!("Urgent"), "{narrowed}");
+    assert_eq!(narrowed["rows"], json!(1), "{narrowed}");
+
+    // The consumer's language toggle rebuilds the columns signal (Spanish
+    // headers, same ids) AND swaps the texts, exactly as Office does.
+    click(
+        &harness,
+        "#entity-table-filter-row-fixture [data-testid='entity-filter-row-toggle-language']",
+    )
+    .await;
+    let spanish = filter_row_copy(&harness).await;
+    let headers = spanish["headers"].as_array().expect("header cells").clone();
+    assert_eq!(headers.len(), 2, "{spanish}");
+    for (id, expected) in [("client", "Nombre"), ("status", "Estado")] {
+        let text = headers
+            .iter()
+            .find(|cell| cell[0] == id)
+            .and_then(|cell| cell[1].as_str())
+            .unwrap_or_default();
+        assert!(
+            text.contains(expected),
+            "the table itself rendered the swapped {id} header ({expected}): {spanish}"
+        );
+    }
+    assert_eq!(
+        spanish["clientLabel"],
+        json!("Filtrar Nombre"),
+        "the accessible name must carry the LIVE header, not the one at build: {spanish}"
+    );
+    assert_eq!(
+        spanish["clientPlaceholder"],
+        json!("Filtrar Nombre…"),
+        "{spanish}"
+    );
+    assert_eq!(spanish["statusLabel"], json!("Filtrar Estado"), "{spanish}");
+    assert_eq!(
+        spanish["statusAll"],
+        json!("Todos (Estado)"),
+        "the reset option substitutes the live header too: {spanish}"
+    );
+    // Identity did not move with the copy.
+    assert_eq!(spanish["clientId"], english["clientId"], "{spanish}");
+    assert_eq!(spanish["statusId"], english["statusId"], "{spanish}");
+    assert_eq!(
+        spanish["statusValue"],
+        json!("Urgent"),
+        "the value typed before the swap is still the control's value: {spanish}"
+    );
+    assert_eq!(
+        spanish["rows"],
+        json!(1),
+        "and still filters the rows -- the value signal was kept, not rebuilt: {spanish}"
+    );
+
+    // And back: the copy follows the signal in both directions.
+    click(
+        &harness,
+        "#entity-table-filter-row-fixture [data-testid='entity-filter-row-toggle-language']",
+    )
+    .await;
+    let back = filter_row_copy(&harness).await;
+    assert_eq!(back["clientLabel"], json!("Filter Client"), "{back}");
+    assert_eq!(back["statusAll"], json!("All (Status)"), "{back}");
+    assert_eq!(back["rows"], json!(1), "{back}");
+
+    assert_no_browser_errors(&harness, "EntityAutoFilters live column header").await;
+}
+
+/// The debounced cell's observable state on the filter-row fixture.
+async fn debounced_cell_state(harness: &pixelproof_web::Harness) -> Value {
+    eval_json(
+        harness,
+        r#"(() => {
+            const root = document.querySelector('#entity-table-filter-row-fixture');
+            const client = root.querySelector('[data-entity-filter-control="client"]');
+            return {
+                kind: client.dataset.entityFilterKind,
+                apply: client.dataset.entityFilterApply,
+                debounceMs: client.dataset.entityFilterDebounceMs,
+                pending: client.dataset.entityFilterPending ?? null,
+                ariaBusy: client.getAttribute('aria-busy'),
+                value: client.value,
+                commits: root.querySelector('[data-testid="entity-filter-row-commit-count"]').textContent.trim(),
+                committed: root.querySelector('[data-testid="entity-filter-row-committed"]').textContent.trim(),
+                rows: root.querySelectorAll('tbody tr[data-entity-row-key]').length,
+                // The column headers' sort controls are buttons and belong
+                // there; the ruling forbids buttons in the FILTER row.
+                theadButtons: root.querySelectorAll(
+                    'thead tr:has([data-entity-filter-placement="header"]) button'
+                ).length,
+            };
+        })()"#,
+    )
+    .await
+}
+
+/// Types `values` into the debounced client cell as consecutive input
+/// events, the way a keystroke burst reaches the component.
+async fn type_into_debounced_cell(harness: &pixelproof_web::Harness, values: &[&str]) {
+    let expression = format!(
+        r#"(() => {{
+            const client = document.querySelector('#entity-table-filter-row-fixture [data-entity-filter-control="client"]');
+            for (const value of {values}) {{
+                client.value = value;
+                client.dispatchEvent(new Event('input', {{ bubbles: true }}));
+            }}
+            return client.value;
+        }})()"#,
+        values = json!(values)
+    );
+    let last = values.last().copied().unwrap_or_default();
+    assert_eq!(eval_json(harness, &expression).await, json!(last));
+}
+
+/// ldui-ga96: a `filterable_text_debounced(500)` column applies ONCE after
+/// the quiet window (three keystrokes inside it are one proposal), reports
+/// itself pending meanwhile, applies IMMEDIATELY on Enter (cancelling the
+/// pending timer), and never grows an Apply button in the `thead` -- the
+/// owner ruling that sent Office's Clients search back here.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-client-snapshot)"]
+async fn debounced_text_filter_applies_after_quiet_or_enter_and_never_renders_apply() {
+    let harness = harness_at("/components/entity-table-filter-row").await;
+    begin_browser_error_capture(&harness).await;
+    wait_for_selector(
+        &harness,
+        "#entity-table-filter-row-fixture [data-entity-filter-control='client']",
+    )
+    .await;
+
+    let rest = debounced_cell_state(&harness).await;
+    assert_eq!(rest["kind"], json!("text"), "it IS a text filter: {rest}");
+    assert_eq!(rest["apply"], json!("debounced"), "{rest}");
+    assert_eq!(rest["debounceMs"], json!("500"), "{rest}");
+    assert_eq!(
+        rest["pending"],
+        Value::Null,
+        "nothing pending at rest: {rest}"
+    );
+    assert_eq!(rest["ariaBusy"], Value::Null, "{rest}");
+    assert_eq!(rest["commits"], json!("0"), "{rest}");
+    assert_eq!(rest["rows"], json!(3), "{rest}");
+    assert_eq!(
+        rest["theadButtons"],
+        json!(0),
+        "the filter row holds only cells that apply as typed -- no Apply button: {rest}"
+    );
+
+    // Three keystrokes inside one quiet window.
+    type_into_debounced_cell(&harness, &["C", "Cl", "Client 1"]).await;
+    let typing = debounced_cell_state(&harness).await;
+    assert_eq!(
+        typing["value"],
+        json!("Client 1"),
+        "the cell shows what is being typed, not the accepted value: {typing}"
+    );
+    assert_eq!(
+        typing["pending"],
+        json!("true"),
+        "the pending hook is up between keystrokes: {typing}"
+    );
+    assert_eq!(typing["ariaBusy"], json!("true"), "{typing}");
+    assert_eq!(
+        typing["commits"],
+        json!("0"),
+        "nothing applied per keystroke: {typing}"
+    );
+    assert_eq!(typing["rows"], json!(3), "{typing}");
+
+    tokio::time::sleep(Duration::from_millis(1_200)).await;
+    let applied = debounced_cell_state(&harness).await;
+    assert_eq!(
+        applied["commits"],
+        json!("1"),
+        "three keystrokes in one window are ONE proposal: {applied}"
+    );
+    assert_eq!(applied["committed"], json!("Client 1"), "{applied}");
+    assert_eq!(applied["pending"], Value::Null, "{applied}");
+    assert_eq!(applied["ariaBusy"], Value::Null, "{applied}");
+    assert_eq!(applied["value"], json!("Client 1"), "{applied}");
+    assert_eq!(
+        applied["rows"],
+        json!(1),
+        "the local predicate runs on the committed value: {applied}"
+    );
+
+    // A new keystroke, then Enter before the window elapses: Enter commits
+    // NOW and the timer it cancelled never fires a second proposal.
+    type_into_debounced_cell(&harness, &["Client"]).await;
+    let pending_again = debounced_cell_state(&harness).await;
+    assert_eq!(pending_again["pending"], json!("true"), "{pending_again}");
+    assert_eq!(pending_again["commits"], json!("1"), "{pending_again}");
+    assert_eq!(
+        eval_json(
+            &harness,
+            r#"(() => {
+                const client = document.querySelector('#entity-table-filter-row-fixture [data-entity-filter-control="client"]');
+                client.focus();
+                return client.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+            })()"#,
+        )
+        .await,
+        json!(false),
+        "Enter is consumed by the cell (default prevented)"
+    );
+    let entered = debounced_cell_state(&harness).await;
+    assert_eq!(
+        entered["commits"],
+        json!("2"),
+        "Enter applies immediately, well inside the 500 ms window: {entered}"
+    );
+    assert_eq!(entered["committed"], json!("Client"), "{entered}");
+    assert_eq!(entered["pending"], Value::Null, "{entered}");
+    assert_eq!(entered["ariaBusy"], Value::Null, "{entered}");
+    assert_eq!(entered["rows"], json!(3), "{entered}");
+
+    tokio::time::sleep(Duration::from_millis(1_200)).await;
+    let settled = debounced_cell_state(&harness).await;
+    assert_eq!(
+        settled["commits"],
+        json!("2"),
+        "the cancelled timer must not fire a duplicate proposal: {settled}"
+    );
+    assert_eq!(settled["theadButtons"], json!(0), "{settled}");
+
+    assert_no_browser_errors(&harness, "EntityTable debounced text filter").await;
 }

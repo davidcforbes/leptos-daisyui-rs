@@ -19,12 +19,80 @@ fn emit(
     }
 }
 
+/// The reactive accessible name, as a closure so it serves both an
+/// `attr:aria-label` spread and (through `Signal::derive`) a `label` prop.
+fn control_name(
+    state: Signal<ClientCallWorkspaceState>,
+    texts: Signal<ClientCallWorkspaceTexts>,
+    control: ClientCallControl,
+) -> impl Fn() -> String + Clone + Send + Sync + 'static {
+    move || state.with(|s| texts.with(|t| t.control_name(&control, s)))
+}
+
+fn control_disabled(
+    state: Signal<ClientCallWorkspaceState>,
+    control: ClientCallControl,
+) -> Signal<bool> {
+    Signal::derive(move || !state.with(|s| s.control_enabled(&control)))
+}
+
+/// The full disabled reason, for a Field-wrapped control whose help line
+/// carries it (the Field owns that control's `aria-describedby`).
+fn control_reason(
+    state: Signal<ClientCallWorkspaceState>,
+    texts: Signal<ClientCallWorkspaceTexts>,
+    control: ClientCallControl,
+) -> Signal<Option<String>> {
+    Signal::derive(move || state.with(|s| texts.with(|t| t.disabled_reason(&control, s))))
+}
+
+/// The reason a button's own line shows. While no context exists the shared
+/// context line already says why, so the button line stays empty rather than
+/// repeating it nine times; the button's `aria-describedby` names both lines.
+fn local_reason(
+    state: Signal<ClientCallWorkspaceState>,
+    texts: Signal<ClientCallWorkspaceTexts>,
+    control: ClientCallControl,
+) -> Signal<Option<String>> {
+    Signal::derive(move || {
+        state.with(|s| {
+            if s.context_missing() {
+                None
+            } else {
+                texts.with(|t| t.disabled_reason(&control, s))
+            }
+        })
+    })
+}
+
+fn context_reason_id(base_id: &str) -> String {
+    format!("{base_id}-reason-context")
+}
+
+fn reason_id(base_id: &str, key: &str) -> String {
+    format!("{base_id}-reason-{key}")
+}
+
+/// `aria-describedby` for a button: the shared context line plus its own line.
+fn described_by(base_id: &str, key: &str) -> String {
+    format!("{} {}", context_reason_id(base_id), reason_id(base_id, key))
+}
+
+/// A visible disabled-reason line; hidden (and empty) while there is no reason.
+fn reason_line(id: String, key: &'static str, text: Signal<Option<String>>) -> impl IntoView {
+    view! {
+        <p id=id class="text-sm text-base-content/75 [overflow-wrap:anywhere]" data-call-disabled-reason=key
+            class:hidden=move || text.with(Option::is_none)>{move || text.get()}</p>
+    }
+}
+
 #[component]
 fn Destination(
     state: Signal<ClientCallWorkspaceState>,
     texts: Signal<ClientCallWorkspaceTexts>,
     on_command: Callback<ClientCallCommand>,
     keypad_id: String,
+    base_id: String,
 ) -> impl IntoView {
     let input_ref = NodeRef::<leptos::html::Input>::new();
     let target_ref = NodeRef::<leptos::html::Select>::new();
@@ -38,6 +106,18 @@ fn Destination(
     let keypad = RwSignal::new(false);
     let controls = keypad_id.clone();
     let phones = Memo::new(move |_| state.get().call.client.phones);
+    // Reason-line ids, minted once from the workspace id (Office op-stjm9).
+    let saved_base = base_id.clone();
+    let destination_described = described_by(&base_id, "destination");
+    let destination_reason = reason_id(&base_id, "destination");
+    let pad_described = described_by(&base_id, "pad");
+    let pad_reason = reason_id(&base_id, "pad");
+    let backspace_described = described_by(&base_id, "backspace");
+    let backspace_reason = reason_id(&base_id, "backspace");
+    let save_number_described = described_by(&base_id, "save-number");
+    let save_number_reason = reason_id(&base_id, "save-number");
+    let dial_described = described_by(&base_id, "dial");
+    let dial_reason = reason_id(&base_id, "dial");
     Effect::new(move |previous: Option<String>| {
         // Both dependencies must be read even when the context changes.
         let context = state.with(|s| s.call.context_id.clone());
@@ -50,14 +130,18 @@ fn Destination(
     view! {
         <div class="flex min-w-0 flex-col gap-4" data-call-destination="true">
             <Field label=Signal::derive(move || Some(texts.get().destination))
-                help_text=Signal::derive(move || Some(texts.get().destination_hint))
+                help_text={
+                    let reason = control_reason(state, texts, ClientCallControl::Destination);
+                    Signal::derive(move || reason.get().or_else(|| Some(texts.get().destination_hint)))
+                }
                 error=Signal::derive(move || state.get().number_error)
                 state=Signal::derive(move || if state.get().number_error.is_some() { FieldState::Error } else { FieldState::Default })
                 label_class="whitespace-normal">
                 <Input input_type=InputType::Tel node_ref=input_ref class="w-full min-w-0 font-mono"
                     attr:data-call-field="destination" attr:inputmode="tel" attr:autocomplete="off" maxlength=Some(64)
+                    attr:aria-label=control_name(state, texts, ClientCallControl::Destination)
                     value=Signal::derive(move || state.get().destination)
-                    disabled=Signal::derive(move || !state.with(ClientCallWorkspaceState::can_edit_destination))
+                    disabled=control_disabled(state, ClientCallControl::Destination)
                     on_input=Callback::new(move |value| {
                         emit(state, on_command, ClientCallAction::EditDestination(value));
                         if let Some(input) = input_ref.get_untracked() { input.set_value(&state.get_untracked().destination); }
@@ -69,32 +153,48 @@ fn Destination(
                     <p class="text-sm text-base-content/75">{move || texts.get().no_numbers}</p>
                 </Show>
                 <div class="flex flex-col gap-2">
-                    {move || phones.get().into_iter().map(|phone| {
+                    {move || phones.get().into_iter().enumerate().map(|(index, phone)| {
                         let action = ClientCallAction::ChooseSavedNumber(phone.id.clone());
-                        let for_disabled = action.clone();
+                        let control = ClientCallControl::SavedNumber(phone.id.clone());
+                        // Index-keyed: a phone id is host text and may not be a valid id token.
+                        let key = format!("saved-number-{index}");
+                        let own = local_reason(state, texts, control.clone());
+                        // Bound before the view: the macro evaluates props ahead of spreads.
+                        let name = control_name(state, texts, control.clone());
+                        let disabled = control_disabled(state, control);
+                        let described = described_by(&saved_base, &key);
+                        let own_id = reason_id(&saved_base, &key);
                         view! {
                             <div class="flex min-w-0 flex-col gap-2">
                             <Button class="h-auto min-h-10 w-full justify-start whitespace-normal py-2 text-left" attr:data-call-saved-number=phone.id
-                                disabled=Signal::derive(move || !state.with(|s| s.can_dispatch(&for_disabled)))
+                                attr:aria-label=name
+                                attr:aria-describedby=described
+                                disabled=disabled
                                 on_click=Callback::new(move |_| emit(state, on_command, action.clone()))>
                                 <span class="min-w-0 [overflow-wrap:anywhere]">{format!("{} · {}", phone.label, phone.number)}</span>
                             </Button>
-                            {phone.blocked_reason.map(|reason| view! { <p class="text-sm text-base-content/75 [overflow-wrap:anywhere]" data-call-number-blocked="true">{reason}</p> })}
+                            <p id=own_id class="text-sm text-base-content/75 [overflow-wrap:anywhere]" data-call-number-blocked=phone.blocked_reason.is_some().then_some("true")
+                                class:hidden=move || own.with(Option::is_none)>{move || own.get()}</p>
                             </div>
                         }
                     }).collect_view()}
                 </div>
                 <Button style=ButtonStyle::Ghost attr:data-call-action="keypad" attr:aria-controls=controls
                     attr:aria-expanded=move || keypad.get().to_string()
-                    disabled=Signal::derive(move || !state.with(ClientCallWorkspaceState::can_edit_destination))
+                    attr:aria-label=control_name(state, texts, ClientCallControl::Keypad)
+                    attr:aria-describedby=destination_described
+                    disabled=control_disabled(state, ClientCallControl::Keypad)
                     on_click=Callback::new(move |_| if state.with_untracked(ClientCallWorkspaceState::can_edit_destination) { keypad.update(|value| *value = !*value); })>
                     {move || texts.get().keypad}
                 </Button>
+                {reason_line(destination_reason, "destination", local_reason(state, texts, ClientCallControl::Keypad))}
                 <Show when=move || keypad.get()>
                     <div id=keypad_id.clone() class="grid grid-cols-3 gap-2" data-call-pad="true">
-                        {['1','2','3','4','5','6','7','8','9','*','0','#'].into_iter().map(move |digit| view! {
+                        {ClientCallControl::DIGITS.into_iter().map(|digit| view! {
                             <Button attr:data-call-digit=digit.to_string()
-                                disabled=Signal::derive(move || !state.with(|s| s.can_edit_destination() && s.destination.chars().count() < 64))
+                                attr:aria-label=control_name(state, texts, ClientCallControl::Digit(digit))
+                                attr:aria-describedby=pad_described.clone()
+                                disabled=control_disabled(state, ClientCallControl::Digit(digit))
                                 on_click=Callback::new(move |_| {
                                     let mut value = state.get_untracked().destination;
                                     value.push(digit);
@@ -102,23 +202,29 @@ fn Destination(
                                 })>{digit.to_string()}</Button>
                         }).collect_view()}
                         <Button class="col-span-3" attr:data-call-action="backspace"
-                            disabled=Signal::derive(move || !state.with(|s| s.can_edit_destination() && !s.destination.is_empty()))
+                            attr:aria-label=control_name(state, texts, ClientCallControl::Backspace)
+                            attr:aria-describedby=backspace_described.clone()
+                            disabled=control_disabled(state, ClientCallControl::Backspace)
                             on_click=Callback::new(move |_| {
                                 let mut value = state.get_untracked().destination;
                                 value.pop();
                                 emit(state, on_command, ClientCallAction::EditDestination(value));
                             })>{move || texts.get().backspace}</Button>
+                        {reason_line(pad_reason.clone(), "pad", local_reason(state, texts, ClientCallControl::Digit('0')))}
+                        {reason_line(backspace_reason.clone(), "backspace", local_reason(state, texts, ClientCallControl::Backspace))}
                     </div>
                 </Show>
             </div>
             <Show when=move || state.get().number_update.is_some()>
                 <div class="flex min-w-0 flex-col gap-2 rounded-box border border-base-300 p-3" data-call-number-update="true">
                     <Show when=move || !targets.get().is_empty()>
-                        <Field label=Signal::derive(move || Some(texts.get().number_target)) label_class="whitespace-normal">
+                        <Field label=Signal::derive(move || Some(texts.get().number_target)) label_class="whitespace-normal"
+                            help_text=control_reason(state, texts, ClientCallControl::NumberTarget)>
                             <Select node_ref=target_ref class="w-full min-w-0" attr:data-call-field="number-target"
+                                label=Signal::derive(control_name(state, texts, ClientCallControl::NumberTarget))
                                 value=Signal::derive(move || state.get().number_update.map(|u| u.field_id).unwrap_or_default())
                                 options_revision=Signal::derive(move || format!("{:?}", targets.get()))
-                                disabled=Signal::derive(move || !state.with(ClientCallWorkspaceState::can_edit_destination) || state.get().number_update.is_some_and(|u| u.blocked_reason.is_some()))
+                                disabled=control_disabled(state, ClientCallControl::NumberTarget)
                                 on_change=Callback::new(move |value| {
                                     emit(state, on_command, ClientCallAction::ChooseNumberTarget(value));
                                     if let Some(select) = target_ref.get_untracked() { select.set_value(&state.get_untracked().number_update.map(|u| u.field_id).unwrap_or_default()); }
@@ -136,24 +242,30 @@ fn Destination(
                     <p class="text-sm font-medium [overflow-wrap:anywhere]">{move || state.get().number_update.and_then(|u| u.selected_target()).map(|t| t.label).unwrap_or_default()}</p>
                     <p class="text-sm text-base-content/75 [overflow-wrap:anywhere]" data-call-confirmed-number="true">{move || state.get().number_update.and_then(|u| u.selected_target()).map(|t| t.saved_number).unwrap_or_default()}</p>
                     <Button attr:data-call-action="save-number"
-                        disabled=Signal::derive(move || !state.with(|s| s.number_update.as_ref().is_some_and(|u| s.can_dispatch(&ClientCallAction::SaveNumber { field_id: u.field_id.clone(), number: s.destination.clone() }))))
+                        attr:aria-label=control_name(state, texts, ClientCallControl::SaveNumber)
+                        attr:aria-describedby=save_number_described.clone()
+                        disabled=control_disabled(state, ClientCallControl::SaveNumber)
                         on_click=Callback::new(move |_| {
                             let current = state.get_untracked();
                             if let Some(update) = current.number_update {
                                 emit(state, on_command, ClientCallAction::SaveNumber { field_id: update.field_id, number: current.destination });
                             }
                         })>{move || if state.get().number_update.is_some_and(|u| u.pending) { texts.get().saving } else { texts.get().save_number }}</Button>
-                    <p class="text-sm text-base-content/75 [overflow-wrap:anywhere]">{move || state.get().number_update.and_then(|u| u.blocked_reason)}</p>
-                    <p class="text-sm text-base-content/75 [overflow-wrap:anywhere]">{move || state.get().number_update.and_then(|u| u.selected_target()).and_then(|t| t.blocked_reason)}</p>
+                    // The write's reason line leads with the host's blocked reasons
+                    // (capability, then selected field) that used to be two bare lines.
+                    {reason_line(save_number_reason.clone(), "save-number", local_reason(state, texts, ClientCallControl::SaveNumber))}
                     <p class="text-sm text-error [overflow-wrap:anywhere]" role="status">{move || state.get().number_update.and_then(|u| u.error)}</p>
                 </div>
             </Show>
             <Button color=ButtonColor::Primary class="w-full" attr:data-call-action="dial"
-                disabled=Signal::derive(move || !state.with(|s| s.can_dispatch(&ClientCallAction::Dial { number: s.destination.clone() })))
+                attr:aria-label=control_name(state, texts, ClientCallControl::Dial)
+                attr:aria-describedby=dial_described
+                disabled=control_disabled(state, ClientCallControl::Dial)
                 on_click=Callback::new(move |_| emit(state, on_command, ClientCallAction::Dial { number: state.get_untracked().destination }))>
                 {move || texts.get().call}
             </Button>
-            <p class="text-sm text-base-content/75 [overflow-wrap:anywhere]">{move || state.get().dial_blocked_reason}</p>
+            // Leads with the host's dial_blocked_reason, the line's former content.
+            {reason_line(dial_reason, "dial", local_reason(state, texts, ClientCallControl::Dial))}
         </div>
     }
 }
@@ -163,8 +275,18 @@ fn Guidance(
     state: Signal<ClientCallWorkspaceState>,
     texts: Signal<ClientCallWorkspaceTexts>,
     on_command: Callback<ClientCallCommand>,
+    base_id: String,
 ) -> impl IntoView {
     let guidance = Signal::derive(move || state.get().guidance.unwrap_or_default());
+    let regeneration_status = format!("{base_id}-regeneration-status");
+    let regenerate_reason = reason_id(&base_id, "regenerate");
+    // Context line, the independent status line, then the host's blocked reason.
+    let regenerate_described = format!(
+        "{} {} {}",
+        context_reason_id(&base_id),
+        regeneration_status,
+        regenerate_reason
+    );
     // Content, including a replaced beat with the same ID, is host-controlled.
     let beats = Memo::new(move |_| guidance.get().beats);
     view! {
@@ -203,12 +325,14 @@ fn Guidance(
             <Show when=move || guidance.get().regeneration.is_some()>
                 <div class="flex min-w-0 flex-col gap-2" data-call-regeneration-state=move || guidance.get().regeneration.map(|r| r.state.as_str())>
                     <Button style=ButtonStyle::Outline class="h-auto min-h-10 whitespace-normal py-2" attr:data-call-action="regenerate"
-                        disabled=Signal::derive(move || !state.with(|s| s.can_dispatch(&ClientCallAction::RegenerateGuidance)))
+                        attr:aria-label=control_name(state, texts, ClientCallControl::Regenerate)
+                        attr:aria-describedby=regenerate_described.clone()
+                        disabled=control_disabled(state, ClientCallControl::Regenerate)
                         on_click=Callback::new(move |_| emit(state, on_command, ClientCallAction::RegenerateGuidance))>
                         {move || texts.get().regenerate}
                     </Button>
-                    <p role="status" class="text-sm">{move || guidance.get().regeneration.map(|r| texts.get().regeneration(r.state))}</p>
-                    <p class="text-sm text-base-content/75">{move || guidance.get().regeneration.and_then(|r| r.blocked_reason)}</p>
+                    <p id=regeneration_status.clone() role="status" class="text-sm">{move || guidance.get().regeneration.map(|r| texts.get().regeneration(r.state))}</p>
+                    <p id=regenerate_reason.clone() class="text-sm text-base-content/75" data-call-disabled-reason="regenerate">{move || guidance.get().regeneration.and_then(|r| r.blocked_reason)}</p>
                     <p role="status" class="text-sm text-error">{move || guidance.get().regeneration.and_then(|r| r.error)}</p>
                 </div>
             </Show>
@@ -221,11 +345,15 @@ fn WrapUp(
     state: Signal<ClientCallWorkspaceState>,
     texts: Signal<ClientCallWorkspaceTexts>,
     on_command: Callback<ClientCallCommand>,
+    base_id: String,
 ) -> impl IntoView {
     let wrap = Signal::derive(move || state.get().wrap_up.unwrap_or_default());
-    let locked = Signal::derive(move || {
-        !state.with(|s| s.can_dispatch(&ClientCallAction::SetOutcome(None)))
-    });
+    let locked = control_disabled(state, ClientCallControl::Outcome);
+    // One reason serves all four draft fields (they share one lock); each
+    // Field shows it as its help line, which the Field binds to the control.
+    let field_reason = control_reason(state, texts, ClientCallControl::Outcome);
+    let save_described = described_by(&base_id, "save-wrap-up");
+    let save_reason = reason_id(&base_id, "save-wrap-up");
     let select_ref = NodeRef::<leptos::html::Select>::new();
     let notes_ref = NodeRef::<leptos::html::Textarea>::new();
     let duration_ref = NodeRef::<leptos::html::Input>::new();
@@ -248,8 +376,9 @@ fn WrapUp(
                 <h3 class="text-lg font-semibold">{move || texts.get().wrap_up}</h3>
                 <p class="text-sm text-base-content/75">{move || texts.get().wrap_up_hint}</p>
             </div>
-            <Field label=Signal::derive(move || Some(texts.get().outcome)) required=true label_class="whitespace-normal">
+            <Field label=Signal::derive(move || Some(texts.get().outcome)) required=true label_class="whitespace-normal" help_text=field_reason>
                 <Select class="w-full min-w-0" node_ref=select_ref attr:data-call-field="outcome" attr:required=true disabled=locked
+                    label=Signal::derive(control_name(state, texts, ClientCallControl::Outcome))
                     value=Signal::derive(move || wrap.get().outcome.map(|o| o.as_str().to_owned()).unwrap_or_default())
                     on_change=Callback::new(move |value: String| {
                         if value.is_empty() || ClientCallOutcome::from_value(&value).is_some() {
@@ -261,17 +390,19 @@ fn WrapUp(
                     {ClientCallOutcome::ALL.into_iter().map(move |outcome| view! { <option value=outcome.as_str()>{move || texts.get().outcome(outcome)}</option> }).collect_view()}
                 </Select>
             </Field>
-            <Field label=Signal::derive(move || Some(texts.get().notes)) label_class="whitespace-normal">
+            <Field label=Signal::derive(move || Some(texts.get().notes)) label_class="whitespace-normal" help_text=field_reason>
                 <Textarea node_ref=notes_ref class="w-full min-w-0" rows=Some(5) maxlength=Some(8_000) attr:data-call-field="notes"
+                    label=Signal::derive(control_name(state, texts, ClientCallControl::Notes))
                     disabled=locked value=Signal::derive(move || wrap.get().notes)
                     on_input=Callback::new(move |value| {
                         emit(state, on_command, ClientCallAction::SetNotes(value));
                         if let Some(input) = notes_ref.get_untracked() { input.set_value(&wrap.get_untracked().notes); }
                     }) />
             </Field>
-            <Field label=Signal::derive(move || Some(texts.get().duration)) error=duration_error
+            <Field label=Signal::derive(move || Some(texts.get().duration)) error=duration_error help_text=field_reason
                 state=Signal::derive(move || if duration_error.get().is_some() { FieldState::Error } else { FieldState::Default }) label_class="whitespace-normal">
                 <Input node_ref=duration_ref class="w-full min-w-0" attr:inputmode="numeric" maxlength=Some(10) attr:data-call-field="duration"
+                    attr:aria-label=control_name(state, texts, ClientCallControl::Duration)
                     disabled=locked value=Signal::derive(move || wrap.get().duration_minutes)
                     on_input=Callback::new(move |value| {
                         emit(state, on_command, ClientCallAction::SetDurationMinutes(value));
@@ -279,8 +410,9 @@ fn WrapUp(
                     }) />
             </Field>
             <Show when=move || wrap.get().outcome == Some(ClientCallOutcome::RequestedCallBack)>
-                <Field label=Signal::derive(move || Some(texts.get().follow_up)) help_text=Signal::derive(move || Some(texts.get().follow_up_hint)) required=true label_class="whitespace-normal">
+                <Field label=Signal::derive(move || Some(texts.get().follow_up)) help_text=Signal::derive(move || field_reason.get().or_else(|| Some(texts.get().follow_up_hint))) required=true label_class="whitespace-normal">
                     <Textarea node_ref=follow_ref class="w-full min-w-0" rows=Some(3) maxlength=Some(1_000) attr:data-call-field="follow-up" required=true
+                        label=Signal::derive(control_name(state, texts, ClientCallControl::FollowUp))
                         disabled=locked value=Signal::derive(move || wrap.get().follow_up)
                         on_input=Callback::new(move |value| {
                             emit(state, on_command, ClientCallAction::SetFollowUp(value));
@@ -290,14 +422,16 @@ fn WrapUp(
             </Show>
             <div class="flex flex-col gap-2">
                 <p role="status" class="text-sm text-error [overflow-wrap:anywhere]">{move || wrap.get().error}</p>
-                <Show when=move || !state.with(ClientCallWorkspaceState::finished)>
-                    <p class="text-sm text-base-content/75">{move || texts.get().finish_hint}</p>
-                </Show>
                 <Button color=ButtonColor::Primary class="w-full" attr:data-call-action="save-wrap-up"
-                    disabled=Signal::derive(move || !state.with(|s| s.wrap_up.as_ref().and_then(ClientCallWrapUp::payload).is_some_and(|payload| s.can_dispatch(&ClientCallAction::SaveWrapUp(payload)))))
+                    attr:aria-label=control_name(state, texts, ClientCallControl::SaveWrapUp)
+                    attr:aria-describedby=save_described
+                    disabled=control_disabled(state, ClientCallControl::SaveWrapUp)
                     on_click=Callback::new(move |_| {
                         if let Some(payload) = wrap.get_untracked().payload() { emit(state, on_command, ClientCallAction::SaveWrapUp(payload)); }
                     })>{move || { let draft = wrap.get(); let copy = texts.get(); if draft.saved { copy.saved } else if draft.pending { copy.saving } else { copy.save_wrap_up } }}</Button>
+                // Carries the finish hint (formerly a bare line above the button)
+                // whenever an unfinished call is the reason Save is disabled.
+                {reason_line(save_reason, "save-wrap-up", local_reason(state, texts, ClientCallControl::SaveWrapUp))}
             </div>
         </section>
     }
@@ -329,6 +463,14 @@ pub fn ClientCallWorkspace(
 ) -> impl IntoView {
     let keypad_id = format!("{id}-destination-pad");
     let console_id = format!("{id}-session");
+    // Reason-line ids share the region id so two workspaces never collide.
+    let base_id = id.clone();
+    let destination_base = base_id.clone();
+    let guidance_base = base_id.clone();
+    let wrap_base = base_id.clone();
+    let context_reason = context_reason_id(&base_id);
+    let dismiss_described = described_by(&base_id, "dismiss");
+    let dismiss_reason = reason_id(&base_id, "dismiss");
     let now = now_ms.unwrap_or_else(|| {
         #[cfg(target_arch = "wasm32")]
         {
@@ -354,10 +496,23 @@ pub fn ClientCallWorkspace(
                     <h2 class="text-xl font-semibold">{move || state.get().call.client.name}</h2>
                     <p class="text-sm text-base-content/75">{move || state.get().call.client.subtitle}</p>
                 </div>
-                <Button style=ButtonStyle::Ghost class="shrink-0" attr:data-call-action="dismiss"
-                    disabled=Signal::derive(move || !state.with(|s| s.can_dispatch(&ClientCallAction::Dismiss)))
-                    on_click=Callback::new(move |_| emit(state, on_command, ClientCallAction::Dismiss))>{move || texts.get().close}</Button>
+                <div class="flex shrink-0 flex-col items-end gap-2">
+                    <Button style=ButtonStyle::Ghost class="shrink-0" attr:data-call-action="dismiss"
+                        attr:aria-label=control_name(state, texts, ClientCallControl::Dismiss)
+                        attr:aria-describedby=dismiss_described
+                        disabled=control_disabled(state, ClientCallControl::Dismiss)
+                        on_click=Callback::new(move |_| emit(state, on_command, ClientCallAction::Dismiss))>{move || texts.get().close}</Button>
+                    {reason_line(dismiss_reason, "dismiss", local_reason(state, texts, ClientCallControl::Dismiss))}
+                </div>
             </header>
+            // One shared line for the state that disables every control at once:
+            // no call context from the host (Office op-stjm9). Each button's
+            // aria-describedby names it first.
+            <p id=context_reason role="note" class="border-b border-base-300 px-5 py-3 text-sm text-base-content/75 [overflow-wrap:anywhere]"
+                data-call-disabled-reason="context"
+                class:hidden=move || !state.with(ClientCallWorkspaceState::context_missing)>
+                {move || state.with(ClientCallWorkspaceState::context_missing).then(|| texts.get().not_ready)}
+            </p>
             <div class="grid min-w-0 gap-6 p-5 @3xl:grid-cols-2">
                 <div class="flex min-w-0 flex-col gap-4">
                     <div role="status" class="flex flex-col gap-2 rounded-box bg-base-200 p-4 [overflow-wrap:anywhere]" data-call-status="true">
@@ -378,7 +533,7 @@ pub fn ClientCallWorkspace(
                         </Show>
                     </div>
                     <Show when=move || state.with(|s| s.attempt == ClientCallAttempt::Managed && s.call.phase.is_live())
-                        fallback=move || view! { <Destination state=state texts=texts on_command=on_command keypad_id=keypad_id.clone() /> }>
+                        fallback=move || view! { <Destination state=state texts=texts on_command=on_command keypad_id=keypad_id.clone() base_id=destination_base.clone() /> }>
                         <Softphone id=console_id.clone() state=Signal::derive(move || state.get().call)
                             texts=Signal::derive(move || texts.get().softphone) on_command=session_command
                             now_ms=now class="max-w-none" />
@@ -386,9 +541,9 @@ pub fn ClientCallWorkspace(
                 </div>
                 <div class="flex min-w-0 flex-col gap-6">
                     <Show when=move || state.get().guidance.is_some()>
-                        <Guidance state=state texts=texts on_command=on_command />
+                        <Guidance state=state texts=texts on_command=on_command base_id=guidance_base.clone() />
                     </Show>
-                    <Show when=move || state.get().wrap_up.is_some()><WrapUp state=state texts=texts on_command=on_command /></Show>
+                    <Show when=move || state.get().wrap_up.is_some()><WrapUp state=state texts=texts on_command=on_command base_id=wrap_base.clone() /></Show>
                 </div>
             </div>
         </section>

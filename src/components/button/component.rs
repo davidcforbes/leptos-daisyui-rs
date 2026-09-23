@@ -6,6 +6,35 @@ use leptos::{
     html::{A, Button as HTMLButton},
     prelude::*,
 };
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static NEXT_BUTTON_REASON_ID: AtomicU64 = AtomicU64::new(0);
+
+/// A process-unique id for one `Button`'s disabled-reason hint
+/// (`ld-btn-reason-0`, ...). Same shape as `Field`'s `next_field_id` and
+/// `Collapse`'s `next_collapse_id`: a monotonic counter, stable for the
+/// page's lifetime, which is all `aria-describedby` needs (ldui-p82h).
+pub(crate) fn next_button_reason_id() -> String {
+    format!(
+        "ld-btn-reason-{}",
+        NEXT_BUTTON_REASON_ID.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
+/// The disabled reason a `Button` actually acts on, or `None` when the
+/// supplied text is blank (ldui-p82h).
+///
+/// A `disabled_reason` signal that resolves to whitespace is treated exactly
+/// like no reason at all -- the button is not disabled by it, no hint is
+/// rendered, no `aria-describedby` is emitted -- so a consumer can drive one
+/// reactive `Signal<String>` between `""` (enabled) and `"No rows to export"`
+/// (disabled, explained) without a second `disabled` signal that could drift
+/// out of step with it. Trimmed, so the hint never carries stray whitespace
+/// into the accessible description.
+pub(crate) fn resolve_disabled_reason(reason: String) -> Option<String> {
+    let trimmed = reason.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_owned())
+}
 
 /// Resolves the native `disabled` attribute for the underlying `<button>`.
 ///
@@ -122,9 +151,42 @@ pub(crate) fn resolve_native_disabled(
 /// on [`Progress`](crate::components::progress::Progress)'s `attr:max`. Use
 /// `button_type`, not a spread `type`.
 ///
+/// ## Disabled with a reason (`disabled_reason`, ldui-p82h)
+///
+/// A disabled control that does not say *why* is a dead end for every user,
+/// and for an icon-only button it is an unlabelled dead end. `disabled_reason`
+/// is the one prop that answers it: when it resolves to non-blank text the
+/// button is disabled exactly as `disabled=true` would (native `disabled`,
+/// `.btn-disabled`), and the reason is delivered three ways at once --
+///
+/// - a visually-hidden `<span class="sr-only">` **inside** the button (the
+///   component must stay a single root element for spread attributes, so
+///   the hint cannot be a sibling), carrying a minted id
+///   (`ld-btn-reason-N`), marked `aria-hidden="true"` so the reason joins
+///   the accessible **description** through `aria-describedby` without also
+///   leaking into the accessible **name**;
+/// - `aria-describedby` on the button, referencing that id;
+/// - the native `title`, so a sighted mouse user hovering an icon-only
+///   button sees the reason as a tooltip without any extra wrapper.
+///
+/// ```rust,ignore
+/// let no_rows = Signal::derive(move || {
+///     if rows.get() == 0 { "No rows to export".to_owned() } else { String::new() }
+/// });
+/// view! { <Button disabled_reason=no_rows>"Export"</Button> }
+/// ```
+///
+/// A reason that resolves to blank text is the same as none (see
+/// `resolve_disabled_reason`), which is what lets one reactive signal drive
+/// both the state and the explanation. A button rendered `disabled=true`
+/// with no reason is **not** an error -- existing callers keep compiling and
+/// rendering -- but it is stamped `data-disabled-without-reason="true"` so
+/// the `ldui-audit` drift sweep (`disabled-without-reason`) can report it as
+/// a finding rather than the omission going unnoticed.
+///
 /// ### Add to `input.css`
 /// ```css
-/// @source inline("btn btn-neutral btn-primary btn-secondary btn-accent btn-info btn-success btn-warning btn-error btn-outline btn-dash btn-soft btn-ghost btn-link btn-xs btn-sm btn-md btn-lg btn-xl btn-wide btn-block btn-square btn-circle btn-active btn-disabled loading");
+/// @source inline("btn btn-neutral btn-primary btn-secondary btn-accent btn-info btn-success btn-warning btn-error btn-outline btn-dash btn-soft btn-ghost btn-link btn-xs btn-sm btn-md btn-lg btn-xl btn-wide btn-block btn-square btn-circle btn-active btn-disabled loading sr-only");
 /// ```
 ///
 /// ## Node References
@@ -169,9 +231,20 @@ pub fn Button(
     #[prop(optional, into)]
     active: Signal<bool>,
 
-    /// Whether the button is disabled
+    /// Whether the button is disabled. Prefer `disabled_reason` when there is
+    /// a reason to give: a `disabled=true` with no reason is stamped
+    /// `data-disabled-without-reason="true"` for the audit.
     #[prop(optional, into)]
     disabled: Signal<bool>,
+
+    /// Why the button is disabled (ldui-p82h). Non-blank text disables the
+    /// button and renders the reason as a hidden hint referenced by
+    /// `aria-describedby`, plus the native `title`. Blank text (the default)
+    /// is "no reason", so one reactive signal can drive both the state and
+    /// the explanation. See the component doc's "Disabled with a reason"
+    /// section.
+    #[prop(optional, into)]
+    disabled_reason: Signal<String>,
 
     /// Enables the click ripple effect. Defaults to off.
     #[prop(optional, into)]
@@ -194,10 +267,17 @@ pub fn Button(
     children: Children,
 ) -> impl IntoView {
     let ripple_handle = use_ripple();
+    // Minted once per instance so a reason that toggles between blank and
+    // text keeps one stable id; referenced only while a reason is present.
+    let reason_id = next_button_reason_id();
+    let describedby_id = reason_id.clone();
+    let reason_text = move || resolve_disabled_reason(disabled_reason.get());
+    let reason_present = move || reason_text().is_some();
+    let is_disabled = move || disabled.get() || reason_present();
     view! {
         <button
             type=move || button_type.get().as_str()
-            disabled=move || resolve_native_disabled(disabled.get(), loading.get(), button_type.get())
+            disabled=move || resolve_native_disabled(is_disabled(), loading.get(), button_type.get())
             node_ref=node_ref
             class=move || {
                 merge_classes!(
@@ -211,9 +291,14 @@ pub fn Button(
             }
 
             class:btn-active=active
-            class:btn-disabled=disabled
+            class:btn-disabled=is_disabled
             class:loading=loading
             class:ld-ripple-host=ripple
+            aria-describedby=move || reason_present().then(|| describedby_id.clone())
+            title=reason_text
+            data-disabled-without-reason=move || {
+                (disabled.get() && !reason_present()).then_some("true")
+            }
             on:click=move |ev| {
                 if ripple.get_untracked() {
                     ripple_handle.trigger.run(ev.clone());
@@ -224,6 +309,15 @@ pub fn Button(
             }
         >
             {children()}
+            {move || {
+                let id = reason_id.clone();
+                let reason = reason_text()?;
+                Some(view! {
+                    <span class="sr-only" aria-hidden="true" id=id data-button-disabled-reason="true">
+                        {reason}
+                    </span>
+                })
+            }}
             {move || ripple.get().then(|| view! { <RippleOverlay handle=ripple_handle /> })}
         </button>
     }

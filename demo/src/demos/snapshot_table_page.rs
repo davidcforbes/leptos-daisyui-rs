@@ -1862,6 +1862,126 @@ pub fn EntityTableSavedFiltersFixture() -> impl IntoView {
     }
 }
 
+/// The filter-row fixture's columns in one language: same ids either way,
+/// so a consumer's `Signal::derive_local(move || columns(spanish.get()))`
+/// keeps filter identity while the headers move. `client` is the
+/// server-backed (debounced) text filter; `status` is a badge column and so
+/// an option list.
+fn filter_row_columns(spanish: bool) -> Vec<EntityColumn<FixtureRow>> {
+    let (client, status) = if spanish {
+        ("Nombre", "Estado")
+    } else {
+        ("Client", "Status")
+    };
+    vec![
+        EntityColumn::text("client", client, |row: &FixtureRow| row.client.clone())
+            .required()
+            .with_min_width(220)
+            .filterable_text_debounced(500),
+        EntityColumn::text("status", status, |row: &FixtureRow| row.status.clone())
+            .with_min_width(120)
+            .badge_with(|row: &FixtureRow| {
+                Some(EntityBadgePresentation::new(if row.status == "Urgent" {
+                    BadgeColor::Neutral
+                } else {
+                    BadgeColor::Success
+                }))
+            })
+            .filterable(),
+    ]
+}
+
+/// Browser fixture for the filter row's two reactive contracts:
+///
+/// * ldui-xgj8 -- the framework-built filters are built with
+///   `EntityAutoFilters::from_columns` over a columns SIGNAL, and the
+///   language toggle swaps both the columns (Spanish headers) and the
+///   `EntityAutoFilterTexts`; every label/placeholder/"All" option must read
+///   the new header while control ids and typed values survive.
+/// * ldui-ga96 -- `client` is a `filterable_text_debounced(500)` column: it
+///   applies once after 500 ms of quiet typing or immediately on Enter,
+///   shows `aria-busy`/`data-entity-filter-pending` while pending, and the
+///   `thead` never holds an Apply button. The commit counter is an `Effect`
+///   on the framework's own value signal, so it counts exactly the
+///   proposals the auto path emitted.
+#[component]
+pub fn EntityTableFilterRowFixture() -> impl IntoView {
+    let data = RwSignal::new_local(rows("office-mx"));
+    let spanish = RwSignal::new(false);
+    let columns: Signal<Vec<EntityColumn<FixtureRow>>, LocalStorage> =
+        Signal::derive_local(move || filter_row_columns(spanish.get()));
+    let texts = Signal::derive(move || {
+        if spanish.get() {
+            EntityAutoFilterTexts {
+                label: "Filtrar {column}".to_owned(),
+                placeholder: "Filtrar {column}…".to_owned(),
+                all: "Todos ({column})".to_owned(),
+            }
+        } else {
+            EntityAutoFilterTexts {
+                label: "Filter {column}".to_owned(),
+                placeholder: "Filter {column}…".to_owned(),
+                all: "All ({column})".to_owned(),
+            }
+        }
+    });
+    // `StoredValue` because `EntityAutoFilters` is not `Send + Sync` (it
+    // holds `Rc`s); the handle is `Copy + Send`.
+    let auto = StoredValue::new_local(EntityAutoFilters::from_columns(
+        columns,
+        data.into(),
+        "filter-row-fixture",
+        texts,
+    ));
+    let client_value = auto
+        .with_value(|auto| auto.value("client"))
+        .expect("client declares a debounced filter");
+    let filtered_rows = auto.with_value(|auto| auto.rows());
+    let commits = RwSignal::new(0u32);
+    Effect::new(move |previous: Option<()>| {
+        client_value.track();
+        if previous.is_some() {
+            commits.update(|count| *count += 1);
+        }
+    });
+
+    view! {
+        <section
+            id="entity-table-filter-row-fixture"
+            class="mx-auto max-w-3xl space-y-6 bg-base-100 p-4"
+        >
+            <h1 class="ld-text-display font-semibold">"Filter row"</h1>
+            <div class="flex flex-wrap gap-2">
+                <Button
+                    on:click=move |_| spanish.update(|spanish| *spanish = !*spanish)
+                    attr:data-testid="entity-filter-row-toggle-language"
+                >
+                    {move || if spanish.get() { "Use English" } else { "Use Spanish" }}
+                </Button>
+            </div>
+            <div data-testid="entity-filter-row-table">
+                <EntityTable
+                    data=filtered_rows
+                    source_data=Signal::derive_local(move || data.get())
+                    columns=columns
+                    column_filters=auto.with_value(|auto| auto.filters())
+                    row_key=Rc::new(|row: &FixtureRow| row.id.clone())
+                    dataset_identity="filter-row"
+                />
+            </div>
+            <output data-testid="entity-filter-row-commit-count">
+                {move || commits.get().to_string()}
+            </output>
+            <output data-testid="entity-filter-row-committed">
+                {move || client_value.get()}
+            </output>
+            <output data-testid="entity-filter-row-rendered-rows">
+                {move || filtered_rows.get().len().to_string()}
+            </output>
+        </section>
+    }
+}
+
 /// Focused browser fixture for `EntityTable` controlled single-row selection
 /// (ldui-sh3), mirroring `ServerTableSelection`'s cursor-table fixture. The
 /// detail panel is a master-detail readout driven purely by the caller's

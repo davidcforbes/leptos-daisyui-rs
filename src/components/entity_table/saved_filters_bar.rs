@@ -34,7 +34,12 @@ pub(crate) fn saved_filters_bar(model: EntitySavedFilters, bar_id: String) -> An
     let on_delete = model.on_delete;
     let on_apply = model.on_apply;
 
+    // ldui-q85o: Save Filter is always enabled; with nothing to save the
+    // click is a no-op (no dialog, no toast) rather than a disabled control.
     let open_dialog = Callback::new(move |()| {
+        if !current_values.with_untracked(|values| saved_filter_can_save(values)) {
+            return;
+        }
         draft_name.set(String::new());
         dialog_open.set(true);
     });
@@ -55,12 +60,6 @@ pub(crate) fn saved_filters_bar(model: EntitySavedFilters, bar_id: String) -> An
 
     let title_id = format!("{bar_id}-title");
     let name_input_id = format!("{bar_id}-name");
-    // ONE id, referenced by the badge group's `aria-labelledby` and owned by
-    // the visible caption below. The visible text and the accessible name are
-    // therefore the same node's content and structurally cannot drift apart --
-    // the failure mode a hidden `aria-label` beside a visible caption invites
-    // (Office op-e6dsi, which had shipped exactly that and replaced it).
-    let badges_label_id = format!("{bar_id}-badges-label");
 
     view! {
         <div
@@ -73,9 +72,6 @@ pub(crate) fn saved_filters_bar(model: EntitySavedFilters, bar_id: String) -> An
             <Button
                 class="btn-sm btn-outline"
                 attr:data-entity-saved-filters-open="true"
-                disabled=Signal::derive(move || {
-                    !current_values.with(|values| saved_filter_can_save(values))
-                })
                 attr:aria-label=move || texts.with(|t: &super::saved_filters::EntitySavedFilterTexts| t.save_button.clone())
                 on_click=Callback::new(move |_| open_dialog.run(()))
             >
@@ -97,8 +93,6 @@ pub(crate) fn saved_filters_bar(model: EntitySavedFilters, bar_id: String) -> An
                 }
                 let current = current_values.get();
                 let active = EntitySavedFilters::active_name(&saved, &current);
-                let caption_id = badges_label_id.clone();
-                let group_id = badges_label_id.clone();
                 let badges = saved
                     .into_iter()
                     // The list is CONSUMER-owned: a host that persists its
@@ -159,18 +153,14 @@ pub(crate) fn saved_filters_bar(model: EntitySavedFilters, bar_id: String) -> An
                         .into_any()
                     })
                     .collect_view();
+                // ldui-q85o: no visible caption; the group is still ONE named
+                // group so a screen-reader user hears that the badges belong
+                // together.
                 view! {
-                    <span
-                        id=caption_id
-                        class="text-sm text-base-content/75"
-                        data-entity-saved-filters-caption="true"
-                    >
-                        {move || texts.with(|t: &super::saved_filters::EntitySavedFilterTexts| t.badges_label.clone())}
-                    </span>
                     <div
                         class="flex flex-wrap items-center gap-2"
                         role="group"
-                        aria-labelledby=group_id
+                        aria-label=move || texts.with(|t: &super::saved_filters::EntitySavedFilterTexts| t.badges_label.clone())
                         data-entity-saved-filters-badges="true"
                     >
                         {badges}

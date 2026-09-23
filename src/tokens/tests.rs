@@ -391,6 +391,82 @@ fn animations_css_defines_focus_ring() {
     );
 }
 
+/// Slice the `@keyframes <name> { ... }` block out of the emitted CSS.
+fn keyframes_block<'a>(css: &'a str, name: &str) -> &'a str {
+    let head = format!("@keyframes {name} {{");
+    let start = css
+        .find(&head)
+        .unwrap_or_else(|| panic!("missing @keyframes {name}: {css}"));
+    let body = &css[start + head.len()..];
+    // Each keyframe step closes its own `}` on the same line; the block's
+    // closing brace is the first one at column 0.
+    let end = body
+        .find("\n}")
+        .unwrap_or_else(|| panic!("unterminated @keyframes {name}: {css}"));
+    &body[..end]
+}
+
+#[test]
+fn focus_ring_colour_is_present_from_frame_zero_and_only_the_offset_animates() {
+    // ldui-reod: the entrance used to fade `outline-color` in from
+    // `transparent`, so for the first `--ld-duration-fast` after a Tab the
+    // computed outline of every ring-carrying control was a transparent 2px
+    // line. A keyboard probe reading the computed outline in the same tick as
+    // focus saw no ring on solid buttons (Office's Search / EN / ES buttons and
+    // the active hub tab). The colour must be on the rule itself, and the
+    // keyframes may move only `outline-offset`, 0 -> 2px.
+    let css = ui_animations_css();
+    let frames = keyframes_block(css, "ld-focus-ring-in");
+
+    assert!(
+        !frames.contains("outline-color") && !frames.contains("transparent"),
+        "ld-focus-ring-in must not fade the ring colour in: {frames}"
+    );
+    assert!(
+        frames.contains("from { outline-offset: 0px; }"),
+        "ld-focus-ring-in must start with the ring flush at 0px offset: {frames}"
+    );
+    assert!(
+        frames.contains("to   { outline-offset: 2px; }"),
+        "ld-focus-ring-in must settle at the 2px resting offset: {frames}"
+    );
+
+    // The colour lives on the rule, present the instant `:focus-visible`
+    // matches, and the resting offset the keyframes settle at is the rule's own.
+    let rule_start = css
+        .find(".ld-focus-ring:focus-visible {")
+        .expect("missing .ld-focus-ring:focus-visible rule");
+    let rule = &css[rule_start..];
+    let rule = &rule[..rule.find('}').expect("unterminated focus-ring rule")];
+    assert!(
+        rule.contains("outline: 2px solid var(--color-primary, currentColor);"),
+        "the ring colour must be declared on the rule, not faded in: {rule}"
+    );
+    assert!(
+        rule.contains("outline-offset: 2px;"),
+        "the rule's resting offset must be 2px: {rule}"
+    );
+    assert!(
+        rule.contains("animation: ld-focus-ring-in var(--ld-duration-fast)"),
+        "the rule must still run the offset entrance: {rule}"
+    );
+
+    // Reduced motion removes the motion only; the ring itself stays (the
+    // colour and resting offset are on the rule, outside the media block).
+    let reduced_start = css
+        .find("@media (prefers-reduced-motion: reduce)")
+        .expect("missing prefers-reduced-motion block");
+    let reduced = &css[reduced_start..];
+    assert!(
+        reduced.contains(".ld-focus-ring:focus-visible,"),
+        "reduced-motion block must still cover the focus ring: {reduced}"
+    );
+    assert!(
+        !reduced.contains("outline"),
+        "reduced-motion must not touch the ring's outline, only its animation: {reduced}"
+    );
+}
+
 #[test]
 fn animations_css_defines_drawer_keyframes() {
     let css = ui_animations_css();

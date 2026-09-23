@@ -82,6 +82,20 @@ pub struct ClientCallWorkspaceTexts {
     pub saved: String,
     /// Explanation while completion has not been established.
     pub finish_hint: String,
+    /// Why every control is disabled while the host has minted no call context.
+    pub not_ready: String,
+    /// Why the number, saved numbers, pad and chooser are locked during a call or a save.
+    pub destination_locked: String,
+    /// Why the pad digits are disabled at the 64-character limit.
+    pub destination_full: String,
+    /// Why Place call / Backspace are disabled with no usable number.
+    pub needs_number: String,
+    /// Why the contact write is disabled with no chosen field or no changed number.
+    pub save_number_hint: String,
+    /// Why the call-record fields are read-only once the record is saved.
+    pub wrap_up_locked: String,
+    /// Why Save call record is disabled on an incomplete draft after the call finished.
+    pub wrap_up_incomplete: String,
     /// Existing live-console labels and statuses.
     pub softphone: SoftphoneTexts,
 }
@@ -113,6 +127,13 @@ impl Default for ClientCallWorkspaceTexts {
             follow_up: "Callback instructions".into(), follow_up_hint: "Include when and who should call. This records instructions; it does not schedule a call.".into(),
             save_wrap_up: "Save call record".into(), saved: "Saved".into(),
             finish_hint: "Saving becomes available when the host confirms this call has finished.".into(),
+            not_ready: "Calling is not available for this client right now.".into(),
+            destination_locked: "The number cannot change while a call is in progress or a record is saving.".into(),
+            destination_full: "The number has reached its 64-character limit.".into(),
+            needs_number: "Enter or choose a number first.".into(),
+            save_number_hint: "Choose a contact field and enter a different number to save it.".into(),
+            wrap_up_locked: "This call record is saved and can no longer be edited.".into(),
+            wrap_up_incomplete: "Choose an outcome (and callback instructions for a callback) to save.".into(),
             softphone: SoftphoneTexts::default(),
         }
     }

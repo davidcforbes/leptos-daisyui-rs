@@ -5,12 +5,14 @@ mod component;
 mod date_filter;
 mod draft_edit;
 mod emphasis;
+mod export_action;
 mod focus_request;
 mod grouping;
 mod identity;
 mod model;
 mod multi_selection;
 mod paging;
+mod row_actions;
 mod saved_filters;
 mod saved_filters_bar;
 mod selection;
@@ -18,8 +20,8 @@ mod storage;
 mod types;
 
 pub use auto_filters::{
-    EntityAutoFilterTexts, EntityAutoFilters, entity_auto_filter_matches,
-    entity_auto_filter_options,
+    EntityAutoFilterCopy, EntityAutoFilterTexts, EntityAutoFilters, entity_auto_filter_matches,
+    entity_auto_filter_options, entity_auto_filter_text,
 };
 pub use date_filter::{
     EntityDate, EntityDateBound, EntityDateFilter, EntityDateFilterCause, EntityDateFilterProposal,
@@ -31,6 +33,10 @@ pub use draft_edit::{
     EntityEditTarget,
 };
 pub use emphasis::{EntityRowEmphasis, EntityRowEmphasisClassifier};
+pub use export_action::{
+    ENTITY_EXPORT_GLYPH, EntityExportAction, EntityExportActionTexts, entity_export_action_label,
+    entity_export_disabled_reason,
+};
 pub use focus_request::{
     EntityFocusRequest, EntityFocusRequestOutcome, EntityFocusRequestResolution,
     EntityFocusRequestTarget, entity_focus_request_outcome,
@@ -54,6 +60,9 @@ pub use multi_selection::{
     propose_entity_row_toggle,
 };
 pub use paging::EntityPagePlan;
+pub use row_actions::{
+    EntityRowActionTexts, RowActionButton, RowActionKind, entity_row_action_label,
+};
 pub use saved_filters::{
     ENTITY_SAVED_FILTER_BADGE_CHARS, ENTITY_SAVED_FILTER_LIMIT, EntitySavedFilter,
     EntitySavedFilterChange, EntitySavedFilterTerm, EntitySavedFilterTexts, EntitySavedFilters,

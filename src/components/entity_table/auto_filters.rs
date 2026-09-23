@@ -41,6 +41,32 @@
 //! The record-list composite in the consuming application turns the filter
 //! row ON by default: every column of a `RecordListPage` table is
 //! `.filterable()` unless the page opts one out with `.not_filterable()`.
+//!
+//! # The header is read live (ldui-xgj8)
+//!
+//! Every generated label, placeholder and "All" option substitutes the
+//! column HEADER into the consumer's [`EntityAutoFilterTexts`] template. The
+//! texts are a signal, and consumers swap them on a language change -- but a
+//! consumer that rebuilds its columns reactively (Spanish headers) needs the
+//! `{column}` half to move too, or the cells read "Filtrar Work type". Build
+//! with [`EntityAutoFilters::from_columns`] when your columns are a signal:
+//! the filter SET (which columns, their ids, kinds, accessors and value
+//! signals) is fixed from the columns' value at build time, while each
+//! filter's header is looked up in the live signal by column id on every
+//! read. [`EntityAutoFilters::new`] takes a plain slice and keeps a static
+//! header; both go through the same internals.
+//!
+//! ```rust,ignore
+//! let columns = Signal::derive_local(move || columns_for(language.get()));
+//! let auto = EntityAutoFilters::from_columns(columns, data, "notes", texts);
+//! view! { <EntityTable columns=columns column_filters=auto.filters() /* … */ /> }
+//! ```
+//!
+//! A column whose filter is a server round trip declares
+//! `.filterable_text_debounced(ms)` (ldui-ga96) and gets an
+//! [`EntityColumnFilter::text_debounced`] cell: it applies once typing goes
+//! quiet or on Enter, never per keystroke and never through an Apply button.
+//! The local predicate still runs on the committed value.
 
 use super::types::{
     EntityColumn, EntityColumnFilter, EntityColumnFilterOption, EntityColumnFilters,
@@ -97,7 +123,9 @@ pub fn entity_auto_filter_matches(kind: EntityResolvedFilterKind, cell: &str, va
         return true;
     }
     match kind {
-        EntityResolvedFilterKind::Text => cell.to_lowercase().contains(&value.to_lowercase()),
+        EntityResolvedFilterKind::Text | EntityResolvedFilterKind::TextDebounced { .. } => {
+            cell.to_lowercase().contains(&value.to_lowercase())
+        }
         EntityResolvedFilterKind::Options => cell == value,
     }
 }
@@ -124,13 +152,36 @@ struct AutoFilterPredicate<T> {
     value: RwSignal<String>,
 }
 
+/// The live copy of one framework-built filter: the column header it
+/// substitutes and the three texts derived from it. Every field is a
+/// signal, so a consumer can render the same accessible name the filter
+/// row uses (a chip, a tooltip) without re-deriving the template.
+#[derive(Clone, Copy, Debug)]
+pub struct EntityAutoFilterCopy {
+    /// The column this copy belongs to.
+    pub column_id: &'static str,
+    /// The header substituted into every template: live from the columns
+    /// signal under [`EntityAutoFilters::from_columns`], captured once under
+    /// [`EntityAutoFilters::new`].
+    pub header: Signal<String>,
+    /// [`EntityAutoFilterTexts::label`] with `{column}` substituted.
+    pub label: Signal<String>,
+    /// [`EntityAutoFilterTexts::placeholder`] with `{column}` substituted.
+    pub placeholder: Signal<String>,
+    /// [`EntityAutoFilterTexts::all`] with `{column}` substituted.
+    pub all: Signal<String>,
+}
+
 /// The framework-built filter set for one table: its controls, its value
 /// signals and the filtered rows. Build once per column set with
-/// [`EntityAutoFilters::new`]; hand [`Self::filters`] to
-/// `EntityTable::column_filters` and [`Self::rows`] to `EntityTable::data`.
+/// [`EntityAutoFilters::new`] (a plain slice) or
+/// [`EntityAutoFilters::from_columns`] (a columns signal whose headers are
+/// read live); hand [`Self::filters`] to `EntityTable::column_filters` and
+/// [`Self::rows`] to `EntityTable::data`.
 pub struct EntityAutoFilters<T: 'static> {
     filters: Vec<EntityColumnFilter>,
     values: Rc<Vec<(&'static str, RwSignal<String>)>>,
+    copy: Rc<Vec<EntityAutoFilterCopy>>,
     rows: Signal<Rc<Vec<T>>, LocalStorage>,
 }
 
@@ -139,6 +190,7 @@ impl<T: 'static> Clone for EntityAutoFilters<T> {
         Self {
             filters: self.filters.clone(),
             values: Rc::clone(&self.values),
+            copy: Rc::clone(&self.copy),
             rows: self.rows,
         }
     }
@@ -154,6 +206,11 @@ impl<T: Clone + 'static> EntityAutoFilters<T> {
     /// pass the same signal to `EntityTable::source_data` so an over-narrow
     /// filter reads as "no matching rows" rather than "no rows".
     ///
+    /// The column header each label, placeholder and "All" option
+    /// substitutes is captured from this slice. When your columns are a
+    /// signal that is rebuilt on a language change, build with
+    /// [`Self::from_columns`] instead so the header follows it (ldui-xgj8).
+    ///
     /// # Panics
     ///
     /// When `control_id_prefix` is empty, for the same reason
@@ -165,14 +222,62 @@ impl<T: Clone + 'static> EntityAutoFilters<T> {
         control_id_prefix: impl Into<String>,
         texts: impl Into<Signal<EntityAutoFilterTexts>>,
     ) -> Self {
+        Self::build(columns, None, data, control_id_prefix, texts)
+    }
+
+    /// Builds the filter set from a columns SIGNAL, reading each column's
+    /// header live (ldui-xgj8).
+    ///
+    /// The filter set itself -- which columns filter, their control ids
+    /// (`"{prefix}-{column id}-filter"`), kinds, accessors and value signals
+    /// -- is fixed from the signal's value at build time, exactly as
+    /// [`Self::new`] fixes it from a slice, so filter identity survives a
+    /// column rebuild: a typed value keeps filtering and a saved filter
+    /// keeps applying. What follows the signal is the copy: every label,
+    /// placeholder and "All" option looks its column up in the live signal
+    /// by id on each read, so a consumer that swaps to Spanish headers and
+    /// Spanish [`EntityAutoFilterTexts`] gets "Filtrar Estado", not
+    /// "Filtrar Status". A column whose id has vanished from the signal
+    /// falls back to the header captured at build time.
+    ///
+    /// Pass the same signal to `EntityTable::columns`. Adding or removing a
+    /// FILTERABLE column later needs a rebuild -- the set does not grow.
+    ///
+    /// # Panics
+    ///
+    /// When `control_id_prefix` is empty; see [`Self::new`].
+    pub fn from_columns(
+        columns: Signal<Vec<EntityColumn<T>>, LocalStorage>,
+        data: Signal<Rc<Vec<T>>, LocalStorage>,
+        control_id_prefix: impl Into<String>,
+        texts: impl Into<Signal<EntityAutoFilterTexts>>,
+    ) -> Self {
+        columns.with_untracked(|snapshot| {
+            Self::build(snapshot, Some(columns), data, control_id_prefix, texts)
+        })
+    }
+
+    fn build(
+        columns: &[EntityColumn<T>],
+        live_columns: Option<Signal<Vec<EntityColumn<T>>, LocalStorage>>,
+        data: Signal<Rc<Vec<T>>, LocalStorage>,
+        control_id_prefix: impl Into<String>,
+        texts: impl Into<Signal<EntityAutoFilterTexts>>,
+    ) -> Self {
         let prefix = control_id_prefix.into();
         assert!(
             !prefix.trim().is_empty(),
             "EntityAutoFilters control_id_prefix must not be empty"
         );
         let texts = texts.into();
+        // `Signal::derive` wants a `Send + Sync` closure and the columns
+        // signal is thread-local; park it in a `StoredValue::new_local` so
+        // the closures below capture only a `Copy` handle (the same pattern
+        // the option list uses for `data`).
+        let live_columns = StoredValue::new_local(live_columns);
         let mut filters = Vec::new();
         let mut values = Vec::new();
+        let mut copy = Vec::new();
         let mut predicates: Vec<AutoFilterPredicate<T>> = Vec::new();
         for column in columns {
             let Some(kind) = column.resolved_filter_kind() else {
@@ -180,24 +285,62 @@ impl<T: Clone + 'static> EntityAutoFilters<T> {
             };
             let value = RwSignal::new(String::new());
             let control_id = format!("{prefix}-{}-filter", column.id);
-            let header = column.header.clone();
+            let column_id = column.id;
+            let captured_header = column.header.clone();
+            let header = Signal::derive(move || {
+                live_columns
+                    .with_value(|live| {
+                        live.as_ref().and_then(|columns| {
+                            columns.with(|columns| {
+                                columns
+                                    .iter()
+                                    .find(|column| column.id == column_id)
+                                    .map(|column| column.header.clone())
+                            })
+                        })
+                    })
+                    .unwrap_or_else(|| captured_header.clone())
+            });
             let label = Signal::derive(move || {
-                texts.with(|texts| entity_auto_filter_text(&texts.label, &header))
+                texts.with(|texts| {
+                    header.with(|header| entity_auto_filter_text(&texts.label, header))
+                })
+            });
+            let placeholder = Signal::derive(move || {
+                texts.with(|texts| {
+                    header.with(|header| entity_auto_filter_text(&texts.placeholder, header))
+                })
+            });
+            let all = Signal::derive(move || {
+                texts
+                    .with(|texts| header.with(|header| entity_auto_filter_text(&texts.all, header)))
+            });
+            copy.push(EntityAutoFilterCopy {
+                column_id,
+                header,
+                label,
+                placeholder,
+                all,
             });
             let on_change = Callback::new(move |next: String| value.set(next));
             let filter = match kind {
-                EntityResolvedFilterKind::Text => {
-                    let header = column.header.clone();
-                    let placeholder = Signal::derive(move || {
-                        texts.with(|texts| entity_auto_filter_text(&texts.placeholder, &header))
-                    });
-                    EntityColumnFilter::text(
+                EntityResolvedFilterKind::Text => EntityColumnFilter::text(
+                    column.id,
+                    control_id,
+                    label,
+                    value,
+                    placeholder,
+                    on_change,
+                ),
+                EntityResolvedFilterKind::TextDebounced { debounce_ms } => {
+                    EntityColumnFilter::text_debounced(
                         column.id,
                         control_id,
                         label,
                         value,
                         placeholder,
                         on_change,
+                        debounce_ms,
                     )
                 }
                 EntityResolvedFilterKind::Options => {
@@ -217,10 +360,6 @@ impl<T: Clone + 'static> EntityAutoFilters<T> {
                                 })
                             })
                         })
-                    });
-                    let header = column.header.clone();
-                    let all = Signal::derive(move || {
-                        texts.with(|texts| entity_auto_filter_text(&texts.all, &header))
                     });
                     EntityColumnFilter::select(
                         column.id, control_id, label, value, all, options, on_change,
@@ -265,6 +404,7 @@ impl<T: Clone + 'static> EntityAutoFilters<T> {
         Self {
             filters,
             values: Rc::new(values),
+            copy: Rc::new(copy),
             rows,
         }
     }
@@ -273,6 +413,35 @@ impl<T: Clone + 'static> EntityAutoFilters<T> {
     /// fixed by the column declarations this was built from.
     pub fn filters(&self) -> EntityColumnFilters {
         EntityColumnFilters::Static(self.filters.clone())
+    }
+
+    /// The live copy (header, label, placeholder, "All") of one column's
+    /// filter, or `None` when the column has no framework-built filter.
+    /// Under [`Self::from_columns`] every signal follows the columns signal;
+    /// under [`Self::new`] the header is the one captured at build time.
+    pub fn copy(&self, column_id: &str) -> Option<EntityAutoFilterCopy> {
+        self.copy
+            .iter()
+            .find(|copy| copy.column_id == column_id)
+            .copied()
+    }
+
+    /// The accessible name of one column's filter control, live; see
+    /// [`Self::copy`].
+    pub fn label(&self, column_id: &str) -> Option<Signal<String>> {
+        self.copy(column_id).map(|copy| copy.label)
+    }
+
+    /// The placeholder of one column's text filter, live; see
+    /// [`Self::copy`]. Present for an option filter too (unused there).
+    pub fn placeholder(&self, column_id: &str) -> Option<Signal<String>> {
+        self.copy(column_id).map(|copy| copy.placeholder)
+    }
+
+    /// The reset-option label of one column's option filter, live; see
+    /// [`Self::copy`]. Present for a text filter too (unused there).
+    pub fn all_label(&self, column_id: &str) -> Option<Signal<String>> {
+        self.copy(column_id).map(|copy| copy.all)
     }
 
     /// The filtered rows, for `EntityTable::data`.
@@ -722,6 +891,236 @@ mod tests {
                 "  ",
                 EntityAutoFilterTexts::default(),
             );
+        });
+    }
+
+    /// `columns()` with the given headers, same ids: what a consumer's
+    /// `Signal::derive_local(move || columns_for(language.get()))` yields
+    /// on either side of a language change.
+    fn columns_with_headers(client: &str, status: &str) -> Vec<EntityColumn<Survey>> {
+        vec![
+            EntityColumn::text("client", client, |row: &Survey| row.client.to_owned()).filterable(),
+            EntityColumn::text("status", status, |row: &Survey| row.status.to_owned())
+                .filterable_options(),
+        ]
+    }
+
+    fn spanish_texts() -> EntityAutoFilterTexts {
+        EntityAutoFilterTexts {
+            label: "Filtrar {column}".to_owned(),
+            placeholder: "Filtrar {column}…".to_owned(),
+            all: "Todos ({column})".to_owned(),
+        }
+    }
+
+    /// ldui-xgj8: the header a filter substitutes must follow the columns
+    /// signal, while the filter's IDENTITY (control id, value signal,
+    /// predicate) stays what it was built as.
+    #[test]
+    fn from_columns_reads_the_header_live_and_keeps_filter_identity() {
+        let owner = Owner::new();
+        owner.with(|| {
+            let data = RwSignal::new_local(Rc::new(surveys()));
+            let columns = RwSignal::new_local(columns_with_headers("Client", "Status"));
+            let texts = RwSignal::new(EntityAutoFilterTexts {
+                placeholder: "Filter {column}…".to_owned(),
+                all: "All ({column})".to_owned(),
+                ..EntityAutoFilterTexts::default()
+            });
+            let auto = EntityAutoFilters::from_columns(
+                columns.into(),
+                data.into(),
+                "nps",
+                Signal::from(texts),
+            );
+            assert_eq!(auto.len(), 2);
+
+            let status = auto.copy("status").expect("status filter copy");
+            assert_eq!(status.header.get(), "Status");
+            assert_eq!(status.label.get(), "Filter Status");
+            assert_eq!(status.all.get(), "All (Status)");
+            let client_label = auto.label("client").expect("client label");
+            let client_placeholder = auto.placeholder("client").expect("client placeholder");
+            assert_eq!(client_label.get(), "Filter Client");
+            assert_eq!(client_placeholder.get(), "Filter Client…");
+            assert!(auto.copy("note").is_none(), "no filter, no copy");
+
+            // A value typed BEFORE the language change keeps filtering.
+            auto.value("status")
+                .expect("status filter")
+                .set("Closed".to_owned());
+            assert_eq!(auto.rows().get().len(), 1);
+
+            // The consumer swaps its columns and its texts, as Office does.
+            columns.set(columns_with_headers("Cliente", "Estado"));
+            texts.set(spanish_texts());
+
+            assert_eq!(
+                status.label.get(),
+                "Filtrar Estado",
+                "the {{column}} half must move with the columns signal"
+            );
+            assert_eq!(status.all.get(), "Todos (Estado)");
+            assert_eq!(client_label.get(), "Filtrar Cliente");
+            assert_eq!(client_placeholder.get(), "Filtrar Cliente…");
+
+            // Identity is untouched: same control ids, same value signal,
+            // same rows.
+            let EntityColumnFilters::Static(filters) = auto.filters() else {
+                panic!("auto filters are a static declaration set");
+            };
+            assert_eq!(filters[0].control_id(), Some("nps-client-filter"));
+            assert_eq!(filters[1].control_id(), Some("nps-status-filter"));
+            assert_eq!(
+                auto.value("status").expect("status filter").get(),
+                "Closed",
+                "the value signal is the one built, not a fresh one"
+            );
+            assert_eq!(auto.rows().get().len(), 1, "the typed value still applies");
+
+            // Only the texts changing back moves the template, not the header.
+            texts.set(EntityAutoFilterTexts::default());
+            assert_eq!(status.label.get(), "Filter Estado");
+        });
+    }
+
+    /// A column whose id has left the live signal keeps the header it was
+    /// built with rather than reading as "Filter " -- the set is fixed at
+    /// build time, so the control still exists and still needs a name.
+    #[test]
+    fn from_columns_falls_back_to_the_captured_header_when_the_id_vanishes() {
+        let owner = Owner::new();
+        owner.with(|| {
+            let data = RwSignal::new_local(Rc::new(surveys()));
+            let columns = RwSignal::new_local(columns_with_headers("Client", "Status"));
+            let auto = EntityAutoFilters::from_columns(
+                columns.into(),
+                data.into(),
+                "nps",
+                EntityAutoFilterTexts::default(),
+            );
+            let label = auto.label("status").expect("status label");
+            assert_eq!(label.get(), "Filter Status");
+
+            columns.set(vec![
+                EntityColumn::text("client", "Cliente", |row: &Survey| row.client.to_owned())
+                    .filterable(),
+            ]);
+            assert_eq!(
+                auto.label("client").expect("client label").get(),
+                "Filter Cliente"
+            );
+            assert_eq!(
+                label.get(),
+                "Filter Status",
+                "captured header is the fallback"
+            );
+            assert_eq!(auto.len(), 2, "the set never shrinks after build");
+        });
+    }
+
+    /// The slice constructor is unchanged: its header is the one captured.
+    #[test]
+    fn new_with_a_slice_keeps_a_static_header_and_still_follows_the_texts() {
+        let owner = Owner::new();
+        owner.with(|| {
+            let data = RwSignal::new_local(Rc::new(surveys()));
+            let texts = RwSignal::new(EntityAutoFilterTexts::default());
+            let auto = EntityAutoFilters::new(
+                &columns_with_headers("Client", "Status"),
+                data.into(),
+                "nps",
+                Signal::from(texts),
+            );
+            let label = auto.label("status").expect("status label");
+            assert_eq!(label.get(), "Filter Status");
+            texts.set(spanish_texts());
+            assert_eq!(label.get(), "Filtrar Status");
+            assert_eq!(auto.copy("status").expect("copy").header.get(), "Status");
+        });
+    }
+
+    /// ldui-ga96: the debounced mode resolves to its own kind (so the auto
+    /// path builds the debounced cell), overrides a badge presentation like
+    /// the other explicit modes, and matches exactly as a text filter does.
+    #[test]
+    fn filterable_text_debounced_resolves_to_the_debounced_kind_with_the_text_predicate() {
+        let column = EntityColumn::text("client", "Client", |row: &Survey| row.client.to_owned())
+            .filterable_text_debounced(300);
+        assert_eq!(
+            column.filter_mode,
+            EntityColumnFilterMode::TextDebounced { debounce_ms: 300 }
+        );
+        assert_eq!(column.filter_mode.as_str(), "text-debounced");
+        let kind = column.resolved_filter_kind();
+        assert_eq!(
+            kind,
+            Some(EntityResolvedFilterKind::TextDebounced { debounce_ms: 300 })
+        );
+        assert_eq!(
+            kind.expect("declared").as_str(),
+            "text",
+            "the rendered data-entity-filter-kind stays text; apply says debounced"
+        );
+
+        let badge = columns().remove(1).filterable_text_debounced(250);
+        assert_eq!(
+            badge.resolved_filter_kind(),
+            Some(EntityResolvedFilterKind::TextDebounced { debounce_ms: 250 }),
+            "an explicit mode overrides the badge presentation rule"
+        );
+        assert_eq!(
+            columns()
+                .remove(4)
+                .filterable_text_debounced(250)
+                .resolved_filter_kind(),
+            None,
+            "an action column never filters"
+        );
+
+        let kind = EntityResolvedFilterKind::TextDebounced { debounce_ms: 300 };
+        assert!(entity_auto_filter_matches(kind, "Acme Holdings", "hold"));
+        assert!(entity_auto_filter_matches(kind, "Acme Holdings", "  ACME "));
+        assert!(!entity_auto_filter_matches(kind, "Acme Holdings", "beta"));
+        assert!(entity_auto_filter_matches(kind, "anything", ""));
+    }
+
+    /// The auto path builds the debounced cell under the same identity rules
+    /// and filters locally on the COMMITTED value signal.
+    #[test]
+    fn a_debounced_column_gets_a_filter_with_the_standard_identity_and_local_predicate() {
+        let owner = Owner::new();
+        owner.with(|| {
+            let data = RwSignal::new_local(Rc::new(surveys()));
+            let columns = vec![
+                EntityColumn::text("client", "Client", |row: &Survey| row.client.to_owned())
+                    .filterable_text_debounced(300),
+                EntityColumn::text("status", "Status", |row: &Survey| row.status.to_owned())
+                    .filterable(),
+            ];
+            let auto = EntityAutoFilters::new(
+                &columns,
+                data.into(),
+                "nps",
+                EntityAutoFilterTexts::default(),
+            );
+            assert_eq!(auto.len(), 2);
+            let EntityColumnFilters::Static(filters) = auto.filters() else {
+                panic!("auto filters are a static declaration set");
+            };
+            assert_eq!(filters[0].column_id, "client");
+            assert_eq!(filters[0].control_id(), Some("nps-client-filter"));
+            assert_eq!(auto.label("client").expect("label").get(), "Filter Client");
+
+            // The committed value is what the rows follow; the cell's own
+            // typing buffer never reaches the predicate.
+            auto.value("client")
+                .expect("client filter")
+                .set("acme".to_owned());
+            assert_eq!(auto.active_count(), 1);
+            assert_eq!(auto.rows().get().len(), 2);
+            auto.clear_all();
+            assert_eq!(auto.rows().get().len(), 3);
         });
     }
 }

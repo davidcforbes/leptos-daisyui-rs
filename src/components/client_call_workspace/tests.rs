@@ -414,3 +414,331 @@ fn localized_structured_statuses_preserve_host_distinctions() {
         assert_eq!(texts.regeneration(status), label);
     }
 }
+
+// Office op-stjm9: every control the workspace renders announces a name, and
+// every disabled one a reason. The render path reads these same functions for
+// `aria-label`, `disabled` and the `aria-describedby` reason line.
+fn assert_named_and_explained(state: &ClientCallWorkspaceState, case: &str) -> usize {
+    let texts = ClientCallWorkspaceTexts::default();
+    let mut disabled = 0;
+    for control in ClientCallControl::inventory(state) {
+        let name = texts.control_name(&control, state);
+        assert!(
+            !name.trim().is_empty(),
+            "{case}: {control:?} has no accessible name"
+        );
+        let reason = texts.disabled_reason(&control, state);
+        if state.control_enabled(&control) {
+            assert_eq!(
+                reason, None,
+                "{case}: enabled {control:?} must not claim a reason"
+            );
+        } else {
+            disabled += 1;
+            assert!(
+                reason.as_deref().is_some_and(|r| !r.trim().is_empty()),
+                "{case}: disabled {control:?} has no reason"
+            );
+        }
+    }
+    disabled
+}
+
+fn not_ready() -> ClientCallWorkspaceState {
+    let mut state = ready();
+    state.call.context_id = String::new();
+    state
+}
+
+#[test]
+fn every_control_is_named_and_every_disabled_control_says_why() {
+    let mut cases: Vec<(&str, ClientCallWorkspaceState)> = vec![
+        ("default", ClientCallWorkspaceState::default()),
+        ("not-ready", not_ready()),
+        ("ready", ready()),
+    ];
+    let mut ringing = ready();
+    ringing.attempt = ClientCallAttempt::AgentRinging;
+    cases.push(("ringing", ringing));
+    let mut finished = ready();
+    finished.attempt = ClientCallAttempt::Finished;
+    cases.push(("finished-empty-draft", finished.clone()));
+    let mut saved = finished.clone();
+    saved.wrap_up.as_mut().unwrap().saved = true;
+    cases.push(("saved", saved));
+    let mut pending = finished.clone();
+    pending.wrap_up.as_mut().unwrap().pending = true;
+    cases.push(("pending", pending));
+    let mut callback = ready();
+    callback.wrap_up.as_mut().unwrap().outcome = Some(ClientCallOutcome::RequestedCallBack);
+    cases.push(("callback-draft", callback));
+    let mut blocked = ready();
+    blocked.destination = String::new();
+    blocked.call.client.phones[0].blocked_reason = Some("Do not call".into());
+    blocked.number_update = Some(ClientCallNumberUpdate {
+        field_id: "phone".into(),
+        targets: vec![target("phone"), target("mobile")],
+        blocked_reason: Some("Read-only contact".into()),
+        ..Default::default()
+    });
+    blocked.guidance = Some(ClientCallGuidance {
+        regeneration: Some(ClientCallRegeneration {
+            state: ClientCallRegenerationState::Busy,
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    cases.push(("blocked", blocked));
+    let mut full = ready();
+    full.destination = "1".repeat(64);
+    cases.push(("full", full));
+    for (case, state) in &cases {
+        assert_named_and_explained(state, case);
+    }
+}
+
+#[test]
+fn a_missing_call_context_disables_all_nine_production_controls_with_one_reason() {
+    let texts = ClientCallWorkspaceTexts::default();
+    let state = not_ready();
+    let visible: Vec<_> = ClientCallControl::inventory(&state)
+        .into_iter()
+        .filter(|c| {
+            !matches!(
+                c,
+                ClientCallControl::Digit(_) | ClientCallControl::Backspace
+            )
+        })
+        .collect();
+    assert_eq!(visible.len(), 9, "{visible:?}");
+    for control in &visible {
+        assert!(!state.control_enabled(control), "{control:?}");
+        assert_eq!(
+            texts.disabled_reason(control, &state),
+            Some(texts.not_ready.clone()),
+            "{control:?}"
+        );
+    }
+}
+
+#[test]
+fn names_match_visible_labels_and_digits_name_themselves() {
+    let texts = ClientCallWorkspaceTexts::default();
+    let state = ready();
+    assert_eq!(
+        texts.control_name(&ClientCallControl::Dial, &state),
+        texts.call
+    );
+    assert_eq!(
+        texts.control_name(&ClientCallControl::Dismiss, &state),
+        texts.close
+    );
+    assert_eq!(
+        texts.control_name(&ClientCallControl::Outcome, &state),
+        texts.outcome
+    );
+    assert_eq!(
+        texts.control_name(&ClientCallControl::SavedNumber("phone".into()), &state),
+        "Phone · +14155550142"
+    );
+    for digit in ClientCallControl::DIGITS {
+        assert_eq!(
+            texts.control_name(&ClientCallControl::Digit(digit), &state),
+            digit.to_string()
+        );
+    }
+}
+
+#[test]
+fn disabled_reasons_prefer_the_hosts_explanation_then_the_lock() {
+    let texts = ClientCallWorkspaceTexts::default();
+    let mut state = ready();
+    state.dial_blocked_reason = Some("Set yourself Available".into());
+    assert_eq!(
+        texts
+            .disabled_reason(&ClientCallControl::Dial, &state)
+            .as_deref(),
+        Some("Set yourself Available")
+    );
+    state.attempt = ClientCallAttempt::AgentRinging;
+    assert_eq!(
+        texts.disabled_reason(&ClientCallControl::Destination, &state),
+        Some(texts.destination_locked.clone())
+    );
+    let mut state = ready();
+    assert_eq!(
+        texts.disabled_reason(&ClientCallControl::SaveWrapUp, &state),
+        Some(texts.finish_hint.clone())
+    );
+    state.attempt = ClientCallAttempt::Finished;
+    assert_eq!(
+        texts.disabled_reason(&ClientCallControl::SaveWrapUp, &state),
+        Some(texts.wrap_up_incomplete.clone())
+    );
+    state.wrap_up.as_mut().unwrap().saved = true;
+    assert_eq!(
+        texts.disabled_reason(&ClientCallControl::Notes, &state),
+        Some(texts.wrap_up_locked.clone())
+    );
+}
+
+// ldui-tyyn: the inventory is CLOSED. `inventoried` matches every variant
+// with no wildcard, so adding a variant to `ClientCallControl` fails to
+// compile until it is added here, and this test then fails until it is also
+// returned by `ClientCallControl::inventory` for the maximal state below.
+fn inventoried(control: &ClientCallControl) {
+    match control {
+        ClientCallControl::Dismiss
+        | ClientCallControl::Destination
+        | ClientCallControl::SavedNumber(_)
+        | ClientCallControl::Keypad
+        | ClientCallControl::Digit(_)
+        | ClientCallControl::Backspace
+        | ClientCallControl::NumberTarget
+        | ClientCallControl::SaveNumber
+        | ClientCallControl::Dial
+        | ClientCallControl::Regenerate
+        | ClientCallControl::Outcome
+        | ClientCallControl::Notes
+        | ClientCallControl::Duration
+        | ClientCallControl::FollowUp
+        | ClientCallControl::SaveWrapUp => {}
+    }
+}
+
+/// A state in which every control the workspace can render is rendered.
+fn maximal() -> ClientCallWorkspaceState {
+    let mut state = ready();
+    state.number_update = Some(ClientCallNumberUpdate {
+        field_id: "phone".into(),
+        targets: vec![target("phone"), target("mobile")],
+        ..Default::default()
+    });
+    state.guidance = Some(ClientCallGuidance {
+        regeneration: Some(ClientCallRegeneration::default()),
+        ..Default::default()
+    });
+    state.wrap_up.get_or_insert_with(Default::default).outcome =
+        Some(ClientCallOutcome::RequestedCallBack);
+    state
+}
+
+#[test]
+fn inventory_is_closed_and_lists_every_control_in_document_order() {
+    let state = maximal();
+    let inventory = ClientCallControl::inventory(&state);
+    let mut expected = vec![
+        ClientCallControl::Dismiss,
+        ClientCallControl::Destination,
+        ClientCallControl::SavedNumber("phone".into()),
+        ClientCallControl::Keypad,
+    ];
+    expected.extend(
+        ClientCallControl::DIGITS
+            .into_iter()
+            .map(ClientCallControl::Digit),
+    );
+    expected.extend([
+        ClientCallControl::Backspace,
+        ClientCallControl::NumberTarget,
+        ClientCallControl::SaveNumber,
+        ClientCallControl::Dial,
+        ClientCallControl::Regenerate,
+        ClientCallControl::Outcome,
+        ClientCallControl::Notes,
+        ClientCallControl::Duration,
+        ClientCallControl::FollowUp,
+        ClientCallControl::SaveWrapUp,
+    ]);
+    assert_eq!(inventory, expected);
+    for control in &inventory {
+        inventoried(control);
+    }
+    // Every rendered control is named, and each disabled one explained.
+    let _disabled = assert_named_and_explained(&state, "maximal");
+}
+
+#[test]
+fn inventory_drops_controls_the_state_does_not_render() {
+    let mut state = maximal();
+    state.number_update = None;
+    state.guidance = None;
+    state.wrap_up = None;
+    let inventory = ClientCallControl::inventory(&state);
+    for absent in [
+        ClientCallControl::NumberTarget,
+        ClientCallControl::SaveNumber,
+        ClientCallControl::Regenerate,
+        ClientCallControl::Outcome,
+        ClientCallControl::Notes,
+        ClientCallControl::Duration,
+        ClientCallControl::FollowUp,
+        ClientCallControl::SaveWrapUp,
+    ] {
+        assert!(!inventory.contains(&absent), "{absent:?}");
+    }
+    let mut state = maximal();
+    state.number_update.as_mut().unwrap().targets.clear();
+    let inventory = ClientCallControl::inventory(&state);
+    assert!(!inventory.contains(&ClientCallControl::NumberTarget));
+    assert!(inventory.contains(&ClientCallControl::SaveNumber));
+    let mut state = maximal();
+    state.wrap_up.as_mut().unwrap().outcome = Some(ClientCallOutcome::Interested);
+    assert!(!ClientCallControl::inventory(&state).contains(&ClientCallControl::FollowUp));
+}
+
+#[test]
+fn default_not_ready_text() {
+    assert_eq!(
+        ClientCallWorkspaceTexts::default().not_ready,
+        "Calling is not available for this client right now."
+    );
+}
+
+#[test]
+fn default_destination_locked_text() {
+    assert_eq!(
+        ClientCallWorkspaceTexts::default().destination_locked,
+        "The number cannot change while a call is in progress or a record is saving."
+    );
+}
+
+#[test]
+fn default_destination_full_text() {
+    assert_eq!(
+        ClientCallWorkspaceTexts::default().destination_full,
+        "The number has reached its 64-character limit."
+    );
+}
+
+#[test]
+fn default_needs_number_text() {
+    assert_eq!(
+        ClientCallWorkspaceTexts::default().needs_number,
+        "Enter or choose a number first."
+    );
+}
+
+#[test]
+fn default_save_number_hint_text() {
+    assert_eq!(
+        ClientCallWorkspaceTexts::default().save_number_hint,
+        "Choose a contact field and enter a different number to save it."
+    );
+}
+
+#[test]
+fn default_wrap_up_locked_text() {
+    assert_eq!(
+        ClientCallWorkspaceTexts::default().wrap_up_locked,
+        "This call record is saved and can no longer be edited."
+    );
+}
+
+#[test]
+fn default_wrap_up_incomplete_text() {
+    assert_eq!(
+        ClientCallWorkspaceTexts::default().wrap_up_incomplete,
+        "Choose an outcome (and callback instructions for a callback) to save."
+    );
+}

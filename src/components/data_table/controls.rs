@@ -91,7 +91,7 @@ pub fn DataTableControls(
                 }}
             </span>
 
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-2" data-pagination="true">
                 <button
                     class=button_class
                     disabled=prev_disabled

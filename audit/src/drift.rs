@@ -1,8 +1,9 @@
 //! daisyUI component-drift heuristics: a second, small in-page sweep separate
 //! from the engine's generic style sweep. The engine (`pixelproof-style-audit`)
-//! knows no framework, only values; these five rules are daisyUI and WCAG
+//! knows no framework, only values; these six rules are daisyUI and WCAG
 //! knowledge —
-//! "a raw `<button>` without `.btn`", "a raw `<table>` without `.table`" —
+//! "a raw `<button>` without `.btn`", "a raw `<table>` without `.table`",
+//! "a disabled control that never says why" —
 //! so they live here rather than in the engine.
 //!
 //! Follows the engine's `sweep_js` pattern (see
@@ -83,16 +84,105 @@ mod tests {
     fn drift_js_embeds_the_mount_selector_as_json() {
         let js = drift_js("main");
         assert!(js.contains("\"main\""));
-        // The four rule ids must appear in the generated source, so a rule
+        // Every rule id must appear in the generated source, so a rule
         // cannot be silently dropped.
         for rule in [
             "button-without-btn",
             "table-without-table-class",
             "badge-lookalike",
             "input-outside-field",
+            "target-too-small",
+            "disabled-without-reason",
         ] {
             assert!(js.contains(rule), "rule {rule} missing from generated JS");
         }
+    }
+
+    /// ldui-p82h: the a11y half of `disabled_reason`. The rule must check
+    /// BOTH halves -- an accessible name and an `aria-describedby` that
+    /// resolves to text -- and must report the Button's own
+    /// `data-disabled-without-reason` marker so the finding names the fix.
+    #[test]
+    fn disabled_without_reason_rule_checks_name_and_description_and_reports_the_marker() {
+        let js = drift_js("main");
+        assert!(
+            js.contains("disabled-without-reason"),
+            "the rule is embedded"
+        );
+        assert!(
+            js.contains("el.tagName === 'BUTTON' && el.disabled"),
+            "a native disabled button is a disabled control"
+        );
+        assert!(
+            js.contains("el.classList.contains('btn-disabled')"),
+            "daisyUI's visual-only disabled class is a disabled control too"
+        );
+        assert!(
+            js.contains("idrefsText(el, 'aria-describedby')"),
+            "the reason must be resolved through aria-describedby idrefs, not assumed from the attribute's presence"
+        );
+        assert!(
+            js.contains("disabled control has no accessible name"),
+            "a nameless disabled control is the first finding"
+        );
+        assert!(
+            js.contains("has no aria-describedby resolving to non-empty text"),
+            "a described-by that resolves to nothing is the second finding"
+        );
+        assert!(
+            js.contains("el.hasAttribute('data-disabled-without-reason')"),
+            "the Button's marker must be surfaced in the finding"
+        );
+    }
+
+    /// The negative control for the name computation: the Button's reason
+    /// hint is an `aria-hidden` descendant, so the rule's own-text walk must
+    /// skip `aria-hidden` subtrees -- otherwise a reason would count as a
+    /// name and an icon-only disabled button with no label would pass.
+    #[test]
+    fn disabled_without_reason_name_excludes_aria_hidden_descendants() {
+        let js = drift_js("main");
+        assert!(
+            js.contains("c.getAttribute('aria-hidden') !== 'true') walk(c)"),
+            "the own-text walk must not descend into aria-hidden subtrees"
+        );
+        assert!(
+            js.contains("if (!isDisabled) continue;"),
+            "an enabled control is never a finding of this rule (the rule's own negative control)"
+        );
+    }
+
+    /// State-disabled controls are not findings: a pager's current page and
+    /// boundary arrows, a busy control, and a single-select group's chosen
+    /// option carry no reason because there is nothing to explain. The
+    /// exemption is a closed selector list, applied only in rule 6, so a
+    /// genuinely reasonless action can never hide behind it.
+    #[test]
+    fn disabled_without_reason_exempts_state_disabled_controls_only() {
+        let js = drift_js("main");
+        for hook in [
+            "[data-pagination]",
+            "[aria-current=\"page\"]",
+            ".loading",
+            "[aria-busy=\"true\"]",
+            "[aria-checked=\"true\"]",
+            "[aria-pressed=\"true\"]",
+            "[aria-selected=\"true\"]",
+        ] {
+            assert!(
+                js.contains(hook),
+                "state exemption {hook} missing from DISABLED_STATE_EXEMPT"
+            );
+        }
+        assert!(
+            js.contains("if (el.closest(DISABLED_STATE_EXEMPT)) continue;"),
+            "the exemption is applied by ancestry inside rule 6"
+        );
+        assert_eq!(
+            js.matches("DISABLED_STATE_EXEMPT").count(),
+            2,
+            "declared once, used once -- no other rule may borrow the state exemption"
+        );
     }
 
     /// The library's `Pressable` primitive emits `data-pressable="true"` as

@@ -138,7 +138,9 @@ pub fn QuickActionBar(
     // `FnOnce`, and a `view!` child closure must be `Fn`.
     let prefix = StoredValue::new(id_prefix);
     let language_id = move || prefix.with_value(|p| format!("{p}-qa-language"));
+    let needs_language_id = move || prefix.with_value(|p| format!("{p}-qa-translate-reason"));
     let language = RwSignal::new(String::new());
+    let needs_language = move || language.get().trim().is_empty();
 
     let chips = move || {
         let t = texts.get();
@@ -198,11 +200,22 @@ pub fn QuickActionBar(
                 class="btn btn-xs btn-outline"
                 data-ai-chat-quick-action="translate"
                 data-ai-chat-label="qa_translate_button"
-                prop:disabled=move || language.get().trim().is_empty()
+                prop:disabled=needs_language
+                // ldui-p82h: the disabled Translate says why -- the reason is
+                // the sibling hint below, referenced only while it applies.
+                aria-describedby=move || needs_language().then(needs_language_id)
+                title=move || needs_language().then(|| texts.get().qa_translate_needs_language)
                 on:click=translate
             >
                 {move || texts.get().qa_translate_button}
             </button>
+            <span
+                class="sr-only"
+                id=needs_language_id
+                data-ai-chat-label="qa_translate_needs_language"
+            >
+                {move || texts.get().qa_translate_needs_language}
+            </span>
         </div>
     }
 }

@@ -439,6 +439,50 @@ and an accessible description in every placement. A custom filter can read the
 same value through `.description()`, but remains responsible for placing it in
 its own markup.
 
+### Debounced server-apply text filter (ldui-ga96)
+
+**Owner ruling: the filter row holds only cells that apply as typed. There is
+no Apply button in the `thead`.** `EntityColumnFilter::text` applies on every
+keystroke, which is right for a local snapshot and wrong for a server round
+trip — Office's server-paged Clients search grew Apply buttons to cope. The
+sanctioned answer is the debounced variant:
+
+```rust,ignore
+EntityColumnFilter::text_debounced(
+    "client", "clients-client-filter", label, value, placeholder, on_change,
+    300, // debounce_ms
+)
+// or, on the framework-built path:
+EntityColumn::text("client", "Client", |r: &Client| r.name.clone())
+    .filterable_text_debounced(300)
+```
+
+Same identity contract as `text` (control id verbatim in the header,
+`-responsive` suffix in the responsive copy, `value` the sole source of
+truth, `data-entity-filter-kind="text"`); what differs is *when* `on_change`
+runs:
+
+| Moment | Behaviour |
+|---|---|
+| Typing | The cell keeps its own typed text and shows it. Nothing is proposed. The input carries `aria-busy="true"` and `data-entity-filter-pending="true"`; the cell also carries `data-entity-filter-apply="debounced"` and `data-entity-filter-debounce-ms`. |
+| `debounce_ms` of quiet | `on_change` runs **once** with the full typed text. Every keystroke inside the window restarts it. |
+| Enter | Commits **immediately**, cancelling the pending timer — and always, even with nothing pending, so the user has an explicit "apply now" (a re-apply of an unchanged value is a refresh a server-backed page is glad to take). |
+| After a commit | The accepted `value` is displayed again, so a rejected proposal snaps back exactly as `text` does. |
+| Responsive clear | Cancels any pending commit and proposes the empty string at once. |
+
+The typed/pending state and the timer live on the filter, not on one rendered
+placement, so a commit pending when the column moves between the header and
+the responsive panel is neither lost nor duplicated; the timer handle is
+cleared when the owner that built the filter is cleaned up, and the callback
+uses try-forms. On the framework-built path (`EntityColumnFilterMode::TextDebounced`,
+`EntityResolvedFilterKind::TextDebounced`) the local predicate still runs on
+the **committed** value, so a page that hands the table server-filtered rows
+and one that filters locally both behave. `EntityAutoFilters::clear_all()`
+sets the value signal directly and cannot see a header cell's in-flight
+timer; a page that clears programmatically while the user is mid-burst may
+see that burst commit — clear through the cell's own clear action when that
+matters.
+
 ### Controlled date filter (ldui-lx5t)
 
 `EntityColumnFilter::date(column_id, control_id, label, value, invalid_hint,
@@ -553,13 +597,21 @@ there; it does not duplicate column controls above the table. See
 ## Saved filters
 
 The opinionated filter row pairs with an optional **saved filters** bar in the
-table toolbar. Pass `saved_filters=Some(EntitySavedFilters …)` and the table
-renders a left-justified **Save Filter** button plus one badge per saved set
-ahead of the caller's `toolbar_actions` and the column chooser. Clicking **Save
-Filter** opens a framework-owned dialog that names the CURRENT filter values;
-each saved name becomes a badge; clicking a badge proposes applying its values
-to the filter row, and a small `x` on the badge proposes deleting it. `None`
-renders no bar and no dialog.
+table's ONE quick-action row (owner ruling, ldui-q85o, 2026-09-22). Pass
+`saved_filters=Some(EntitySavedFilters …)` and the row renders, LEFT: the
+**Save Filter** button -- always enabled; a click with no filter value set is a
+no-op -- immediately followed by up to five badges, one per saved set, each
+with its own small `x`; RIGHT: the framework `+ New` (when inline editing is
+on), the caller's `toolbar_actions` (Export, via `EntityExportAction`), then
+the column chooser, whose default trigger is the gear icon. There is no visible
+"Filters:" caption -- badges beside Save Filter are self-explanatory -- but the
+badge group keeps an accessible name (`badges_label`, default `"Saved
+filters"`). Clicking **Save Filter** with a value set opens a framework-owned
+dialog that names the CURRENT filter values; clicking a badge proposes applying
+its values to the filter row, and its `x` proposes deleting it. `None` renders
+no bar and no dialog. Hooks: `data-entity-table-toolbar` (the row),
+`data-entity-quick-actions-leading` / `-trailing` (the two clusters),
+`data-entity-saved-filters-bar`, `-open`, `-badges`, `data-entity-saved-filter`.
 
 Every action is a **proposal**, like every other controlled `EntityTable`
 input. The consumer owns the saved list (`EntitySavedFilters::filters`), the
@@ -1716,8 +1768,9 @@ back to `text`, so a future call site cannot skip the fallback and start
 filtering on invisible content.
 
 ⚠️ **If the filter text depends on anything that can change after mount, use
-`with_filter_text_from` instead.** `EntityAutoFilters` takes its columns *once*.
-A closure that captured a language **by value** keeps returning that language
+`with_filter_text_from` instead.** `EntityAutoFilters` takes its filter *set*
+— ids, kinds, accessors — *once* (only the header is read live; see the next
+section). A closure that captured a language **by value** keeps returning that language
 forever while the cells move on, and the symptom is not an error — Office
 shipped this, and a Spanish reader was offered English values that matched no
 Spanish cell, so filtering returned **zero rows silently**. The reactive form
@@ -1728,6 +1781,48 @@ freeze:
 EntityColumn::text("status", "Status", |r: &Job| r.status_code.clone())
     .with_filter_text_from(language, |r: &Job, lang| localize(&r.status_code, *lang))
 ```
+
+## The filter row reads the column header live (ldui-xgj8)
+
+Every framework-built label, placeholder and "All" option substitutes the
+column **header** into the consumer's `EntityAutoFilterTexts` template. The
+texts are a signal and consumers swap them on a language change — but Office
+also rebuilds its *columns* on that change (`Signal::derive_local(move ||
+columns_for(language.get()))`), and `EntityAutoFilters::new(&columns, ..)`
+froze the header at construction, so after the shell switched to Spanish the
+cells read "Filtrar Work type" / "Filtrar Date": the template moved, the
+`{column}` half did not.
+
+**The header is read live; build with `from_columns` when your columns are a
+signal:**
+
+```rust,ignore
+let columns = Signal::derive_local(move || columns_for(language.get()));
+let auto = EntityAutoFilters::from_columns(columns, data, "clients", texts);
+view! { <EntityTable columns=columns column_filters=auto.filters() data=auto.rows() /* … */ /> }
+```
+
+What is fixed at build time and what follows the signal:
+
+| Fixed from the signal's value at build | Live from the signal on every read |
+|---|---|
+| Which columns filter, their ids and control ids (`{prefix}-{id}-filter`) | The header substituted into `label`, `placeholder` and `all` |
+| Each filter's kind (text / debounced / options) and accessor | — |
+| The value signals (`auto.value(id)`) and the row predicate | — |
+
+So a value typed before the swap keeps filtering, a saved filter keeps
+applying, and a browser test reading `[data-entity-filter-control=id]` sees
+the same control with a new accessible name. A column whose id has left the
+signal falls back to the header captured at build — the control still exists
+and still needs a name. Adding or removing a *filterable* column later needs a
+rebuild; the set does not grow.
+
+`EntityAutoFilters::new(&[..])` is unchanged for callers holding a plain
+slice (static header, live texts); both constructors share one builder. The
+derived copy is exposed for consumers that render the same name elsewhere (a
+chip, a tooltip): `auto.copy(id)` returns an `EntityAutoFilterCopy { header,
+label, placeholder, all }` of signals, with `auto.label(id)`,
+`auto.placeholder(id)` and `auto.all_label(id)` as shortcuts.
 
 ## Term-structured saved filters (op-e6dsi)
 
@@ -1820,22 +1915,103 @@ to place anything to the left of **Save Filter**, and the fix is a second slot
 rather than a reordering, because reordering `toolbar_actions` would move
 Export and `+ New` on every table already shipping.
 
-## One caption names the badge group — and only the badge group
+## Row-action presets: icon actions only in rows (ldui-bmqj)
 
-The saved-filter badge row carries a **visible** caption (`badges_label`,
-default `"Saved filters"`) that supplies the group's accessible name through a
-single `aria-labelledby` id. One node's text reaches both the screen and the
-accessibility tree, so a translation or a copy edit cannot leave a hidden name
-disagreeing with the visible one — which is what a hidden `aria-label` beside a
-visible caption invites. It is not rendered when nothing is saved; the empty
-hint stands alone.
+**Icon actions only in rows; text buttons live in the quick-action row.** A
+row is dense and repeats, so a labelled text button per row is what overflowed
+the originating consumer's tables. Page-level actions with visible labels
+belong in `PageQuickActions`.
 
-⚠️ **Do not apply the same idea to the per-column filter row.** Office tried it
-there first and reverted: one shared caption would name all seven controls
+`RowActionButton` is the one canonical shape for a per-row action, and the
+six `RowActionKind`s are the vocabulary:
+
+| Kind | Glyph (sprite id) | Default EN label |
+|---|---|---|
+| `Open` | `eye` | `Open {name}` |
+| `Delete` | `trash` | `Delete {name}` |
+| `Call` | `phone` | `Call {name}` |
+| `Text` | `message` | `Text {name}` |
+| `Email` | `envelope` | `Email {name}` |
+| `Complete` | `circle-check` | `Complete {name}` |
+
+Each renders a square ghost `btn-xs` icon button carrying: the sprite glyph,
+an `aria-label` built from `EntityRowActionTexts` with the row's `{name}`
+substituted ("Delete Ana Ruiz", never a bare "Delete" forty times down a
+column), a daisyUI `Tooltip` with the **same** text, and
+`data-row-action="<kind>"` so a test or audit finds every Delete on a page
+without parsing class lists. Place it inside the table's existing
+`EntityRowAction` slot so framework-owned focus recovery keeps working after
+a row is removed:
+
+```rust
+<EntityRowAction action_id="delete">
+    <RowActionButton
+        kind=RowActionKind::Delete
+        name=row.name.clone()
+        on_click=move |()| on_delete.run(row.id)
+    />
+</EntityRowAction>
+```
+
+A per-row "why not" goes through `disabled_reason`, which is forwarded to
+`Button` unchanged (see the Button guide's "Disabled With a Reason"): the
+action is disabled, the reason resolves through `aria-describedby` and the
+native `title`, and the accessible name is untouched.
+
+The EN templates are the framework's defaults. Spanish (or any other) copy is
+the consumer's to supply through `EntityRowActionTexts`, exactly as
+`EntityAutoFilterTexts` is localized.
+
+## The standard Export action (ldui-e6x8)
+
+`EntityExportAction` is the one Export button, rendered through
+`toolbar_actions`:
+
+```rust
+<EntityTable
+    toolbar_actions=move || view! {
+        <EntityExportAction rows=visible_rows on_export=move |()| export.run(()) />
+    }
+    ...
+/>
+```
+
+It is a square ghost icon button with the sprite's `download` glyph,
+`"Export to CSV"` as both `aria-label` and tooltip (`EntityExportActionTexts`
+localizes it; `{rows}` substitutes the count when a `rows` signal is given),
+and the `data-entity-export="true"` hook. With a `rows` signal, zero rows
+disables it with `"No rows to export"` as its `disabled_reason`, so an empty
+table's Export explains itself instead of silently doing nothing.
+
+The framework does not own encoding, authorization, or download policy.
+`on_export` is a bare trigger; what the consumer writes, how it is encoded,
+and whether the browser downloads it is theirs, typically fed by
+`on_display_projection`.
+
+⚠️ The host document's inlined sprite must define a `download` symbol. The
+crate's `Icon` map does not carry that name as of ldui-e6x8, so the glyph is
+referenced directly (`ENTITY_EXPORT_GLYPH`); a host without the symbol renders
+an empty box, which is the silent failure ldui-q8bj documents.
+
+Both presets are shown on the demo's `/components/row-action-presets` page and
+proven in `tests/row_action_presets_smoke.rs`
+(`cargo xtask test-row-action-presets`).
+
+## The badge group is named, not captioned
+
+The saved-filter badges carry no visible caption (ldui-q85o): next to **Save
+Filter** they explain themselves, and a "Filters:" label competed for the
+row's width. The group is still ONE named group -- `role="group"` with
+`aria-label` from `badges_label` (default `"Saved filters"`) -- because a
+screen-reader user needs the container named to know the badges belong
+together. Before ldui-q85o the caption was visible and named the group through
+`aria-labelledby`; the rule that motivated it (never let a hidden name and a
+visible caption drift apart) still holds wherever a caption IS visible.
+
+⚠️ **Do not apply a shared caption to the per-column filter row.** Office tried
+it there first and reverted: one shared caption would name all seven controls
 identically. That row needs no caption, because each control sits in a cell
-under its own header and the table structure already names it. The badge bar is
-genuinely one group with one name, which is the only reason a single caption is
-right there.
+under its own header and the table structure already names it.
 
 ## One `<tr>`, two presentations: never click by DOM order
 

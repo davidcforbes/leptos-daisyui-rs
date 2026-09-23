@@ -1018,7 +1018,7 @@ pub fn EntityTable<T>(
     #[prop(optional)]
     projection_action_columns: EntityTableActionColumnPolicy,
     /// Visible presentation of the framework-owned column-chooser trigger.
-    #[prop(into, default = Signal::stored(EntityColumnChooserTrigger::Text))]
+    #[prop(into, default = Signal::stored(EntityColumnChooserTrigger::default()))]
     column_chooser_trigger: Signal<EntityColumnChooserTrigger>,
     /// Enable alternating body-row striping. The opinionated default is a
     /// clean faint grid without zebra banding.
@@ -2260,43 +2260,37 @@ where
                     </section>
                 })
             }}
-            // The saved-filter row is PAGE furniture, not a table utility: it
-            // is the user's own named views, left-justified on its own line,
-            // and it does not belong in the right-justified cluster of table
-            // actions (Export, `+ New`, the column chooser). Sharing that row
-            // put a user's filter names in the quick-action area and let them
-            // compete for space with controls they have nothing to do with.
-            {saved_filters
-                .map(|model| {
-                    let bar_id = saved_filters_bar_id
-                        .expect("a saved-filters bar always gets a minted id");
-                    view! {
-                        <div
-                            class="flex w-full min-w-0 shrink-0 items-center justify-start"
-                            data-entity-saved-filters-row="true"
-                            inert=move || edit_locked.get()
-                            aria-disabled=move || edit_locked.get().then_some("true")
-                        >
-                            {saved_filters_bar(model, bar_id)}
-                        </div>
-                    }
-                })}
+            // ldui-q85o (owner ruling, 2026-09-22): ONE quick-action row with
+            // two clusters. LEFT: the caller's leading slot, then Save Filter
+            // (always enabled) immediately followed by the saved-filter badges
+            // -- no "Filters:" caption, the badges beside the button explain
+            // themselves. RIGHT: `+ New`, the caller's actions (Export), the
+            // column chooser. The page/section header sits above this row.
             <div
-                class="flex shrink-0 flex-wrap items-center justify-end gap-2"
+                class="flex shrink-0 flex-wrap items-center justify-between gap-2"
                 data-entity-table-toolbar="true"
                 inert=move || edit_locked.get()
                 aria-disabled=move || edit_locked.get().then_some("true")
             >
-                {toolbar_leading.map(|render_leading| view! {
-                    <div class="contents" data-entity-toolbar-leading="true">
-                        {render_leading()}
-                    </div>
-                })}
-                {toolbar_actions.map(|render_actions| view! {
-                    <div class="contents" data-entity-toolbar-actions="true">
-                        {render_actions()}
-                    </div>
-                })}
+                <div
+                    class="flex min-w-0 flex-wrap items-center gap-2"
+                    data-entity-quick-actions-leading="true"
+                >
+                    {toolbar_leading.map(|render_leading| view! {
+                        <div class="contents" data-entity-toolbar-leading="true">
+                            {render_leading()}
+                        </div>
+                    })}
+                    {saved_filters.map(|model| {
+                        let bar_id = saved_filters_bar_id
+                            .expect("a saved-filters bar always gets a minted id");
+                        saved_filters_bar(model, bar_id)
+                    })}
+                </div>
+                <div
+                    class="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2"
+                    data-entity-quick-actions-trailing="true"
+                >
                 // `ldui-ff2f`: the framework-owned `+`. Rendered only when the
                 // table opted in, and disabled while a row is already live --
                 // the reducer would refuse a second session anyway
@@ -2327,6 +2321,11 @@ where
                     >
                         {move || draft_texts.get().add_row}
                     </Button>
+                })}
+                {toolbar_actions.map(|render_actions| view! {
+                    <div class="contents" data-entity-toolbar-actions="true">
+                        {render_actions()}
+                    </div>
                 })}
 
                 <div
@@ -2648,8 +2647,14 @@ where
                     <Button
                         class="btn-ghost btn-sm"
                         attr:data-entity-reset-sort="true"
-                        disabled=Signal::derive(move || {
-                            preferences.with(|preferences| preferences.sort.is_system())
+                        // Blank while there is something to reset; the reason
+                        // otherwise, which is what disables it (ldui-p82h).
+                        disabled_reason=Signal::derive(move || {
+                            if preferences.with(|preferences| preferences.sort.is_system()) {
+                                texts.with(|texts| texts.reset_sort_reason.clone())
+                            } else {
+                                String::new()
+                            }
                         })
                         on_click=Callback::new(move |_| {
                             if edit_locked.get_untracked() {
@@ -2666,17 +2671,24 @@ where
                     <Button
                         class="btn-ghost btn-sm"
                         attr:data-entity-reset-columns="true"
-                        disabled=Signal::derive(move || preferences.with(|preferences| {
-                            preferences.column_widths.is_empty()
-                                && column_store.with_value(|columns| {
-                                    preferences.hidden_columns == default_hidden_columns(columns)
-                                        && preferences
-                                            .column_order
-                                            .iter()
-                                            .map(String::as_str)
-                                            .eq(columns.iter().map(|column| column.id))
-                                })
-                        }))
+                        disabled_reason=Signal::derive(move || {
+                            let at_defaults = preferences.with(|preferences| {
+                                preferences.column_widths.is_empty()
+                                    && column_store.with_value(|columns| {
+                                        preferences.hidden_columns == default_hidden_columns(columns)
+                                            && preferences
+                                                .column_order
+                                                .iter()
+                                                .map(String::as_str)
+                                                .eq(columns.iter().map(|column| column.id))
+                                    })
+                            });
+                            if at_defaults {
+                                texts.with(|texts| texts.reset_columns_reason.clone())
+                            } else {
+                                String::new()
+                            }
+                        })
                         on_click=Callback::new(move |_| {
                             if edit_locked.get_untracked() {
                                 return;
@@ -2691,6 +2703,7 @@ where
                         {move || texts.with(|texts| texts.reset_columns.clone())}
                     </Button>
                 })}
+                </div>
             </div>
 
             <p class="sr-only" aria-live="polite" data-entity-sort-summary="true">

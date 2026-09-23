@@ -34,6 +34,10 @@ pub fn Pagination(
     view! {
         <div
             node_ref=node_ref
+            // The audit's disabled-without-reason rule treats a pager's
+            // current page and boundary arrows as state, not withheld
+            // actions; this hook is how it recognizes one.
+            data-pagination="true"
             class=move || {
                 merge_classes!("join",
                 size.get().as_str(),

@@ -585,6 +585,10 @@ pub struct KpiAction {
     /// `disabled` attribute, so the control stays in the accessibility tree
     /// and out of the tab order.
     pub disabled: bool,
+    /// Why the action is unavailable (ldui-p82h: a disabled action must say
+    /// why). When `disabled` and non-blank, rendered as a hidden hint the
+    /// control references by `aria-describedby`, plus the native `title`.
+    pub disabled_reason: String,
     /// Render the label visually hidden (`sr-only`) and stretch the control
     /// over the whole card (Office op-zp4af): one tab stop, one accessible
     /// name, the card's whole area as the hit target, a focus ring drawn
@@ -607,6 +611,7 @@ impl KpiAction {
             label: label.into(),
             accessible_label: String::new(),
             disabled: false,
+            disabled_reason: String::new(),
             label_hidden: false,
         }
     }
@@ -620,6 +625,12 @@ impl KpiAction {
     /// Marks the action unavailable.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
+        self
+    }
+
+    /// Says why the action is unavailable; see [`KpiAction::disabled_reason`].
+    pub fn disabled_reason(mut self, reason: impl Into<String>) -> Self {
+        self.disabled_reason = reason.into();
         self
     }
 
@@ -1838,16 +1849,38 @@ pub fn KpiCard(
                 } else {
                     action_label.into_any()
                 };
+                // ldui-p82h: a disabled action says why -- the same hidden
+                // hint + aria-describedby shape as `Button::disabled_reason`.
+                let reason = action.disabled_reason.trim().to_owned();
+                let reason_id = format!("{id}-disabled-reason");
+                let described_by =
+                    (action.disabled && !reason.is_empty()).then(|| reason_id.clone());
+                let title = described_by.is_some().then(|| reason.clone());
+                let reason_hint = described_by.is_some().then(|| {
+                    view! {
+                        <span
+                            class="sr-only"
+                            aria-hidden="true"
+                            id=reason_id
+                            data-kpi-card-action-reason="true"
+                        >
+                            {reason}
+                        </span>
+                    }
+                });
                 view! {
                     <Pressable
                         disabled=action.disabled
                         class=kpi_action_control_class(action.label_hidden)
                         on_click=Callback::new(move |_| on_activate.run(activation_id.clone()))
                         attr:aria-label=accessible_action_name
+                        attr:aria-describedby=described_by
+                        attr:title=title
                         attr:data-kpi-card-action="true"
                         attr:data-kpi-card-action-label-hidden=action.label_hidden.then_some("true")
                     >
                         {label_node}
+                        {reason_hint}
                     </Pressable>
                 }
             });

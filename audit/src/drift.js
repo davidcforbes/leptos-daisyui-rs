@@ -28,7 +28,7 @@ const visible = el => {
 // Hard cap, mirroring the engine's sweep (`pixelproof-style-audit`'s
 // `sweep.rs`): without one a pathological page — a form-heavy consumer screen
 // with thousands of unlabelled inputs — builds a multi-megabyte JSON string
-// and the CDP round-trip appears to hang. All five rules feed the single
+// and the CDP round-trip appears to hang. All six rules feed the single
 // `component-drift` family, so one list shares the engine's per-family cap.
 // Truncation is reported, never silent.
 const MAX_PER_CATEGORY = 200;
@@ -40,6 +40,13 @@ const push = (selector, detail) => {
 };
 
 const EXEMPT_CLOSEST = '.menu, .tabs, .dropdown, .modal-backdrop, [data-ld-audit-exempt]';
+// Rule 6 only. A control disabled by STATE rather than a withheld action has
+// nothing to explain: the pager's current page and its boundary arrows
+// ("you are here"), a busy control, and the already-selected option of a
+// single-select group. Everything else that is disabled needs a reason.
+const DISABLED_STATE_EXEMPT =
+  '[data-pagination], [aria-current="page"], .loading, [aria-busy="true"], ' +
+  '[aria-checked="true"], [aria-pressed="true"], [aria-selected="true"]';
 const NON_FIELD_INPUT_TYPES = ['checkbox', 'radio', 'range', 'hidden'];
 
 const mount = document.querySelector(OPTS.mount_selector);
@@ -183,6 +190,67 @@ for (const t of targets) {
       path(t.el),
       'target-too-small: ' + Math.round(t.r.width) + 'x' + Math.round(t.r.height) +
       'px target is under 24x24 and a neighbour sits inside its 24px spacing circle (WCAG 2.5.8)'
+    );
+  }
+}
+
+// 6. disabled-without-reason (ldui-p82h): a disabled control -- a native
+// `<button disabled>`, anything carrying daisyUI's `.btn-disabled`, or an
+// ARIA button with `aria-disabled="true"` -- must still have an accessible
+// name (a disabled control is still announced, and an icon-only one with no
+// name is an unlabelled dead end) AND an `aria-describedby` that resolves to
+// non-empty text saying WHY it is disabled. The library's `Button` mints
+// both from its `disabled_reason` prop, and stamps
+// `data-disabled-without-reason="true"` when it was rendered `disabled=true`
+// without a reason, so that marker is reported verbatim in the finding
+// wherever it appears -- it names the fix (pass `disabled_reason`).
+//
+// The name is the accname computation's first three steps, not the whole
+// algorithm: `aria-label`, then `aria-labelledby`, then the element's own
+// text with `aria-hidden` subtrees excluded (the Button's reason hint is one,
+// deliberately, so a reason can never masquerade as a name), then `title`.
+// A description resolves through `aria-describedby` only; `title` is not
+// accepted as a description because it is not announced on every platform.
+const ownText = el => {
+  let out = '';
+  const walk = n => {
+    for (const c of n.childNodes) {
+      if (c.nodeType === 3) out += c.textContent;
+      else if (c.nodeType === 1 && c.getAttribute('aria-hidden') !== 'true') walk(c);
+    }
+  };
+  walk(el);
+  return out.replace(/\s+/g, ' ').trim();
+};
+const idrefsText = (el, attr) => (el.getAttribute(attr) || '')
+  .split(/\s+/)
+  .filter(Boolean)
+  .map(id => { const t = document.getElementById(id); return t ? t.textContent.trim() : ''; })
+  .filter(Boolean)
+  .join(' ');
+for (const el of els) {
+  const isDisabled =
+    (el.tagName === 'BUTTON' && el.disabled) ||
+    el.classList.contains('btn-disabled') ||
+    (el.matches('[role="button"]') && el.getAttribute('aria-disabled') === 'true');
+  if (!isDisabled) continue;
+  if (el.closest(EXEMPT_CLOSEST) || el.closest('[aria-hidden="true"], [inert]')) continue;
+  if (el.closest(DISABLED_STATE_EXEMPT)) continue;
+  const name =
+    (el.getAttribute('aria-label') || '').trim() ||
+    idrefsText(el, 'aria-labelledby') ||
+    ownText(el) ||
+    (el.getAttribute('title') || '').trim();
+  const reason = idrefsText(el, 'aria-describedby');
+  const marker = el.hasAttribute('data-disabled-without-reason')
+    ? ' [data-disabled-without-reason]'
+    : '';
+  if (!name) {
+    push(path(el), 'disabled-without-reason: disabled control has no accessible name' + marker);
+  } else if (!reason) {
+    push(
+      path(el),
+      'disabled-without-reason: disabled control has no aria-describedby resolving to non-empty text' + marker
     );
   }
 }

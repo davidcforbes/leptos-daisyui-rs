@@ -871,6 +871,32 @@ fn help_hint_step() -> Step {
     }
 }
 
+/// Focus-ring token proof (ldui-reod): the `.ld-focus-ring` outline colour is
+/// present from the first frame after `focus()` (only the offset animates), so
+/// a keyboard user or an instant probe never reads a transparent ring.
+fn focus_ring_step() -> Step {
+    Step {
+        name: "test-focus-ring",
+        run: Run::BrowserSuite {
+            test: "focus_ring_smoke",
+            html_target: None,
+        },
+    }
+}
+
+/// Canonical row-action and Export presets (ldui-bmqj, ldui-e6x8, ldui-p82h):
+/// the standard sprite glyphs, accessible names, tooltips and the
+/// `disabled_reason` describedby hint on the showcase page.
+fn row_action_presets_step() -> Step {
+    Step {
+        name: "test-row-action-presets",
+        run: Run::BrowserSuite {
+            test: "row_action_presets_smoke",
+            html_target: None,
+        },
+    }
+}
+
 /// The full release gate. The catalog browser suites are deliberately
 /// consecutive: [`run_steps`] reuses one verified release server for adjacent
 /// suites targeting the same HTML entry point.
@@ -904,6 +930,8 @@ fn full_steps() -> Vec<Step> {
     steps.push(field_context_scoping_step());
     steps.push(softphone_step());
     steps.push(help_hint_step());
+    steps.push(focus_ring_step());
+    steps.push(row_action_presets_step());
     steps
 }
 
@@ -2659,6 +2687,8 @@ fn main() -> ExitCode {
         "test-data-table-fit" => run_steps(&[data_table_fit_step()]),
         "test-softphone" => run_steps(&[softphone_step()]),
         "test-help-hint" => run_steps(&[help_hint_step()]),
+        "test-focus-ring" => run_steps(&[focus_ring_step()]),
+        "test-row-action-presets" => run_steps(&[row_action_presets_step()]),
         "gen-tokens" => {
             let check = std::env::args().any(|a| a == "--check");
             gen_tokens(check)
@@ -2673,7 +2703,7 @@ fn main() -> ExitCode {
         other => {
             eprintln!("xtask: unknown subcommand {other:?}");
             eprintln!(
-                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-selectable-summary|test-person-picker|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-snapshot-table-page-filter-actions|test-helpdesk|test-ai-chat|test-ai-chat-knowledge|test-server-table-column-tools|test-collapse-naming|test-data-table-fit|test-app-shell|test-field-context-scoping|test-entity-draft-row|test-softphone|test-help-hint|gen-tokens|check-sibling-tokens|clean-cache|bump>"
+                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-selectable-summary|test-person-picker|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-snapshot-table-page-filter-actions|test-helpdesk|test-ai-chat|test-ai-chat-knowledge|test-server-table-column-tools|test-collapse-naming|test-data-table-fit|test-app-shell|test-field-context-scoping|test-entity-draft-row|test-softphone|test-help-hint|test-focus-ring|test-row-action-presets|gen-tokens|check-sibling-tokens|clean-cache|bump>"
             );
             ExitCode::from(2)
         }
@@ -3208,6 +3238,44 @@ pub fn r() -> f32 { radius::CARD }
         ));
         assert!(!gate_steps().iter().any(|s| s.name == "test-data-table-fit"));
         assert!(full_steps().iter().any(|s| s.name == "test-data-table-fit"));
+    }
+
+    #[test]
+    fn focus_ring_step_is_in_process_and_full_only() {
+        let step = focus_ring_step();
+        assert_eq!(step.name, "test-focus-ring");
+        assert!(matches!(
+            step.run,
+            Run::BrowserSuite {
+                test: "focus_ring_smoke",
+                html_target: None
+            }
+        ));
+        assert!(!gate_steps().iter().any(|s| s.name == "test-focus-ring"));
+        assert!(full_steps().iter().any(|s| s.name == "test-focus-ring"));
+    }
+
+    #[test]
+    fn row_action_presets_step_is_in_process_and_full_only() {
+        let step = row_action_presets_step();
+        assert_eq!(step.name, "test-row-action-presets");
+        assert!(matches!(
+            step.run,
+            Run::BrowserSuite {
+                test: "row_action_presets_smoke",
+                html_target: None
+            }
+        ));
+        assert!(
+            !gate_steps()
+                .iter()
+                .any(|s| s.name == "test-row-action-presets")
+        );
+        assert!(
+            full_steps()
+                .iter()
+                .any(|s| s.name == "test-row-action-presets")
+        );
     }
 
     #[test]

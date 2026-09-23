@@ -100,7 +100,8 @@ impl EntitySavedFilter {
 /// are English placeholders, like every `*Texts` struct in this crate.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EntitySavedFilterTexts {
-    /// Toolbar button label. Default `"Save Filter"`.
+    /// Toolbar button label. Always enabled (ldui-q85o); a click with no
+    /// filter value set is a no-op. Default `"Save Filter"`.
     pub save_button: String,
     /// Dialog heading. Default `"Save current filters"`.
     pub dialog_title: String,
@@ -121,14 +122,12 @@ pub struct EntitySavedFilterTexts {
     /// Empty-state hint rendered when a saved-filters bar exists but no
     /// filters are saved yet. Default `"No saved filters"`.
     pub empty: String,
-    /// Visible caption rendered before the badge row, and — via a single
-    /// `aria-labelledby` id — the badge group's accessible name (Office
-    /// op-e6dsi). Default `"Filters:"`.
-    ///
-    /// One string reaches the screen and the accessibility tree through the
-    /// same element, so a translation or a copy edit cannot leave a hidden
-    /// name disagreeing with the visible one. It is not rendered when no
-    /// filters are saved; the [`Self::empty`] hint stands alone there.
+    /// Accessible name of the badge group (`aria-label` on the `role="group"`
+    /// container). Not rendered visibly: beside **Save Filter** the badges
+    /// explain themselves, and a caption competed for the quick-action row's
+    /// width (ldui-q85o, superseding the visible caption of Office op-e6dsi).
+    /// Default `"Saved filters"`. Unused while no filters are saved; the
+    /// [`Self::empty`] hint stands alone there.
     pub badges_label: String,
 }
 
@@ -144,7 +143,7 @@ impl Default for EntitySavedFilterTexts {
             apply_filter: "Apply filter {name}".to_owned(),
             remove_filter: "Remove filter {name}".to_owned(),
             empty: "No saved filters".to_owned(),
-            badges_label: "Filters:".to_owned(),
+            badges_label: "Saved filters".to_owned(),
         }
     }
 }
@@ -781,8 +780,9 @@ mod tests {
             "Remove filter Urgent only"
         );
         assert_eq!(
-            texts.badges_label, "Filters:",
-            "the badge row's visible caption doubles as the group's accessible              name, so it must be real user-facing copy and translatable like              the rest"
+            texts.badges_label, "Saved filters",
+            "the badge group's accessible name (ldui-q85o: no visible caption) \
+             is real user-facing copy and translatable like the rest"
         );
     }
 }

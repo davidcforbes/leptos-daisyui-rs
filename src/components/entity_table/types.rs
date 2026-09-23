@@ -8,12 +8,13 @@ use crate::components::button::Button;
 use crate::components::icon::{Icon, IconSize};
 use crate::components::input::{Input, InputSize, InputType};
 use crate::components::select::{Select, SelectSize};
-use leptos::ev::MouseEvent;
+use leptos::ev::{KeyboardEvent, MouseEvent};
 use leptos::html::{Input as HtmlInput, Select as HtmlSelect};
 use leptos::prelude::{
     AddAnyAttr, AnyView, Callable, Callback, ClassAttribute, CollectView, CustomAttribute,
     ElementChild, Get, GetUntracked, GetValue, GlobalAttributes, IntoAny, LocalStorage, NodeRef,
-    Signal, StoredValue, With, view,
+    RwSignal, Set, SetValue, Signal, StoredValue, TimeoutHandle, UpdateValue, With, on_cleanup,
+    set_timeout_with_handle, view,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::cmp::Ordering;
@@ -21,6 +22,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::num::NonZeroU8;
 use std::rc::Rc;
+use std::time::Duration;
 
 /// A callback that renders one typed cell from a borrowed row.
 pub type EntityCellRenderer<T> = Rc<dyn Fn(&T) -> AnyView>;
@@ -603,6 +605,147 @@ impl EntityColumnFilter {
             label,
             Signal::derive(move || !value.get().is_empty()),
             Callback::new(move |()| on_change.run(String::new())),
+            renderer,
+        )
+    }
+
+    /// Creates a controlled text filter that applies once typing goes QUIET
+    /// (ldui-ga96): the server-round-trip variant of [`Self::text`].
+    ///
+    /// Owner ruling: the filter row holds only cells that apply as typed;
+    /// there is no Apply button in the `thead`, ever. A server-paged page
+    /// that applies [`Self::text`] per keystroke round-trips on every key,
+    /// which is why Office's Clients search grew Apply buttons -- this cell
+    /// is the sanctioned answer instead. Same identity contract as `text`
+    /// (`control_id` verbatim in the header, `-responsive` suffix in the
+    /// responsive copy, `value` the sole source of truth); the difference
+    /// is WHEN `on_change` runs:
+    ///
+    /// * The cell keeps the text being typed itself. `on_change` runs ONCE,
+    ///   with the full typed text, after `debounce_ms` of quiet; every
+    ///   keystroke inside the window restarts it.
+    /// * While a commit is pending the input carries `aria-busy="true"` and
+    ///   the `data-entity-filter-pending="true"` hook, so both assistive
+    ///   technology and a browser test can see that the typed text is not
+    ///   yet the applied one.
+    /// * **Enter commits immediately**, cancelling the pending timer, and
+    ///   always -- even with nothing pending -- so the user has an explicit
+    ///   "apply now" gesture (a re-apply of an unchanged value is a refresh,
+    ///   which a server-backed page is glad to take).
+    /// * Once committed the accepted `value` is displayed again, so a
+    ///   proposal the caller rejects snaps back exactly as `text` does.
+    /// * The responsive panel's clear action cancels any pending commit and
+    ///   proposes the empty string at once.
+    ///
+    /// The timer follows the crate's timer discipline: its handle is
+    /// stored, cleared when the owner that built the filter is cleaned up,
+    /// and the callback uses try-forms so a late fire after unmount is a
+    /// no-op. The typed/pending state lives on the filter, not on one
+    /// rendered placement, so a commit pending when the column moves between
+    /// the header and the responsive panel is neither lost nor duplicated.
+    /// With no `window` (native tests) the cell fails open and applies
+    /// immediately, like `use_debounced_signal`.
+    ///
+    /// Rendered hooks beyond `text`'s: `data-entity-filter-apply="debounced"`
+    /// and `data-entity-filter-debounce-ms="<ms>"`; `data-entity-filter-kind`
+    /// stays `"text"` because it IS a text filter.
+    pub fn text_debounced(
+        column_id: &'static str,
+        control_id: impl Into<String>,
+        label: impl Into<Signal<String>>,
+        value: impl Into<Signal<String>>,
+        placeholder: impl Into<Signal<String>>,
+        on_change: Callback<String>,
+        debounce_ms: u64,
+    ) -> Self {
+        let control_id = Rc::<str>::from(control_id.into());
+        assert_valid_entity_filter_control_id(&control_id);
+        let label = label.into();
+        let value = value.into();
+        let placeholder = placeholder.into();
+        // The cell's own typed text, shown only while a commit is pending;
+        // afterwards the accepted `value` is displayed again.
+        let typed = RwSignal::new(String::new());
+        let pending = RwSignal::new(false);
+        let timer = StoredValue::new(Option::<TimeoutHandle>::None);
+        let cancel_timer = move || {
+            if let Some(handle) = timer.try_update_value(|slot| slot.take()).flatten() {
+                handle.clear();
+            }
+        };
+        let commit = move || {
+            cancel_timer();
+            let next = typed.try_get_untracked().unwrap_or_default();
+            on_change.run(next);
+            let _ = pending.try_set(false);
+        };
+        on_cleanup(cancel_timer);
+        let renderer_control_id = Rc::clone(&control_id);
+        let renderer = Rc::new(move |placement, description: Option<String>| {
+            let id = placed_entity_filter_control_id(&renderer_control_id, placement);
+            let label_for = id.clone();
+            let node_ref = NodeRef::<HtmlInput>::new();
+            let on_input = Callback::new(move |next: String| {
+                typed.set(next);
+                pending.set(true);
+                cancel_timer();
+                match set_timeout_with_handle(commit, Duration::from_millis(debounce_ms)) {
+                    Ok(handle) => timer.set_value(Some(handle)),
+                    // No `window` to schedule on: fail open, apply now.
+                    Err(_) => commit(),
+                }
+            });
+            let on_keydown = Callback::new(move |event: KeyboardEvent| {
+                if event.key() == "Enter" {
+                    event.prevent_default();
+                    commit();
+                }
+            });
+            let display = Signal::derive(move || {
+                if pending.get() {
+                    typed.get()
+                } else {
+                    value.get()
+                }
+            });
+            view! {
+                <label class="block w-full" for=label_for>
+                    <span class="sr-only">{move || label.get()}</span>
+                    <Input
+                        size=InputSize::Xs
+                        class="input-bordered w-full bg-table-filter text-table-filter-content"
+                        value=display
+                        placeholder=placeholder
+                        on_input=on_input
+                        on_keydown=on_keydown
+                        node_ref=node_ref
+                        attr:id=id
+                        attr:data-entity-filter-control=column_id
+                        attr:data-entity-filter-kind="text"
+                        attr:data-entity-filter-apply="debounced"
+                        attr:data-entity-filter-debounce-ms=debounce_ms.to_string()
+                        attr:data-entity-filter-placement=entity_filter_placement_name(placement)
+                        attr:data-entity-filter-pending=move || pending.get().then_some("true")
+                        attr:aria-busy=move || pending.get().then_some("true")
+                        attr:title=description.clone()
+                        attr:aria-description=description.clone()
+                    />
+                </label>
+            }
+            .into_any()
+        });
+        Self::controlled(
+            column_id,
+            control_id,
+            label,
+            Signal::derive(move || !value.get().is_empty()),
+            Callback::new(move |()| {
+                // A clear outranks whatever was still being typed.
+                cancel_timer();
+                let _ = typed.try_set(String::new());
+                let _ = pending.try_set(false);
+                on_change.run(String::new());
+            }),
             renderer,
         )
     }
@@ -1448,6 +1591,15 @@ pub enum EntityColumnFilterMode {
     Auto,
     /// A text box regardless of presentation.
     Text,
+    /// A text box that applies once typing goes quiet for `debounce_ms`, or
+    /// on Enter -- the server-backed variant (ldui-ga96). Built as
+    /// [`EntityColumnFilter::text_debounced`]; the local predicate still
+    /// runs on the COMMITTED value, so a page that hands the table
+    /// server-filtered rows and one that filters locally both behave.
+    TextDebounced {
+        /// Quiet window before the typed text is applied.
+        debounce_ms: u64,
+    },
     /// An option list of the column's distinct cell texts regardless of
     /// presentation -- a plain-text status column, for instance.
     Options,
@@ -1460,29 +1612,41 @@ impl EntityColumnFilterMode {
             EntityColumnFilterMode::None => "none",
             EntityColumnFilterMode::Auto => "auto",
             EntityColumnFilterMode::Text => "text",
+            EntityColumnFilterMode::TextDebounced { .. } => "text-debounced",
             EntityColumnFilterMode::Options => "options",
         }
     }
 }
 
 /// The control a column's [`EntityColumnFilterMode`] resolves to once its
-/// presentation is known -- the only two kinds a framework-built filter
+/// presentation is known -- the only kinds a framework-built filter
 /// renders. Date filters stay explicit ([`EntityColumnFilter::date`]) because
 /// they need a typed accessor, not cell text.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum EntityResolvedFilterKind {
     /// Case-insensitive substring match on the cell text.
     Text,
+    /// Case-insensitive substring match on the cell text, applied after
+    /// `debounce_ms` of quiet typing or on Enter
+    /// ([`EntityColumnFilter::text_debounced`]).
+    TextDebounced {
+        /// Quiet window before the typed text is applied.
+        debounce_ms: u64,
+    },
     /// Exact match against one of the column's distinct cell texts.
     Options,
 }
 
 impl EntityResolvedFilterKind {
     /// Stable marker for tests and audits; matches the
-    /// `data-entity-filter-kind` the rendered control carries.
+    /// `data-entity-filter-kind` the rendered control carries. A debounced
+    /// text filter is still `"text"` there; its `data-entity-filter-apply`
+    /// hook is what says `"debounced"`.
     pub const fn as_str(self) -> &'static str {
         match self {
-            EntityResolvedFilterKind::Text => "text",
+            EntityResolvedFilterKind::Text | EntityResolvedFilterKind::TextDebounced { .. } => {
+                "text"
+            }
             EntityResolvedFilterKind::Options => "select",
         }
     }
@@ -1497,9 +1661,9 @@ impl EntityResolvedFilterKind {
 /// ("Delete the note from 12 May?") is domain copy and the destructive
 /// action is the consumer's four-part mutation. The component owns the
 /// icons, the button shape, the `data-entity-row-actions` hooks, and the
-/// accessible-name grammar `"<verb label> <row label>"` -- e.g. `"Edit
-/// Acme Holdings"`, `"Eliminar Acme Holdings"` -- so a screen-reader user
-/// hears WHICH of thirty identical pencils this is. Labels are `Signal`s so
+/// accessible-name grammar `"<verb label> <row label>"` -- e.g.
+/// `"Edit Acme Holdings"`, `"Eliminar Acme Holdings"` -- so a screen-reader
+/// user hears WHICH of thirty identical pencils this is. Labels are `Signal`s so
 /// a locale change re-reads them without rebuilding the column.
 pub struct EntityRowActions<T: 'static> {
     /// Opens the record's edit dialog. `None` renders no pencil.
@@ -2010,6 +2174,16 @@ impl<T: 'static> EntityColumn<T> {
         self
     }
 
+    /// Joins the framework-built filter row with a text box that applies
+    /// once typing goes quiet for `debounce_ms` (or on Enter) -- for a
+    /// column whose filter is a server round trip (ldui-ga96). See
+    /// [`EntityColumnFilter::text_debounced`] for the cell's contract.
+    #[must_use]
+    pub fn filterable_text_debounced(mut self, debounce_ms: u64) -> Self {
+        self.filter_mode = EntityColumnFilterMode::TextDebounced { debounce_ms };
+        self
+    }
+
     /// Joins the framework-built filter row with an option list of the
     /// column's distinct cell texts.
     #[must_use]
@@ -2038,6 +2212,9 @@ impl<T: 'static> EntityColumn<T> {
         match self.filter_mode {
             EntityColumnFilterMode::None => None,
             EntityColumnFilterMode::Text => Some(EntityResolvedFilterKind::Text),
+            EntityColumnFilterMode::TextDebounced { debounce_ms } => {
+                Some(EntityResolvedFilterKind::TextDebounced { debounce_ms })
+            }
             EntityColumnFilterMode::Options => Some(EntityResolvedFilterKind::Options),
             EntityColumnFilterMode::Auto => Some(match self.presentation {
                 Some(EntityCellPresentation::Badge(_)) => EntityResolvedFilterKind::Options,
@@ -2478,9 +2655,11 @@ impl<T: Clone + 'static> EntityColumn<T> {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum EntityColumnChooserTrigger {
     /// Show the localized `EntityTableTexts::choose_columns` label.
-    #[default]
     Text,
-    /// Show a compact gear glyph while retaining the localized accessible name.
+    /// Show a compact gear glyph while retaining the localized accessible
+    /// name. The default since ldui-q85o (owner ruling: the quick-action
+    /// row's right cluster is `+ New`, the download icon, the gear).
+    #[default]
     Icon,
 }
 
@@ -2808,8 +2987,15 @@ pub struct EntityTableTexts {
     pub sort_clause: String,
     /// Action label that restores server-supplied ordering.
     pub reset_sort: String,
+    /// Why `reset_sort` is disabled: the sort already IS the system order
+    /// (ldui-p82h: a disabled action says why). Rendered through
+    /// `Button::disabled_reason`. Default `"Already in system order"`.
+    pub reset_sort_reason: String,
     /// Action label that restores default column visibility, widths, and order.
     pub reset_columns: String,
+    /// Why `reset_columns` is disabled: the columns are already at their
+    /// defaults. Default `"Columns are at their defaults"`.
+    pub reset_columns_reason: String,
     /// Previous-page action label.
     pub previous: String,
     /// Next-page action label.
@@ -2910,7 +3096,9 @@ impl Default for EntityTableTexts {
             sort_summary: "Sorted by {clauses}".to_owned(),
             sort_clause: "priority {priority}: {column} {direction}".to_owned(),
             reset_sort: "Reset sort".to_owned(),
+            reset_sort_reason: "Already in system order".to_owned(),
             reset_columns: "Reset columns".to_owned(),
+            reset_columns_reason: "Columns are at their defaults".to_owned(),
             previous: "Previous".to_owned(),
             next: "Next".to_owned(),
             row_range: "Showing {start}-{end} of {total}".to_owned(),

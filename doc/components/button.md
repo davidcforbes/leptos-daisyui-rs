@@ -15,7 +15,8 @@ The Button component provides a clean, accessible way to handle user interaction
 | `size` | `Signal<ButtonSize>` | `ButtonSize::Default` | Size of the button |
 | `shape` | `Signal<ButtonShape>` | `ButtonShape::Default` | Shape style of the button |
 | `outline` | `Signal<bool>` | `false` | Whether button has outline style |
-| `disabled` | `Signal<bool>` | `false` | Whether button is disabled |
+| `disabled` | `Signal<bool>` | `false` | Whether button is disabled. Prefer `disabled_reason` when there is a reason to give; `disabled=true` with no reason is stamped `data-disabled-without-reason="true"` for the audit (ldui-p82h). |
+| `disabled_reason` | `Signal<String>` | `""` | Why the button is disabled (ldui-p82h). Non-blank text disables the button exactly as `disabled=true` and delivers the reason as a hidden `sr-only` hint referenced by `aria-describedby`, plus the native `title`. Blank text (the default) is "no reason". |
 | `loading` | `Signal<bool>` | `false` | Whether button shows loading state. When `button_type=ButtonType::Submit`, also disables the button at the DOM level for as long as it is `true` (ldui-9vs), on top of the explicit `disabled` prop — natively disabled but not given the dimmed `btn-disabled` look, since the spinner already shows it's busy. `Button`/`Reset` loading buttons stay clickable/focusable (spinner-only), unless `disabled` is also passed. |
 | `button_type` | `Signal<ButtonType>` | `ButtonType::Button` | Native `type` attribute: `Button` (no form action), `Submit`, or `Reset` (ldui-9vs). Form `action`/`method`/`target` stay on the caller's `<form>` element. |
 | `wide` | `Signal<bool>` | `false` | Whether button takes full width |
@@ -329,12 +330,64 @@ button dispatches no `click` event at all (browser-enforced), by mouse or
 keyboard. See `Button`'s doc comment in `src/components/button/component.rs`
 for the full precedence-vs-`attr:type` and nested/form-associated notes.
 
+### Disabled With a Reason (`disabled_reason`, ldui-p82h)
+
+A disabled control that does not say *why* is a dead end for every user, and
+for an icon-only button it is an unlabelled dead end. `disabled_reason` is the
+one prop that answers it.
+
+<details>
+<summary>View Code</summary>
+
+```rust
+use leptos::prelude::*;
+use leptos_daisyui_rs::components::*;
+
+#[component]
+fn ExportButton(rows: Signal<usize>) -> impl IntoView {
+    // One reactive signal drives both the state and the explanation: blank
+    // means enabled, text means disabled-with-this-reason.
+    let no_rows = Signal::derive(move || {
+        if rows.get() == 0 { "No rows to export".to_owned() } else { String::new() }
+    });
+    view! {
+        <Button disabled_reason=no_rows>"Export to CSV"</Button>
+    }
+}
+```
+
+</details>
+
+When the reason resolves to non-blank text the button is disabled exactly as
+`disabled=true` would be (native `disabled`, `.btn-disabled`), and the reason
+is delivered three ways at once:
+
+- a visually-hidden `<span class="sr-only">` **inside** the button (the
+  component must stay a single root element for spread attributes, so the hint
+  cannot be a sibling), carrying a minted id (`ld-btn-reason-N`) and marked
+  `aria-hidden="true"` so the reason joins the accessible **description**
+  through `aria-describedby` without also leaking into the accessible
+  **name**;
+- `aria-describedby` on the button, referencing that id;
+- the native `title`, so a sighted mouse user hovering an icon-only button
+  sees the reason as a tooltip without any extra wrapper.
+
+A `disabled=true` with no reason still compiles and renders — nothing panics —
+but the button is stamped `data-disabled-without-reason="true"` and the
+`ldui-audit` drift sweep reports it under `disabled-without-reason`, whose
+rule is: every disabled control must have an accessible name **and** an
+`aria-describedby` that resolves to non-empty text. `RowActionButton` and
+`EntityExportAction` (see the EntityTable guide) forward `disabled_reason`
+unchanged, which is how a per-row "Already complete" or an empty table's
+"No rows to export" reaches the user.
+
 ## Accessibility
 
 - Supports all standard button ARIA attributes
 - Proper focus management with keyboard navigation
 - Loading state announced to screen readers
-- Disabled state properly communicated
+- Disabled state properly communicated; give the reason through
+  `disabled_reason` so it reaches `aria-describedby` and `title`
 
 ## Best Practices
 

@@ -2321,9 +2321,10 @@ async fn quick_action_bar_present(h: &pixelproof_web::Harness, root: &str) -> Va
 /// Hand-maintained, like `AiChatWorkspaceTexts::FIELD_COUNT`. Adding a
 /// labelled string to the workspace fails this, loudly, with the new name in
 /// the diff — which is the intended way to learn that the set moved.
-const EXPECTED_LABELS: [&str; 11] = [
+const EXPECTED_LABELS: [&str; 12] = [
     // The quick-action bar, in render order: its group label, the seven
-    // static chips, then the Translate control's own label and button.
+    // static chips, then the Translate control's own label, button, and
+    // its disabled-reason hint (ldui-p82h).
     "quick_actions_label",
     "qa_summarize",
     "qa_rewrite",
@@ -2334,6 +2335,7 @@ const EXPECTED_LABELS: [&str; 11] = [
     "qa_convert_to_table",
     "qa_language_label",
     "qa_translate_button",
+    "qa_translate_needs_language",
     // From the settings popover's provider rows.
     "effort_label",
 ];

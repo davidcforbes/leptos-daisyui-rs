@@ -1274,22 +1274,31 @@ pub fn DataTableDemo() -> impl IntoView {
                 // daisyUI shows the tooltip on `:has(:focus-visible)`, so this
                 // shape surfaces it by keyboard as well as by hover. The click
                 // handler short-circuits, since aria-disabled is advisory only.
-                Some(why) => view! {
-                    <Tooltip
-                        tip=Signal::derive(move || why.to_string())
-                        position=TooltipPosition::Left
-                    >
-                        <button
-                            type="button"
-                            class=format!("btn btn-xs btn-disabled {extra}")
-                            aria-disabled="true"
-                            on:click=move |ev: leptos::ev::MouseEvent| ev.prevent_default()
+                // ldui-p82h: the tooltip is for sighted users; assistive
+                // technology gets the same reason as a description through
+                // `aria-describedby` on a hidden sibling.
+                Some(why) => {
+                    let reason_id = format!("widget-{subject}-{verb}-reason");
+                    let described_by = reason_id.clone();
+                    view! {
+                        <Tooltip
+                            tip=Signal::derive(move || why.to_string())
+                            position=TooltipPosition::Left
                         >
-                            {label}
-                        </button>
-                    </Tooltip>
+                            <button
+                                type="button"
+                                class=format!("btn btn-xs btn-disabled {extra}")
+                                aria-disabled="true"
+                                aria-describedby=described_by
+                                on:click=move |ev: leptos::ev::MouseEvent| ev.prevent_default()
+                            >
+                                {label}
+                            </button>
+                            <span class="sr-only" id=reason_id>{why}</span>
+                        </Tooltip>
+                    }
+                    .into_any()
                 }
-                .into_any(),
             }
         };
 

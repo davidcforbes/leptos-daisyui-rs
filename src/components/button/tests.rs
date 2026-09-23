@@ -321,6 +321,148 @@ fn test_resolve_native_disabled_matches_the_documented_formula_for_every_combina
     }
 }
 
+// ---------------------------------------------------------------------------
+// `disabled_reason` (ldui-p82h)
+// ---------------------------------------------------------------------------
+//
+// This crate has no DOM/SSR renderer in native tests (see the module doc on
+// `filter_bar/tests.rs`), so the reason handling is split into pure
+// functions asserted directly, plus source-level guards on the wiring in the
+// `view!` -- the same shape `page_quick_actions.rs` uses for its own
+// contract tests.
+
+const BUTTON_VIEW_SRC: &str = include_str!("component.rs");
+
+/// The `Button` component body only, so a guard cannot be satisfied by
+/// `LinkButton` or by the doc comment above the component.
+fn button_component_src() -> &'static str {
+    BUTTON_VIEW_SRC
+        .split_once("pub fn Button(")
+        .expect("Button component source")
+        .1
+        .split_once("pub fn LinkButton(")
+        .expect("LinkButton follows Button")
+        .0
+}
+
+#[test]
+fn disabled_reason_text_is_kept_and_trimmed() {
+    assert_eq!(
+        resolve_disabled_reason("  No rows to export  ".to_owned()).as_deref(),
+        Some("No rows to export")
+    );
+    assert_eq!(
+        resolve_disabled_reason("Already complete".to_owned()).as_deref(),
+        Some("Already complete")
+    );
+}
+
+/// A blank reason is the same as none: it must not disable the button and
+/// must not produce a hint, so one reactive signal can drive both the state
+/// and the explanation.
+#[test]
+fn blank_disabled_reason_is_no_reason() {
+    assert_eq!(resolve_disabled_reason(String::new()), None);
+    assert_eq!(resolve_disabled_reason("   ".to_owned()), None);
+    assert_eq!(resolve_disabled_reason("\n\t".to_owned()), None);
+}
+
+#[test]
+fn minted_reason_ids_are_prefixed_and_unique() {
+    let a = next_button_reason_id();
+    let b = next_button_reason_id();
+    assert!(a.starts_with("ld-btn-reason-"), "{a}");
+    assert!(b.starts_with("ld-btn-reason-"), "{b}");
+    assert_ne!(a, b);
+}
+
+/// The prop is the crate's idiomatic optional-signal form (`Select::value`,
+/// `EntityTable::focus_scope`), so a caller passes a `Signal<String>` and
+/// omits it freely.
+#[test]
+fn disabled_reason_prop_is_an_optional_signal() {
+    let src = button_component_src();
+    assert!(
+        src.contains("#[prop(optional, into)]\n    disabled_reason: Signal<String>,")
+            || src.contains("#[prop(optional, into)]\r\n    disabled_reason: Signal<String>,"),
+        "disabled_reason must be an optional `Signal<String>` (blank = no reason)"
+    );
+}
+
+/// A present reason disables the button through the SAME resolver that
+/// `disabled` and `loading` go through, so a reasoned button can never be
+/// natively enabled while visually `.btn-disabled`, or vice versa.
+#[test]
+fn a_present_reason_disables_natively_and_visually() {
+    let src = button_component_src();
+    assert!(
+        src.contains("let is_disabled = move || disabled.get() || reason_present();"),
+        "the combined disabled state must fold the reason in"
+    );
+    assert!(
+        src.contains(
+            "disabled=move || resolve_native_disabled(is_disabled(), loading.get(), button_type.get())"
+        ),
+        "the native attribute must be resolved from the combined state"
+    );
+    assert!(
+        src.contains("class:btn-disabled=is_disabled"),
+        "the visual class must follow the combined state"
+    );
+}
+
+/// The reason reaches assistive technology as a DESCRIPTION (never the
+/// name) and sighted mouse users as the native tooltip.
+#[test]
+fn a_present_reason_is_described_and_titled() {
+    let src = button_component_src();
+    assert!(
+        src.contains("aria-describedby=move || reason_present().then(|| describedby_id.clone())"),
+        "aria-describedby must reference the minted id only while a reason is present"
+    );
+    assert!(
+        src.contains("title=reason_text"),
+        "the native title carries the reason"
+    );
+    assert!(
+        src.contains(
+            r#"<span class="sr-only" aria-hidden="true" id=id data-button-disabled-reason="true">"#
+        ),
+        "the hint is a visually-hidden, name-excluded span carrying the minted id"
+    );
+}
+
+/// `disabled=true` with no reason is not a panic and not silently fine: it
+/// is stamped so the audit's `disabled-without-reason` rule can report it.
+#[test]
+fn disabled_without_a_reason_is_stamped_for_the_audit() {
+    let src = button_component_src();
+    assert!(
+        src.contains("data-disabled-without-reason=move || {"),
+        "the audit marker must be emitted reactively"
+    );
+    assert!(
+        src.contains(r#"(disabled.get() && !reason_present()).then_some("true")"#),
+        "the marker is present exactly when disabled without a reason"
+    );
+    assert!(
+        !src.contains("panic!(") && !src.contains("unreachable!("),
+        "a missing reason must never panic"
+    );
+}
+
+/// The `sr-only` hint class must be discoverable by Tailwind's source scan
+/// (the demo scans `../src/**/*.rs`), so it is listed in the documented
+/// `@source inline(...)` line as well as emitted literally.
+#[test]
+fn sr_only_is_in_the_documented_source_inline_list() {
+    let doc_line = BUTTON_VIEW_SRC
+        .lines()
+        .find(|line| line.contains("@source inline(\"btn btn-neutral"))
+        .expect("Button's @source inline line");
+    assert!(doc_line.contains(" sr-only"), "{doc_line}");
+}
+
 // Comprehensive enum variant coverage tests
 #[test]
 fn test_all_button_colors_return_valid_classes() {

@@ -13,6 +13,11 @@ use leptos::prelude::*;
 /// - `ld-pressable` — adds a subtle `scale(0.97)` on `:active`.
 /// - `ld-elevated` — resting LEVEL_4 shadow that lifts to LEVEL_8 + a 1px
 ///   translate on hover.
+/// - `ld-focus-ring` — a 2px primary outline on `:focus-visible`. The ring
+///   colour is present from frame 0; only `outline-offset` animates, growing
+///   from 0 to 2px (`ld-focus-ring-in`). Never fade the colour in: a keyboard
+///   user, or a probe reading the computed outline right after focus, must
+///   see the ring at every instant (ldui-reod).
 ///
 /// Plus named entrance animations triggered by daisyUI's open-state classes:
 ///
@@ -155,15 +160,32 @@ dialog.modal[open]::backdrop {
    `btn-primary` it came out primary-content (near-white) against the primary
    fill, collapsing focus visibility on the most prominent control in the
    library. `.ld-focus-ring` is applied by eight control types, so this is the
-   widest-reach dead token in the crate (ldui-xxc). */
+   widest-reach dead token in the crate (ldui-xxc).
+
+   ldui-reod / Office op-7q9d0 (2026-09-22): THE RING MUST NEVER BE
+   TRANSPARENT, NOT EVEN FOR ONE FRAME. The entrance used to fade
+   `outline-color` in from `transparent`, so for the first `--ld-duration-fast`
+   after a Tab the computed outline of every ring-carrying control was a
+   transparent 2px solid line. A keyboard probe that focuses a control and
+   reads its computed outline in the same tick sees no ring at all; the
+   controls whose focus ALSO changes daisyUI's own `box-shadow` (ghost, outline
+   and link buttons, inputs) still registered through that second property,
+   and the ones whose focus changes nothing but the outline - every SOLID
+   button: Office's title-bar primary search icon, its EN/ES language pair,
+   its hub bar's current tab - read as having no focus ring at all. The
+   entrance now grows the ring outward from the border instead: the colour is
+   primary from the first frame and only `outline-offset` moves (0 -> 2px), so
+   a probe and a person see the same thing at every instant.
+   `prefers-reduced-motion` still removes the motion below; the ring itself is
+   present either way. */
 .ld-focus-ring:focus-visible {
     outline: 2px solid var(--color-primary, currentColor);
     outline-offset: 2px;
     animation: ld-focus-ring-in var(--ld-duration-fast) var(--ld-ease-decelerate);
 }
 @keyframes ld-focus-ring-in {
-    from { outline-color: transparent; }
-    to   { outline-color: var(--color-primary, currentColor); }
+    from { outline-offset: 0px; }
+    to   { outline-offset: 2px; }
 }
 
 /* VerticalSteps: a small dash sliding down a "lit" rail segment, giving a
