@@ -438,10 +438,17 @@ pub fn FilterBar(
                         <Button
                             class="btn-ghost btn-sm"
                             attr:data-filter-reset="true"
-                            disabled=Signal::derive(move || {
-                                active_binding
+                            // ldui-p82h: a disabled Reset says why (the
+                            // `active_none` caption text); blank = enabled.
+                            disabled_reason=Signal::derive(move || {
+                                let no_chips = active_binding
                                     .as_ref()
-                                    .is_some_and(|(chips, _)| chips.with(|chips| chips.is_empty()))
+                                    .is_some_and(|(chips, _)| chips.with(|chips| chips.is_empty()));
+                                if no_chips {
+                                    texts.with(|texts| texts.active_none.clone())
+                                } else {
+                                    String::new()
+                                }
                             })
                             on_click=Callback::new(move |_| callback.run(()))
                         >
@@ -466,11 +473,16 @@ pub fn FilterBar(
                                         |reason| format!("{}. {reason}", texts.save_default),
                                     )
                                 })
-                                disabled=Signal::derive(move || texts.with(|texts| {
-                                    !filter_save_presentation(
+                                // ldui-p82h: the presentation's reason is
+                                // `Some` exactly when `enabled` is false, so
+                                // one signal drives both the state and the
+                                // describedby hint (the combined aria-label
+                                // above keeps the name-level phrasing).
+                                disabled_reason=Signal::derive(move || texts.with(|texts| {
+                                    filter_save_presentation(
                                         &disabled_binding.state.get(),
                                         texts,
-                                    ).enabled
+                                    ).disabled_reason.unwrap_or_default()
                                 }))
                                 on_click=Callback::new(move |_| {
                                     let state = click_binding.state.get_untracked();

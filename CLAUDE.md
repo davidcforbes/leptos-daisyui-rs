@@ -67,6 +67,7 @@ cargo xtask test-ai-chat-knowledge     # knowledge rail: corpora, ingest, ground
 cargo xtask test-admin-workbench       # KpiStrip ladders + the measured help-bubble side (ldui-k3ip, ldui-rzvv)
 cargo xtask test-focus-ring            # .ld-focus-ring colour present from frame 0; only the offset animates (ldui-reod)
 cargo xtask test-row-action-presets    # row-action + Export presets: glyphs, names, tooltips, disabled_reason (ldui-bmqj, ldui-e6x8, ldui-p82h)
+cargo xtask test-server-cursor-footer  # ServerDataTable cursor mode: standard three-region footer with total+position, fallback without (ldui-q14c)
 cargo xtask gen-tokens [--check]     # regenerate styles/tokens.css from ui-tokens
 cargo xtask check-sibling-tokens     # preamble.rs's ui_tokens refs must exist on the sibling's DEFAULT branch
 cargo xtask test-person-picker       # PersonPicker listbox contract, wrapping, Unknown-vs-Offline, contrast

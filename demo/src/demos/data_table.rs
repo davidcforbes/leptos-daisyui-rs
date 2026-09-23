@@ -874,6 +874,53 @@ pub fn DataTableDemo() -> impl IntoView {
         cursor_page.into(),
         Callback::new(propose_cursor_query),
     ));
+    // ldui-q14c: a keyset endpoint that ALSO reports its population total and
+    // the slice's offset. The fixture's `offset:*` tokens stay opaque to the
+    // component; only this simulated backend reads them.
+    let known_total_fixture = StoredValue::new(generate_users(120));
+    let known_total_rows = RwSignal::new(Vec::<HashMap<&'static str, String>>::new());
+    let known_total_query = RwSignal::new(ServerCursorQuery::first_slice(25));
+    let known_total_page = RwSignal::new(ServerCursorPage::default());
+    let known_total_forgotten = RwSignal::new(false);
+    let known_total_columns = RwSignal::new(vec![
+        Column::new("name", "Name"),
+        Column::new("email", "Email"),
+        Column::new("role", "Role"),
+    ]);
+    let run_known_total_query = move |query: ServerCursorQuery| {
+        let requested_offset = match &query.request {
+            ServerCursorRequest::First => 0,
+            ServerCursorRequest::Previous(cursor) | ServerCursorRequest::Next(cursor) => cursor
+                .as_str()
+                .strip_prefix("offset:")
+                .and_then(|value| value.parse::<usize>().ok())
+                .unwrap_or(0),
+        };
+        let items = known_total_fixture.get_value();
+        let size = query.page_size.max(1) as usize;
+        let start = requested_offset.min(items.len());
+        let previous = (start > 0)
+            .then(|| ServerCursorToken::new(format!("offset:{}", start.saturating_sub(size))));
+        let next = (start + size < items.len())
+            .then(|| ServerCursorToken::new(format!("offset:{}", start + size)));
+        let mut page = ServerCursorPage::new(previous, next);
+        if !known_total_forgotten.get_untracked() {
+            page = page
+                .with_total_rows(items.len() as i64)
+                .with_position(start as i64);
+        }
+        known_total_rows.set(items.into_iter().skip(start).take(size).collect());
+        known_total_page.set(page);
+    };
+    run_known_total_query(known_total_query.get_untracked());
+    let known_total_pagination = ServerTablePagination::cursor(ServerCursorPagination::controlled(
+        known_total_query.into(),
+        known_total_page.into(),
+        Callback::new(move |query: ServerCursorQuery| {
+            known_total_query.set(query.clone());
+            run_known_total_query(query);
+        }),
+    ));
     let navigation_only_query = RwSignal::new(ServerCursorQuery::first_slice(4));
     let navigation_only_page = RwSignal::new(ServerCursorPage::new(
         None,
@@ -2925,6 +2972,36 @@ pub fn DataTableDemo() -> impl IntoView {
                         viewport_fit=true
                     />
                 </div>
+            </Section>
+
+            // ldui-q14c: cursor paging whose caller also knows the total and offset
+            <Section title="Cursor Paging With a Known Total">
+                <p class="text-sm opacity-70 mb-2">
+                    "A keyset endpoint that also reports its population total and the "
+                    "slice offset gets the standard footer: rows per page left, the pager "
+                    "centred with the one page number a cursor can truthfully name, and "
+                    "the range on the right. Forgetting the total falls back to opaque "
+                    "Previous/Next in the same grid."
+                </p>
+                <div class="flex flex-wrap gap-2 mb-3">
+                    <Button
+                        attr:data-testid="cursor-known-total-forget"
+                        on:click=move |_| {
+                            known_total_forgotten.update(|value| *value = !*value);
+                            run_known_total_query(known_total_query.get_untracked());
+                        }
+                    >
+                        {move || if known_total_forgotten.get() { "Restore total" } else { "Forget total" }}
+                    </Button>
+                </div>
+                <ServerDataTable
+                    rows=known_total_rows
+                    columns=known_total_columns
+                    pagination=known_total_pagination
+                    query_capabilities=ServerQueryCapabilities::navigation_only().with_page_size(true)
+                    page_size_options=Signal::stored(vec![10_i64, 25_i64, 50_i64])
+                    attr:id="cursor-known-total-table"
+                />
             </Section>
 
             // Column resize, typed cells (Badge/Icon), row background, clipboard export

@@ -41,9 +41,26 @@ async fn actions_snapshot(harness: &pixelproof_web::Harness) -> Value {
                     tag: element.tagName,
                     type: element.getAttribute('type'),
                     role: element.getAttribute('role'),
-                    text: element.textContent?.trim() ?? null,
+                    // The VISIBLE label. `Button::disabled_reason`
+                    // (ldui-p82h) renders its reason as an aria-hidden
+                    // `sr-only` span INSIDE the button, so raw textContent
+                    // concatenates it ("ResetNo active filters") although
+                    // neither the eye nor the accessible name sees it.
+                    text: (() => {
+                        const clone = element.cloneNode(true);
+                        clone.querySelectorAll('[data-button-disabled-reason]')
+                            .forEach(hint => hint.remove());
+                        return clone.textContent?.trim() ?? null;
+                    })(),
                     ariaLabel: element.getAttribute('aria-label'),
                     disabled: element.disabled === true,
+                    // The disabled reason as assistive tech receives it:
+                    // the text of the element aria-describedby names.
+                    describedBy: (() => {
+                        const id = element.getAttribute('aria-describedby');
+                        const hint = id ? document.getElementById(id) : null;
+                        return hint?.textContent?.trim() ?? null;
+                    })(),
                 };
             const opted = document.getElementById('snapshot-actions-filters');
             const bar = opted?.querySelector('[data-filter-bar="local"]') ?? null;
@@ -135,6 +152,12 @@ async fn filter_actions_supply_count_reset_and_save_without_a_consumer_filter_ba
     assert_eq!(initial["reset"]["text"], json!("Reset"));
     // No active filter yet, so the framework Reset reports nothing to reset.
     assert_eq!(initial["reset"]["disabled"], json!(true));
+    // ...and says so (ldui-p82h): a disabled action carries its reason.
+    assert_eq!(
+        initial["reset"]["describedBy"],
+        json!("No active filters"),
+        "a disabled Reset must describe why: {initial}"
+    );
 
     assert_eq!(initial["save"]["tag"], json!("BUTTON"));
     assert_eq!(initial["save"]["type"], json!("button"));
@@ -145,6 +168,11 @@ async fn filter_actions_supply_count_reset_and_save_without_a_consumer_filter_ba
         "a clean view must say why Save is unavailable in its accessible name: {initial}"
     );
     assert_eq!(initial["save"]["disabled"], json!(true));
+    assert_eq!(
+        initial["save"]["describedBy"],
+        json!("Defaults are already saved"),
+        "a disabled Save must describe why: {initial}"
+    );
     assert_eq!(initial["feedbackKind"], json!(null));
 
     // --- Negative control: the same composite, no opt-in ----------------

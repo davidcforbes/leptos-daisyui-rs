@@ -191,6 +191,38 @@ fn save_presentation_enables_only_explicit_dirty_or_retryable_states() {
     );
 }
 
+/// The Save-as-default button drives its state from `disabled_reason` alone
+/// (ldui-p82h): `Button` disables exactly when the reason is non-blank. So a
+/// presentation whose `enabled` disagreed with `disabled_reason.is_none()`
+/// would render an enabled button with a stale reason, or a disabled one
+/// with no reason at all (an audit finding). Pin the invariant for every
+/// state, including a blank-but-`Some` reason, which `Button` treats as
+/// enabled.
+#[test]
+fn save_presentation_reason_is_present_exactly_when_disabled() {
+    let texts = FilterBarTexts::default();
+    let states = [
+        SnapshotDefaultSaveState::Clean,
+        SnapshotDefaultSaveState::Dirty,
+        SnapshotDefaultSaveState::Pending,
+        SnapshotDefaultSaveState::Saved,
+        SnapshotDefaultSaveState::Conflict("revision changed".to_owned()),
+        SnapshotDefaultSaveState::Failure("network unavailable".to_owned()),
+    ];
+    for state in states {
+        let presentation = filter_save_presentation(&state, &texts);
+        let reason_is_blank = presentation
+            .disabled_reason
+            .as_deref()
+            .is_none_or(|reason| reason.trim().is_empty());
+        assert_eq!(
+            presentation.enabled, reason_is_blank,
+            "{state:?}: enabled={} but disabled_reason={:?}",
+            presentation.enabled, presentation.disabled_reason
+        );
+    }
+}
+
 #[test]
 fn localized_templates_cover_filter_and_result_counts() {
     let texts = FilterBarTexts {

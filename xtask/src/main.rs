@@ -897,6 +897,21 @@ fn row_action_presets_step() -> Step {
     }
 }
 
+/// `ServerDataTable` cursor mode's standard footer (ldui-q14c): with a known
+/// total + position the three-region ldui-5oce grid renders the truthful
+/// range and the current page slot; without them Previous/Next fall back
+/// inside the same grid. Measures rendered geometry over the demo's
+/// known-total fixture and uses its "Forget total" toggle as the BREAK.
+fn server_cursor_footer_step() -> Step {
+    Step {
+        name: "test-server-cursor-footer",
+        run: Run::BrowserSuite {
+            test: "server_cursor_footer_smoke",
+            html_target: None,
+        },
+    }
+}
+
 /// The full release gate. The catalog browser suites are deliberately
 /// consecutive: [`run_steps`] reuses one verified release server for adjacent
 /// suites targeting the same HTML entry point.
@@ -932,6 +947,7 @@ fn full_steps() -> Vec<Step> {
     steps.push(help_hint_step());
     steps.push(focus_ring_step());
     steps.push(row_action_presets_step());
+    steps.push(server_cursor_footer_step());
     steps
 }
 
@@ -2689,6 +2705,7 @@ fn main() -> ExitCode {
         "test-help-hint" => run_steps(&[help_hint_step()]),
         "test-focus-ring" => run_steps(&[focus_ring_step()]),
         "test-row-action-presets" => run_steps(&[row_action_presets_step()]),
+        "test-server-cursor-footer" => run_steps(&[server_cursor_footer_step()]),
         "gen-tokens" => {
             let check = std::env::args().any(|a| a == "--check");
             gen_tokens(check)
@@ -2703,7 +2720,7 @@ fn main() -> ExitCode {
         other => {
             eprintln!("xtask: unknown subcommand {other:?}");
             eprintln!(
-                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-selectable-summary|test-person-picker|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-snapshot-table-page-filter-actions|test-helpdesk|test-ai-chat|test-ai-chat-knowledge|test-server-table-column-tools|test-collapse-naming|test-data-table-fit|test-app-shell|test-field-context-scoping|test-entity-draft-row|test-softphone|test-help-hint|test-focus-ring|test-row-action-presets|gen-tokens|check-sibling-tokens|clean-cache|bump>"
+                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-selectable-summary|test-person-picker|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-snapshot-table-page-filter-actions|test-helpdesk|test-ai-chat|test-ai-chat-knowledge|test-server-table-column-tools|test-collapse-naming|test-data-table-fit|test-app-shell|test-field-context-scoping|test-entity-draft-row|test-softphone|test-help-hint|test-focus-ring|test-row-action-presets|test-server-cursor-footer|gen-tokens|check-sibling-tokens|clean-cache|bump>"
             );
             ExitCode::from(2)
         }
@@ -3275,6 +3292,29 @@ pub fn r() -> f32 { radius::CARD }
             full_steps()
                 .iter()
                 .any(|s| s.name == "test-row-action-presets")
+        );
+    }
+
+    #[test]
+    fn server_cursor_footer_step_is_in_process_and_full_only() {
+        let step = server_cursor_footer_step();
+        assert_eq!(step.name, "test-server-cursor-footer");
+        assert!(matches!(
+            step.run,
+            Run::BrowserSuite {
+                test: "server_cursor_footer_smoke",
+                html_target: None
+            }
+        ));
+        assert!(
+            !gate_steps()
+                .iter()
+                .any(|s| s.name == "test-server-cursor-footer")
+        );
+        assert!(
+            full_steps()
+                .iter()
+                .any(|s| s.name == "test-server-cursor-footer")
         );
     }
 

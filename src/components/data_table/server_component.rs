@@ -606,6 +606,13 @@ impl ServerCursorSliceState {
 }
 
 /// Navigation metadata for the currently displayed cursor slice.
+///
+/// A keyset endpoint that ALSO knows its population total and the slice's
+/// offset may say so through [`with_total_rows`](Self::with_total_rows) and
+/// [`with_position`](Self::with_position) (ldui-q14c). With both present the
+/// footer renders the same truthful `Showing x-y of z` range and current
+/// page number as offset paging; with either absent it keeps the opaque
+/// slice caption and never invents a total.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ServerCursorPage {
     /// Opaque cursor for the preceding slice, or `None` at the beginning.
@@ -614,6 +621,32 @@ pub struct ServerCursorPage {
     pub next: Option<ServerCursorToken>,
     /// Whether these rows are current or deliberately retained.
     pub state: ServerCursorSliceState,
+    /// Population total reported by the server, when it reports one.
+    /// Only meaningful together with `position`.
+    pub total_rows: Option<i64>,
+    /// Zero-based offset of the first displayed row within the population,
+    /// from the caller's own cursor bookkeeping. Only meaningful together
+    /// with `total_rows`.
+    pub position: Option<i64>,
+}
+
+/// The truthful range a cursor slice reports once the caller supplied both a
+/// population total and the slice's position (ldui-q14c). Derived by
+/// [`ServerCursorPage::known_range`]; never fabricated from a page index.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ServerCursorRange {
+    /// One-based index of the first displayed row, or `0` when nothing is
+    /// displayed.
+    pub start: i64,
+    /// One-based index of the last displayed row, or `0` when nothing is
+    /// displayed.
+    pub end: i64,
+    /// Population total.
+    pub total: i64,
+    /// One-based page number the position falls on at this page size.
+    pub page: i64,
+    /// Number of pages the total spans at this page size (at least one).
+    pub pages: i64,
 }
 
 impl ServerCursorPage {
@@ -623,7 +656,49 @@ impl ServerCursorPage {
             previous,
             next,
             state: ServerCursorSliceState::Current,
+            total_rows: None,
+            position: None,
         }
+    }
+
+    /// Records the population total the server reported (ldui-q14c).
+    pub fn with_total_rows(mut self, total_rows: i64) -> Self {
+        self.total_rows = Some(total_rows);
+        self
+    }
+
+    /// Records the zero-based offset of this slice's first row (ldui-q14c).
+    pub fn with_position(mut self, position: i64) -> Self {
+        self.position = Some(position);
+        self
+    }
+
+    /// The range this slice can truthfully report, or `None` unless BOTH
+    /// `total_rows` and `position` are known. `displayed` is the number of
+    /// rows actually rendered, so a short final slice reports its real end
+    /// rather than `position + page_size`.
+    pub fn known_range(&self, displayed: usize, page_size: i64) -> Option<ServerCursorRange> {
+        let total = self.total_rows?.max(0);
+        let position = self.position?.max(0);
+        let size = page_size.max(1);
+        let count = i64::try_from(displayed).unwrap_or(i64::MAX);
+        let (start, end) = if count == 0 || total == 0 {
+            (0, 0)
+        } else {
+            (
+                position.saturating_add(1).min(total),
+                position.saturating_add(count).min(total),
+            )
+        };
+        let pages = (total / size + i64::from(total % size != 0)).max(1);
+        let page = (position / size + 1).clamp(1, pages);
+        Some(ServerCursorRange {
+            start,
+            end,
+            total,
+            page,
+            pages,
+        })
     }
 
     /// Labels the same slice as retained while a newer request is loading.
@@ -3199,7 +3274,7 @@ pub fn ServerDataTable(
             </div>
 
             <div
-                class=merge_classes!(classes.pagination, "flex shrink-0 flex-wrap items-center justify-between gap-3")
+                class=merge_classes!(classes.pagination, "@container shrink-0")
                 data-server-table-footer="true"
                 data-server-cursor-state=move || match pagination {
                     ServerTablePagination::Cursor(cursor) => Some(match cursor.page.get().state {
@@ -3210,10 +3285,23 @@ pub fn ServerDataTable(
                     ServerTablePagination::Offset(_) => None,
                 }
             >
-                <div class="flex min-w-0 max-w-full flex-wrap items-center gap-3">
+                // ldui-q14c / ldui-5oce: the same three-region footer row as
+                // `EntityTable` -- rows-per-page LEFT, the pager CENTERED (an
+                // `auto` track between two equal `1fr` tracks is centered
+                // regardless of what the flanks hold), the row range RIGHT --
+                // in BOTH paging modes, so an offset table and a cursor table
+                // on one page share one geometry. Below the `@2xl` container
+                // width the pager drops to its own centered second row.
+                // `w-full` because `classes.pagination` may be a flex row (its
+                // default is): a content-sized grid inside a flex row would
+                // size to its tracks, not to the table.
+                <div
+                    class="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center gap-2 @2xl:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]"
+                    data-server-table-footer-controls="true"
+                >
                     {has_page_size.then(|| view! {
                         <label
-                            class="flex min-w-0 max-w-full flex-wrap items-center gap-2 text-sm text-base-content/75"
+                            class="col-start-1 row-start-1 flex min-w-0 max-w-full flex-wrap items-center justify-self-start gap-2 text-sm text-base-content/75"
                             r#for=move || page_size_input_id.get()
                         >
                             <span class="min-w-0 break-words">{move || texts.with(|t| t.page_size_label.clone())}</span>
@@ -3252,7 +3340,56 @@ pub fn ServerDataTable(
                             </Select>
                         </label>
                     })}
-                    <span class=classes.page_indicator data-server-row-range="true" role="status" aria-live="polite">
+                    <div
+                        class="col-span-2 col-start-1 row-start-2 flex-none justify-self-center @2xl:col-span-1 @2xl:col-start-2 @2xl:row-start-1"
+                        data-server-table-pagination="true"
+                    >
+                        {move || match pagination {
+                            ServerTablePagination::Offset(offset) => {
+                                let total = offset.total_count.get().max(0);
+                                let query = query_state.get();
+                                let size = query.page_size().max(1);
+                                let page = query.offset_page().unwrap_or(1).max(1);
+                                let total_pages = (total / size + i64::from(total % size != 0)).max(1);
+                                view! {
+                                    <ServerPaginationControls
+                                        current_page=page
+                                        total_pages=total_pages
+                                        loading=loading.get()
+                                        on_page_change=page_change
+                                        texts=texts.get()
+                                        classes=pagination_classes.clone()
+                                    />
+                                }.into_any()
+                            }
+                            ServerTablePagination::Cursor(cursor) => {
+                                let page = cursor.page.get();
+                                let range = page.known_range(
+                                    rows.with(Vec::len),
+                                    query_state.get().page_size(),
+                                );
+                                view! {
+                                    <ServerCursorPaginationControls
+                                        page=page
+                                        range=range
+                                        loading=loading.get()
+                                        on_navigate=cursor_change
+                                        texts=texts.get()
+                                        classes=pagination_classes.clone()
+                                    />
+                                }.into_any()
+                            }
+                        }}
+                    </div>
+                    // The truthful range shares the footer row with the
+                    // page-size selector and the centered pager,
+                    // right-justified in the row's third column (ldui-5oce).
+                    <span
+                        class=merge_classes!(classes.page_indicator, "col-start-2 row-start-1 max-w-full flex-none justify-self-end text-right tabular-nums @2xl:col-start-3")
+                        data-server-row-range="true"
+                        role="status"
+                        aria-live="polite"
+                    >
                         {move || match pagination {
                             ServerTablePagination::Offset(offset) => {
                                 if loading.get() { return texts.with(|t| t.loading.clone()); }
@@ -3268,7 +3405,24 @@ pub fn ServerDataTable(
                                     .replace("{end}", &end.to_string()).replace("{total}", &total.to_string()))
                             }
                             ServerTablePagination::Cursor(cursor) => {
-                                let state = cursor.page.get().state;
+                                let page = cursor.page.get();
+                                // ldui-q14c: a CURRENT slice whose caller
+                                // supplied total + position reports the same
+                                // truthful range as offset paging. Retained
+                                // slices keep their caption: "retained while
+                                // loading" says something a range cannot.
+                                if matches!(page.state, ServerCursorSliceState::Current)
+                                    && let Some(range) = page.known_range(
+                                        rows.with(Vec::len),
+                                        query_state.get().page_size(),
+                                    )
+                                {
+                                    return texts.with(|t| t.row_range
+                                        .replace("{start}", &range.start.to_string())
+                                        .replace("{end}", &range.end.to_string())
+                                        .replace("{total}", &range.total.to_string()));
+                                }
+                                let state = page.state;
                                 cursor.texts.with(|t| match state {
                                     ServerCursorSliceState::Current => &t.current,
                                     ServerCursorSliceState::RetainedWhileLoading => &t.retained_loading,
@@ -3278,34 +3432,6 @@ pub fn ServerDataTable(
                         }}
                     </span>
                 </div>
-                {move || match pagination {
-                    ServerTablePagination::Offset(offset) => {
-                        let total = offset.total_count.get().max(0);
-                        let query = query_state.get();
-                        let size = query.page_size().max(1);
-                        let page = query.offset_page().unwrap_or(1).max(1);
-                        let total_pages = (total / size + i64::from(total % size != 0)).max(1);
-                        view! {
-                            <ServerPaginationControls
-                                current_page=page
-                                total_pages=total_pages
-                                loading=loading.get()
-                                on_page_change=page_change
-                                texts=texts.get()
-                                classes=pagination_classes.clone()
-                            />
-                        }.into_any()
-                    }
-                    ServerTablePagination::Cursor(cursor) => view! {
-                        <ServerCursorPaginationControls
-                            page=cursor.page.get()
-                            loading=loading.get()
-                            on_navigate=cursor_change
-                            texts=texts.get()
-                            classes=pagination_classes.clone()
-                        />
-                    }.into_any(),
-                }}
             </div>
         </div>
     }
@@ -3382,9 +3508,16 @@ fn restore_server_column_move_focus(
 }
 
 /// Cursor pagination controls with no fabricated page number or total.
+///
+/// When the caller's page carries a known `range` (total + position,
+/// ldui-q14c) the current page number sits between Previous and Next as the
+/// pager's `aria-current="page"` slot -- the one page a cursor can truthfully
+/// name. Other page numbers are never rendered: a cursor cannot jump to them,
+/// and a button that cannot act is an audit finding, not navigation.
 #[component]
 fn ServerCursorPaginationControls(
     page: ServerCursorPage,
+    #[prop(optional_no_strip)] range: Option<ServerCursorRange>,
     loading: bool,
     on_navigate: Callback<ServerCursorRequest>,
     texts: DataTableTexts,
@@ -3397,9 +3530,9 @@ fn ServerCursorPaginationControls(
 
     view! {
         <div
-            class="max-w-full flex flex-wrap items-center justify-end gap-1"
+            class="max-w-full flex flex-wrap items-center justify-center gap-1"
         >
-            <div class="join max-w-full flex flex-wrap items-center justify-end gap-1" data-pagination="true">
+            <div class="join max-w-full flex flex-wrap items-center justify-center gap-1" data-pagination="true">
                 <button
                     type="button"
                     class=merge_classes!(classes.pagination_button, "join-item")
@@ -3413,6 +3546,18 @@ fn ServerCursorPaginationControls(
                 >
                     {texts.previous}
                 </button>
+                {range.map(|range| view! {
+                    <button
+                        type="button"
+                        class=merge_classes!(classes.pagination_button, "join-item btn-active tabular-nums")
+                        data-server-cursor-page=range.page.to_string()
+                        data-server-cursor-pages=range.pages.to_string()
+                        aria-current="page"
+                        disabled=true
+                    >
+                        {range.page.to_string()}
+                    </button>
+                })}
                 <button
                     type="button"
                     class=merge_classes!(classes.pagination_button, "join-item")
@@ -3455,8 +3600,8 @@ fn ServerPaginationControls(
     let next_disabled = loading || current_page >= total_pages;
 
     view! {
-        <div class="max-w-full flex flex-wrap items-center justify-end gap-1">
-            <div class="join max-w-full flex flex-wrap items-center justify-end gap-1" data-pagination="true">
+        <div class="max-w-full flex flex-wrap items-center justify-center gap-1">
+            <div class="join max-w-full flex flex-wrap items-center justify-center gap-1" data-pagination="true">
                 // Previous button
                 <button
                     class=merge_classes!(classes.pagination_button, "join-item")
@@ -3579,6 +3724,84 @@ mod tests {
 
     fn identified_row(id: &str) -> TableRow {
         HashMap::from([("id", id.to_owned())])
+    }
+
+    /// ldui-q14c: the cursor footer reports a range ONLY when the caller
+    /// supplied both a total and a position; either alone is not enough to
+    /// say anything true, so it stays on the opaque caption.
+    #[test]
+    fn cursor_known_range_requires_both_total_and_position() {
+        let neither = ServerCursorPage::new(None, None);
+        assert_eq!(neither.known_range(25, 25), None);
+        let total_only = ServerCursorPage::new(None, None).with_total_rows(120);
+        assert_eq!(total_only.known_range(25, 25), None);
+        let position_only = ServerCursorPage::new(None, None).with_position(25);
+        assert_eq!(position_only.known_range(25, 25), None);
+    }
+
+    /// The bead's own check: total 120, page size 25, position 25 reads
+    /// "26-50 of 120" on page 2 of 5. A short final slice ends at its real
+    /// last row, an empty slice reads 0-0, and a position past the end still
+    /// names a page that exists.
+    #[test]
+    fn cursor_known_range_reads_the_displayed_slice_truthfully() {
+        let page = ServerCursorPage::new(None, None)
+            .with_total_rows(120)
+            .with_position(25);
+        assert_eq!(
+            page.known_range(25, 25),
+            Some(ServerCursorRange {
+                start: 26,
+                end: 50,
+                total: 120,
+                page: 2,
+                pages: 5,
+            })
+        );
+
+        let first = ServerCursorPage::new(None, None)
+            .with_total_rows(120)
+            .with_position(0);
+        assert_eq!(
+            first.known_range(25, 25).map(|r| (r.start, r.end, r.page)),
+            Some((1, 25, 1))
+        );
+
+        let short_last = ServerCursorPage::new(None, None)
+            .with_total_rows(103)
+            .with_position(100);
+        assert_eq!(
+            short_last
+                .known_range(3, 25)
+                .map(|r| (r.start, r.end, r.page, r.pages)),
+            Some((101, 103, 5, 5))
+        );
+
+        let empty = ServerCursorPage::new(None, None)
+            .with_total_rows(0)
+            .with_position(0);
+        assert_eq!(
+            empty.known_range(0, 25).map(|r| (r.start, r.end, r.pages)),
+            Some((0, 0, 1))
+        );
+
+        let past_end = ServerCursorPage::new(None, None)
+            .with_total_rows(120)
+            .with_position(500);
+        assert_eq!(
+            past_end
+                .known_range(0, 25)
+                .map(|r| (r.start, r.end, r.page)),
+            Some((0, 0, 5))
+        );
+
+        let degenerate_size = ServerCursorPage::new(None, None)
+            .with_total_rows(7)
+            .with_position(3);
+        assert_eq!(
+            degenerate_size.known_range(4, 0).map(|r| (r.page, r.pages)),
+            Some((4, 7))
+        );
     }
 
     #[test]

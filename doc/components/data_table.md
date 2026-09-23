@@ -499,11 +499,17 @@ contract as `data-table-data-mode="server-query"` for runtime audits.
 
 ### Footer and Auto/fixed rows per page
 
-The footer follows EntityTable's standard layout: Rows per page and the range
-on the left, navigation on the right, wrapping on compact screens. The shared
-Select retains its ID/name through query changes, empty results and loading.
-Search stays above the table. Cursor mode retains its slice-status caption and
-opaque navigation contract; it never invents a population total.
+The footer follows EntityTable's standard layout (ldui-5oce, ldui-q14c): one
+row with rows-per-page on the left, the pager centred under the table, and the
+row range right-justified; below the `@2xl` container width the pager drops to
+its own centred second row. Both paging modes render this same grid
+(`data-server-table-footer-controls`, `data-server-table-pagination`,
+`data-server-row-range`), so an offset table and a cursor table on one page
+share one geometry. The shared Select retains its ID/name through query
+changes, empty results and loading. Search stays above the table. Cursor mode
+keeps its slice-status caption and opaque navigation contract unless the caller
+supplies both a total and a position (see [Cursor pagination](#cursor-pagination));
+it never invents a population total.
 
 Keep preference and accepted data separate:
 
@@ -763,9 +769,28 @@ Use `ServerTablePagination::cursor(ServerCursorPagination::controlled(...))`
 for keyset APIs that return opaque previous/next cursors without a population
 total. The caller supplies a controlled `ServerCursorQuery`, the accepted
 `ServerCursorPage` metadata for the rows currently displayed, and one
-full-query replacement callback. No page number, total, or offset range is
-rendered. The root exposes `data-server-pagination-strategy="cursor"` for
-runtime audits.
+full-query replacement callback. By default no page number, total, or offset
+range is rendered. The root exposes `data-server-pagination-strategy="cursor"`
+for runtime audits.
+
+A keyset endpoint that ALSO reports its population total and the slice's
+offset may say so (ldui-q14c):
+
+```rust,ignore
+let page = ServerCursorPage::new(previous, next)
+    .with_total_rows(total)   // the server's population total
+    .with_position(offset);   // zero-based offset of the first displayed row
+```
+
+With BOTH present on a current slice the footer renders the standard
+`Showing x-y of z` range (`DataTableTexts::row_range`, right) and the pager
+centres the current page number between Previous and Next as its
+`aria-current="page"` slot (`data-server-cursor-page`, `data-server-cursor-pages`)
+-- the one page a cursor can truthfully name; other page numbers are never
+rendered because a cursor cannot jump to them. With either field absent, or on
+a retained slice, the opaque caption and Previous/Next render in the same grid.
+`ServerCursorPage::known_range(displayed, page_size)` is the pure derivation,
+so a short final slice ends at its real last row.
 
 `ServerCursorToken` is deliberately opaque: the component only returns a
 cloned token through `ServerCursorRequest::Previous` or `Next`; it never parses
