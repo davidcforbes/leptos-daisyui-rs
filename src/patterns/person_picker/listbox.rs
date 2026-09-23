@@ -2,7 +2,16 @@ use super::model::{PickerPerson, Step, next_selection, step_id, tab_stop_id};
 use super::texts::PersonPickerTexts;
 use crate::components::{Icon, IconSize, IconTileSize};
 use leptos::{ev, prelude::*};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use wasm_bindgen::JsCast;
+
+/// Mints one id per option for its stale-presence description, so an
+/// option's `aria-describedby` never depends on the caller's person id being
+/// a valid, page-unique DOM id.
+fn next_presence_as_of_id() -> String {
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    format!("ld-person-as-of-{}", NEXT.fetch_add(1, Ordering::Relaxed))
+}
 
 /// Single-select listbox that can be emptied.
 ///
@@ -27,6 +36,15 @@ pub fn PersonListbox(
     /// Copy, for the presence words.
     #[prop(into)]
     texts: Signal<PersonPickerTexts>,
+    /// Stale-presence caption (ldui-8hmy), e.g. `"Status as of 1:52 PM"`.
+    /// `None` renders live presence exactly as before. `Some` greys every
+    /// dot in place and makes the caption each dot's tooltip and its
+    /// option's accessible description. See [`PersonPicker`]'s prop of the
+    /// same name.
+    ///
+    /// [`PersonPicker`]: super::PersonPicker
+    #[prop(optional, into)]
+    presence_as_of: Signal<Option<String>>,
 ) -> impl IntoView {
     // Focus and selection are SEPARATE here, unlike a radiogroup.
     let focused = RwSignal::new(None::<String>);
@@ -79,6 +97,7 @@ pub fn PersonListbox(
                             focused=focused
                             on_select=on_select
                             texts=texts
+                            presence_as_of=presence_as_of
                         />
                     }
                 }
@@ -95,6 +114,7 @@ fn PersonOption(
     focused: RwSignal<Option<String>>,
     on_select: Callback<Option<String>>,
     texts: Signal<PersonPickerTexts>,
+    presence_as_of: Signal<Option<String>>,
 ) -> impl IntoView {
     let id = person.id.clone();
     let is_selected = {
@@ -130,17 +150,55 @@ fn PersonOption(
         IconTileSize::Md.as_str()
     );
     // `Unknown` has no dot class, so it renders no dot; its word still shows.
+    // Stale (ldui-8hmy): the SAME span, greyed in place -- only the fill
+    // class changes, so nothing moves -- with the caption as its tooltip.
+    // The dot stays `aria-hidden` decoration; assistive tech gets the
+    // caption as the OPTION's description, the element that takes focus.
+    let has_dot = person
+        .presence
+        .is_some_and(|presence| presence.dot_class().is_some());
+    let as_of = Signal::derive(move || {
+        if has_dot {
+            presence_as_of
+                .get()
+                .filter(|caption| !caption.trim().is_empty())
+        } else {
+            None
+        }
+    });
+    let as_of_id = next_presence_as_of_id();
     let presence_dot = person.presence.and_then(|presence| {
-        presence.dot_class().map(|dot| {
+        presence.dot_class().map(|_| {
             view! {
                 <span
-                    class=format!("absolute bottom-0 right-0 size-3 rounded-full {dot}")
+                    class=move || {
+                        let fill = presence
+                            .dot_class_when(as_of.with(Option::is_some))
+                            .unwrap_or_default();
+                        format!("absolute bottom-0 right-0 size-3 rounded-full {fill}")
+                    }
                     aria-hidden="true"
+                    title=move || as_of.get()
                     data-person-presence=presence.as_str()
+                    data-person-presence-stale=move || as_of.with(Option::is_some).then_some("true")
                 ></span>
             }
         })
     });
+    let describedby_id = as_of_id.clone();
+    let as_of_hint = move || {
+        let id = as_of_id.clone();
+        as_of.get().map(|caption| {
+            // aria-hidden so the caption joins the option's DESCRIPTION
+            // through aria-describedby without also joining its NAME,
+            // which a listbox option computes from its content.
+            view! {
+                <span class="sr-only" aria-hidden="true" id=id data-person-presence-as-of="true">
+                    {caption}
+                </span>
+            }
+        })
+    };
 
     view! {
         <li
@@ -149,9 +207,11 @@ fn PersonOption(
             tabindex=move || if is_tab_stop.get() { "0" } else { "-1" }
             data-person-option=id.clone()
             data-person-selected=move || is_selected.get().then_some("true")
+            aria-describedby=move || as_of.with(Option::is_some).then(|| describedby_id.clone())
             class=move || option_class(is_selected.get())
             on:click=on_click
         >
+            {as_of_hint}
             <span class=avatar_class>{person.initials.clone()} {presence_dot}</span>
             <span class="min-w-0 flex-1">
                 <span class="block whitespace-normal font-semibold [overflow-wrap:anywhere]">

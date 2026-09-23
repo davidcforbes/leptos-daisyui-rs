@@ -43,6 +43,11 @@ pub enum PersonPresence {
     Unknown,
 }
 
+/// The single muted fill every stale presence dot uses (ldui-8hmy). Distinct
+/// from every live fill, including `Offline`'s `bg-base-300`, so a test can
+/// tell "greyed because stale" from "offline".
+pub const STALE_PRESENCE_DOT_CLASS: &str = "bg-base-content/40";
+
 impl PersonPresence {
     /// The dot's fill class, or `None` for no dot. `Unknown` gets NO dot: a
     /// dot claims a known state, and there is none to claim.
@@ -53,6 +58,25 @@ impl PersonPresence {
             Self::Away => Some("bg-warning"),
             Self::Offline => Some("bg-base-300"),
             Self::Unknown => None,
+        }
+    }
+
+    /// The dot's fill class when the caller says presence is STALE
+    /// (ldui-8hmy), or `None` for no dot. Every known state greys to one
+    /// neutral fill -- the kept status is last-known, not current, so no
+    /// colour may claim it -- while `Unknown` still gets no dot. Same size
+    /// and position as the live dot; only the fill changes.
+    pub fn stale_dot_class(self) -> Option<&'static str> {
+        self.dot_class().map(|_| STALE_PRESENCE_DOT_CLASS)
+    }
+
+    /// [`dot_class`](Self::dot_class) or
+    /// [`stale_dot_class`](Self::stale_dot_class), by staleness.
+    pub fn dot_class_when(self, stale: bool) -> Option<&'static str> {
+        if stale {
+            self.stale_dot_class()
+        } else {
+            self.dot_class()
         }
     }
 

@@ -351,3 +351,150 @@ async fn cards_wrap_at_360px_distinguish_unknown_and_pass_contrast() {
 
     assert_no_browser_errors(&h, "person picker layout and contrast").await;
 }
+
+/// ldui-8hmy (4iiz-Office owner ruling 2026-09-23): a page whose presence
+/// refresh failed says so QUIETLY. Live, the dots carry today's fills and no
+/// option has a description. Stale, every KNOWN dot greys to the one stale
+/// fill in exactly the same box, carries the caption as its tooltip, and the
+/// caption is the accessible description of that dot's option; Unknown still
+/// has no dot and gains nothing. Turning it off restores today's rendering.
+/// BREAK: ignore the prop and the greyed-fill assertion fails.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-person-picker)"]
+async fn stale_presence_greys_the_dots_in_place_and_describes_the_options() {
+    let h = open().await;
+
+    async fn dots(h: &pixelproof_web::Harness) -> Value {
+        eval_json(
+            h,
+            r#"(() => {
+                const opts = [...document.querySelectorAll('[data-person-picker] [data-person-option]')];
+                return opts.map(opt => {
+                    const dot = opt.querySelector('[data-person-presence]');
+                    const r = dot ? dot.getBoundingClientRect() : null;
+                    const describedBy = opt.getAttribute('aria-describedby');
+                    const hint = describedBy ? document.getElementById(describedBy) : null;
+                    return {
+                        id: opt.getAttribute('data-person-option'),
+                        presence: dot ? dot.getAttribute('data-person-presence') : null,
+                        fill: dot
+                            ? [...dot.classList].find(c => c.startsWith('bg-')) ?? null
+                            : null,
+                        stale: dot ? dot.getAttribute('data-person-presence-stale') : null,
+                        title: dot ? dot.getAttribute('title') : null,
+                        box: r ? [r.left, r.top, r.width, r.height].map(Math.round) : null,
+                        description: hint ? hint.textContent.trim() : null,
+                        // The caption must not leak into the option's NAME.
+                        // A listbox option is named from its content minus
+                        // aria-hidden subtrees (the accname rule, and the
+                        // one ldui-audit's drift.js uses). Raw textContent
+                        // would include the aria-hidden caption span by
+                        // design, which is exactly the disabled_reason trap.
+                        nameLeak: (() => {
+                            const clone = opt.cloneNode(true);
+                            clone.querySelectorAll('[aria-hidden="true"]').forEach(n => n.remove());
+                            return /as of|a las/.test(clone.textContent);
+                        })(),
+                    };
+                });
+            })()"#,
+        )
+        .await
+    }
+
+    let live = dots(&h).await;
+    let live_rows = live.as_array().expect("option rows");
+    let fills: Vec<&str> = live_rows
+        .iter()
+        .filter_map(|row| row["fill"].as_str())
+        .collect();
+    assert!(
+        fills.contains(&"bg-success")
+            && fills.contains(&"bg-error")
+            && fills.contains(&"bg-warning")
+            && fills.contains(&"bg-base-300"),
+        "live dots carry today's four fills: {live}"
+    );
+    for row in live_rows {
+        assert_eq!(row["stale"], json!(null), "live: {row}");
+        assert_eq!(
+            row["title"],
+            json!(null),
+            "live dots have no tooltip: {row}"
+        );
+        assert_eq!(
+            row["description"],
+            json!(null),
+            "live options are undescribed: {row}"
+        );
+    }
+
+    click(&h, "[data-testid='person-picker-stale']").await;
+    let stale = dots(&h).await;
+    let stale_rows = stale.as_array().expect("option rows");
+    assert_eq!(stale_rows.len(), live_rows.len(), "{stale}");
+    for (before, after) in live_rows.iter().zip(stale_rows) {
+        assert_eq!(before["id"], after["id"], "{stale}");
+        if before["presence"].is_null() {
+            // Unknown: no dot before, none after, and no description.
+            assert_eq!(
+                after["presence"],
+                json!(null),
+                "Unknown stays dotless: {after}"
+            );
+            assert_eq!(after["description"], json!(null), "{after}");
+            continue;
+        }
+        assert_eq!(
+            after["fill"],
+            json!("bg-base-content/40"),
+            "every known dot greys to the stale fill: {after}"
+        );
+        assert_eq!(after["stale"], json!("true"), "{after}");
+        assert_eq!(after["title"], json!("Status as of 1:52 PM"), "{after}");
+        assert_eq!(
+            after["description"],
+            json!("Status as of 1:52 PM"),
+            "the caption is the option's accessible description: {after}"
+        );
+        assert_eq!(
+            after["presence"], before["presence"],
+            "the kept status is still recorded: {after}"
+        );
+        assert_eq!(
+            after["box"], before["box"],
+            "the dot must not move or resize when it greys: {before} -> {after}"
+        );
+        assert_eq!(after["nameLeak"], json!(false), "{after}");
+    }
+    assert!(
+        stale_rows.iter().any(|row| row["id"] == json!("dmitri")),
+        "the Unknown fixture is in the roster: {stale}"
+    );
+
+    // The caption is the caller's translated text and follows it live.
+    click(&h, "[data-testid='person-picker-spanish']").await;
+    let spanish = dots(&h).await;
+    let ana = spanish
+        .as_array()
+        .and_then(|rows| rows.iter().find(|row| row["id"] == json!("ana")))
+        .cloned()
+        .expect("ana row");
+    assert_eq!(
+        ana["description"],
+        json!("Estado a las 1:52 p. m."),
+        "{spanish}"
+    );
+    assert_eq!(ana["title"], json!("Estado a las 1:52 p. m."), "{spanish}");
+    click(&h, "[data-testid='person-picker-spanish']").await;
+
+    // Back to live: exactly today's rendering again.
+    click(&h, "[data-testid='person-picker-stale']").await;
+    let restored = dots(&h).await;
+    assert_eq!(
+        restored, live,
+        "turning staleness off restores the live render"
+    );
+
+    assert_no_browser_errors(&h, "person picker stale presence").await;
+}

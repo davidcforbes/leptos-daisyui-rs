@@ -76,6 +76,18 @@ pub fn PersonPickerDemo() -> impl IntoView {
     let selected = RwSignal::new(None::<String>);
     let collapsed = RwSignal::new(false);
     let spanish = RwSignal::new(false);
+    // ldui-8hmy: what a page does when its presence refresh fails -- keep the
+    // last statuses, and say how old they are instead of raising a banner.
+    let presence_stale = RwSignal::new(false);
+    let presence_as_of = Signal::derive(move || {
+        presence_stale.get().then(|| {
+            if spanish.get() {
+                "Estado a las 1:52 p. m.".to_owned()
+            } else {
+                "Status as of 1:52 PM".to_owned()
+            }
+        })
+    });
     let texts = Signal::derive(move || {
         if spanish.get() {
             PersonPickerTexts::es()
@@ -105,6 +117,14 @@ pub fn PersonPickerDemo() -> impl IntoView {
                 >
                     "Toggle Spanish"
                 </button>
+                <button
+                    type="button"
+                    class="btn btn-sm"
+                    data-testid="person-picker-stale"
+                    on:click=move |_| presence_stale.update(|value| *value = !*value)
+                >
+                    {move || if presence_stale.get() { "Presence live" } else { "Presence stale" }}
+                </button>
             </div>
             <div class="flex justify-end">
                 <PersonPicker
@@ -115,6 +135,7 @@ pub fn PersonPickerDemo() -> impl IntoView {
                     on_toggle_collapsed=Callback::new(move |()| collapsed.update(|c| *c = !*c))
                     title=Signal::stored("Client Coordinators".to_owned())
                     texts=texts
+                    presence_as_of=presence_as_of
                 />
             </div>
         </section>

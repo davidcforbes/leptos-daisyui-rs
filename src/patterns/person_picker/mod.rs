@@ -8,7 +8,10 @@ mod panel;
 mod texts;
 
 pub use listbox::PersonListbox;
-pub use model::{PersonPresence, PickerPerson, matches_search, nameable_selection, next_selection};
+pub use model::{
+    PersonPresence, PickerPerson, STALE_PRESENCE_DOT_CLASS, matches_search, nameable_selection,
+    next_selection,
+};
 pub use panel::PersonPicker;
 pub use texts::PersonPickerTexts;
 

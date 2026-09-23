@@ -130,6 +130,35 @@ fn arrow_keys_step_without_wrapping_and_home_end_jump() {
     assert_eq!(step_id(&all, "c", Step::First).as_deref(), Some("a"));
 }
 
+/// ldui-8hmy: stale presence greys every KNOWN state to one fill that no
+/// live state uses (Offline's grey included), and never invents a dot for
+/// Unknown. Not stale is today's rendering exactly.
+#[test]
+fn stale_presence_greys_every_known_dot_and_keeps_unknown_dotless() {
+    use super::model::STALE_PRESENCE_DOT_CLASS;
+    let known = [
+        PersonPresence::Available,
+        PersonPresence::Busy,
+        PersonPresence::Away,
+        PersonPresence::Offline,
+    ];
+    for presence in known {
+        assert_eq!(presence.dot_class_when(false), presence.dot_class());
+        assert_eq!(
+            presence.dot_class_when(true),
+            Some(STALE_PRESENCE_DOT_CLASS),
+            "{presence:?} must grey when stale"
+        );
+        assert_ne!(
+            presence.dot_class(),
+            Some(STALE_PRESENCE_DOT_CLASS),
+            "{presence:?}'s live fill must differ from the stale fill"
+        );
+    }
+    assert_eq!(PersonPresence::Unknown.dot_class_when(true), None);
+    assert_eq!(PersonPresence::Unknown.dot_class_when(false), None);
+}
+
 #[test]
 fn english_and_spanish_texts_differ_and_name_every_presence() {
     let en = PersonPickerTexts::default();

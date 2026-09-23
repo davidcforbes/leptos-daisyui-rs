@@ -31,6 +31,17 @@ pub fn PersonPicker(
     /// Page-specific content under the roster.
     #[prop(optional)]
     footer: Option<Children>,
+    /// Stale-presence caption (ldui-8hmy): the page's own translated text,
+    /// e.g. `"Status as of 1:52 PM"`, set when its presence refresh failed
+    /// and it is showing the last statuses it had. `None` (the default)
+    /// renders live presence exactly as before. `Some(caption)` greys every
+    /// presence dot to one neutral fill IN PLACE (same size and position;
+    /// `Unknown` still has no dot), makes the caption each dot's tooltip,
+    /// and makes it the accessible description of each option that has a
+    /// dot. A blank caption counts as `None`. The quiet replacement for a
+    /// "presence may be out of date" banner.
+    #[prop(optional, into)]
+    presence_as_of: Signal<Option<String>>,
 ) -> impl IntoView {
     let search = RwSignal::new(String::new());
     let visible = Memo::new(move |_| {
@@ -125,6 +136,7 @@ pub fn PersonPicker(
                     on_select=on_select
                     label=roster_label
                     texts=texts
+                    presence_as_of=presence_as_of
                 />
             }
             .into_any()

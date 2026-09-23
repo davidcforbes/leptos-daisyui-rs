@@ -112,8 +112,8 @@ pub use page_quick_actions::{
 };
 pub use page_state_panel::{PageStatePanel, PageStatePanelTexts};
 pub use person_picker::{
-    PersonListbox, PersonPicker, PersonPickerTexts, PersonPresence, PickerPerson, matches_search,
-    nameable_selection, next_selection,
+    PersonListbox, PersonPicker, PersonPickerTexts, PersonPresence, PickerPerson,
+    STALE_PRESENCE_DOT_CLASS, matches_search, nameable_selection, next_selection,
 };
 pub use record_header::{
     RecordActionFeedback, RecordAvatar, RecordBadge, RecordHeader, RecordHeaderState,

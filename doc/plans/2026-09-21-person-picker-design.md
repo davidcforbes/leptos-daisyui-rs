@@ -98,11 +98,37 @@ pub fn PersonPicker(
     title: Signal<String>,
     #[prop(optional)] texts: Signal<PersonPickerTexts>,  // reactive: no language freeze
     #[prop(optional)] footer: Option<Children>,
+    #[prop(optional)] presence_as_of: Signal<Option<String>>,  // stale caption (ldui-8hmy)
 ) -> impl IntoView
 ```
 
 `texts` is a `Signal` so a language that arrives after mount propagates — the
 defect Office shipped with `filter_text` (op-e6dsi).
+
+**Stale presence (ldui-8hmy, 4iiz-Office owner ruling 2026-09-23: "no banner;
+instead the status dots go grey, with a tooltip like 'status as of 1:52
+PM'").** A page whose presence refresh failed keeps the last statuses and
+passes its own translated caption as `presence_as_of`. `None` (or blank)
+renders live presence exactly as before. `Some(caption)`:
+
+- every KNOWN dot's fill becomes `STALE_PRESENCE_DOT_CLASS`
+  (`bg-base-content/40`, deliberately distinct from Offline's `bg-base-300`)
+  on the same span, so nothing moves; `data-person-presence` keeps the
+  last-known state and `data-person-presence-stale="true"` marks it;
+- the dot's `title` is the caption (the mouse tooltip);
+- the OPTION gets `aria-describedby` to an `aria-hidden` `sr-only` span holding
+  the caption. The dot is `aria-hidden` decoration, so a description on it
+  would never reach assistive tech; the option is what takes focus. The span
+  is `aria-hidden` so the caption joins the description, not the option's
+  name, which a listbox option computes from its content;
+- `Unknown` still has no dot and gains no description;
+- the presence WORDS keep their `/75` colour: muting them would fail AA, and
+  the description already says they are last-known.
+
+Pure rule: `PersonPresence::dot_class_when(stale)` (native-tested). Browser
+proof: `stale_presence_greys_the_dots_in_place_and_describes_the_options` in
+`tests/person_picker_smoke.rs` (dot box unchanged, Spanish caption follows,
+off restores the live render byte-for-byte); break-and-revert verified.
 
 ### Pure rules (native-tested)
 
