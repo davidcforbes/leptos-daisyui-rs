@@ -53,3 +53,14 @@ aria-labelledby, own text minus `aria-hidden` subtrees, title) AND an
 reason, and the finding quotes it so the fix is named. Negative control:
 `disabled_without_reason_name_excludes_aria_hidden_descendants` in
 `audit/src/drift.rs`. Browser proof: `cargo xtask test-row-action-presets`.
+
+## Testing a component that uses it
+
+`Button` must stay a single root element, so the reason span lives INSIDE the
+`<button>`. The accessible name excludes it (`aria-hidden`), but raw
+`textContent` does not: a disabled FilterBar Reset reads
+`"ResetNo active filters"`. A label assertion written against `textContent`
+therefore fails the moment a button gains a reason -- which is exactly what
+happened to `tests/snapshot_table_page_filter_actions_smoke.rs`. Read the
+visible label from a clone with `[data-button-disabled-reason]` removed, and
+assert the reason separately through the element `aria-describedby` names.

@@ -161,7 +161,10 @@ centers them; a clipping negative control that expanded a heading by a fixed
 assert the expansion actually happened. The `EntityTable` footer itself is an
 owner ruling, not a per-page option: rows-per-page left, pager centered (an
 `auto` grid track between two `minmax(0,1fr)` flanks), row range right, with
-the pager on its own centered row below `@2xl`. So is the quick-action row
+the pager on its own centered row below `@2xl`. `ServerDataTable` renders the
+same grid in both offset and cursor mode (ldui-q14c); a cursor page shows a
+range and a current-page slot only when the caller supplies
+`with_total_rows` AND `with_position`. The quick-action row is a ruling too
 (ldui-q85o): LEFT Save Filter (always enabled; an empty click is a no-op) then
 up to five saved-filter badges with their `x` and no "Filters:" caption;
 RIGHT `+ New`, the consumer's actions (Export = the download icon), the gear.
@@ -174,7 +177,11 @@ description; only STATE-disabled controls are exempt (a pager's current page
 and boundary arrows under `[data-pagination]`, `.loading`/`aria-busy`, the
 selected option of a single-select group) -- see
 `doc/visual-quality/disabled-without-reason.md`. Never fix a finding by
-raising a ceiling.
+raising a ceiling. The hint is an `aria-hidden` span INSIDE the `<button>`, so
+a test reading a disabled button's raw `textContent` gets the label with the
+reason glued on (`"ResetNo active filters"`); strip
+`[data-button-disabled-reason]` from a clone first, and assert the reason via
+`aria-describedby`.
 
 **`@container` collapses a content-sized parent.** `container-type: inline-size`
 makes an element's inline size independent of its contents, so a parent that
