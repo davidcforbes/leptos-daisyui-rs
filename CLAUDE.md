@@ -206,6 +206,20 @@ against a threshold far below the signal (48 per channel, where a glyph on the
 fill is 100+) -- never a MEAN score, which lets a few pixels of a letter vanish.
 `image` is a PNG-only dev-dependency for this.
 
+**An `sr-only` copy of visible text is still SELECTABLE text (ldui-q7yl).**
+Pairing `aria-hidden` visible lines with an `sr-only` accessible copy makes a
+mouse selection take both: copying an EntityTable name cell pasted the name
+twice in 4iiz-Office. Give the copy `select-none` (`user-select` does not touch
+the accessibility tree), and test with `window.getSelection().toString()`.
+
+**A consumer's bug report may cite code that only exists in THEIR vendored
+copy (ldui-bw2p).** Office reported `server_component.rs:3326` rendering a
+saved-filters bar; upstream had no such bar -- it was an Office delta marked
+"for upstream" in `vendor/PROVENANCE.json`. Before fixing, read the consumer's
+PROVENANCE entry for the cited file. The fix is usually to upstream the delta
+(three-way merge against THEIR re-vendor base, only the hunks the bead needs)
+and tell them which vendor lines to drop.
+
 **`@container` collapses a content-sized parent.** `container-type: inline-size`
 makes an element's inline size independent of its contents, so a parent that
 sizes to content — a bare `<div>` in a `flex` row, or `max-w-*` with no width —
