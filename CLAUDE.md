@@ -183,6 +183,29 @@ reason glued on (`"ResetNo active filters"`); strip
 `[data-button-disabled-reason]` from a clone first, and assert the reason via
 `aria-describedby`.
 
+**A viewport breakpoint says nothing about the space a component has.**
+`lg:` fires on the WINDOW, so a composite mounted in a 375px side rail on a
+wide screen still takes its three-column layout -- `AiChatWorkspace` resolved to
+256 | 1.6 | 256 px in 4iiz-Office production (ldui-d5ss). A composite that can
+be hosted narrow needs a host-chosen layout (`AiChatWorkspaceLayout::Rail`) or a
+container query on its own root. Prove it the way that bead's lane does: mount
+it in a narrow host on a WIDE viewport, and keep the old layout in the same
+host as the negative control.
+
+**daisyUI 5.5 `.select` is `appearance: base-select` in Chrome, and that changes
+clipping (ldui-tfx7).** The selected label ignores `text-overflow`, and
+`overflow: hidden` clips at the PADDING box, so a label wider than the column
+paints under the arrow. `Select` clips at the content box for that reason; a
+raw `<select class="select">` does not, and a hand-copied daisyUI rule without
+the `@supports (appearance: base-select)` block will not reproduce the bug.
+
+**Pixel comparisons need a tolerance; byte equality is flaky.** The same arrow
+on two identical selects differed by 1/255 of anti-aliasing and failed an exact
+PNG comparison at a different size each run. Decode and compare per pixel
+against a threshold far below the signal (48 per channel, where a glyph on the
+fill is 100+) -- never a MEAN score, which lets a few pixels of a letter vanish.
+`image` is a PNG-only dev-dependency for this.
+
 **`@container` collapses a content-sized parent.** `container-type: inline-size`
 makes an element's inline size independent of its contents, so a parent that
 sizes to content — a bare `<div>` in a `flex` row, or `max-w-*` with no width —
