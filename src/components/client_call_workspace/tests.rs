@@ -521,6 +521,36 @@ fn a_missing_call_context_disables_all_nine_production_controls_with_one_reason(
     }
 }
 
+/// ldui-eray (Office op-1yxvd): with no call context every button's own line
+/// stays empty -- the shared context line says why -- EXCEPT the number pad's,
+/// which sits apart under the destination field and states `not_ready` itself.
+#[test]
+fn a_missing_context_leaves_own_lines_empty_except_the_number_pad() {
+    use super::component::own_line_reason;
+    let texts = ClientCallWorkspaceTexts::default();
+    let state = not_ready();
+    assert_eq!(
+        own_line_reason(&ClientCallControl::Keypad, &state, &texts),
+        Some(texts.not_ready.clone())
+    );
+    for control in [
+        ClientCallControl::Dial,
+        ClientCallControl::SaveNumber,
+        ClientCallControl::Dismiss,
+    ] {
+        assert_eq!(
+            own_line_reason(&control, &state, &texts),
+            None,
+            "{control:?}"
+        );
+    }
+    // With a context, the pad's line is its ordinary reason (or none).
+    assert_eq!(
+        own_line_reason(&ClientCallControl::Keypad, &ready(), &texts),
+        texts.disabled_reason(&ClientCallControl::Keypad, &ready())
+    );
+}
+
 #[test]
 fn names_match_visible_labels_and_digits_name_themselves() {
     let texts = ClientCallWorkspaceTexts::default();

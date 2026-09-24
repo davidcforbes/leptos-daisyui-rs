@@ -129,6 +129,13 @@ pub struct EntitySavedFilterTexts {
     /// Default `"Saved filters"`. Unused while no filters are saved; the
     /// [`Self::empty`] hint stands alone there.
     pub badges_label: String,
+    /// Why the dialog's **Save** is disabled while the name is blank or too
+    /// long (ldui-eray, Office op-1yxvd). Default `"Enter a name"`.
+    pub name_required: String,
+    /// Why the dialog's **Save** is disabled while no filter value is set,
+    /// e.g. the filters were cleared with the dialog open (ldui-eray).
+    /// Default `"Set a filter value first"`.
+    pub nothing_to_save: String,
 }
 
 impl Default for EntitySavedFilterTexts {
@@ -144,6 +151,8 @@ impl Default for EntitySavedFilterTexts {
             remove_filter: "Remove filter {name}".to_owned(),
             empty: "No saved filters".to_owned(),
             badges_label: "Saved filters".to_owned(),
+            name_required: "Enter a name".to_owned(),
+            nothing_to_save: "Set a filter value first".to_owned(),
         }
     }
 }
@@ -239,7 +248,6 @@ impl std::fmt::Debug for EntitySavedFilters {
     }
 }
 
-/// A name is acceptable when it trims to non-empty.
 /// Whether the current filter row has anything to save: at least one
 /// non-blank value survives canonicalization. When it does not, Save Filter
 /// is disabled -- opening a dialog that takes a name and then stores nothing
@@ -248,11 +256,30 @@ pub(crate) fn saved_filter_can_save(values: &[(String, String)]) -> bool {
     !entity_saved_filter_terms(values.iter().cloned()).is_empty()
 }
 
+/// A name is acceptable when it trims to non-empty and fits
+/// [`ENTITY_SAVED_FILTER_NAME_CHARS`].
 pub(crate) fn saved_filter_name_is_valid(name: &str) -> bool {
     use unicode_segmentation::UnicodeSegmentation;
 
     let trimmed = name.trim();
     !trimmed.is_empty() && trimmed.graphemes(true).count() <= ENTITY_SAVED_FILTER_NAME_CHARS
+}
+
+/// Why the dialog's **Save** cannot run, or blank when it can (ldui-eray):
+/// the button's `disabled_reason`. The name is checked first -- it is the
+/// field the dialog is asking for.
+pub(crate) fn saved_filter_save_blocker(
+    name: &str,
+    can_save: bool,
+    texts: &EntitySavedFilterTexts,
+) -> String {
+    if !saved_filter_name_is_valid(name) {
+        texts.name_required.clone()
+    } else if !can_save {
+        texts.nothing_to_save.clone()
+    } else {
+        String::new()
+    }
 }
 
 /// Most saved filters one table keeps before the oldest is evicted.
@@ -489,6 +516,23 @@ mod tests {
         assert!(!saved_filter_name_is_valid("   "));
         assert!(saved_filter_name_is_valid("Urgent only"));
         assert!(saved_filter_name_is_valid("  Urgent only  "));
+    }
+
+    /// ldui-eray: the dialog's disabled Save always states why -- the name
+    /// first, then the empty filter row -- and is blank exactly when Save runs.
+    #[test]
+    fn save_blocker_names_the_missing_name_then_the_missing_value() {
+        let texts = EntitySavedFilterTexts::default();
+        assert_eq!(saved_filter_save_blocker("", true, &texts), "Enter a name");
+        assert_eq!(
+            saved_filter_save_blocker("  ", false, &texts),
+            "Enter a name"
+        );
+        assert_eq!(
+            saved_filter_save_blocker("Urgent", false, &texts),
+            "Set a filter value first"
+        );
+        assert_eq!(saved_filter_save_blocker("Urgent", true, &texts), "");
     }
 
     #[test]

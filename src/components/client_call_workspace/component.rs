@@ -49,20 +49,34 @@ fn control_reason(
 /// The reason a button's own line shows. While no context exists the shared
 /// context line already says why, so the button line stays empty rather than
 /// repeating it nine times; the button's `aria-describedby` names both lines.
+///
+/// The number pad is the exception (ldui-eray, Office op-1yxvd): its line sits
+/// under the destination field, apart from the shared line, so it states the
+/// reason itself -- and its `aria-describedby` names only its own line, so the
+/// reason is announced once.
+pub(crate) fn own_line_reason(
+    control: &ClientCallControl,
+    state: &ClientCallWorkspaceState,
+    texts: &ClientCallWorkspaceTexts,
+) -> Option<String> {
+    if state.context_missing()
+        && !matches!(
+            control,
+            ClientCallControl::Keypad | ClientCallControl::Destination
+        )
+    {
+        None
+    } else {
+        texts.disabled_reason(control, state)
+    }
+}
+
 fn local_reason(
     state: Signal<ClientCallWorkspaceState>,
     texts: Signal<ClientCallWorkspaceTexts>,
     control: ClientCallControl,
 ) -> Signal<Option<String>> {
-    Signal::derive(move || {
-        state.with(|s| {
-            if s.context_missing() {
-                None
-            } else {
-                texts.with(|t| t.disabled_reason(&control, s))
-            }
-        })
-    })
+    Signal::derive(move || state.with(|s| texts.with(|t| own_line_reason(&control, s, t))))
 }
 
 fn context_reason_id(base_id: &str) -> String {
@@ -108,8 +122,9 @@ fn Destination(
     let phones = Memo::new(move |_| state.get().call.client.phones);
     // Reason-line ids, minted once from the workspace id (Office op-stjm9).
     let saved_base = base_id.clone();
-    let destination_described = described_by(&base_id, "destination");
     let destination_reason = reason_id(&base_id, "destination");
+    // Own line only: the pad's line carries the context reason too (ldui-eray).
+    let destination_described = destination_reason.clone();
     let pad_described = described_by(&base_id, "pad");
     let pad_reason = reason_id(&base_id, "pad");
     let backspace_described = described_by(&base_id, "backspace");

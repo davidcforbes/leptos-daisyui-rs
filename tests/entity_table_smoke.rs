@@ -8489,6 +8489,35 @@ async fn entity_table_saved_filters_bar_saves_applies_and_deletes() {
     // Save it under a name via the dialog.
     click(&harness, "[data-entity-saved-filters-open]").await;
     wait_for_selector(&harness, "[data-entity-saved-filters-name]").await;
+
+    // ldui-eray (Office op-1yxvd): with the name still blank, the dialog's
+    // Save is disabled AND says why through aria-describedby -- never a bare
+    // `disabled=` the disabled-without-reason audit would name.
+    async fn save_state(harness: &pixelproof_web::Harness) -> Value {
+        eval_json(
+            harness,
+            r#"(() => {
+                const b = document.querySelector('[data-entity-saved-filters-save]');
+                const reason = (b.getAttribute('aria-describedby') || '')
+                    .split(/\s+/).filter(Boolean)
+                    .map(id => document.getElementById(id)?.textContent.trim() ?? '')
+                    .filter(Boolean).join(' ');
+                return {
+                    disabled: b.disabled,
+                    reason,
+                    bare: b.hasAttribute('data-disabled-without-reason'),
+                };
+            })()"#,
+        )
+        .await
+    }
+    let blank = save_state(&harness).await;
+    assert_eq!(
+        blank,
+        json!({ "disabled": true, "reason": "Enter a name", "bare": false }),
+        "a blank name disables Save with the name_required reason"
+    );
+
     let name_input = harness
         .page()
         .find_element("[data-entity-saved-filters-name]")
@@ -8496,6 +8525,12 @@ async fn entity_table_saved_filters_bar_saves_applies_and_deletes() {
         .expect("saved-filter name input");
     name_input.focus().await.expect("focus name input");
     name_input.type_str("Urgent only").await.expect("type name");
+    let named = save_state(&harness).await;
+    assert_eq!(
+        named,
+        json!({ "disabled": false, "reason": "", "bare": false }),
+        "a valid name with a filter value set enables Save with no reason"
+    );
     click(&harness, "[data-entity-saved-filters-save]").await;
     let saved = wait_state(&harness, 1, Some("Urgent"), 1).await;
     assert_eq!(saved["badges"][0]["name"], json!("Urgent only"), "{saved}");

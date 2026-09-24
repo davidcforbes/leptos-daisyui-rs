@@ -14,7 +14,7 @@ use leptos::prelude::*;
 
 use super::saved_filters::{
     ENTITY_SAVED_FILTER_LIMIT, ENTITY_SAVED_FILTER_NAME_CHARS, EntitySavedFilters,
-    saved_filter_can_save, saved_filter_name_is_valid,
+    saved_filter_can_save, saved_filter_name_is_valid, saved_filter_save_blocker,
 };
 use crate::components::badge::Badge;
 use crate::components::button::{Button, ButtonType};
@@ -224,10 +224,21 @@ pub(crate) fn saved_filters_bar(model: EntitySavedFilters, bar_id: String) -> An
                             <Button
                                 class="btn-primary"
                                 button_type=ButtonType::Submit
+                                // `disabled` keeps the state even if a consumer
+                                // blanks a reason text -- the audit then names
+                                // the button -- and `disabled_reason` says why
+                                // (ldui-eray, Office op-1yxvd).
                                 disabled=Signal::derive(move || {
                                     !saved_filter_name_is_valid(&draft_name.get())
                                         || !current_values
                                             .with(|values| saved_filter_can_save(values))
+                                })
+                                disabled_reason=Signal::derive(move || {
+                                    saved_filter_save_blocker(
+                                        &draft_name.get(),
+                                        current_values.with(|values| saved_filter_can_save(values)),
+                                        &texts.get(),
+                                    )
                                 })
                                 attr:data-entity-saved-filters-save="true"
                             >
