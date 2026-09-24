@@ -1,0 +1,10 @@
+{
+  "projectId": "b2de55d9-2a31-477d-9dd2-196997706f73",
+  "shape": "package",
+  "pkg": "leptos-daisyui-rs",
+  "globalName": "LeptosDaisyui",
+  "buildCmd": "cargo xtask capture-design && node .design-sync/build-from-capture.mjs pkg",
+  "cssEntry": "styles.css",
+  "guidelinesGlob": ["guides/**/*.md"],
+  "readmeHeader": ".design-sync/conventions.md"
+}

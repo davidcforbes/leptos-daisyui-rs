@@ -861,6 +861,19 @@ fn softphone_step() -> Step {
 }
 
 /// Focused release-browser proof for supplementary HelpHint disclosure.
+/// Claude Design sync capture (not a test): walks the showcase sidebar and
+/// writes every example's rendered HTML and screenshot, plus the page's
+/// stylesheets, to `target/design-capture/`. Never part of verify.
+fn design_capture_step() -> Step {
+    Step {
+        name: "capture-design",
+        run: Run::BrowserSuite {
+            test: "design_capture",
+            html_target: None,
+        },
+    }
+}
+
 fn help_hint_step() -> Step {
     Step {
         name: "test-help-hint",
@@ -2706,6 +2719,7 @@ fn main() -> ExitCode {
         "test-focus-ring" => run_steps(&[focus_ring_step()]),
         "test-row-action-presets" => run_steps(&[row_action_presets_step()]),
         "test-server-cursor-footer" => run_steps(&[server_cursor_footer_step()]),
+        "capture-design" => run_steps(&[design_capture_step()]),
         "gen-tokens" => {
             let check = std::env::args().any(|a| a == "--check");
             gen_tokens(check)
@@ -2720,7 +2734,7 @@ fn main() -> ExitCode {
         other => {
             eprintln!("xtask: unknown subcommand {other:?}");
             eprintln!(
-                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-selectable-summary|test-person-picker|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-snapshot-table-page-filter-actions|test-helpdesk|test-ai-chat|test-ai-chat-knowledge|test-server-table-column-tools|test-collapse-naming|test-data-table-fit|test-app-shell|test-field-context-scoping|test-entity-draft-row|test-softphone|test-help-hint|test-focus-ring|test-row-action-presets|test-server-cursor-footer|gen-tokens|check-sibling-tokens|clean-cache|bump>"
+                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-selectable-summary|test-person-picker|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-snapshot-table-page-filter-actions|test-helpdesk|test-ai-chat|test-ai-chat-knowledge|test-server-table-column-tools|test-collapse-naming|test-data-table-fit|test-app-shell|test-field-context-scoping|test-entity-draft-row|test-softphone|test-help-hint|test-focus-ring|test-row-action-presets|test-server-cursor-footer|capture-design|gen-tokens|check-sibling-tokens|clean-cache|bump>"
             );
             ExitCode::from(2)
         }
