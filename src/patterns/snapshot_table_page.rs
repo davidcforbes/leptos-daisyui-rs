@@ -21,6 +21,19 @@ use std::sync::Arc;
 /// No-Hires measured ~90px of blank between the dataset select and the table).
 const EMPTY_SLOT_HIDDEN: &str = "[&:not(:has(*))]:hidden";
 
+/// ldui-xhrw: a slot whose element descendants are ALL empty, UNSTYLED
+/// `div`/`span` wrappers (a consumer's bare `<div>`) renders nothing either,
+/// but [`EMPTY_SLOT_HIDDEN`] cannot see that, so the slot stayed a 0px flex
+/// item spending a gap. It goes `sr-only` -- out of flow -- rather than
+/// `hidden`, because such a wrapper may hold a live region that must already
+/// be rendered when its first message arrives. "Unstyled" (no `class`, no
+/// `style`) is load-bearing: an empty element can still paint -- a daisyUI
+/// `loading` spinner or a `skeleton` block has no children -- so any styled
+/// element, any other element (an input, a paragraph) or any text keeps the
+/// slot in flow. The rule errs toward showing.
+const EMPTY_WRAPPERS_OUT_OF_FLOW: &str =
+    "[&:has(*):not(:has(:not(:is(div,span):empty:not([class]):not([style]))))]:sr-only";
+
 /// ldui-8ia5: a `filters` slot whose only child is a [`FilterBar`] that has
 /// collapsed itself (`data-filter-bar-empty`) is still an element, so
 /// [`EMPTY_SLOT_HIDDEN`] keeps it as a 0px flex item that spends a gap. It
@@ -686,6 +699,9 @@ where
     let filters_id = format!("{contract_id}-filters");
     let feedback_id = format!("{contract_id}-feedback");
     let table_id = format!("{contract_id}-table");
+    // The header, KPI and filter slots cost nothing when they render nothing:
+    // no element at all (ldui-75xy) or only empty wrappers (ldui-xhrw).
+    let empty_slot_class = format!("{EMPTY_SLOT_HIDDEN} {EMPTY_WRAPPERS_OUT_OF_FLOW}");
     let (root_class, table_slot_class) =
         entity_table.with_value(|config| snapshot_page_layout(config.viewport_fit.as_ref()));
     // A panel turns the table slot into a row; without one the slot keeps
@@ -705,7 +721,7 @@ where
             data-snapshot-generation=move || generation_marker.get()
             data-snapshot-phase=move || state.with(|state| format!("{:?}", state.view(None).phase()))
         >
-            <div class=EMPTY_SLOT_HIDDEN data-snapshot-page-slot="header">{header()}</div>
+            <div class=empty_slot_class.clone() data-snapshot-page-slot="header">{header()}</div>
             <div
                 id=dataset_id
                 data-snapshot-page-slot="dataset"
@@ -726,11 +742,11 @@ where
                 />
             </div>
             {kpis.map(|kpis| view! {
-                <div id=kpis_id class=EMPTY_SLOT_HIDDEN data-snapshot-page-slot="kpis">{kpis()}</div>
+                <div id=kpis_id class=empty_slot_class.clone() data-snapshot-page-slot="kpis">{kpis()}</div>
             })}
             <div
                 id=filters_id
-                class=format!("{EMPTY_SLOT_HIDDEN} {COLLAPSED_FILTER_BAR_OUT_OF_FLOW}")
+                class=format!("{empty_slot_class} {COLLAPSED_FILTER_BAR_OUT_OF_FLOW}")
                 data-snapshot-page-slot="filters"
             >
                 {match filters_slot {

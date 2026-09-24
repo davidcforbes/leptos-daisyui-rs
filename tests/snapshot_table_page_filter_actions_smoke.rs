@@ -615,3 +615,106 @@ async fn a_filters_slot_holding_only_a_collapsed_filter_bar_costs_no_gap() {
 
     assert_no_browser_errors(&harness, "collapsed filter bar costs no gap").await;
 }
+
+/// ldui-xhrw: a slot whose only content is an EMPTY WRAPPER -- `#snapshot-side`
+/// passes `<div data-testid="side-filters"></div>` as its filters -- renders
+/// nothing but used to stay a 0px flex item spending a gap, because the
+/// no-element rule cannot see a wrapper as empty. It is out of flow now, never
+/// display:none (a wrapper may hold a live region). `#snapshot-plain`, whose
+/// filters hold a real Button, is the negative control that stays in flow.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-snapshot-table-page-filter-actions)"]
+async fn a_slot_holding_only_an_empty_wrapper_costs_no_gap() {
+    let harness = harness_at("/components/snapshot-table-page-filter-actions").await;
+    begin_browser_error_capture(&harness).await;
+    wait_for_selector(&harness, "#snapshot-side [data-testid=\"side-filters\"]").await;
+
+    let shape = eval_json(
+        &harness,
+        r#"(() => {
+            const measure = id => {
+                const root = document.querySelector(id);
+                const part = name => root.querySelector(
+                    `:scope > [data-snapshot-page-slot="${name}"]`);
+                const filters = part('filters');
+                const cs = getComputedStyle(filters);
+                return {
+                    rowGap: parseFloat(getComputedStyle(root).rowGap),
+                    datasetToTable: part('table').getBoundingClientRect().top
+                        - part('dataset').getBoundingClientRect().bottom,
+                    filtersHeight: filters.getBoundingClientRect().height,
+                    position: cs.position,
+                    display: cs.display,
+                };
+            };
+            return { side: measure('#snapshot-side'), plain: measure('#snapshot-plain') };
+        })()"#,
+    )
+    .await;
+    let near = |v: &Value, want: f64| v.as_f64().is_some_and(|got| (got - want).abs() <= 1.0);
+    let side = &shape["side"];
+    let gap = side["rowGap"].as_f64().unwrap_or(0.0);
+    assert!(gap > 0.0, "the page column has a row gap to lose: {shape}");
+    assert_eq!(
+        side["position"],
+        json!("absolute"),
+        "an empty-wrapper slot is out of flow: {shape}"
+    );
+    assert_ne!(
+        side["display"],
+        json!("none"),
+        "out of flow, never display:none: {shape}"
+    );
+    assert!(
+        near(&side["datasetToTable"], gap),
+        "ONE row gap between the dataset select and the table: {shape}"
+    );
+    let plain = &shape["plain"];
+    let height = plain["filtersHeight"].as_f64().unwrap_or(0.0);
+    assert_eq!(
+        plain["position"],
+        json!("static"),
+        "negative control: real filter content stays in flow: {shape}"
+    );
+    assert!(
+        height > 0.0 && near(&plain["datasetToTable"], 2.0 * gap + height),
+        "negative control: two gaps around a real filter row: {shape}"
+    );
+
+    // An empty element can still PAINT: a daisyUI spinner has no children.
+    // Styled empties must keep the slot in flow, or a KPI slot showing only
+    // loading skeletons would vanish. Insert one, then take it out again.
+    let spinner = eval_json(
+        &harness,
+        r#"(async () => {
+            const wrap = document.querySelector('#snapshot-side [data-testid="side-filters"]');
+            const slot = wrap.closest('[data-snapshot-page-slot="filters"]');
+            const s = document.createElement('span');
+            s.className = 'loading loading-spinner';
+            wrap.appendChild(s);
+            await new Promise(r => requestAnimationFrame(() => r()));
+            const withSpinner = getComputedStyle(slot).position;
+            const spinnerWidth = s.getBoundingClientRect().width;
+            s.remove();
+            await new Promise(r => requestAnimationFrame(() => r()));
+            return { withSpinner, spinnerWidth, after: getComputedStyle(slot).position };
+        })()"#,
+    )
+    .await;
+    assert!(
+        spinner["spinnerWidth"].as_f64().is_some_and(|w| w > 0.0),
+        "the spinner really paints, or this proves nothing: {spinner}"
+    );
+    assert_eq!(
+        spinner["withSpinner"],
+        json!("static"),
+        "a styled empty element keeps the slot in flow: {spinner}"
+    );
+    assert_eq!(
+        spinner["after"],
+        json!("absolute"),
+        "and the slot leaves the flow again without it: {spinner}"
+    );
+
+    assert_no_browser_errors(&harness, "empty-wrapper slot costs no gap").await;
+}
