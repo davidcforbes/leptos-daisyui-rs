@@ -881,3 +881,89 @@ async fn assignee_picker_reports_an_unavailable_directory() {
     assert_eq!(s["changePresent"], json!(false), "nothing to open: {s}");
     assert_no_browser_errors(&h, "assignee directory unavailable").await;
 }
+
+/// 4iiz-Office op-ggymr: a column filter narrows the table AND both of its
+/// counts -- the FilterBar's "N of M results" and the footer's row range. The
+/// summary used to count bucket + search only, so it stayed at "12 of 12"
+/// while the Key filter showed one row.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-helpdesk)"]
+async fn a_column_filter_narrows_the_result_count_and_the_footer() {
+    let h = harness_at(PAGE).await;
+    begin_browser_error_capture(&h).await;
+    wait_for_selector(&h, &format!("{SUPPORT} [data-helpdesk-state=\"ready\"]")).await;
+
+    async fn counts(h: &pixelproof_web::Harness) -> Value {
+        eval_json(
+            h,
+            &format!(
+                r#"(() => {{
+                    const root = document.querySelector('{SUPPORT}');
+                    return {{
+                        rows: root.querySelectorAll('[data-helpdesk-table] tbody tr[data-entity-row-key]').length,
+                        result: root.querySelector('[data-filter-result-count]')?.textContent?.trim() ?? null,
+                        range: root.querySelector('[data-entity-row-range]')?.textContent?.trim() ?? null,
+                    }};
+                }})()"#
+            ),
+        )
+        .await
+    }
+
+    let before = counts(&h).await;
+    assert_eq!(before["rows"], json!(12), "{before}");
+    assert!(
+        before["result"]
+            .as_str()
+            .is_some_and(|t| t.starts_with("12 ")),
+        "unfiltered summary counts all 12: {before}"
+    );
+
+    // Filter by one key that no other key contains, so exactly one row fits.
+    let key = eval_json(
+        &h,
+        &format!(
+            r#"(() => {{
+                const root = document.querySelector('{SUPPORT}');
+                const keys = Array.from(root.querySelectorAll('[data-helpdesk-table] tbody tr'))
+                    .map(r => r.textContent.match(/OF-\d+/)?.[0]).filter(Boolean);
+                const key = keys.find(k => keys.filter(o => o.includes(k)).length === 1);
+                const input = root.querySelector('[data-entity-filter-control="key"]');
+                input.value = key;
+                input.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                input.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                return key;
+            }})()"#
+        ),
+    )
+    .await;
+    assert!(
+        key.as_str().is_some(),
+        "a unique key exists in the seed: {key}"
+    );
+
+    let mut after = Value::Null;
+    for _ in 0..30 {
+        after = counts(&h).await;
+        if after["rows"] == json!(1) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert_eq!(
+        after["rows"],
+        json!(1),
+        "the Key filter narrows the table: {after}"
+    );
+    assert!(
+        after["result"]
+            .as_str()
+            .is_some_and(|t| t.starts_with("1 ")),
+        "the result summary counts the column filter too: {after}"
+    );
+    assert!(
+        after["range"].as_str().is_some_and(|t| t.contains("of 1")),
+        "the footer range counts the column filter too: {after}"
+    );
+    assert_no_browser_errors(&h, "helpdesk column-filter counts").await;
+}

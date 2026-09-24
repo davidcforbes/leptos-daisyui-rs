@@ -273,10 +273,6 @@ pub fn Helpdesk(
             .collect::<Vec<_>>()
     });
     let table_data = Signal::derive_local(move || Rc::new(visible.get()));
-    let result = Signal::derive(move || FilterResultSummary {
-        visible: visible.get().len(),
-        total: tickets.get().len(),
-    });
 
     // `EntityColumn<HelpdeskTicket>` holds `Rc<dyn Fn>` renderers, so it is
     // neither `Send` nor `Sync`. `<Show>`'s children slot is
@@ -422,6 +418,15 @@ pub fn Helpdesk(
         auto_filter_prefix,
         auto_filter_texts,
     ));
+    // "N of M results" counts what the TABLE shows: bucket and search
+    // (`visible`) AND the column filters (the auto filters' rows). Counting
+    // `visible` alone left the summary at "8 of 8" while a Key filter had
+    // narrowed the table (4iiz-Office op-ggymr).
+    let shown_rows = auto_filters.get_value().rows();
+    let result = Signal::derive(move || FilterResultSummary {
+        visible: shown_rows.with(|rows| rows.len()),
+        total: tickets.get().len(),
+    });
 
     let on_bucket = Callback::new(move |id: String| {
         filter.update(|f| {
