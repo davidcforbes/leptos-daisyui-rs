@@ -239,11 +239,12 @@ without it `src/test_mode.rs` is neither linted nor tested.
 CreateProcess's 32,767-character limit (`could not compile web-sys`). rustc
 1.98+ is fine. `cargo xtask`, `.\launcher.ps1`, and `cargo make` unset
 `RUSTC_WRAPPER` before spawning cargo. A raw `cargo check` in a shell that
-has sccache must unset it first with `$env:RUSTC_WRAPPER = $null`. Don't use
-`Remove-Item Env:RUSTC_WRAPPER`: in the agent PowerShell tool on this machine,
-`Remove-Item` resolved to a zero-byte `C:\Windows\system32\Remove-Item`, and
-with `-ErrorAction SilentlyContinue` the variable silently stayed set
-(2026-09-24).
+has sccache must unset it first with `$env:RUSTC_WRAPPER = $null`, then
+echo the value back. Prefer the assignment to `Remove-Item Env:RUSTC_WRAPPER`:
+on 2026-09-24 a stray zero-byte `C:\Windows\system32\Remove-Item` shadowed the
+cmdlet in the agent PowerShell tool. With `-ErrorAction SilentlyContinue` the
+variable silently stayed set, and the result looked like a `web-sys` code
+failure. The file has been deleted, but the assignment cannot be shadowed.
 
 **The visual-quality rulebook is [`doc/visual-quality/`](./doc/visual-quality/)** —
 one page per defect pattern the `test-style`/`test-layout` audits detect, with
