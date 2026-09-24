@@ -640,7 +640,9 @@ exactly equal `current_values` (`EntitySavedFilters::active_name`), so the
 badge that produced the current row state is visibly distinct. Copy is
 consumer-localized through `EntitySavedFilterTexts` (`save_button`,
 `dialog_title`, `name_label`, `apply_filter`/`remove_filter` templates with a
-`{name}` placeholder, and the rest).
+`{name}` placeholder, and the rest). The dialog's Save states why it is
+disabled from `name_required` (blank or over-long name, checked first) and
+`nothing_to_save` (no filter value set) (ldui-eray).
 
 ```rust,no_run
 let saved = RwSignal::new_local(Vec::<EntitySavedFilter>::new());

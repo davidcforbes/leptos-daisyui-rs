@@ -92,7 +92,7 @@ cargo-make therefore **unset** `RUSTC_WRAPPER` before spawning cargo. For a
 raw `cargo check` in a shell that has sccache:
 
 ```powershell
-Remove-Item Env:RUSTC_WRAPPER
+$env:RUSTC_WRAPPER = $null
 ```
 
 Remove those unsets when sccache forwards `@argfile`s without expanding them.
