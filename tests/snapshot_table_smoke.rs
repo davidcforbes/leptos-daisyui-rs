@@ -47,8 +47,31 @@ async fn contract_snapshot(harness: &pixelproof_web::Harness) -> Value {
                     table?.dataset.snapshotGeneration,
                 ],
                 phase: root?.dataset.snapshotPhase,
-                panel: feedback?.querySelector('[data-page-state-panel]')?.dataset.pageStatePanel ?? null,
-                tablePanel: table?.querySelector('[data-page-state-panel]')?.dataset.pageStatePanel ?? null,
+                // ldui-75xy: the retained notice is an overlay on the table
+                // slot; the table slot's own panel is its direct child.
+                panel: table?.querySelector('[data-snapshot-retained-notice] [data-page-state-panel]')?.dataset.pageStatePanel ?? null,
+                tablePanel: table?.querySelector(':scope > [data-page-state-panel]')?.dataset.pageStatePanel ?? null,
+                noticeOutOfFlow: (() => {
+                    const n = table?.querySelector('[data-snapshot-retained-notice]');
+                    return n ? getComputedStyle(n).position === 'absolute' : null;
+                })(),
+                tableTop: table ? Math.round(table.getBoundingClientRect().top) : null,
+                // Every rendered slot has height: an empty one is display:none,
+                // so it costs no flex gap either.
+                zeroHeightVisibleSlots: Array.from(root?.children || [])
+                    .filter(child => child.dataset.snapshotPageSlot)
+                    .filter(child => child.checkVisibility()
+                        && getComputedStyle(child).position !== 'absolute'
+                        && child.getBoundingClientRect().height < 1)
+                    .map(child => child.dataset.snapshotPageSlot),
+                // The idle feedback slot keeps its live region in the a11y
+                // tree: collapsed out of flow, never display:none.
+                feedbackIdle: feedback?.dataset.snapshotFeedbackIdle ?? null,
+                feedbackLiveRegionRendered: (() => {
+                    const live = feedback?.querySelector('[aria-live]');
+                    return live ? getComputedStyle(feedback).display !== 'none' : null;
+                })(),
+                feedbackOutOfFlow: feedback ? getComputedStyle(feedback).position === 'absolute' : null,
                 rows: table?.querySelectorAll('[data-entity-table-grid] tbody tr').length ?? 0,
                 sameTableNode: window.__snapshotFixtureTable === entity,
                 selectedDataset: datasetSelect?.value ?? null,
@@ -114,6 +137,22 @@ async fn typed_snapshot_page_preserves_order_identity_and_retained_table_node() 
     );
     assert_eq!(initial["distinctSelector"], json!(true));
     assert_eq!(initial["phase"], json!("Displaying"));
+    assert_eq!(
+        initial["zeroHeightVisibleSlots"],
+        json!([]),
+        "an empty slot must cost no box and no gap (ldui-75xy): {initial}"
+    );
+    assert_eq!(initial["feedbackIdle"], json!("true"), "{initial}");
+    assert_eq!(
+        initial["feedbackOutOfFlow"],
+        json!(true),
+        "the idle feedback slot is out of flow, so it costs no gap: {initial}"
+    );
+    assert_eq!(
+        initial["feedbackLiveRegionRendered"],
+        json!(true),
+        "the idle feedback slot keeps its aria-live region rendered: {initial}"
+    );
     assert_eq!(initial["rows"], json!(3));
     assert_eq!(initial["sameTableNode"], json!(true));
     assert_eq!(initial["headerLayout"], json!("dedicated-row"));
@@ -235,6 +274,15 @@ async fn typed_snapshot_page_preserves_order_identity_and_retained_table_node() 
     let replacing = contract_snapshot(&harness).await;
     assert_eq!(replacing["phase"], json!("Replacing"));
     assert_eq!(replacing["panel"], json!("replacing"));
+    assert_eq!(
+        replacing["noticeOutOfFlow"],
+        json!(true),
+        "the retained notice overlays the table (ldui-75xy): {replacing}"
+    );
+    assert_eq!(
+        replacing["tableTop"], initial["tableTop"],
+        "the retained notice must not push the table down (ldui-75xy)"
+    );
     assert_eq!(replacing["selectedDataset"], json!("office-in"));
     assert_eq!(replacing["rows"], json!(3));
     assert_eq!(replacing["sameTableNode"], json!(true));
@@ -249,7 +297,7 @@ async fn typed_snapshot_page_preserves_order_identity_and_retained_table_node() 
 
     click(
         &harness,
-        "#snapshot-page-feedback [data-page-state-panel='retained-error'] button",
+        "#snapshot-page-table [data-snapshot-retained-notice] [data-page-state-panel='retained-error'] button",
     )
     .await;
     click(&harness, "[data-testid='snapshot-complete-replacement']").await;

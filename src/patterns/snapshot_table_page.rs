@@ -15,6 +15,12 @@ use leptos::prelude::*;
 use std::rc::Rc;
 use std::sync::Arc;
 
+/// ldui-75xy: a consumer-filled slot that renders no element costs nothing --
+/// no box and, because it is `display: none`, no flex gap either. Without it
+/// an empty `filters` slot still spent the column's 16px gap (4iiz-Office
+/// No-Hires measured ~90px of blank between the dataset select and the table).
+const EMPTY_SLOT_HIDDEN: &str = "[&:not(:has(*))]:hidden";
+
 fn snapshot_page_layout(
     fit: Option<&EntityTableViewportFit>,
 ) -> (&'static str, Option<&'static str>) {
@@ -688,7 +694,7 @@ where
             data-snapshot-generation=move || generation_marker.get()
             data-snapshot-phase=move || state.with(|state| format!("{:?}", state.view(None).phase()))
         >
-            <div data-snapshot-page-slot="header">{header()}</div>
+            <div class=EMPTY_SLOT_HIDDEN data-snapshot-page-slot="header">{header()}</div>
             <div
                 id=dataset_id
                 data-snapshot-page-slot="dataset"
@@ -709,9 +715,9 @@ where
                 />
             </div>
             {kpis.map(|kpis| view! {
-                <div id=kpis_id data-snapshot-page-slot="kpis">{kpis()}</div>
+                <div id=kpis_id class=EMPTY_SLOT_HIDDEN data-snapshot-page-slot="kpis">{kpis()}</div>
             })}
-            <div id=filters_id data-snapshot-page-slot="filters">
+            <div id=filters_id class=EMPTY_SLOT_HIDDEN data-snapshot-page-slot="filters">
                 {match filters_slot {
                     None => filters().into_any(),
                     Some((
@@ -738,22 +744,24 @@ where
                     .into_any(),
                 }}
             </div>
-            <div id=feedback_id class="space-y-2" data-snapshot-page-slot="feedback">
-                {move || state.with(|state| {
-                    let summary = effective_local_result.get();
-                    let decision = state.view(summary.as_ref()).render_decision();
-                    decision.retained_notice().then(|| {
-                        let kind = decision.panel().expect("retained notice has panel");
-                        view! {
-                            <PageStatePanel
-                                kind=kind
-                                texts=panel_texts
-                                nostrip:on_retry=on_retry
-                                detail=load_error
-                            />
-                        }
-                    })
-                })}
+            // ldui-75xy: the feedback slot shows only keyed action outcomes.
+            // With none it collapses to `sr-only` -- absolutely positioned, so
+            // it is not a flex item and costs no gap -- and NOT `hidden`:
+            // ActionFeedback's `aria-live` announcement region lives in here,
+            // and a live region that is display:none until the moment its
+            // first message arrives is routinely not announced. The
+            // retained "Replacing"/"retained error" notice no longer lives
+            // here: in the flow above a viewport-fitted table it took a row
+            // from the fit every time a dataset switched, so consumers
+            // reserved its height permanently. It is an overlay on the table
+            // slot now (see below).
+            <div
+                id=feedback_id
+                class="space-y-2"
+                class:sr-only=move || action_model.with(|model| model.is_empty())
+                data-snapshot-feedback-idle=move || action_model.with(|model| model.is_empty()).then_some("true")
+                data-snapshot-page-slot="feedback"
+            >
                 <ActionFeedback
                     model=action_model
                     texts=action_texts
@@ -764,11 +772,38 @@ where
             </div>
             <div
                 id=table_id
-                class=table_slot_class
+                class=format!("relative {}", table_slot_class.unwrap_or_default())
                 data-snapshot-page-slot="table"
                 data-snapshot-side-panel=has_side_panel.then_some("true")
                 data-snapshot-generation=move || generation_marker.get()
             >
+                // ldui-75xy: the retained notice as an OVERLAY pinned to the
+                // top of the table slot -- out of flow, so it never moves the
+                // table or changes how many rows a viewport-fitted table fits.
+                // The wrapper passes pointer events through; the panel itself
+                // takes them, so a retained error's Retry still works.
+                {move || state.with(|state| {
+                    let summary = effective_local_result.get();
+                    let decision = state.view(summary.as_ref()).render_decision();
+                    decision.retained_notice().then(|| {
+                        let kind = decision.panel().expect("retained notice has panel");
+                        view! {
+                            <div
+                                class="pointer-events-none absolute inset-x-0 top-0 z-20 flex justify-center p-2"
+                                data-snapshot-retained-notice="true"
+                            >
+                                <div class="pointer-events-auto w-full max-w-xl rounded-box bg-base-100 shadow-lg">
+                                    <PageStatePanel
+                                        kind=kind
+                                        texts=panel_texts
+                                        nostrip:on_retry=on_retry
+                                        detail=load_error
+                                    />
+                                </div>
+                            </div>
+                        }
+                    })
+                })}
                 <Show
                     when=move || state.with(|state| {
                         let summary = effective_local_result.get();
