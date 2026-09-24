@@ -204,7 +204,7 @@ tokens:
 @plugin "daisyui";
 @source "../src/**/*.rs";
 @source "../leptos-daisyui-rs/src/**/*.rs";
-@source inline("chat chat-start chat-bubble chat-bubble-primary chat-bubble-info chat-bubble-ghost chat-bubble-neutral chat-bubble-warning chat-image chat-header avatar avatar-placeholder");
+@source inline("chat chat-start chat-end chat-bubble chat-bubble-primary chat-bubble-info chat-bubble-ghost chat-bubble-neutral chat-bubble-warning chat-image chat-header avatar avatar-placeholder");
 ```
 
 The animation and focus classes the panel emits (`ld-aichat-msg-in`,

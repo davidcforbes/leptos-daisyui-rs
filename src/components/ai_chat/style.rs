@@ -6,16 +6,19 @@ use ai_chat_core::{ChatRole, MessageMeta, ToolPhase};
 
 /// `(chat-side, chat-bubble-modifier)` daisyUI classes for a message role.
 ///
-/// Every role sits `chat-start`: bubbles span the full row (see the
-/// `.lds-aichat .chat` override in `markdown::theme`), so no message sits on
-/// the right. The bubble colour, not the side, distinguishes the speaker.
+/// The user's bubbles sit `chat-start` (tail on the left); every other role --
+/// the assistant, its thinking and tool rows, system notes -- sits `chat-end`
+/// (tail on the right), a 4iiz-Office owner ruling (ldui-bay7). The side only
+/// moves the tail, header and avatar: bubbles still span the full row (see
+/// the `.lds-aichat .chat` override in `markdown::theme`), so a narrow rail
+/// loses no width to the side.
 pub fn role_classes(role: &ChatRole) -> (&'static str, &'static str) {
     match role {
         ChatRole::User => ("chat-start", "chat-bubble-primary"),
-        ChatRole::Assistant => ("chat-start", ""),
-        ChatRole::System => ("chat-start", "chat-bubble-info"),
-        ChatRole::Thinking => ("chat-start", "chat-bubble-ghost"),
-        ChatRole::Tool => ("chat-start", "chat-bubble-neutral"),
+        ChatRole::Assistant => ("chat-end", ""),
+        ChatRole::System => ("chat-end", "chat-bubble-info"),
+        ChatRole::Thinking => ("chat-end", "chat-bubble-ghost"),
+        ChatRole::Tool => ("chat-end", "chat-bubble-neutral"),
     }
 }
 

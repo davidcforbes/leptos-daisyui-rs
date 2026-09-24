@@ -18,22 +18,19 @@ use ai_chat_core::{
 };
 
 #[test]
-fn every_role_sits_start_for_full_width_rows() {
-    // Bubbles span the full row (the .lds-aichat .chat override in theme.rs
-    // stretches them to width:100%), so no role sits on the right. Colour, not
-    // side, distinguishes the speaker -- see user_bubble_is_primary.
-    for r in [
-        ChatRole::User,
-        ChatRole::Assistant,
-        ChatRole::System,
-        ChatRole::Thinking,
-        ChatRole::Tool,
+fn only_the_user_sits_start_every_other_role_sits_end() {
+    // ldui-bay7 (4iiz-Office owner ruling): the user's tail is on the left,
+    // the assistant's -- and its thinking/tool rows and system notes -- on the
+    // right. Bubbles still span the full row (the .lds-aichat .chat override
+    // in theme.rs), so the side moves only the tail, header and avatar.
+    for (r, side) in [
+        (ChatRole::User, "chat-start"),
+        (ChatRole::Assistant, "chat-end"),
+        (ChatRole::System, "chat-end"),
+        (ChatRole::Thinking, "chat-end"),
+        (ChatRole::Tool, "chat-end"),
     ] {
-        assert_eq!(
-            role_classes(&r).0,
-            "chat-start",
-            "{r:?} should be chat-start"
-        );
+        assert_eq!(role_classes(&r).0, side, "{r:?} should be {side}");
     }
 }
 

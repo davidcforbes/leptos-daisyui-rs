@@ -672,6 +672,10 @@ const BASE_STYLES: &str = r#"
   width: 100%;
 }
 .lds-aichat .chat-image { align-self: flex-start; }
+/* chat-end (every non-user role, ldui-bay7): daisyUI already puts the tail on
+   the right; mirror the avatar and header to match. The bubble stays full width. */
+.lds-aichat .chat-end .chat-image { align-self: flex-end; }
+.lds-aichat .chat-end .chat-header { justify-content: flex-end; }
 .lds-aichat .chat-bubble {
   max-width: 100%;
   width: 100%;

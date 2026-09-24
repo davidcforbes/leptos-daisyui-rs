@@ -288,6 +288,20 @@ async fn settings_shape(h: &pixelproof_web::Harness) -> Value {
                         .map(e => e.textContent.trim()),
                     toolPhases: Array.from(root.querySelectorAll('[data-chat-role]'))
                         .map(e => e.getAttribute('data-chat-tool-phase')),
+                    // ldui-bay7: which side each row's bubble TAIL paints on,
+                    // from the rendered geometry rather than the class -- the
+                    // tail is the bubble's ::before, left of the bubble's left
+                    // edge on chat-start and right of its right edge on chat-end.
+                    tails: Array.from(root.querySelectorAll('[data-chat-role]'))
+                        .map(e => {{
+                            const b = e.querySelector(':scope > .chat-bubble');
+                            if (!b) return null;
+                            const t = getComputedStyle(b, '::before');
+                            if (t.content === 'none' || t.maskImage === 'none') return null;
+                            const left = parseFloat(t.left);
+                            const width = b.getBoundingClientRect().width;
+                            return left < 0 ? 'left' : (left >= width - 1 ? 'right' : 'inside');
+                        }}),
                     chatState: q('[data-ai-chat-state]')
                         ?.getAttribute('data-ai-chat-state') ?? null,
                     composer: q('[data-ai-chat-composer]')?.value ?? null,
@@ -989,6 +1003,14 @@ async fn send_streams_thinking_tool_call_result_and_text_in_order() {
     assert!(
         texts[4].contains("conflict check"),
         "the assistant bubble: {texts:?}"
+    );
+    // ldui-bay7 (4iiz-Office owner ruling): the user's tail on the left,
+    // every assistant-side row's -- thinking, tool call/result, answer -- on
+    // the right, measured from the painted ::before, not the class.
+    assert_eq!(
+        shape["tails"],
+        json!(["left", "right", "right", "right", "right"]),
+        "user tail left, every other role's tail right: {shape}"
     );
 
     let ids = distinct_turn_ids(&backend_calls(&h).await);

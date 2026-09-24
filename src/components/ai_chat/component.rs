@@ -961,7 +961,8 @@ pub fn AiChat(
             >
                 {messages}
                 <Show when=thinking>
-                    <div class="chat chat-start">
+                    // The assistant's side, as role_classes(Thinking) (ldui-bay7).
+                    <div class="chat chat-end">
                         <div class="chat-header text-xs opacity-60">
                             {move || assistant.get()}
                         </div>
@@ -1226,7 +1227,7 @@ fn AnnotationRow(ann: TranscriptAnnotation) -> impl IntoView {
 
     view! {
         <div
-            class="chat chat-start lds-aichat-annotation"
+            class="chat chat-end lds-aichat-annotation"
             data-chat-role="notice"
             data-chat-annotation-kind=kind
         >
