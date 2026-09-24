@@ -21,6 +21,17 @@ use std::sync::Arc;
 /// No-Hires measured ~90px of blank between the dataset select and the table).
 const EMPTY_SLOT_HIDDEN: &str = "[&:not(:has(*))]:hidden";
 
+/// ldui-8ia5: a `filters` slot whose only child is a [`FilterBar`] that has
+/// collapsed itself (`data-filter-bar-empty`) is still an element, so
+/// [`EMPTY_SLOT_HIDDEN`] keeps it as a 0px flex item that spends a gap. It
+/// goes `sr-only` -- out of flow, like the idle feedback slot -- and never
+/// `display: none`: the FilterBar decides "empty" by observing its own
+/// rendered geometry, and a live region inside it must stay rendered to be
+/// announced. When the bar shows content it re-expands, the attribute goes,
+/// and the slot rejoins the flow.
+const COLLAPSED_FILTER_BAR_OUT_OF_FLOW: &str =
+    "[&:has(>[data-filter-bar-empty=true]:only-child)]:sr-only";
+
 fn snapshot_page_layout(
     fit: Option<&EntityTableViewportFit>,
 ) -> (&'static str, Option<&'static str>) {
@@ -717,7 +728,11 @@ where
             {kpis.map(|kpis| view! {
                 <div id=kpis_id class=EMPTY_SLOT_HIDDEN data-snapshot-page-slot="kpis">{kpis()}</div>
             })}
-            <div id=filters_id class=EMPTY_SLOT_HIDDEN data-snapshot-page-slot="filters">
+            <div
+                id=filters_id
+                class=format!("{EMPTY_SLOT_HIDDEN} {COLLAPSED_FILTER_BAR_OUT_OF_FLOW}")
+                data-snapshot-page-slot="filters"
+            >
                 {match filters_slot {
                     None => filters().into_any(),
                     Some((

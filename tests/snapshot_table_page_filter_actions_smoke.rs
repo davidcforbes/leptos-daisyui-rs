@@ -506,3 +506,112 @@ async fn a_side_panel_sits_beside_the_table_and_an_empty_filter_frame_collapses(
 
     assert_no_browser_errors(&harness, "side panel and filter-frame collapse").await;
 }
+
+/// ldui-8ia5 (4iiz-Office /no-hires/, measured on 4671d75): a `filters` slot
+/// whose ONLY child is a FilterBar that collapsed itself still spent a row
+/// gap -- two gaps between the dataset select and the table, not one.
+/// `#snapshot-collapsed-filters` holds exactly that shape: a FilterBar around
+/// an empty status line. At rest the slot is out of flow (like the idle
+/// feedback slot) and the dataset-to-table distance is ONE row gap; when the
+/// status line gets text the bar expands and the slot rejoins the flow; when
+/// the text goes, the gap goes again. `#snapshot-actions`, whose bar shows a
+/// count, is the negative control that a non-empty bar stays in flow.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-snapshot-table-page-filter-actions)"]
+async fn a_filters_slot_holding_only_a_collapsed_filter_bar_costs_no_gap() {
+    use std::time::Duration;
+
+    let harness = harness_at("/components/snapshot-table-page-filter-actions").await;
+    begin_browser_error_capture(&harness).await;
+    wait_for_selector(
+        &harness,
+        "#snapshot-collapsed-filters [data-snapshot-page-slot=\"filters\"] [data-filter-bar]",
+    )
+    .await;
+
+    async fn slot(harness: &pixelproof_web::Harness) -> Value {
+        eval_json(
+            harness,
+            r#"(() => {
+                const root = document.querySelector('#snapshot-collapsed-filters');
+                const part = name => root.querySelector(
+                    `:scope > [data-snapshot-page-slot="${name}"]`);
+                const dataset = part('dataset').getBoundingClientRect();
+                const table = part('table').getBoundingClientRect();
+                const filters = part('filters');
+                const bar = filters.querySelector(':scope > [data-filter-bar]');
+                const status = filters.querySelector('[data-testid="slot-status"]');
+                const control = document.querySelector(
+                    '#snapshot-actions > [data-snapshot-page-slot="filters"]');
+                return {
+                    rowGap: parseFloat(getComputedStyle(root).rowGap),
+                    datasetToTable: Math.round(table.top - dataset.bottom),
+                    filtersPosition: getComputedStyle(filters).position,
+                    filtersDisplay: getComputedStyle(filters).display,
+                    filtersHeight: Math.round(filters.getBoundingClientRect().height),
+                    barEmpty: bar ? bar.getAttribute('data-filter-bar-empty') : 'absent',
+                    statusRendered: !!status && getComputedStyle(status).display !== 'none',
+                    controlPosition: control ? getComputedStyle(control).position : null,
+                };
+            })()"#,
+        )
+        .await
+    }
+
+    async fn slot_until(harness: &pixelproof_web::Harness, want_empty: bool) -> Value {
+        let mut last = slot(harness).await;
+        for _ in 0..60 {
+            let empty = last["barEmpty"] == json!("true");
+            let out = last["filtersPosition"] == json!("absolute");
+            if empty == want_empty && out == want_empty {
+                return last;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            last = slot(harness).await;
+        }
+        panic!("filters slot never settled to empty={want_empty}: {last}");
+    }
+
+    let rest = slot_until(&harness, true).await;
+    let gap = rest["rowGap"].as_f64().unwrap_or(0.0);
+    assert!(gap > 0.0, "the page column has a row gap to lose: {rest}");
+    // Rects are fractional; one pixel of rounding either way.
+    let near = |v: &Value, want: f64| v.as_f64().is_some_and(|got| (got - want).abs() <= 1.0);
+    assert!(
+        near(&rest["datasetToTable"], gap),
+        "ONE row gap between the dataset select and the table, not two: {rest}"
+    );
+    assert_ne!(
+        rest["filtersDisplay"],
+        json!("none"),
+        "out of flow, never display:none -- the bar must keep observing: {rest}"
+    );
+    assert_eq!(
+        rest["statusRendered"],
+        json!(true),
+        "the status live region stays rendered while collapsed: {rest}"
+    );
+    assert_eq!(
+        rest["controlPosition"],
+        json!("static"),
+        "negative control: a bar showing a count stays in flow: {rest}"
+    );
+
+    click(&harness, "[data-testid=\"slot-status-show\"]").await;
+    let shown = slot_until(&harness, false).await;
+    let height = shown["filtersHeight"].as_f64().unwrap_or(0.0);
+    assert!(height > 0.0, "the expanded bar has height: {shown}");
+    assert!(
+        near(&shown["datasetToTable"], 2.0 * gap + height),
+        "back in flow: two gaps around the bar: {shown}"
+    );
+
+    click(&harness, "[data-testid=\"slot-status-hide\"]").await;
+    let hidden = slot_until(&harness, true).await;
+    assert!(
+        near(&hidden["datasetToTable"], gap),
+        "the gap goes again with the text: {hidden}"
+    );
+
+    assert_no_browser_errors(&harness, "collapsed filter bar costs no gap").await;
+}

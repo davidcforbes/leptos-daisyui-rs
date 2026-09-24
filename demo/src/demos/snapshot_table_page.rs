@@ -787,6 +787,10 @@ pub fn SnapshotTablePageFilterActionsFixture() -> impl IntoView {
     let side_state = RwSignal::new_local(seeded_state());
     // FilterBar collapse: empty at rest, like a consumer's error/status slot.
     let collapse_status = RwSignal::new(String::new());
+    // ldui-8ia5: a fourth page whose filters slot is ONLY a FilterBar holding
+    // an empty status line -- the 4iiz-Office No-Hires shape.
+    let slot_state = RwSignal::new_local(seeded_state());
+    let slot_status = RwSignal::new(String::new());
     let filter_mode = RwSignal::new("all");
     let local_rows = RwSignal::new_local(Option::<SnapshotLocalRowProjection<FixtureRow>>::None);
 
@@ -995,6 +999,45 @@ pub fn SnapshotTablePageFilterActionsFixture() -> impl IntoView {
                         "Client Coordinator"
                     </div>
                 }.into_any())
+            />
+
+            // ldui-8ia5: the filters slot holds only a FilterBar whose content
+            // is an empty status line, so the bar collapses and the slot must
+            // cost no gap. The toggles sit outside the page so they never
+            // count as slot content.
+            <div class="flex gap-2">
+                <Button
+                    attr:data-testid="slot-status-show"
+                    on_click=Callback::new(move |_| slot_status.set("Saved".to_owned()))
+                >
+                    "Show slot status"
+                </Button>
+                <Button
+                    attr:data-testid="slot-status-hide"
+                    on_click=Callback::new(move |_| slot_status.set(String::new()))
+                >
+                    "Hide slot status"
+                </Button>
+            </div>
+            <SnapshotTablePage
+                contract_id="snapshot-collapsed-filters"
+                state=slot_state.into()
+                header=Box::new(|| view! {
+                    <PageHeader
+                        title="Snapshot table with a collapsed filter bar"
+                        subtitle="ldui-8ia5: an empty FilterBar costs no gap."
+                    />
+                }.into_any())
+                dataset_selector=selector_config()
+                filters=Box::new(move || view! {
+                    <FilterBar>
+                        <div class="space-y-2">
+                            <p role="status" data-testid="slot-status">{move || slot_status.get()}</p>
+                        </div>
+                    </FilterBar>
+                }.into_any())
+                entity_table=table_config()
+                action_key_label=Rc::new(|key: &String| key.clone())
             />
 
             // FilterBar whose only children are invisible at rest -- the
