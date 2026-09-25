@@ -72,6 +72,7 @@ cargo xtask gen-tokens [--check]     # regenerate styles/tokens.css from ui-toke
 cargo xtask check-sibling-tokens     # preamble.rs's ui_tokens refs must exist on the sibling's DEFAULT branch
 cargo xtask test-person-picker       # PersonPicker listbox contract, wrapping, Unknown-vs-Offline, contrast
 cargo xtask clean-cache              # drop incremental/doc/rust-analyzer caches; keeps deps/ warm (~100 GB)
+cargo xtask capture-design           # showcase -> target/design-capture/ for the Claude Design sync (see .design-sync/NOTES.md); never part of verify
 # (list non-exhaustive and rot-prone — the dispatch match in
 #  xtask/src/main.rs is the self-updating source of truth; newer lanes include
 #  test-softphone, test-section-heading, test-search-picker-dialog, verify-pattern, check-demo, ...)
