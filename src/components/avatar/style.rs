@@ -1,31 +1,4 @@
-/// # Avatar Modifier Variants
-///
-/// Style enum for daisyUI avatar modifier classes that control the status indicators
-/// and type of avatar components.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub enum AvatarModifier {
-    /// Default avatar with no status indicator
-    #[default]
-    Default,
+//! Moved to `ldui_design::avatar` (ldui-3u3p) so non-Leptos consumers share
+//! these variants; re-exported here so every existing path keeps resolving.
 
-    /// Shows online status indicator (green dot)
-    Online,
-
-    /// Shows offline status indicator (gray dot)
-    Offline,
-
-    /// Indicates a placeholder avatar
-    Placeholder,
-}
-
-impl AvatarModifier {
-    /// CSS class string
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            AvatarModifier::Default => "",
-            AvatarModifier::Online => "avatar-online",
-            AvatarModifier::Offline => "avatar-offline",
-            AvatarModifier::Placeholder => "avatar-placeholder",
-        }
-    }
-}
+pub use ldui_design::components::avatar::*;

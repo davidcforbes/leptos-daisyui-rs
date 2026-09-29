@@ -128,6 +128,7 @@ pub fn PageHeader(
                     divider_class = divider.class()
                 )
                 data-page-header="true"
+                data-ld-pattern="PageHeader"
                 data-page-header-navigation-layout=navigation_layout.as_str()
                 data-page-header-divider=divider.as_str()
             >
@@ -170,6 +171,7 @@ pub fn PageHeader(
                     divider_class = divider.class()
                 )
                 data-page-header="true"
+                data-ld-pattern="PageHeader"
                 data-page-header-navigation-layout=navigation_layout.as_str()
                 data-page-header-divider=divider.as_str()
             >

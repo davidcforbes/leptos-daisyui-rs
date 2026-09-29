@@ -1,6 +1,35 @@
 use crate::core::{ContentLayout, Section};
+use ldui_design::fixtures::FixtureSection;
+use ldui_design::fixtures::badge::{self as fixtures, BadgeExample};
 use leptos::prelude::*;
 use leptos_daisyui_rs::components::*;
+
+/// One shared-fixture section (ldui-rz43): the title and every badge come
+/// from `ldui_design::fixtures::badge`, the list 4iiz-kit's gallery renders
+/// too. Name no variant and no label here, or the two renderers drift
+/// (`tests/demo_shared_fixtures.rs`).
+#[component]
+fn BadgeFixtureSection(section: FixtureSection<BadgeExample>) -> impl IntoView {
+    view! {
+        <Section row=true title=section.title>
+            {section
+                .examples
+                .iter()
+                .map(|example| {
+                    view! {
+                        <Badge
+                            color=example.color.clone()
+                            style=example.style.clone()
+                            size=example.size.clone()
+                        >
+                            {example.label}
+                        </Badge>
+                    }
+                })
+                .collect_view()}
+        </Section>
+    }
+}
 
 #[component]
 pub fn BadgeDemo() -> impl IntoView {
@@ -12,41 +41,9 @@ pub fn BadgeDemo() -> impl IntoView {
             title="Badge"
             description="Badges are used to inform the user of the status of specific data"
         >
-            <Section row=true title="Colors">
-                <Badge>"Default"</Badge>
-                <Badge color=BadgeColor::Neutral>"Neutral"</Badge>
-                <Badge color=BadgeColor::Primary>"Primary"</Badge>
-                <Badge color=BadgeColor::Secondary>"Secondary"</Badge>
-                <Badge color=BadgeColor::Accent>"Accent"</Badge>
-                <Badge color=BadgeColor::Info>"Info"</Badge>
-                <Badge color=BadgeColor::Success>"Success"</Badge>
-                <Badge color=BadgeColor::Warning>"Warning"</Badge>
-                <Badge color=BadgeColor::Error>"Error"</Badge>
-            </Section>
-
-            <Section row=true title="Sizes">
-                <Badge size=BadgeSize::Xs>"XS"</Badge>
-                <Badge size=BadgeSize::Sm>"SM"</Badge>
-                <Badge size=BadgeSize::Md>"MD"</Badge>
-                <Badge size=BadgeSize::Lg>"LG"</Badge>
-                <Badge size=BadgeSize::Xl>"XL"</Badge>
-            </Section>
-
-            <Section row=true title="Styles">
-                <Badge color=BadgeColor::Primary>"Default"</Badge>
-                <Badge style=BadgeStyle::Outline color=BadgeColor::Primary>
-                    "Outline"
-                </Badge>
-                <Badge style=BadgeStyle::Ghost color=BadgeColor::Primary>
-                    "Ghost"
-                </Badge>
-                <Badge style=BadgeStyle::Soft color=BadgeColor::Primary>
-                    "Soft"
-                </Badge>
-                <Badge style=BadgeStyle::Dash color=BadgeColor::Primary>
-                    "Dash"
-                </Badge>
-            </Section>
+            <BadgeFixtureSection section=fixtures::COLORS />
+            <BadgeFixtureSection section=fixtures::SIZES />
+            <BadgeFixtureSection section=fixtures::STYLES />
 
             <Section title="Reactive Counter">
                 <div class="flex items-center gap-4">

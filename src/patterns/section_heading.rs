@@ -264,6 +264,7 @@ pub fn SectionHeading(
                 "flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between {class}"
             )
             data-section-heading="true"
+            data-ld-pattern="SectionHeading"
             data-section-heading-level=level.as_str()
             data-section-heading-status-placement=status_placement.as_str()
         >

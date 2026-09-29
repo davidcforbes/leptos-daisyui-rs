@@ -20,13 +20,16 @@ publish = false
 test-mode = []
 
 [workspace]
-members = [".", "xtask", "demo", "audit"]
+members = [".", "xtask", "demo", "audit", "crates/ldui-design"]
 resolver = "3"
 
 [dependencies]
 leptos = { version = "0.8" }
 leptos_router = "0.8"
-qrcodegen = "1.8"                       # inline-SVG QR for the TOTP-setup step
+# The Leptos-free design layer (ldui-3u3p): token emitters, the component
+# variant enums and the page-contract vocabulary, re-exported at their old
+# paths. It carries qrcodegen for the TOTP-setup QR now.
+ldui-design = { path = "crates/ldui-design" }
 table-rs = { path = "../table-rs" }
 ui-tokens = { path = "../Rust-DeskApp/crates/ui-tokens" }
 ai-chat-core = { path = "../Rust-DeskApp/crates/ai-chat-core" }

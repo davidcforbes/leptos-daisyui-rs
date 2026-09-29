@@ -1,23 +1,4 @@
-/// # Drawer Placement Variants
-///
-/// Style enum for daisyUI drawer placement classes that control which side
-/// of the screen the drawer slides out from.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub enum DrawerPlacement {
-    /// Drawer slides from the left side (default)
-    #[default]
-    Start,
+//! Moved to `ldui_design::drawer` (ldui-3u3p) so non-Leptos consumers share
+//! these variants; re-exported here so every existing path keeps resolving.
 
-    /// Drawer slides from the right side
-    End,
-}
-
-impl DrawerPlacement {
-    /// CSS class string
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            DrawerPlacement::Start => "",
-            DrawerPlacement::End => "drawer-end",
-        }
-    }
-}
+pub use ldui_design::components::drawer::*;

@@ -68,6 +68,7 @@ cargo xtask test-admin-workbench       # KpiStrip ladders + the measured help-bu
 cargo xtask test-focus-ring            # .ld-focus-ring colour present from frame 0; only the offset animates (ldui-reod)
 cargo xtask test-row-action-presets    # row-action + Export presets: glyphs, names, tooltips, disabled_reason (ldui-bmqj, ldui-e6x8, ldui-p82h)
 cargo xtask test-server-cursor-footer  # ServerDataTable cursor mode: standard three-region footer with total+position, fallback without (ldui-q14c)
+cargo xtask test-ld-pattern            # data-ld-pattern on every catalogue pattern ROOT in the real DOM, both hosts (ldui-wra5)
 cargo xtask gen-tokens [--check]     # regenerate styles/tokens.css from ui-tokens
 cargo xtask check-sibling-tokens     # preamble.rs's ui_tokens refs must exist on the sibling's DEFAULT branch
 cargo xtask test-person-picker       # PersonPicker listbox contract, wrapping, Unknown-vs-Offline, contrast
@@ -129,6 +130,17 @@ a new check by the TEST COUNT changing, never by the suite passing — the same
 trap hit the audits themselves: adding pages to `PAGES` swept nothing, because
 coverage comes from per-page `audit_test!(name, index)` invocations, and both
 suites stayed green while appearing to cover six more pages.
+
+**Pattern roots declare themselves (ldui-wra5).** The root element of
+each pixelproof-parity catalogue pattern carries
+`data-ld-pattern="<Pattern>"` (`PageHeader`, `KpiStrip`, `SnapshotTable`
+on `SnapshotTablePage`, `FilterBar`, `ListPage`, `AsyncDataSection`,
+`SectionHeading`, `PageStatePanel`, `Card`, `DataTable`, `Stats`, `Tabs`,
+`Dialog` on `Modal`, `Badge`); the recogniser trusts it over any
+heuristic, and 4iiz-kit emits the same values. Put it on EVERY branch's
+root and nowhere else: `src/patterns/ld_pattern_tests.rs` checks both in
+the source, and `cargo xtask test-ld-pattern` checks the rendered DOM
+(`tests/ld_pattern/mod.rs` holds the root selectors and pages).
 
 **Never identify an element by document position.** A positional selector does
 not fail when the layout changes; it silently starts describing something else.
@@ -278,11 +290,14 @@ suites *after* the last demo change, not before: `test-layout`'s and
 `test-style`'s per-page violation counts are ratcheted and a new demo section
 can move them.
 
-**`styles/tokens.css` is GENERATED — never hand-edit it.** It is the Tailwind
+**`styles/tokens.css` and `crates/ldui-design/src/tokens/generated.rs`
+are GENERATED — never hand-edit them.** The first is the Tailwind
 `@theme` block, produced from the shared `ui-tokens` crate by `cargo xtask
-gen-tokens` and imported by `demo/input.css`. The gate's first step
-(`tokens-fresh`) re-runs the generator with `--check` and fails if the committed
-file has drifted, which is how the desktop and web faces are kept from silently
+gen-tokens` and imported by `demo/input.css`; the second is the Leptos-free
+`ldui-design` crate's copy of the same values, which lets it build without
+the `../Rust-DeskApp` path (see `crates/ldui-design/README.md`). The gate's
+first step (`tokens-fresh`) re-runs the generator with `--check` and fails if
+either committed file has drifted, which is how the desktop and web faces are kept from silently
 forking. Change a token upstream in `../Rust-DeskApp/crates/ui-tokens`, then
 re-run the generator and commit the result. Two rules the generator encodes:
 
@@ -389,6 +404,15 @@ The demo automatically:
 - `src/widgets/` - simple widget-level composites (the `Vec<Vec<String>>` DataTable among them)
 - `src/patterns/` - opinionated page-level patterns (`patterns::Helpdesk`)
 - `src/charts/` - shared SVG paint plumbing (`charts::paint`)
+- `crates/ldui-design/` - the **Leptos-free** design layer (ldui-3u3p): the
+  token CSS emitters, every component's variant enums (the former
+  `src/components/<name>/style.rs`, now `crates/ldui-design/src/components/<name>.rs`)
+  and the page-contract vocabulary. 4iiz-kit consumes it by git, so it must
+  never depend on Leptos, `web-sys` or `ui-tokens` (`tests/leptos_free.rs`).
+  The library re-exports every item at its old path, and each old `style.rs`
+  is a one-line re-export shim: **edit variants in the design crate**.
+  `components/ai_chat/style.rs` is the one that stayed (it needs
+  `ai-chat-core`).
 
 **Choose a table from data ownership before capability (`ldui-aqo`):**
 `EntityTable<T>` is the preferred typed complete-client-snapshot table;
@@ -470,6 +494,7 @@ daisyUI class names must be explicitly included in Tailwind CSS input for proper
 @plugin "daisyui";
 @source "../src/**/*.rs";
 @source "../leptos-daisyui-rs/src/**/*.rs";
+@source "../leptos-daisyui-rs/crates/ldui-design/src/**/*.rs";
 
 /* Example: Button component classes */
 @source inline("btn btn-neutral btn-primary ... btn-circle");
@@ -694,7 +719,8 @@ is to keep this a path-dep-only internal library.
 ## Known Limitations
 
 - Currently assumes CSR usage only
-- Each consumer must scan this crate's Rust source and import
+- Each consumer must scan this crate's Rust source (and
+  `crates/ldui-design/src`) and import
   `styles/tokens.css` in its own `input.css`; class and token delivery is not
   automatic across a Rust path dependency
 - Some components cannot be used with alternative HTML elements (e.g., button styles on `<a>` tags) - workaround is creating wrapper components that add classes to children

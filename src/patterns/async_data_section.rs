@@ -89,6 +89,7 @@ pub fn AsyncDataSection(
         <section
             class="min-w-0 space-y-3"
             data-async-data-section="true"
+            data-ld-pattern="AsyncDataSection"
             aria-busy=move || matches!(
                 state.get(),
                 PageState::InitialLoading | PageState::Revalidating

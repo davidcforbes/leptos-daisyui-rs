@@ -61,6 +61,7 @@ pub fn Badge(
 ) -> impl IntoView {
     view! {
         <div
+            data-ld-pattern="Badge"
             node_ref=node_ref
             class=move || {
                 merge_classes!(

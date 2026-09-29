@@ -103,23 +103,26 @@ Each step is scoped per-crate; that scoping **is** the xtask's logic.
 
 | Step | Command | Note |
 |---|---|---|
-| `tokens-fresh` | `cargo xtask gen-tokens --check` | Fails if `styles/tokens.css` no longer matches what the `ui-tokens` crate produces — i.e. the desktop and web faces have silently forked. First because it is the cheapest and because a stale theme invalidates every downstream visual result. |
-| `sibling-tokens` | `cargo xtask check-sibling-tokens` | Fails if `src/tokens/preamble.rs` references a `ui_tokens` item that does not exist on `../Rust-DeskApp`'s **default** branch. See below — this is the one break no other step can see. |
-| `fmt-check` | `cargo fmt -p leptos-daisyui-rs -p leptos-daisyui-showcase -p xtask -p ldui-audit -- --check` | Per-package, **not `--all`** — `--all` reaches into sibling repos (see above). Every workspace member is named explicitly, so a new member has to be added here or it goes unformatted. |
+| `tokens-fresh` | `cargo xtask gen-tokens --check` | Fails if `styles/tokens.css` or `crates/ldui-design/src/tokens/generated.rs` no longer matches what the `ui-tokens` crate produces — i.e. the desktop and web faces have silently forked. First because it is the cheapest and because a stale theme invalidates every downstream visual result. |
+| `sibling-tokens` | `cargo xtask check-sibling-tokens` | Fails if `xtask/src/design_tokens.rs` (the generator of `ldui-design`'s token values; `src/tokens/preamble.rs` before ldui-3u3p) references a `ui_tokens` item that does not exist on `../Rust-DeskApp`'s **default** branch. See below — this is the one break no other step can see. |
+| `fmt-check` | `cargo fmt -p leptos-daisyui-rs -p leptos-daisyui-showcase -p xtask -p ldui-audit -p ldui-design -- --check` | Per-package, **not `--all`** — `--all` reaches into sibling repos (see above). Every workspace member is named explicitly, so a new member has to be added here or it goes unformatted. |
 | `clippy-lib` | `cargo clippy -p leptos-daisyui-rs --all-targets --features test-mode -- -D warnings` | Per-crate — **not `--workspace`**, which fails on csr feature unification (see above). Host target. `--features test-mode` because `src/test_mode.rs` is behind that feature and a default-feature clippy never lints it. |
 | `clippy-demo` | `cargo clippy -p leptos-daisyui-showcase --all-targets -- -D warnings` | Same per-crate reason. |
 | `clippy-audit` | `cargo clippy -p ldui-audit --all-targets -- -D warnings` | The visual-quality audit crate (`audit/`), which composes the `pixelproof-style-audit` engine with the daisyUI drift rules. |
+| `clippy-design` | `cargo clippy -p ldui-design --all-targets -- -D warnings` | The Leptos-free design crate (`crates/ldui-design`: token emitters, component variant enums, page contracts). 4iiz-kit builds it alone, by git, so it has to lint clean without the library. |
 | `clippy-xtask` | `cargo clippy -p xtask --all-targets -- -D warnings` | The gate must lint the crate that **is** the gate. Its absence let a `needless_borrows_for_generic_args` sit in `xtask/src/main.rs` from 2026-07-26 to 2026-08-10 while `verify` reported a clean 13/13 — `test-xtask` was running its tests all along, so only the lint was missing (ldui-mpm). |
 | `build` | `cargo build -p leptos-daisyui-rs` | **Library only.** The CSR demo is not natively built here — a native `cargo build` of a wasm/CSR binary can link-fail on `web-sys` host stubs; the demo is *checked* instead (next row) and *really* built by `trunk` (see `verify-full`). |
 | `check-demo` | `cargo check -p leptos-daisyui-showcase` | Fast native check of the demo — catches ~all compile breakage without npm/trunk. |
 | `test-lib` | `cargo test -p leptos-daisyui-rs --lib --features test-mode` | The library unit suite. Non-`#[ignore]`d tests only. `--features test-mode` for the same reason as `clippy-lib`: without it the `test_mode` tests silently do not run, and that module is what the browser suites' freeze/oracle bridge is built on. |
 | `test-xtask` | `cargo test -p xtask` | The xtask's own pure-function tests (SemVer bump, the sibling-token parser, the gate's own argument vectors). |
 | `test-audit` | `cargo test -p ldui-audit --lib` | The audit crate's browser-free tests: the generated sweep JS (rule ids, the per-family cap, the percentage-radius conversion) and the drift/engine report merge. |
+| `test-design` | `cargo test -p ldui-design` | The design crate's own tests: the moved style modules' unit tests, the dark palette's WCAG contrast checks, and `tests/leptos_free.rs`, which fails if the manifest gains a Leptos/browser dependency, `ui-tokens`, or a path dependency outside the crate. |
 | `test-daisyui5` | `cargo test -p leptos-daisyui-rs --test no_dead_daisyui4_classes` | Source scan (no browser) guarding against `.form-control` / `.label-text` / `.label-text-alt` coming back — removed in daisyUI 5, so they are silently inert. |
 | `test-svg-paint` | `cargo test -p leptos-daisyui-rs --test svg_paint_routing` | Source scan (no browser) over **all of `src/`**: no `fill=`/`stroke=`/`stop-color=`/`flood-color=`/`lighting-color=` may carry a custom property, and any non-literal value must be a `charts::paint` binding. `var()` substitution is not specified to run in a presentation attribute, so a token there degrades to `fill: black` or `stroke: none` **silently, with no console error**. It has to be its own step because `test-lib` runs unit tests only — an integration test not named here never runs in the gate at all. Scoped to `src/charts` originally, which is exactly how it read green over four live defects in `src/components/gantt/` (ldui-1g5, widened in ldui-xxc). |
 | `test-ld-class-coverage` | `cargo test -p leptos-daisyui-rs --test ld_class_stylesheet_coverage` | Source scan (no browser): every literal `ld-*` class a component or demo page emits must be defined by a stylesheet this crate ships (`styles/tokens.css`, `ui_tokens_css()` or `ui_animations_css()`), and the type ramp must work from `styles/tokens.css` alone -- ldui-h7tw's defect class. Registered as its own step in ldui-n1iv: it had been referenced by comments as "the test that asserts it" while running in no lane at all, and failed locally on a stray literal the same day both gates read green. |
 | `test-bare-buttons` | `cargo test -p leptos-daisyui-rs --test no_bare_library_buttons` | Source guard requiring library buttons to carry a framework interaction/style marker or an explicit allowance. |
 | `test-web-sys-features` | `cargo test -p leptos-daisyui-rs --test web_sys_features_cover_usages` | Source scan (no browser) guarding every `web_sys::Type` / `web_sys::console` use in `src/` against a matching Cargo feature — missing features fail as `E0425`/`E0433` and look like "web-sys will not compile". |
+| `test-demo-fixtures` | `cargo test -p leptos-daisyui-rs --test demo_shared_fixtures` | Source scan (no browser): the demo's badge, button and alert variant sections must render `ldui_design::fixtures`, the lists 4iiz-kit's gallery renders too (ldui-rz43). A hard-coded example renders the same markup as the fixture entry it replaced, so only the source can show the drift. Keeps its BREAKs as permanent negative-control tests. |
 
 ### Pattern-scoped verification
 
@@ -181,7 +184,7 @@ That is not hypothetical: on 2026-07-29 `SPACE_HUGE`, `SPACE_XXXL`,
 4iiz-office session hours of chasing a break that was never theirs.
 
 The step resolves the sibling's default branch via `origin/HEAD` and asserts
-every `ui_tokens` item the preamble references exists *there*, ignoring the
+every `ui_tokens` item the generator references exists *there*, ignoring the
 working tree. It reports which branch each missing item was found on instead —
 usually naming the branch that still needs merging. Two things it handles that
 a naive grep would not: items reached through a module alias (`ty::LINE_DISPLAY`
@@ -217,6 +220,16 @@ and the repo that does catch it is one nobody thinks to look at.
 `demo/input.css`. Never hand-edit it; run `cargo xtask gen-tokens` and commit
 the result. The gate's `tokens-fresh` step re-runs the generator with `--check`
 and fails if the committed file differs.
+
+Since ldui-3u3p the generator has a second output,
+`crates/ldui-design/src/tokens/generated.rs`: the token values the
+Leptos-free `ldui-design` crate's CSS emitters are built from, written as
+Rust literals by `xtask/src/design_tokens.rs`. `ldui-design` is consumed by
+git (4iiz-kit), where the `../Rust-DeskApp` path does not exist, so it cannot
+depend on `ui-tokens`; the committed copy plus this drift check is what keeps
+it in step. The same `tokens-fresh` step checks both files, and
+`check-sibling-tokens` parses that generator, so the guard above still covers
+every item the web face's runtime tokens are drawn from.
 
 It emits the spacing base unit, the stroke family, radii, and the type ramp
 with its grid-aligned line heights. Two deliberate choices, both load-bearing:

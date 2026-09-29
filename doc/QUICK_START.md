@@ -22,6 +22,7 @@ Create or update your `input.css`:
 @plugin "daisyui";
 @source "../src/**/*.rs";
 @source "../leptos-daisyui-rs/src/**/*.rs";
+@source "../leptos-daisyui-rs/crates/ldui-design/src/**/*.rs";
 @source inline("btn btn-primary btn-secondary btn-accent btn-ghost");
 ```
 

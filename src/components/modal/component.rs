@@ -327,6 +327,7 @@ pub fn Modal(
 
     view! {
         <dialog
+            data-ld-pattern="Dialog"
             aria-label=move || modal_aria_label(label.get(), labelled_by.get().is_some())
             aria-labelledby=move || labelled_by.get()
             aria-describedby=move || described_by.get()

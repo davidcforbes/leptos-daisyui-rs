@@ -1,28 +1,4 @@
-/// # Stack Placement Variants
-#[derive(Clone, Debug, Default, PartialEq)]
-pub enum StackPlacement {
-    /// Top vertical placement
-    Top,
+//! Moved to `ldui_design::stack` (ldui-3u3p) so non-Leptos consumers share
+//! these variants; re-exported here so every existing path keeps resolving.
 
-    /// Bottom vertical placement
-    #[default]
-    Bottom,
-
-    /// Start horizontal placement
-    Start,
-
-    /// End horizontal placement
-    End,
-}
-
-impl StackPlacement {
-    /// CSS class string
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Top => "stack-top",
-            Self::Bottom => "stack-bottom",
-            Self::Start => "stack-start",
-            Self::End => "stack-end",
-        }
-    }
-}
+pub use ldui_design::components::stack::*;

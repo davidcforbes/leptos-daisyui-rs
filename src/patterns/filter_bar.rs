@@ -412,6 +412,7 @@ pub fn FilterBar(
             node_ref=section_ref
             class=format!("{} {FILTER_BAR_COLLAPSE_CLASS}", filter_bar_class(class))
             data-filter-bar="local"
+            data-ld-pattern="FilterBar"
             data-filter-bar-empty=move || frame_empty.get().then_some("true")
             aria-label=move || texts.with(|texts| texts.region_label.clone())
         >

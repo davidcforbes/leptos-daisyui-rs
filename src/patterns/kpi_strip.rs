@@ -2173,7 +2173,12 @@ pub fn KpiStrip(
         // classes are all present. Six demo fixtures hit exactly this
         // (ldui-k3ip); the fix is `w-full` or an explicit width on the
         // PARENT, which this component cannot supply for you.
-        <div node_ref=container_ref class="@container w-full" data-kpi-strip-container="true">
+        <div
+            node_ref=container_ref
+            class="@container w-full"
+            data-kpi-strip-container="true"
+            data-ld-pattern="KpiStrip"
+        >
         <div
             node_ref=node_ref
             class=move || merge_classes!(kpi_strip_grid_class(layout.get(), compact.get()), class)

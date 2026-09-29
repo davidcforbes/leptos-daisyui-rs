@@ -8,7 +8,7 @@ inject_scripts = true
 
 
 [watch]
-watch = ["../src", "./src"]
+watch = ["../src", "../crates/ldui-design/src", "./src"]
 ignore = []
 
 [serve]

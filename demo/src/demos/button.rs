@@ -1,6 +1,61 @@
 use crate::core::{ContentLayout, Section};
+use ldui_design::fixtures::FixtureSection;
+use ldui_design::fixtures::button::{self as fixtures, ButtonExample, ButtonExampleState};
 use leptos::prelude::*;
 use leptos_daisyui_rs::components::*;
+
+/// `active` for a fixture state.
+fn state_is_active(state: ButtonExampleState) -> bool {
+    matches!(state, ButtonExampleState::Active)
+}
+
+/// `disabled_reason` for a fixture state; blank leaves the button enabled.
+fn state_disabled_reason(state: ButtonExampleState) -> &'static str {
+    match state {
+        ButtonExampleState::Disabled { reason } => reason,
+        _ => "",
+    }
+}
+
+/// The extra class for a fixture state. Loading is daisyUI's `loading` class
+/// rather than the `loading` prop, as this page has always shown it.
+fn state_class(state: ButtonExampleState) -> &'static str {
+    match state {
+        ButtonExampleState::Loading => "loading",
+        _ => "",
+    }
+}
+
+/// One shared-fixture section (ldui-rz43): the title and every button come
+/// from `ldui_design::fixtures::button`, the list 4iiz-kit's gallery renders
+/// too. Name no variant and no label here, or the two renderers drift
+/// (`tests/demo_shared_fixtures.rs`).
+#[component]
+fn ButtonFixtureSection(section: FixtureSection<ButtonExample>) -> impl IntoView {
+    view! {
+        <Section row=true title=section.title>
+            {section
+                .examples
+                .iter()
+                .map(|example| {
+                    view! {
+                        <Button
+                            color=example.color.clone()
+                            style=example.style.clone()
+                            size=example.size.clone()
+                            shape=example.shape.clone()
+                            active=state_is_active(example.state)
+                            disabled_reason=state_disabled_reason(example.state)
+                            class=state_class(example.state)
+                        >
+                            {example.label}
+                        </Button>
+                    }
+                })
+                .collect_view()}
+        </Section>
+    }
+}
 
 #[component]
 pub fn ButtonDemo() -> impl IntoView {
@@ -22,65 +77,11 @@ pub fn ButtonDemo() -> impl IntoView {
             title="Button"
             description="Buttons allow users to take actions and make choices"
         >
-            <Section title="Colors" row=true>
-                <Button>"Default"</Button>
-                <Button color=ButtonColor::Neutral>"Neutral"</Button>
-                <Button color=ButtonColor::Primary>"Primary"</Button>
-                <Button color=ButtonColor::Secondary>"Secondary"</Button>
-                <Button color=ButtonColor::Accent>"Accent"</Button>
-                <Button color=ButtonColor::Info>"Info"</Button>
-                <Button color=ButtonColor::Success>"Success"</Button>
-                <Button color=ButtonColor::Warning>"Warning"</Button>
-                <Button color=ButtonColor::Error>"Error"</Button>
-            </Section>
-
-            <Section title="Sizes" row=true>
-                <Button size=ButtonSize::Xs>"XS"</Button>
-                <Button size=ButtonSize::Sm>"SM"</Button>
-                <Button size=ButtonSize::Md>"MD"</Button>
-                <Button size=ButtonSize::Lg>"LG"</Button>
-                <Button size=ButtonSize::Xl>"XL"</Button>
-            </Section>
-
-            <Section title="Styles" row=true>
-                <Button style=ButtonStyle::Default>"Default"</Button>
-                <Button style=ButtonStyle::Outline>"Outline"</Button>
-                <Button style=ButtonStyle::Ghost>"Ghost"</Button>
-                <Button style=ButtonStyle::Link>"Link"</Button>
-                <Button style=ButtonStyle::Soft>"Soft"</Button>
-                <Button style=ButtonStyle::Dash>"Dash"</Button>
-            </Section>
-
-            <Section title="States" row=true>
-                <Button color=ButtonColor::Primary>"Normal"</Button>
-                <Button color=ButtonColor::Primary active=true>
-                    "Active"
-                </Button>
-                <Button
-                    color=ButtonColor::Primary
-                    disabled_reason="Shown disabled for the state showcase"
-                >
-                    "Disabled"
-                </Button>
-                <Button color=ButtonColor::Primary class="loading">
-                    "Loading"
-                </Button>
-            </Section>
-
-            <Section title="Shapes" row=true>
-                <Button color=ButtonColor::Primary shape=ButtonShape::Wide>
-                    "Wide"
-                </Button>
-                <Button color=ButtonColor::Primary shape=ButtonShape::Square>
-                    "□"
-                </Button>
-                <Button color=ButtonColor::Primary shape=ButtonShape::Circle>
-                    "○"
-                </Button>
-                <Button color=ButtonColor::Primary shape=ButtonShape::Block>
-                    "Block"
-                </Button>
-            </Section>
+            <ButtonFixtureSection section=fixtures::COLORS />
+            <ButtonFixtureSection section=fixtures::SIZES />
+            <ButtonFixtureSection section=fixtures::STYLES />
+            <ButtonFixtureSection section=fixtures::STATES />
+            <ButtonFixtureSection section=fixtures::SHAPES />
 
             <Section title="Push Effect Demo">
                 <div class="flex flex-col gap-4">

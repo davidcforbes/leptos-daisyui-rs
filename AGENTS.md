@@ -4,10 +4,13 @@
 
 ## Project Structure & Module Organization
 
-This Rust 2024 workspace contains the library (`src/`), reusable browser-audit
-crate (`audit/`), Leptos CSR showcase (`demo/`), and build logic (`xtask/`).
+This Rust 2024 workspace contains the library (`src/`), the Leptos-free design
+crate (`crates/ldui-design/`), reusable browser-audit crate (`audit/`), Leptos
+CSR showcase (`demo/`), and build logic (`xtask/`).
 Components normally live in `src/components/<name>/` with `component.rs`,
-`style.rs`, `tests.rs`, and `mod.rs`; broader primitives live under `charts/`,
+`style.rs`, `tests.rs`, and `mod.rs`. `style.rs` is a re-export shim: the
+variant enums live in `crates/ldui-design/src/components/<name>.rs`, which must
+never depend on Leptos, `web-sys` or `ui-tokens` (ldui-3u3p). Broader primitives live under `charts/`,
 `markdown/`, `motion/`, `theme/`, `tokens/`, `utils/`, and `widgets/`.
 Integration tests are in `tests/`, PixelProof baselines in
 `tests/visual/baselines/`, and visual-quality rules in `doc/visual-quality/`.

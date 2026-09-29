@@ -1,25 +1,4 @@
-/// Validation state for the Field component
-#[derive(Clone, Debug, Default, PartialEq)]
-pub enum FieldState {
-    /// Default state with no validation feedback
-    #[default]
-    Default,
-    /// Error state with error message
-    Error,
-    /// Success state with success message
-    Success,
-    /// Warning state with warning message
-    Warning,
-}
+//! Moved to `ldui_design::field` (ldui-3u3p) so non-Leptos consumers share
+//! these variants; re-exported here so every existing path keeps resolving.
 
-impl FieldState {
-    /// Returns the CSS class string for the field state
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            FieldState::Default => "",
-            FieldState::Error => "error",
-            FieldState::Success => "success",
-            FieldState::Warning => "warning",
-        }
-    }
-}
+pub use ldui_design::components::field::*;

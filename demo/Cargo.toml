@@ -15,6 +15,10 @@ bench = false
 
 [dependencies]
 leptos-daisyui-rs = { path = "../", features = ["test-mode"] }
+# The shared demo fixtures (ldui-rz43): the badge, button and alert variant
+# sections render `ldui_design::fixtures`, the lists 4iiz-kit's gallery
+# renders too. The variant enums are the library's own (it re-exports them).
+ldui-design = { path = "../crates/ldui-design" }
 
 leptos = { version = "0.8", features = ["csr"] }
 leptos_router = "0.8"

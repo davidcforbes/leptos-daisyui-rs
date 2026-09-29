@@ -17,6 +17,11 @@
 //!     }
 //! }
 //! ```
+//!
+//! The emitters themselves (`ui_tokens_css`, `ui_animations_css`,
+//! `dark_form_css_vars` and the step tables) live in the Leptos-free
+//! `ldui_design::tokens` (ldui-3u3p) and are re-exported here unchanged;
+//! only the two Leptos mount points are defined in this crate.
 
 mod animations;
 mod dark_palette;

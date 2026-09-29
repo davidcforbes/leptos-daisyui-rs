@@ -93,7 +93,9 @@ fn Demo () -> impl IntoView {
 ### CSS installation
 
 Each consuming application builds its own Tailwind stylesheet. It must scan the
-library's Rust source so Tailwind sees the literal component classes, and it
+library's Rust source so Tailwind sees the literal component classes (the
+variant enums live in the Leptos-free `crates/ldui-design` crate, so scan that
+too), and it
 must import the generated semantic tokens used by opinionated components. This
 example assumes the application and this checkout are sibling directories;
 adjust the paths relative to the consuming `input.css`:
@@ -104,6 +106,7 @@ adjust the paths relative to the consuming `input.css`:
 @plugin "daisyui";
 @source "../src/**/*.rs";
 @source "../leptos-daisyui-rs/src/**/*.rs";
+@source "../leptos-daisyui-rs/crates/ldui-design/src/**/*.rs";
 
 /* Accordion */
 @source inline("collapse collapse-title collapse-content collapse-arrow collapse-plus collapse-open collapse-close");

@@ -29,6 +29,7 @@ pub fn ListPage(
         <div
             class=list_page_class(class)
             data-list-page="true"
+            data-ld-pattern="ListPage"
             data-page-contract=contract_id
         >
             {children()}

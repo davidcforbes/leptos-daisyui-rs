@@ -60,6 +60,7 @@ pub fn Card(
     let ripple_handle = use_ripple();
     view! {
         <div
+            data-ld-pattern="Card"
             node_ref=node_ref
             class=move || {
                 merge_classes!(

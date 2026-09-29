@@ -5,6 +5,7 @@
 //! PASS/FAIL summary is printed, and the process exit code is the number of
 //! failed steps (0 = all green).
 
+mod design_tokens;
 mod pattern_checks;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -118,6 +119,8 @@ fn gate_steps() -> Vec<Step> {
                 "xtask",
                 "-p",
                 "ldui-audit",
+                "-p",
+                "ldui-design",
                 "--",
                 "--check",
             ],
@@ -199,6 +202,24 @@ fn gate_steps() -> Vec<Step> {
             ],
             None,
         ),
+        // ldui-3u3p: the Leptos-free design crate (token emitters, variant
+        // enums, page contracts). Its own step, like every other crate, and
+        // one that must stay green WITHOUT the library: 4iiz-kit builds it
+        // alone, by git.
+        cmd(
+            "clippy-design",
+            "cargo",
+            &[
+                "clippy",
+                "-p",
+                "ldui-design",
+                "--all-targets",
+                "--",
+                "-D",
+                "warnings",
+            ],
+            None,
+        ),
         // The gate must lint the crate that IS the gate. Omitting this let a
         // `needless_borrows_for_generic_args` sit in `xtask` from 2026-07-26
         // until 2026-08-10 while `verify` reported a clean 13/13 (ldui-mpm).
@@ -253,6 +274,11 @@ fn gate_steps() -> Vec<Step> {
             &["test", "-p", "ldui-audit", "--lib"],
             None,
         ),
+        // ldui-3u3p: the moved style modules' own tests (gantt, capacity_bar),
+        // the dark palette's WCAG checks, and `tests/leptos_free.rs` -- the
+        // manifest guard that keeps the crate free of Leptos and of
+        // out-of-repo path dependencies. `test-lib` cannot reach any of them.
+        cmd("test-design", "cargo", &["test", "-p", "ldui-design"], None),
         // Guards against the daisyUI 4 form classes coming back. They are
         // no-ops in daisyUI 5 and were silently inert in 206 places
         // (ldui-mai.3) — a pure source scan, so it needs no browser.
@@ -367,6 +393,23 @@ fn gate_steps() -> Vec<Step> {
                 "leptos-daisyui-rs",
                 "--test",
                 "web_sys_features_cover_usages",
+            ],
+            None,
+        ),
+        // ldui-rz43: the demo's badge, button and alert variant sections must
+        // render `ldui_design::fixtures`, the lists 4iiz-kit's gallery renders
+        // too. A pure source scan (a hard-coded example renders the same
+        // markup as the fixture entry it replaced, so no browser could see
+        // it), and a native integration test `test-lib` cannot reach.
+        cmd(
+            "test-demo-fixtures",
+            "cargo",
+            &[
+                "test",
+                "-p",
+                "leptos-daisyui-rs",
+                "--test",
+                "demo_shared_fixtures",
             ],
             None,
         ),
@@ -925,6 +968,34 @@ fn server_cursor_footer_step() -> Step {
     }
 }
 
+/// Real-DOM proof for `data-ld-pattern` (ldui-wra5) on the general demo app:
+/// every pixelproof-parity catalogue pattern the demo renders declares
+/// itself on its ROOT element and nowhere else, including both of
+/// `PageStatePanel`'s roots through the search-picker journey. The source
+/// guard is `src/patterns/ld_pattern_tests.rs`; this reads what Leptos
+/// rendered.
+fn ld_pattern_step() -> Step {
+    Step {
+        name: "test-ld-pattern",
+        run: Run::BrowserSuite {
+            test: "ld_pattern_smoke",
+            html_target: None,
+        },
+    }
+}
+
+/// The same proof on the client-snapshot test host, the only entry point
+/// that mounts `SnapshotTablePage` and the dedicated-row `PageHeader`.
+fn ld_pattern_snapshot_step() -> Step {
+    Step {
+        name: "test-ld-pattern-snapshot",
+        run: Run::BrowserSuite {
+            test: "ld_pattern_snapshot_smoke",
+            html_target: Some("client-snapshot-test-host.html"),
+        },
+    }
+}
+
 /// The full release gate. The catalog browser suites are deliberately
 /// consecutive: [`run_steps`] reuses one verified release server for adjacent
 /// suites targeting the same HTML entry point.
@@ -935,6 +1006,7 @@ fn full_steps() -> Vec<Step> {
     steps.push(snapshot_table_delta_step());
     steps.push(snapshot_table_page_controls_step());
     steps.push(snapshot_table_page_filter_actions_step());
+    steps.push(ld_pattern_snapshot_step());
     steps.push(helpdesk_step());
     steps.push(ai_chat_step());
     steps.push(ai_chat_knowledge_step());
@@ -961,6 +1033,7 @@ fn full_steps() -> Vec<Step> {
     steps.push(focus_ring_step());
     steps.push(row_action_presets_step());
     steps.push(server_cursor_footer_step());
+    steps.push(ld_pattern_step());
     steps
 }
 
@@ -1052,6 +1125,7 @@ const CLIENT_SNAPSHOT_FINGERPRINT_FILE: &str =
     "target/pattern-checks/client-snapshot-list/browser.fingerprint";
 const CLIENT_SNAPSHOT_SOURCE_INPUTS: &[&str] = &[
     "src",
+    "crates/ldui-design",
     "demo/src/demos/client_snapshot_list.rs",
     "demo/src/demos/snapshot_table_page.rs",
     "demo/src/demos/ai_chat_fixture.rs",
@@ -1900,7 +1974,8 @@ fn tokens_css() -> String {
     // emits `--text-*`/`--text-*--line-height`) and the `.ld-text-*` class
     // block after `@theme` closes — one array, so the two emissions can never
     // hand-drift apart from each other. Both ultimately trace to the same
-    // `ui_tokens::typography` constants `src/tokens/preamble.rs`'s runtime
+    // `ui_tokens::typography` constants the runtime (ldui-design's
+    // `crates/ldui-design/src/tokens/preamble.rs`, via `generated.rs`)
     // `TYPE_STEPS` also draws from.
     const TYPE_RAMP: [(&str, f32, f32); 6] = [
         ("display", ty::SIZE_DISPLAY, ty::LINE_DISPLAY),
@@ -1959,7 +2034,7 @@ fn tokens_css() -> String {
     // `box-shadow` against those numbers with a fixed px epsilon. Emitting
     // rem would make the shadow grow with the user's font size, silently
     // desynchronising the two faces and putting every card off-profile at
-    // any root size but 16px. `src/tokens/preamble.rs` emits px for the same
+    // any root size but 16px. ldui-design's `tokens/preamble.rs` emits px for the same
     // reason, and the two must agree — `tests/ld_class_stylesheet_coverage.rs`
     // asserts value-for-value that they do.
     css.push_str("\n:root {\n");
@@ -1982,7 +2057,7 @@ fn tokens_css() -> String {
     // emit are a real per-step contract (font-size + line-height together),
     // not merely the `--text-*` custom properties above. Before this, that
     // contract was defined ONLY by `UiTokensPreamble`'s runtime `<style>`
-    // (src/tokens/preamble.rs's `ui_tokens_css()`) — so a consumer using
+    // (ldui-design's `tokens/preamble.rs` `ui_tokens_css()`) — so a consumer using
     // those components without also mounting the preamble silently lost the
     // size step (weight and colour still applied; with Tailwind preflight
     // resetting heading sizes, an H2 rendered at body size). Emitting the
@@ -2013,7 +2088,7 @@ fn tokens_css() -> String {
     // ldui-k4fn: the framework's STATIC card-elevation policy.
     //
     // `.ld-card-depth` is deliberately NOT `.ld-elevated`. That class
-    // (src/tokens/animations.rs) is an *interaction* affordance: it rests at
+    // (ldui-design's `tokens/animations.rs`) is an *interaction* affordance: it rests at
     // LEVEL_4, lifts to LEVEL_8 with a `translateY(-1px)` on hover, and
     // carries a transition for both. Putting it on a KPI card would make a
     // read-only tile appear to respond to the pointer. `.ld-card-depth`
@@ -2058,7 +2133,7 @@ fn tokens_css() -> String {
 /// `box-shadow` value.
 ///
 /// Byte-for-byte identical to `shadow_to_box_shadow` in
-/// `src/tokens/preamble.rs` — the two delivery paths must produce the same
+/// `crates/ldui-design/src/tokens/preamble.rs` — the two delivery paths must produce the same
 /// string, and `tests/ld_class_stylesheet_coverage.rs` asserts it. Duplicated
 /// rather than shared because this crate depends only on `ui-tokens` (see
 /// `xtask/Cargo.toml`), which is the design constraint that keeps the gate
@@ -2082,58 +2157,76 @@ fn same_ignoring_line_endings(a: &str, b: &str) -> bool {
     a.lines().eq(b.lines())
 }
 
-/// `cargo xtask gen-tokens [--check]` — write (or verify) the generated
-/// Tailwind theme.
+/// `cargo xtask gen-tokens [--check]` — write (or verify) every file
+/// generated from `ui-tokens`: the Tailwind theme, and `ldui-design`'s Rust
+/// copy of the token values (ldui-3u3p, see [`design_tokens`]).
 ///
-/// `--check` is the gate step: it never writes, and fails if the committed
-/// file does not match what the tokens currently produce.
+/// `--check` is the gate step: it never writes, and fails if a committed
+/// file does not match what the tokens currently produce. The exit code is
+/// the number of files that failed.
 fn gen_tokens(check: bool) -> ExitCode {
-    let want = tokens_css();
-    let have = std::fs::read_to_string(TOKENS_CSS_PATH).ok();
+    let outputs = [
+        (TOKENS_CSS_PATH, tokens_css()),
+        (
+            design_tokens::DESIGN_TOKENS_RS_PATH,
+            design_tokens::design_tokens_rs(),
+        ),
+    ];
+    let mut failed = 0u8;
+    for (path, want) in &outputs {
+        if !gen_token_file(path, want, check) {
+            failed += 1;
+        }
+    }
+    ExitCode::from(failed)
+}
+
+/// Write (or, with `check`, only verify) one generated file. `true` when the
+/// file is, or now is, up to date.
+fn gen_token_file(path: &str, want: &str, check: bool) -> bool {
+    let have = std::fs::read_to_string(path).ok();
 
     if check {
         return match have.as_deref() {
-            Some(current) if same_ignoring_line_endings(current, &want) => {
-                println!("xtask gen-tokens: {TOKENS_CSS_PATH} is up to date");
-                ExitCode::from(0)
+            Some(current) if same_ignoring_line_endings(current, want) => {
+                println!("xtask gen-tokens: {path} is up to date");
+                true
             }
             Some(_) => {
                 eprintln!(
-                    "xtask gen-tokens: {TOKENS_CSS_PATH} is STALE — the tokens changed.\n\
+                    "xtask gen-tokens: {path} is STALE — the tokens changed.\n\
                      run `cargo xtask gen-tokens` and commit the result."
                 );
-                ExitCode::from(1)
+                false
             }
             None => {
-                eprintln!(
-                    "xtask gen-tokens: {TOKENS_CSS_PATH} is missing — run `cargo xtask gen-tokens`"
-                );
-                ExitCode::from(1)
+                eprintln!("xtask gen-tokens: {path} is missing — run `cargo xtask gen-tokens`");
+                false
             }
         };
     }
 
     if have
         .as_deref()
-        .is_some_and(|current| same_ignoring_line_endings(current, &want))
+        .is_some_and(|current| same_ignoring_line_endings(current, want))
     {
-        println!("xtask gen-tokens: {TOKENS_CSS_PATH} already up to date");
-        return ExitCode::from(0);
+        println!("xtask gen-tokens: {path} already up to date");
+        return true;
     }
-    if let Some(parent) = std::path::Path::new(TOKENS_CSS_PATH).parent()
+    if let Some(parent) = std::path::Path::new(path).parent()
         && let Err(e) = std::fs::create_dir_all(parent)
     {
         eprintln!("xtask gen-tokens: create {}: {e}", parent.display());
-        return ExitCode::from(1);
+        return false;
     }
-    match std::fs::write(TOKENS_CSS_PATH, &want) {
+    match std::fs::write(path, want) {
         Ok(()) => {
-            println!("xtask gen-tokens: wrote {TOKENS_CSS_PATH}");
-            ExitCode::from(0)
+            println!("xtask gen-tokens: wrote {path}");
+            true
         }
         Err(e) => {
-            eprintln!("xtask gen-tokens: write {TOKENS_CSS_PATH}: {e}");
-            ExitCode::from(1)
+            eprintln!("xtask gen-tokens: write {path}: {e}");
+            false
         }
     }
 }
@@ -2142,7 +2235,9 @@ fn gen_tokens(check: bool) -> ExitCode {
 // Sibling-token guard (ldui-ae5)
 // ---------------------------------------------------------------------------
 //
-// `src/tokens/preamble.rs` imports `ui_tokens` items across a *path*
+// `xtask/src/design_tokens.rs` (until ldui-3u3p, `src/tokens/preamble.rs`,
+// whose emitters it now feeds through `ldui-design`'s generated values)
+// imports `ui_tokens` items across a *path*
 // dependency. Cargo resolves that path to whatever the sibling repo currently
 // has checked out, so an item that exists only on an unmerged branch still
 // builds here — and this repo's gate stays green while `main` is, in fact,
@@ -2161,8 +2256,9 @@ const SIBLING_REPO: &str = "../Rust-DeskApp";
 /// The `ui-tokens` source directory, relative to [`SIBLING_REPO`].
 const UI_TOKENS_SRC: &str = "crates/ui-tokens/src";
 
-/// The file whose `ui_tokens` references this guard checks.
-const PREAMBLE_PATH: &str = "src/tokens/preamble.rs";
+/// The file whose `ui_tokens` references this guard checks: the generator
+/// of `ldui-design`'s token values, which draws every item the emitters use.
+const TOKEN_REFS_PATH: &str = "xtask/src/design_tokens.rs";
 
 /// A `ui_tokens` item the preamble depends on — a module (`stroke`), or an
 /// item within one (`spacing::SPACE_HUGE`).
@@ -2311,7 +2407,11 @@ fn modules_declared(lib_src: &str) -> BTreeSet<String> {
 
 /// Public item names a `ui-tokens` module file defines.
 fn defined_items(module_src: &str) -> BTreeSet<String> {
-    const KINDS: [&str; 6] = ["const ", "struct ", "enum ", "fn ", "type ", "static "];
+    // `mod ` too: the generator reaches `color::table`/`color::dark` through
+    // the bare `color` import, and those are modules, not items.
+    const KINDS: [&str; 7] = [
+        "const ", "struct ", "enum ", "fn ", "type ", "static ", "mod ",
+    ];
     module_src
         .lines()
         .filter_map(|l| {
@@ -2409,9 +2509,9 @@ fn check_sibling_tokens_inner() -> Guard {
             "{SIBLING_REPO} has no origin/HEAD (run: git remote set-head origin -a)"
         ));
     };
-    let preamble = match std::fs::read_to_string(PREAMBLE_PATH) {
+    let preamble = match std::fs::read_to_string(TOKEN_REFS_PATH) {
         Ok(s) => s,
-        Err(e) => return Guard::Skipped(format!("cannot read {PREAMBLE_PATH}: {e}")),
+        Err(e) => return Guard::Skipped(format!("cannot read {TOKEN_REFS_PATH}: {e}")),
     };
     let Some(lib) = git(
         SIBLING_REPO,
@@ -2535,7 +2635,7 @@ fn check_sibling_tokens() -> ExitCode {
         }
         Guard::Missing { branch, missing } => {
             eprintln!(
-                "xtask sibling-tokens: {PREAMBLE_PATH} references {} ui_tokens item(s) that do NOT exist on {SIBLING_REPO}'s default branch ({branch}):",
+                "xtask sibling-tokens: {TOKEN_REFS_PATH} references {} ui_tokens item(s) that do NOT exist on {SIBLING_REPO}'s default branch ({branch}):",
                 missing.len()
             );
             for item in &missing {
@@ -2719,6 +2819,7 @@ fn main() -> ExitCode {
         "test-focus-ring" => run_steps(&[focus_ring_step()]),
         "test-row-action-presets" => run_steps(&[row_action_presets_step()]),
         "test-server-cursor-footer" => run_steps(&[server_cursor_footer_step()]),
+        "test-ld-pattern" => run_steps(&[ld_pattern_step(), ld_pattern_snapshot_step()]),
         "capture-design" => run_steps(&[design_capture_step()]),
         "gen-tokens" => {
             let check = std::env::args().any(|a| a == "--check");
@@ -2734,7 +2835,7 @@ fn main() -> ExitCode {
         other => {
             eprintln!("xtask: unknown subcommand {other:?}");
             eprintln!(
-                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-selectable-summary|test-person-picker|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-snapshot-table-page-filter-actions|test-helpdesk|test-ai-chat|test-ai-chat-knowledge|test-server-table-column-tools|test-collapse-naming|test-data-table-fit|test-app-shell|test-field-context-scoping|test-entity-draft-row|test-softphone|test-help-hint|test-focus-ring|test-row-action-presets|test-server-cursor-footer|capture-design|gen-tokens|check-sibling-tokens|clean-cache|bump>"
+                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-selectable-summary|test-person-picker|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-snapshot-table-page-filter-actions|test-helpdesk|test-ai-chat|test-ai-chat-knowledge|test-server-table-column-tools|test-collapse-naming|test-data-table-fit|test-app-shell|test-field-context-scoping|test-entity-draft-row|test-softphone|test-help-hint|test-focus-ring|test-row-action-presets|test-server-cursor-footer|test-ld-pattern|capture-design|gen-tokens|check-sibling-tokens|clean-cache|bump>"
             );
             ExitCode::from(2)
         }
@@ -2809,6 +2910,7 @@ mod tests {
                 "clippy-lib-wasm",
                 "clippy-demo",
                 "clippy-audit",
+                "clippy-design",
                 "clippy-xtask",
             ],
             "every workspace crate must be lint-gated, including xtask itself, \
@@ -2827,6 +2929,7 @@ mod tests {
                 "test-lib",
                 "test-xtask",
                 "test-audit",
+                "test-design",
                 "test-daisyui5",
                 "test-svg-paint",
                 "test-ld-class-coverage",
@@ -2834,6 +2937,7 @@ mod tests {
                 "test-bare-buttons",
                 "test-muted-text",
                 "test-web-sys-features",
+                "test-demo-fixtures",
             ]
         );
     }
@@ -3333,6 +3437,30 @@ pub fn r() -> f32 { radius::CARD }
     }
 
     #[test]
+    fn ld_pattern_steps_cover_both_hosts_and_are_full_only() {
+        let demo = ld_pattern_step();
+        assert!(matches!(
+            demo.run,
+            Run::BrowserSuite {
+                test: "ld_pattern_smoke",
+                html_target: None
+            }
+        ));
+        let snapshot = ld_pattern_snapshot_step();
+        assert!(matches!(
+            snapshot.run,
+            Run::BrowserSuite {
+                test: "ld_pattern_snapshot_smoke",
+                html_target: Some("client-snapshot-test-host.html")
+            }
+        ));
+        for name in [demo.name, snapshot.name] {
+            assert!(!gate_steps().iter().any(|s| s.name == name), "{name}");
+            assert!(full_steps().iter().any(|s| s.name == name), "{name}");
+        }
+    }
+
+    #[test]
     fn collapse_naming_step_is_in_process_and_full_only() {
         let step = collapse_naming_step();
         assert_eq!(step.name, "test-collapse-naming");
@@ -3689,6 +3817,7 @@ pub fn r() -> f32 { radius::CARD }
                 "test-lib",
                 "test-xtask",
                 "test-audit",
+                "test-design",
                 "test-daisyui5",
                 "test-svg-paint",
                 "test-ld-class-coverage",
@@ -3696,6 +3825,7 @@ pub fn r() -> f32 { radius::CARD }
                 "test-bare-buttons",
                 "test-muted-text",
                 "test-web-sys-features",
+                "test-demo-fixtures",
             ]
         );
     }
@@ -4098,7 +4228,7 @@ mod gen_tokens_tests {
 
     #[test]
     fn box_shadow_matches_the_runtime_preambles_format() {
-        // The literal here is the format `src/tokens/preamble.rs`'s
+        // The literal here is the format `crates/ldui-design/src/tokens/preamble.rs`'s
         // `shadow_to_box_shadow` produces. If either side is reformatted,
         // this fails here rather than shipping two spellings of one token.
         assert_eq!(

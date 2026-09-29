@@ -153,4 +153,6 @@ pub use snapshot_table_page::{
 };
 
 #[cfg(test)]
+mod ld_pattern_tests;
+#[cfg(test)]
 mod tests;

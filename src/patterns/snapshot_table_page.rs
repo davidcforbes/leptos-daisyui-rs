@@ -718,6 +718,7 @@ where
             id=contract_id
             class=format!("{root_class} {class}")
             data-snapshot-table-page="true"
+            data-ld-pattern="SnapshotTable"
             data-snapshot-generation=move || generation_marker.get()
             data-snapshot-phase=move || state.with(|state| format!("{:?}", state.view(None).phase()))
         >

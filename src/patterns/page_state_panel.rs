@@ -134,7 +134,11 @@ pub fn PageStatePanel(
 
     if is_error(kind) {
         view! {
-            <div data-page-state-panel=panel_slug(kind) aria-busy=is_busy(kind).then_some("true")>
+            <div
+                data-page-state-panel=panel_slug(kind)
+                data-ld-pattern="PageStatePanel"
+                aria-busy=is_busy(kind).then_some("true")
+            >
                 <Alert color=AlertColor::Error style=AlertStyle::Soft>
                     <div class="min-w-0 flex-1">
                         <p>{content}</p>
@@ -155,6 +159,7 @@ pub fn PageStatePanel(
                 aria-live="polite"
                 aria-busy=is_busy(kind).then_some("true")
                 data-page-state-panel=panel_slug(kind)
+                data-ld-pattern="PageStatePanel"
             >
                 {is_busy(kind).then(|| view! {
                     <span class="loading loading-spinner loading-sm" aria-hidden="true"></span>

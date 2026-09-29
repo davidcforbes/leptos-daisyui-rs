@@ -1181,6 +1181,7 @@ pub fn DataTable(
             node_ref=node_ref
             style=container_style
             data-table-data-mode="compatibility-client"
+            data-ld-pattern="DataTable"
         >
             {move || {
                 let show_search = searchable.get();

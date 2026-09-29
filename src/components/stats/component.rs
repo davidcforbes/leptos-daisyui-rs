@@ -33,6 +33,7 @@ pub fn Stats(
 ) -> impl IntoView {
     view! {
         <div
+            data-ld-pattern="Stats"
             node_ref=node_ref
             class=move || merge_classes!("stats", class)
             class:stats-vertical=vertical

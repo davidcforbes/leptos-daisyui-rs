@@ -1,25 +1,4 @@
-/// # Swap Rotate Variants
-///
-/// Style enum for daisyUI swap animation classes that control the transition effect
-/// when swapping between elements.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub enum SwapRotate {
-    /// No rotation animation (default)
-    #[default]
-    None,
-    /// Rotation animation for swap transition
-    Rotate,
-    /// Flip animation for swap transition
-    Flip,
-}
+//! Moved to `ldui_design::swap` (ldui-3u3p) so non-Leptos consumers share
+//! these variants; re-exported here so every existing path keeps resolving.
 
-impl SwapRotate {
-    /// CSS class string
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            SwapRotate::None => "",
-            SwapRotate::Rotate => "swap-rotate",
-            SwapRotate::Flip => "swap-flip",
-        }
-    }
-}
+pub use ldui_design::components::swap::*;

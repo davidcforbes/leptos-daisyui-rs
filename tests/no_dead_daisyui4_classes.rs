@@ -61,6 +61,8 @@ fn no_source_file_uses_a_removed_daisyui4_form_class() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut files = Vec::new();
     rs_files(&repo.join("src"), &mut files);
+    // ldui-3u3p: the component variant enums live in the design crate.
+    rs_files(&repo.join("crates/ldui-design/src"), &mut files);
     rs_files(&repo.join("demo/src"), &mut files);
     assert!(!files.is_empty(), "found no sources to scan");
 

@@ -403,6 +403,7 @@ pub fn Tabs(
     let context = use_context::<TabSetContext>();
     view! {
         <div
+            data-ld-pattern="Tabs"
             node_ref=node_ref
             role=context.map(|_| "tablist")
             aria-label=move || context.map(|context| context.label.get())

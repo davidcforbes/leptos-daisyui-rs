@@ -1,23 +1,4 @@
-/// # Join Direction Variants
-///
-/// Style enum for daisyUI join direction classes that control how child elements
-/// are connected together in a joined layout.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub enum JoinDirection {
-    /// Elements joined horizontally in a row (default)
-    #[default]
-    Horizontal,
+//! Moved to `ldui_design::join` (ldui-3u3p) so non-Leptos consumers share
+//! these variants; re-exported here so every existing path keeps resolving.
 
-    /// Elements joined vertically in a column
-    Vertical,
-}
-
-impl JoinDirection {
-    /// CSS class string
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            JoinDirection::Horizontal => "join-horizontal",
-            JoinDirection::Vertical => "join-vertical",
-        }
-    }
-}
+pub use ldui_design::components::join::*;

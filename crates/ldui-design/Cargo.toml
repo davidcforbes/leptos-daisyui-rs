@@ -1,0 +1,24 @@
+[package]
+name = "ldui-design"
+description = "Leptos-free design layer of leptos-daisyui-rs: token CSS emitters, component variant enums and page-contract states"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["noshishiRust <nopenoshishi@gmail.com>"]
+readme = "README.md"
+repository = "https://github.com/noshishiRust/leptos-daisyui-rs"
+# Internal, like the root crate: consumed by path (leptos-daisyui-rs) and by
+# git tag (4iiz-kit), never published to crates.io.
+publish = false
+
+# Deliberately NO leptos, web-sys, wasm-bindgen or ui-tokens (ldui-3u3p). The
+# crate must build for a server-rendered consumer that pulls it by git, where
+# the `../Rust-DeskApp` path dependency does not exist; token values arrive
+# through `cargo xtask gen-tokens` (src/tokens/generated.rs) instead.
+# `tests/leptos_free.rs` fails if a forbidden dependency is added here.
+[dependencies]
+# Derives on the gantt variants; the page-contract JSON export.
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+# Inline-SVG QR for the login screen's TOTP-setup step (`qr_svg`).
+qrcodegen = "1.8"

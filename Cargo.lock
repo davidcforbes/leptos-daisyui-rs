@@ -1753,6 +1753,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ldui-design"
+version = "0.1.0"
+dependencies = [
+ "qrcodegen",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "leb128fmt"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1817,11 +1826,11 @@ dependencies = [
  "image",
  "js-sys",
  "ldui-audit",
+ "ldui-design",
  "leptos",
  "leptos_router",
  "petgraph",
  "pixelproof-web",
- "qrcodegen",
  "send_wrapper",
  "serde",
  "serde_json",
@@ -1844,6 +1853,7 @@ dependencies = [
  "console_log",
  "icondata",
  "js-sys",
+ "ldui-design",
  "leptos",
  "leptos-daisyui-rs",
  "leptos-use",

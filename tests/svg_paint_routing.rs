@@ -82,11 +82,18 @@ fn src_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src")
 }
 
-/// Every `.rs` file under `src/`, as `(path relative to the crate root, source)`.
+/// The Leptos-free design crate's sources (ldui-3u3p): the component variant
+/// enums moved there, `login_screen`'s inline-SVG QR builder with them.
+fn design_src_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("crates/ldui-design/src")
+}
+
+/// Every `.rs` file under `src/` and `crates/ldui-design/src/`, as
+/// `(path relative to the crate root, source)`.
 fn library_sources() -> Vec<(String, String)> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut out = Vec::new();
-    let mut stack = vec![src_dir()];
+    let mut stack = vec![src_dir(), design_src_dir()];
     while let Some(dir) = stack.pop() {
         for entry in fs::read_dir(&dir)
             .unwrap_or_else(|e| panic!("reading {}: {e}", dir.display()))

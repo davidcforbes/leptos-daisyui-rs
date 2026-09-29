@@ -69,11 +69,13 @@ fn no_library_text_uses_a_muted_step_below_aa() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut files = Vec::new();
     rs_files(&repo.join("src"), &mut files);
+    // ldui-3u3p: the component variant enums live in the design crate.
+    rs_files(&repo.join("crates/ldui-design/src"), &mut files);
     assert!(!files.is_empty(), "found no sources to scan");
 
     let mut offenders = Vec::new();
     for p in &files {
-        let rel = p.strip_prefix(repo.join("src")).unwrap_or(p);
+        let rel = p.strip_prefix(repo).unwrap_or(p);
         let rel_str = rel.to_string_lossy().replace('\\', "/");
         let Ok(src) = fs::read_to_string(p) else {
             continue;
@@ -94,7 +96,7 @@ fn no_library_text_uses_a_muted_step_below_aa() {
             {
                 continue;
             }
-            offenders.push(format!("src/{rel_str}:{} uses /{steps:?}", i + 1));
+            offenders.push(format!("{rel_str}:{} uses /{steps:?}", i + 1));
         }
     }
 

@@ -9,6 +9,9 @@
   themes: light --default, dark --prefersdark, cupcake, cyberpunk, retro, forest, aqua, dracula;
 }
 @source "../src/**/*.rs";
+/* The component variant enums (and every class literal in them) live in
+   the Leptos-free ldui-design crate since ldui-3u3p; scan it too. */
+@source "../crates/ldui-design/src/**/*.rs";
 
 /* Accordion */
 @source inline("collapse collapse-title collapse-content collapse-arrow collapse-plus collapse-open collapse-close");
