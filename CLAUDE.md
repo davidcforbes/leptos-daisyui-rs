@@ -122,6 +122,14 @@ Finish every edit, including the per-package `cargo fmt` this repo requires,
 different failure -- a tailwind build that never ran (missing
 `demo/node_modules`).
 
+**Another session's `trunk serve` in `demo/` counts as a tree writer too.**
+It watches the same sources, runs the same `build-css.mjs` hook and shares
+`demo/dist` with the lanes. Each edit costs it a ~17-minute release rebuild.
+Before a lane, check `netstat -ano | grep :3010` and read the owner's command
+line. If the server is not yours, leave it running and wait for a
+`✅ success` line with nothing after it in its log before you launch. A server
+left by the 4iiz-kit session was found this way on 2026-09-29.
+
 **A suite registered in no xtask lane runs nowhere.** It compiles, never
 executes, and the evidence it exists to produce is structurally unobtainable.
 Seven registration-or-pin gaps occurred in a single session. Adding a
