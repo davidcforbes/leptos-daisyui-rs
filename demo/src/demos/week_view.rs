@@ -294,6 +294,9 @@ pub fn WeekViewDemo() -> impl IntoView {
                         weekday_label=Callback::new(move |day: Weekday| {
                             if locale.get() == "es" { es_weekday(day).0.to_string() } else { day.abbrev().to_string() }
                         })
+                        all_day_label=Signal::derive(move || {
+                            if locale.get() == "es" { "Todo el día".to_string() } else { "All day".to_string() }
+                        })
                         event_accessible_label=Callback::new(move |(ev, epoch_day): (CalEvent, i64)| {
                             if locale.get() != "es" {
                                 return String::new();

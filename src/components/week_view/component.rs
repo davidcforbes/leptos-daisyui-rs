@@ -98,9 +98,10 @@ use leptos::{html::Div, prelude::*};
 /// A block's accessible name carries its day, because a screen-reader user
 /// tabbing between blocks never hears the column header:
 /// `"Standup, Monday Mar 2, 09:00 to 09:15"`. A localised page supplies
-/// `event_accessible_label` (given the event and its epoch day) and
-/// `weekday_label` (given a [`Weekday`], returning the header text). Empty
-/// callback output falls back to the English default, never to no name.
+/// `event_accessible_label` (given the event and its epoch day),
+/// `weekday_label` (given a [`Weekday`], returning the header text) and
+/// `all_day_label` (the all-day strip's gutter text). Empty callback output
+/// falls back to the English default, never to no name.
 ///
 /// ### Consumer drop targets
 ///
@@ -193,6 +194,11 @@ pub fn WeekView(
     /// Shown only when the line is drawn and this is non-empty.
     #[prop(optional, into)]
     now_label: Signal<String>,
+
+    /// The all-day strip's gutter label. Defaults to `"All day"`; a
+    /// localised page passes its own (`"Todo el día"`), read reactively.
+    #[prop(optional, into, default = Signal::derive(|| String::from("All day")))]
+    all_day_label: Signal<String>,
 
     /// The working weekdays. Columns whose weekday is not in the set are
     /// shaded and marked `data-work-day="false"`; they stay schedulable.
@@ -464,8 +470,11 @@ pub fn WeekView(
             // it one grid whose chips are placed by `grid-column` and keyed by
             // index -- so a day-move keeps the chip's node, like a timed block.
             <div class="flex border-b border-base-300">
-                <div class="min-h-6 w-12 shrink-0 flex items-start justify-end pr-1 pt-1 text-xs opacity-60">
-                    "All day"
+                <div
+                    class="min-h-6 w-12 shrink-0 flex items-start justify-end pr-1 pt-1 text-xs opacity-60"
+                    data-week-all-day-label="true"
+                >
+                    {move || all_day_label.get()}
                 </div>
                 <div class="relative flex-1 min-w-0">
                     <div class="absolute inset-0 flex">

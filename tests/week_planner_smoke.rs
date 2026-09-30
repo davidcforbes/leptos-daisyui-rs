@@ -391,6 +391,14 @@ async fn sunday_first_headers_and_locale_toggle_rename_in_place() {
     assert_eq!(testid_text(&h, "week-locale-selected").await, "0");
     let en_label = attr(&h, &block, "aria-label").await;
     assert_eq!(en_label, json!("Cita, Sunday Mar 1, 09:00 to 10:00"));
+    // ldui-ms76: the all-day strip's gutter label follows the locale too.
+    let all_day = format!("{LOCALIZED} [data-week-all-day-label]");
+    let all_day_text = || {
+        let expression = format!("document.querySelector('{all_day}')?.textContent ?? null");
+        let h = &h;
+        async move { eval_json(h, &expression).await }
+    };
+    assert_eq!(all_day_text().await, json!("All day"));
 
     click(&h, "[data-testid='week-locale-toggle']").await;
     tokio::time::sleep(std::time::Duration::from_millis(150)).await;
@@ -421,6 +429,7 @@ async fn sunday_first_headers_and_locale_toggle_rename_in_place() {
         attr(&h, &block, "aria-label").await,
         json!("Cita, domingo 1, de 09:00 a 10:00")
     );
+    assert_eq!(all_day_text().await, json!("Todo el día"));
     assert_eq!(
         testid_text(&h, "week-locale-selected").await,
         "0",
@@ -430,5 +439,6 @@ async fn sunday_first_headers_and_locale_toggle_rename_in_place() {
     click(&h, "[data-testid='week-locale-toggle']").await;
     tokio::time::sleep(std::time::Duration::from_millis(150)).await;
     assert_eq!(attr(&h, &block, "aria-label").await, en_label);
+    assert_eq!(all_day_text().await, json!("All day"));
     assert_no_browser_errors(&h, "week planner locale toggle").await;
 }
