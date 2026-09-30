@@ -3,7 +3,8 @@
 **Date:** 2026-09-29.
 **Requested by:** the owner, in a leptos-daisyui-rs session. The owner chose the "lean week API" path.
 **Upstream:** leptos-daisyui-rs `ldui-9sip` adds WeekView's interactive planner contract.
-**Office bead:** `op-lcvat`. On 2026-09-30 the office-builder granted the Office half to an ldui session, on the lane branch `op-lcvat-week-view`. The branch is cut from Office `origin/main` after its 0930g ship is promoted and is edit-only; the builder compiles it on integration. The week_view re-vendor rides that lane as its first commit.
+**Office bead:** `op-lcvat`. On 2026-09-30 the office-builder granted the Office half to an ldui session, on the lane branch `op-lcvat-week-view`. The week_view re-vendor rides that lane as its first commit.
+**Status (2026-09-30):** built. `op-lcvat-week-view` = `0476c197` on Office origin, cut from `df6ba2d71` (0930h). It is compiled locally only, so the builder's `cargo make stage-test` on integration remains the gate. See "As built" at the end for where the implementation differs from this plan.
 **Do not inherit `op-aa4eo`:** the day grid's builder plots carried-forward rows by minutes of day, with no check on their date. The week must place every block by its actual date, and the narrowing below guarantees that.
 
 ## Goal
@@ -107,3 +108,48 @@ This mirrors the completed view. A read-only GET needs no `mutation_contract` en
 - `cargo make iterate-day-planner`, then `cargo make stage-test`.
 - After deploy: the DOM/axe pass on `/day-planner/`, with the Week tab both open and closed.
 - Live check of all four gestures: a keyboard day-move, a rail drop onto another day, a header drill-down, and the EN/ES toggle.
+
+## As built (2026-09-30)
+
+The branch has three commits:
+
+- `98ead3b4`: the re-vendor, pinned at ldui `5f7158c`.
+- `11792f55`: the feature.
+- `0476c197`: placement through `DayAssignment::scheduled_on`.
+
+Where the build differs from the plan above:
+
+- **Offsets come from the SCHEDULE clock, not the office zone.** Each day's
+  `utc_offset_minutes` is `configured_timezone()`'s offset at local noon. That
+  is the clock the page's read edge (`from_dto`) and write edge
+  (`wall_clock_to_utc`) convert under, so week writes agree with the Plan tab.
+  The office zone is only where each day's window is cut, and that is
+  `office_zone_local`, the bundle's rule. The wire names both:
+  `day_zone` and `schedule_zone`.
+- **Section states are a plain struct plus a unit enum**
+  (`DayPlannerWeekSectionV1`, `DayPlannerWeekSectionStateV1`: fresh, stale,
+  never_loaded, unavailable) instead of `*_unavailable: Option<String>`. The
+  fixture still builds every type, so `KNOWN_REFUSALS` stays 85.
+- **Blocks are placed by the row's actual wall date.** The column is the week
+  day where `DayAssignment::scheduled_on(date)` holds. That predicate is 0930h's,
+  the Plan tab's own op-aa4eo rule, so the two tabs share one definition. A row
+  whose wall clock falls outside the week is counted in a notice, never drawn
+  elsewhere.
+- **Blocks are ordered by assignment id, never by time.** `WeekView` keys nodes
+  by index, so a re-read that reordered them would hand a moved block's focus to
+  another assignment.
+- **The unplanned rail moved beside both tab panels.** The workspace grid holds
+  the panels in its first column, so a rail card drops onto the week too.
+- **A move is confirmed on the target date's own offset.** The pending move
+  lives in a signal, so whichever week read lands last settles it.
+- **`requested_span` delegates to `requested_span_at(.., offset)`**, and
+  `from_dto` and `day_event` became `pub(crate)`. The day grid builder was not
+  touched; op-aa4eo was the builder's, and shipped in 0930h.
+- **ldui gained `all_day_label`** (ldui-ms76). `WeekView` had one English
+  literal left, and the Spanish tab passes "Todo el día".
+- **The wire snapshots, fingerprint and vendor provenance were hand-written**
+  with self-checking scripts, because `cargo` and `vendor_provenance.py
+  --update` could not run in the lane.
+- **Local compile, on the owner's word.** `office-perf-dto` clippy + 427 tests.
+  Day-planner clippy (native and wasm32) + 72 tests. `office-perf-api` clippy
+  `--bins` + 220 filtered tests. The xtask digest pin.
