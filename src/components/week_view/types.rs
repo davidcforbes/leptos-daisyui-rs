@@ -1,26 +1,140 @@
 use crate::components::day_scheduler::{
-    EventLayout, SchedulerEvent, SchedulerEventColor, compute_event_layout,
+    EventKeyIntent, EventLayout, SchedulerEvent, SchedulerEventColor, compute_event_layout,
+    event_key_intent, minute_label,
 };
 
 const WEEKDAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const WEEKDAY_NAMES: [&str; 7] = [
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+];
 const MONTHS: [&str; 12] = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
 
-/// One calendar event on the week grid. `day` is a Monday-based column index
-/// (`0` = Monday .. `6` = Sunday). Mirrors d2d-ui's `CalEvent`, generalised
-/// with an explicit `day` column (instead of an absolute Unix timestamp) so
-/// the component itself stays free of any date/timezone math -- callers
-/// place events on the grid by column index directly. Reuses
-/// [`SchedulerEventColor`] from [`DayScheduler`](super::super::day_scheduler::DayScheduler)
-/// for the accent-bar / tint color, matching that component's palette.
-#[derive(Clone, Debug, PartialEq)]
+/// Number of day-columns a [`WeekView`](super::WeekView) draws.
+pub const WEEK_DAYS: usize = 7;
+
+/// A day of the week. Derived from a date rather than from a column index,
+/// so a week that starts on any day labels its columns correctly.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Weekday {
+    /// Monday
+    Monday,
+    /// Tuesday
+    Tuesday,
+    /// Wednesday
+    Wednesday,
+    /// Thursday
+    Thursday,
+    /// Friday
+    Friday,
+    /// Saturday
+    Saturday,
+    /// Sunday
+    Sunday,
+}
+
+impl Weekday {
+    /// All seven days, Monday first.
+    pub const ALL: [Weekday; 7] = [
+        Weekday::Monday,
+        Weekday::Tuesday,
+        Weekday::Wednesday,
+        Weekday::Thursday,
+        Weekday::Friday,
+        Weekday::Saturday,
+        Weekday::Sunday,
+    ];
+
+    /// The weekday of `epoch_day` (days since 1970-01-01, a Thursday).
+    pub fn from_epoch_day(epoch_day: i64) -> Self {
+        Self::ALL[(epoch_day + 3).rem_euclid(7) as usize]
+    }
+
+    /// `0` for Monday .. `6` for Sunday.
+    pub fn index_from_monday(self) -> usize {
+        self as usize
+    }
+
+    /// English three-letter abbreviation (`"Mon"`).
+    pub fn abbrev(self) -> &'static str {
+        WEEKDAYS[self.index_from_monday()]
+    }
+
+    /// English full name (`"Monday"`).
+    pub fn name(self) -> &'static str {
+        WEEKDAY_NAMES[self.index_from_monday()]
+    }
+}
+
+/// A set of weekdays -- which days of the week are working days. A
+/// `WeekView` shades the columns whose weekday is NOT in its `work_days`
+/// set; the days stay fully schedulable (shading a day is not hiding it,
+/// the distinction Outlook, Syncfusion and DevExtreme all keep).
+///
+/// [`Default`] is [`WeekdaySet::ALL`]: a seven-day workweek, so a `WeekView`
+/// that never sets `work_days` shades nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct WeekdaySet(u8);
+
+impl WeekdaySet {
+    /// Every day of the week.
+    pub const ALL: Self = Self(0b111_1111);
+    /// No day of the week.
+    pub const NONE: Self = Self(0);
+    /// Monday through Friday. Not the default: weekends are Friday-Saturday
+    /// or Thursday-Friday in much of the world, so pick the set explicitly.
+    pub const MONDAY_TO_FRIDAY: Self = Self(0b001_1111);
+
+    /// The set holding exactly `days`.
+    pub fn from_days(days: impl IntoIterator<Item = Weekday>) -> Self {
+        days.into_iter().fold(Self::NONE, Self::with)
+    }
+
+    /// Whether `day` is in the set.
+    pub fn contains(self, day: Weekday) -> bool {
+        self.0 & (1 << day.index_from_monday()) != 0
+    }
+
+    /// The set with `day` added.
+    pub fn with(self, day: Weekday) -> Self {
+        Self(self.0 | (1 << day.index_from_monday()))
+    }
+
+    /// The set with `day` removed.
+    pub fn without(self, day: Weekday) -> Self {
+        Self(self.0 & !(1 << day.index_from_monday()))
+    }
+}
+
+impl Default for WeekdaySet {
+    fn default() -> Self {
+        Self::ALL
+    }
+}
+
+/// One calendar event on the week grid. `day` is a column index, `0` ..
+/// `6`, counted from the week's first day (the view's
+/// `week_start_epoch_day`); with a Monday start, `0` is Monday and `6` is
+/// Sunday. Mirrors d2d-ui's `CalEvent`, generalised with an explicit `day`
+/// column (instead of an absolute Unix timestamp) so the component itself
+/// stays free of any timezone math -- callers place events on the grid by
+/// column index directly. Reuses [`SchedulerEventColor`] from
+/// [`DayScheduler`](super::super::day_scheduler::DayScheduler) for the
+/// accent-bar / tint color, matching that component's palette.
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct CalEvent {
     /// Display title (the "subject" in d2d-ui), shown in bold in the block.
     pub title: String,
     /// Optional location line, shown under the title when there's room.
     pub location: String,
-    /// Day column, `0` (Monday) .. `6` (Sunday).
+    /// Day column, `0` .. `6`, counted from the week's first day.
     pub day: usize,
     /// Start time, in minutes from midnight. Ignored when `all_day` is set.
     pub start_min: u32,
@@ -98,6 +212,37 @@ pub fn week_start_for(epoch_day: i64) -> i64 {
     epoch_day - weekday_mon0
 }
 
+/// The epoch day of the most recent `first` weekday on or before
+/// `epoch_day` -- the start of its week for a locale whose weeks begin on
+/// `first` (Sunday in the US, Saturday across much of the Middle East).
+/// `week_start_for_weekday(d, Weekday::Monday) == week_start_for(d)`.
+pub fn week_start_for_weekday(epoch_day: i64, first: Weekday) -> i64 {
+    let offset = (Weekday::from_epoch_day(epoch_day).index_from_monday() as i64
+        - first.index_from_monday() as i64)
+        .rem_euclid(7);
+    epoch_day - offset
+}
+
+/// The weekday of column `day` (`0..=6`, clamped) of the week beginning at
+/// `week_start_epoch_day`. This is what a `WeekView` header shows, so a
+/// week that starts on a Sunday reads Sun .. Sat.
+pub fn column_weekday(week_start_epoch_day: i64, day: usize) -> Weekday {
+    Weekday::from_epoch_day(week_start_epoch_day + day.min(WEEK_DAYS - 1) as i64)
+}
+
+/// English date phrase for column `day` of the week beginning at
+/// `week_start_epoch_day`, e.g. `"Monday Mar 2"` -- the day part of a week
+/// event's default accessible name.
+pub fn column_date_label(week_start_epoch_day: i64, day: usize) -> String {
+    let epoch_day = week_start_epoch_day + day.min(WEEK_DAYS - 1) as i64;
+    let (_, month, dom) = civil_from_days(epoch_day);
+    format!(
+        "{} {} {dom}",
+        Weekday::from_epoch_day(epoch_day).name(),
+        MONTHS[(month - 1) as usize]
+    )
+}
+
 /// A human label for the week beginning at `week_start_epoch_day`, e.g.
 /// `"Mar 2 - 8, 2026"`. Spans month and year boundaries sensibly
 /// (`"Mar 30 - Apr 5, 2026"`, `"Dec 29, 2025 - Jan 4, 2026"`). Ported from
@@ -146,4 +291,144 @@ pub fn compute_week_event_layout(
         .map(|e| SchedulerEvent::new(e.title.clone(), e.start_min, e.end_min, e.color.clone()))
         .collect();
     compute_event_layout(&scheduler_events, start_hour, end_hour)
+}
+
+/// Lay out a whole week's timed events for the view's single event layer,
+/// index-aligned with `events`: `None` for an all-day event, otherwise the
+/// block's position as a percentage of the WHOLE seven-column area. Each
+/// day's events are packed into overlap lanes independently (via
+/// [`compute_week_event_layout`]) and then offset into their column.
+///
+/// One layer, rather than blocks nested inside their day's column, is what
+/// lets a keyboard day-move keep the same DOM node: the block's `left`
+/// changes and the node (and its focus) stays.
+pub fn compute_week_layer_layout(
+    events: &[CalEvent],
+    start_hour: u32,
+    end_hour: u32,
+) -> Vec<Option<EventLayout>> {
+    let mut layouts = vec![None; events.len()];
+    let col_w = 100.0 / WEEK_DAYS as f64;
+    for day in 0..WEEK_DAYS {
+        let indices: Vec<usize> = (0..events.len())
+            .filter(|&i| !events[i].all_day && events[i].day.min(WEEK_DAYS - 1) == day)
+            .collect();
+        let day_events: Vec<CalEvent> = indices.iter().map(|&i| events[i].clone()).collect();
+        let day_layouts = compute_week_event_layout(&day_events, start_hour, end_hour);
+        for (&i, layout) in indices.iter().zip(day_layouts) {
+            layouts[i] = Some(EventLayout {
+                left_pct: (day as f64 + layout.left_pct / 100.0) * col_w,
+                width_pct: layout.width_pct / 100.0 * col_w,
+                ..layout
+            });
+        }
+    }
+    layouts
+}
+
+/// The English default accessible name of a week event block: its title,
+/// its day and its time range -- `"Standup, Monday Mar 2, 09:00 to 09:15"`,
+/// or `"Holiday, Friday Mar 6, all day"`. Unlike a single-day scheduler, the
+/// day is part of the name: a screen-reader user tabbing between blocks
+/// hears only the focused block, never the column header above it.
+pub fn week_event_aria_label(ev: &CalEvent, week_start_epoch_day: i64) -> String {
+    let date = column_date_label(week_start_epoch_day, ev.day);
+    if ev.all_day {
+        format!("{}, {date}, all day", ev.title)
+    } else {
+        format!(
+            "{}, {date}, {} to {}",
+            ev.title,
+            minute_label(ev.start_min),
+            minute_label(ev.end_min)
+        )
+    }
+}
+
+/// Resolve a week event block's accessible name from an optional
+/// caller-formatted string -- the result of a `WeekView`'s
+/// `event_accessible_label` callback, if it was given one. `None`, empty or
+/// whitespace-only output falls back to the English
+/// [`week_event_aria_label`]: a wrong-language name is a better outcome than
+/// an interactive control with no name at all.
+pub fn resolve_week_event_accessible_label(
+    ev: &CalEvent,
+    week_start_epoch_day: i64,
+    formatted: Option<String>,
+) -> String {
+    match formatted {
+        Some(label) if !label.trim().is_empty() => label,
+        _ => week_event_aria_label(ev, week_start_epoch_day),
+    }
+}
+
+/// What a key press on a focused week event block asks for. The mapping is
+/// pure so the keyboard contract is unit-testable without a DOM.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WeekEventKeyIntent {
+    /// Enter / Space -- activate the event.
+    Activate,
+    /// Arrow Up/Down -- move the event earlier/later by the signed minute
+    /// delta.
+    Move(i32),
+    /// Shift+Arrow Up/Down -- shrink/grow the event's end by the signed
+    /// minute delta.
+    Resize(i32),
+    /// Arrow Left/Right -- move the event to the previous/next day, a signed
+    /// day delta. Left/Right is the date-grid convention (the WAI-ARIA APG
+    /// date picker, Google Calendar's week view).
+    MoveDay(i32),
+}
+
+/// Map a key press on a focused week event block to its
+/// [`WeekEventKeyIntent`]: the single-day scheduler's contract
+/// ([`event_key_intent`](crate::components::event_key_intent)) plus
+/// ArrowLeft/ArrowRight for a one-day move. Shift+Left/Right is left
+/// unmapped (reserved), and everything else -- Tab above all -- is `None` so
+/// focus navigation keeps working.
+pub fn week_event_key_intent(key: &str, shift: bool, step_min: u32) -> Option<WeekEventKeyIntent> {
+    match key {
+        "ArrowLeft" | "ArrowRight" if shift => None,
+        "ArrowLeft" => Some(WeekEventKeyIntent::MoveDay(-1)),
+        "ArrowRight" => Some(WeekEventKeyIntent::MoveDay(1)),
+        _ => event_key_intent(key, shift, step_min).map(|intent| match intent {
+            EventKeyIntent::Activate => WeekEventKeyIntent::Activate,
+            EventKeyIntent::Move(delta) => WeekEventKeyIntent::Move(delta),
+            EventKeyIntent::Resize(delta) => WeekEventKeyIntent::Resize(delta),
+        }),
+    }
+}
+
+/// A point on the week grid: a day column and a minute from midnight.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WeekSlot {
+    /// Day column, `0..=6`.
+    pub day: usize,
+    /// Minutes from midnight, inside the visible hour band.
+    pub minute: u32,
+}
+
+/// The slot under a pointer, from its position as fractions of the day
+/// columns' area -- the element carrying `data-week-columns`, which excludes
+/// the hour gutter, the headers and the all-day strip. A consumer's
+/// drag-and-drop target measures that element's rect and passes
+/// `(client_x - left) / width` and `(client_y - top) / height`. Fractions
+/// are clamped to `0..=1`; the minute is not snapped (round it to the
+/// consumer's own step).
+pub fn week_slot_at(x_ratio: f64, y_ratio: f64, start_hour: u32, end_hour: u32) -> WeekSlot {
+    let end_hour = end_hour.max(start_hour + 1);
+    let x = if x_ratio.is_finite() {
+        x_ratio.clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let y = if y_ratio.is_finite() {
+        y_ratio.clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let day = ((x * WEEK_DAYS as f64) as usize).min(WEEK_DAYS - 1);
+    let span = (end_hour - start_hour) * 60;
+    let minute = start_hour * 60 + ((y * span as f64) as u32).min(span);
+    WeekSlot { day, minute }
 }

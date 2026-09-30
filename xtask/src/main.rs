@@ -730,6 +730,21 @@ fn heatmap_step() -> Step {
     }
 }
 
+/// Focused browser proof for `WeekView`'s interactive planner contract
+/// (ldui-9sip): day-bearing accessible names, Up/Down time moves and
+/// Left/Right day moves that keep the SAME focused node, all-day chips placed
+/// by grid column, the work-day mask, day drill-down, and a Sunday-first week
+/// relabelled in place by a locale signal.
+fn week_planner_step() -> Step {
+    Step {
+        name: "test-week-planner",
+        run: Run::BrowserSuite {
+            test: "week_planner_smoke",
+            html_target: None,
+        },
+    }
+}
+
 fn bar_chart_step() -> Step {
     Step {
         name: "test-bar-chart-divergence",
@@ -1018,6 +1033,7 @@ fn full_steps() -> Vec<Step> {
     steps.push(modal_close_proposal_step());
     steps.push(bar_chart_step());
     steps.push(heatmap_step());
+    steps.push(week_planner_step());
     steps.push(selectable_summary_step());
     steps.push(section_heading_step());
     steps.push(search_picker_dialog_step());
@@ -2794,6 +2810,7 @@ fn main() -> ExitCode {
         "test-modal-close-proposal" => run_steps(&[modal_close_proposal_step()]),
         "test-bar-chart-divergence" => run_steps(&[bar_chart_step()]),
         "test-heatmap-matrix" => run_steps(&[heatmap_step()]),
+        "test-week-planner" => run_steps(&[week_planner_step()]),
         "test-selectable-summary" => run_steps(&[selectable_summary_step()]),
         "test-person-picker" => run_steps(&[person_picker_step()]),
         "test-section-heading" => run_steps(&[section_heading_step()]),
@@ -2835,7 +2852,7 @@ fn main() -> ExitCode {
         other => {
             eprintln!("xtask: unknown subcommand {other:?}");
             eprintln!(
-                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-selectable-summary|test-person-picker|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-snapshot-table-page-filter-actions|test-helpdesk|test-ai-chat|test-ai-chat-knowledge|test-server-table-column-tools|test-collapse-naming|test-data-table-fit|test-app-shell|test-field-context-scoping|test-entity-draft-row|test-softphone|test-help-hint|test-focus-ring|test-row-action-presets|test-server-cursor-footer|test-ld-pattern|capture-design|gen-tokens|check-sibling-tokens|clean-cache|bump>"
+                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-week-planner|test-selectable-summary|test-person-picker|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-snapshot-table-page-filter-actions|test-helpdesk|test-ai-chat|test-ai-chat-knowledge|test-server-table-column-tools|test-collapse-naming|test-data-table-fit|test-app-shell|test-field-context-scoping|test-entity-draft-row|test-softphone|test-help-hint|test-focus-ring|test-row-action-presets|test-server-cursor-footer|test-ld-pattern|capture-design|gen-tokens|check-sibling-tokens|clean-cache|bump>"
             );
             ExitCode::from(2)
         }
