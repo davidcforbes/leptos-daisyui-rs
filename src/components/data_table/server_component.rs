@@ -9,7 +9,7 @@ use crate::components::data_table::body::{DataTableBody, DataTableBodyClick, Dat
 use crate::components::data_table::filter::{
     ColumnFilters, DataTableFilterOption, DataTableFilterOptions, DataTableFilterRow, FILTER_ALL,
     distinct_values, filter_options_from_strings, has_exact_filterable_columns,
-    has_filterable_columns,
+    has_filterable_columns, row_matches_column_filters, row_matches_search,
 };
 use crate::components::data_table::geometry::{
     StableColumnTrack, StableTableColGroup, stable_table_content_style,
@@ -321,6 +321,15 @@ pub struct TableQuery {
     /// supplied column's [`Column::filter_kind`]: exact dropdowns use equality
     /// and [`Column::filterable_text`] inputs use substring matching.
     pub filters: ColumnFilters,
+    /// `true` when this proposal was scheduled by the table's own
+    /// [`ServerFilterRefresh::LocalFirstDebounced`] mode after a filter-row or
+    /// search change: the rows already loaded are being narrowed locally, so
+    /// the host MAY keep them and its ready state while the slice refreshes
+    /// instead of announcing a reload. Every other proposal (navigation,
+    /// sort, page size, reset, a host-built query) carries `false`; each
+    /// builder on this type resets it, so a stored silent query never leaks
+    /// silence into the next proposal built from it.
+    pub silent: bool,
 }
 
 impl TableQuery {
@@ -332,6 +341,7 @@ impl TableQuery {
             search: String::new(),
             sort: None,
             filters: ColumnFilters::new(),
+            silent: false,
         }
     }
 
@@ -339,6 +349,7 @@ impl TableQuery {
     pub fn with_search(mut self, search: impl Into<String>) -> Self {
         self.page = 1;
         self.search = search.into();
+        self.silent = false;
         self
     }
 
@@ -346,6 +357,7 @@ impl TableQuery {
     pub fn with_sort(mut self, sort: Option<(&'static str, SortOrder)>) -> Self {
         self.page = 1;
         self.sort = sort;
+        self.silent = false;
         self
     }
 
@@ -353,6 +365,7 @@ impl TableQuery {
     pub fn with_filters(mut self, filters: ColumnFilters) -> Self {
         self.page = 1;
         self.filters = filters;
+        self.silent = false;
         self
     }
 
@@ -360,12 +373,21 @@ impl TableQuery {
     pub fn with_page_size(mut self, page_size: i64) -> Self {
         self.page = 1;
         self.page_size = page_size.max(1);
+        self.silent = false;
         self
     }
 
     /// Replaces only the 1-based offset page.
     pub fn with_page(mut self, page: i64) -> Self {
         self.page = page.max(1);
+        self.silent = false;
+        self
+    }
+
+    /// Marks (or unmarks) this proposal as a silent, local-first refresh.
+    /// Apply it LAST: every other builder resets the flag.
+    pub fn with_silent(mut self, silent: bool) -> Self {
+        self.silent = silent;
         self
     }
 
@@ -375,6 +397,7 @@ impl TableQuery {
         self.search.clear();
         self.sort = None;
         self.filters.clear();
+        self.silent = false;
         self
     }
 }
@@ -441,6 +464,11 @@ pub struct ServerCursorQuery {
     /// Active exact or contains column filters, distinguished by the matching
     /// supplied [`Column`] definition.
     pub filters: ColumnFilters,
+    /// `true` when this proposal was scheduled by the table's own
+    /// [`ServerFilterRefresh::LocalFirstDebounced`] mode after a filter-row or
+    /// search change; see [`TableQuery::silent`] for the contract. Navigation
+    /// (`with_request`) and every other builder reset it to `false`.
+    pub silent: bool,
 }
 
 impl ServerCursorQuery {
@@ -452,6 +480,7 @@ impl ServerCursorQuery {
             search: String::new(),
             sort: None,
             filters: ColumnFilters::new(),
+            silent: false,
         }
     }
 
@@ -459,6 +488,7 @@ impl ServerCursorQuery {
     pub fn with_search(mut self, search: impl Into<String>) -> Self {
         self.request = ServerCursorRequest::First;
         self.search = search.into();
+        self.silent = false;
         self
     }
 
@@ -466,6 +496,7 @@ impl ServerCursorQuery {
     pub fn with_sort(mut self, sort: Option<(&'static str, SortOrder)>) -> Self {
         self.request = ServerCursorRequest::First;
         self.sort = sort;
+        self.silent = false;
         self
     }
 
@@ -473,6 +504,7 @@ impl ServerCursorQuery {
     pub fn with_filters(mut self, filters: ColumnFilters) -> Self {
         self.request = ServerCursorRequest::First;
         self.filters = filters;
+        self.silent = false;
         self
     }
 
@@ -480,12 +512,22 @@ impl ServerCursorQuery {
     pub fn with_page_size(mut self, page_size: i64) -> Self {
         self.request = ServerCursorRequest::First;
         self.page_size = page_size.max(1);
+        self.silent = false;
         self
     }
 
-    /// Replaces only the opaque cursor-navigation intent.
+    /// Replaces only the opaque cursor-navigation intent. Navigation is never
+    /// silent: the slice the person asked for is a visible reload.
     pub fn with_request(mut self, request: ServerCursorRequest) -> Self {
         self.request = request;
+        self.silent = false;
+        self
+    }
+
+    /// Marks (or unmarks) this proposal as a silent, local-first refresh.
+    /// Apply it LAST: every other builder resets the flag.
+    pub fn with_silent(mut self, silent: bool) -> Self {
+        self.silent = silent;
         self
     }
 
@@ -495,8 +537,194 @@ impl ServerCursorQuery {
         self.search.clear();
         self.sort = None;
         self.filters.clear();
+        self.silent = false;
         self
     }
+}
+
+/// How a filter-row or search change reaches the server (Office op-qjm7b).
+///
+/// The historical contract proposes the new query the moment a control
+/// settles, and a host that announces every proposal as a reload shows its
+/// "refreshing" banner on every keystroke. `LocalFirstDebounced` keeps the
+/// server-owned population honest while giving the person the local
+/// EntityTable feel: the rows ALREADY LOADED are narrowed at once by the same
+/// predicate the local table uses ([`row_matches_column_filters`] for the
+/// filter row, [`row_matches_search`] for the search box), and ONE proposal
+/// is scheduled `debounce_ms` after the last change, flagged
+/// [`ServerCursorQuery::silent`] / [`TableQuery::silent`] so the host can keep
+/// its rows and its ready state while the slice refreshes. The local
+/// narrowing ends the moment the host accepts a query (its supplied truth
+/// changes), whether or not it matches the draft, because the controls are
+/// re-projected from that truth at the same moment.
+///
+/// Navigation, sort, page-size and reset proposals are unchanged in either
+/// mode and never silent.
+///
+/// The mode is meant for CONTROLLED query ownership (cursor pagination or
+/// [`ServerTableQueryOwnership::Controlled`]), where supplied truth moves only
+/// when the host accepts a proposal, so the local narrowing lasts exactly as
+/// long as the silent read is in flight. Under the component-owned offset
+/// compatibility mode the component accepts its own proposal at once, so the
+/// narrowing ends before the host's re-fetch lands.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ServerFilterRefresh {
+    /// Every accepted filter-row or search change proposes immediately and is
+    /// announced like any other proposal (the historical behavior).
+    #[default]
+    Immediate,
+    /// Narrow the loaded rows locally at once; propose once, silently, after
+    /// `debounce_ms` without a further change.
+    LocalFirstDebounced {
+        /// Quiet period after the last change before the one silent proposal.
+        debounce_ms: u64,
+    },
+}
+
+/// The quiet period [`ServerFilterRefresh::local_first`] uses.
+pub const DEFAULT_LOCAL_FIRST_FILTER_DEBOUNCE_MS: u64 = 350;
+
+impl ServerFilterRefresh {
+    /// Local-first with the default quiet period.
+    pub const fn local_first() -> Self {
+        Self::LocalFirstDebounced {
+            debounce_ms: DEFAULT_LOCAL_FIRST_FILTER_DEBOUNCE_MS,
+        }
+    }
+
+    const fn debounce_ms(self) -> Option<u64> {
+        match self {
+            Self::Immediate => None,
+            Self::LocalFirstDebounced { debounce_ms } => Some(debounce_ms),
+        }
+    }
+}
+
+/// The debounce policy behind [`ServerFilterRefresh::LocalFirstDebounced`],
+/// kept pure so the coalescing rule is testable without a browser timer.
+///
+/// Every change records a new deadline `debounce_ms` after `now_ms`; the
+/// timer scheduled for an earlier deadline is stale and [`Self::fire`] refuses
+/// it. Only the timer carrying the CURRENT deadline fires, and it fires once.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ServerFilterRefreshDebounce {
+    debounce_ms: u64,
+    deadline_ms: Option<u64>,
+}
+
+impl ServerFilterRefreshDebounce {
+    /// A policy with the given quiet period.
+    pub const fn new(debounce_ms: u64) -> Self {
+        Self {
+            debounce_ms,
+            deadline_ms: None,
+        }
+    }
+
+    /// Records a change at `now_ms` and returns the deadline the caller
+    /// should schedule a timer for. A later change moves the deadline, which
+    /// makes every earlier timer stale.
+    pub fn record(&mut self, now_ms: u64) -> u64 {
+        let deadline = now_ms.saturating_add(self.debounce_ms);
+        self.deadline_ms = Some(deadline);
+        deadline
+    }
+
+    /// The timer scheduled for `deadline_ms` fired. Returns `true` exactly
+    /// when that deadline is still the current one, consuming it; a stale
+    /// timer (superseded by a later change) and a second fire for the same
+    /// deadline both answer `false`.
+    pub fn fire(&mut self, deadline_ms: u64) -> bool {
+        if self.deadline_ms == Some(deadline_ms) {
+            self.deadline_ms = None;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Whether a recorded change is still waiting for its timer.
+    pub const fn is_pending(&self) -> bool {
+        self.deadline_ms.is_some()
+    }
+
+    /// Consumes whatever is pending, for a caller whose timer could not be
+    /// scheduled and must propose at once.
+    pub fn take_pending(&mut self) -> bool {
+        self.deadline_ms.take().is_some()
+    }
+}
+
+/// The filter-row and search values the person has entered ahead of the
+/// server under [`ServerFilterRefresh::LocalFirstDebounced`].
+///
+/// `filters` / `search` are the whole draft, which the catch-up check
+/// compares with the server's accepted query. `narrow_filters` /
+/// `narrow_search` are only what the server has NOT applied yet (Office
+/// op-f6q0m): a filter the server already applied may carry a server word
+/// that is not a cell value (a status bucket, an include option, an id),
+/// and re-applying it locally matched no row, so the loaded rows blinked
+/// out on every keystroke until the server answered. The rows on screen
+/// already satisfy every applied filter, so only the new ones narrow them.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct LocalFilterDraft {
+    filters: ColumnFilters,
+    search: String,
+    narrow_filters: ColumnFilters,
+    narrow_search: String,
+}
+
+impl LocalFilterDraft {
+    /// The draft `filters` / `search` ahead of the server's accepted
+    /// `applied_filters` / `applied_search`.
+    fn ahead_of(
+        filters: ColumnFilters,
+        search: String,
+        applied_filters: &ColumnFilters,
+        applied_search: &str,
+    ) -> Self {
+        let narrow_filters = filters
+            .iter()
+            .filter(|(column, wanted)| applied_filters.get(*column) != Some(*wanted))
+            .map(|(column, wanted)| (*column, wanted.clone()))
+            .collect();
+        let narrow_search = if search == applied_search {
+            String::new()
+        } else {
+            search.clone()
+        };
+        Self {
+            filters,
+            search,
+            narrow_filters,
+            narrow_search,
+        }
+    }
+}
+
+/// Narrows `rows` by `draft` with the local table's own matching: exact
+/// selects by equality, text boxes by case-insensitive substring, the search
+/// box across `searched` columns. Used only while a draft is ahead of the
+/// server; the server's answer replaces it unnarrowed.
+fn narrow_rows_locally(
+    rows: Vec<TableRow>,
+    columns: &[Column],
+    draft: &LocalFilterDraft,
+) -> Vec<TableRow> {
+    let search_lower = draft.narrow_search.trim().to_lowercase();
+    rows.into_iter()
+        .filter(|row| {
+            row_matches_column_filters(row, columns, &draft.narrow_filters)
+                && row_matches_search(row, columns, &search_lower)
+        })
+        .collect()
+}
+
+/// Wall-clock milliseconds for the debounce policy. `js_sys::Date` exists
+/// only in a browser, so only a mounted local-first table reads this;
+/// native tests drive [`ServerFilterRefreshDebounce`] with explicit times.
+fn browser_now_ms() -> u64 {
+    js_sys::Date::now().max(0.0) as u64
 }
 
 /// Declares which query-shape transitions a server endpoint accepts.
@@ -1019,6 +1247,13 @@ impl ServerQuerySnapshot {
         }
     }
 
+    fn with_silent(self, silent: bool) -> Self {
+        match self {
+            Self::Offset(query) => Self::Offset(query.with_silent(silent)),
+            Self::Cursor(query) => Self::Cursor(query.with_silent(silent)),
+        }
+    }
+
     fn reset(self) -> Self {
         match self {
             Self::Offset(query) => Self::Offset(query.reset()),
@@ -1385,6 +1620,14 @@ pub fn ServerDataTable(
     #[prop(optional)]
     query_capabilities: ServerQueryCapabilities,
 
+    /// How a filter-row or search change reaches the server. The default
+    /// proposes immediately (the historical behavior); see
+    /// [`ServerFilterRefresh::LocalFirstDebounced`] for the local-first,
+    /// silently debounced alternative. Navigation, sort, page size and reset
+    /// are unaffected either way.
+    #[prop(optional)]
+    filter_refresh: ServerFilterRefresh,
+
     /// Loading state
     #[prop(optional, into)]
     loading: Signal<bool>,
@@ -1721,6 +1964,26 @@ pub fn ServerDataTable(
             None,
         ),
     };
+    // ── Local-first filter refresh (Office op-qjm7b) ──
+    //
+    // Under `ServerFilterRefresh::LocalFirstDebounced` the filter row and the
+    // search box write a DRAFT ahead of the server; `rows` below is the
+    // supplied slice narrowed by that draft with the local table's own
+    // predicate, and it is the one signal every consumer (body, selection
+    // indices, footer count, displayed-slice export) reads, so a highlighted
+    // index can never point at a row the body did not render. The draft is
+    // `None` in `Immediate` mode and whenever no change is ahead of the
+    // server, in which case this is exactly the supplied slice.
+    let supplied_rows = rows;
+    let local_filter_draft: RwSignal<Option<LocalFilterDraft>> = RwSignal::new(None);
+    let rows: Signal<Vec<TableRow>> = Signal::derive(move || {
+        let rows = supplied_rows.get();
+        match local_filter_draft.get() {
+            None => rows,
+            Some(draft) => columns.with(|columns| narrow_rows_locally(rows, columns, &draft)),
+        }
+    });
+
     // Column-width overrides from dragging a header divider, keyed by
     // column id. Shared between the header (writer) and body (reader) so
     // resized columns stay aligned. With column tools, accepted preferences
@@ -2029,6 +2292,7 @@ pub fn ServerDataTable(
                 search: String::new(),
                 sort: None,
                 filters: ColumnFilters::new(),
+                silent: false,
             },
         ),
         ServerTablePagination::Cursor(cursor) => {
@@ -2155,8 +2419,120 @@ pub fn ServerDataTable(
         effective
     });
 
+    // The one debounced, silent proposal `LocalFirstDebounced` schedules
+    // after the last filter-row or search change. The proposal is built from
+    // the drafts at FIRE time, so three edits in the quiet period cost one
+    // read of the settled values; the pure `ServerFilterRefreshDebounce`
+    // refuses a timer whose deadline a later edit superseded.
+    let local_first_debounce_ms = filter_refresh.debounce_ms();
+    let filter_refresh_debounce = StoredValue::new(ServerFilterRefreshDebounce::new(
+        local_first_debounce_ms.unwrap_or_default(),
+    ));
+    let (filter_refresh_handle, set_filter_refresh_handle) = signal(Option::<TimeoutHandle>::None);
+    let propose_local_first_silently = move || {
+        let filters = column_filters.get_untracked();
+        let search = search_draft.get_untracked();
+        let accepted = query_state.get_untracked();
+        let mut next = accepted.clone();
+        if *accepted.filters() != filters {
+            next = next.with_filters(filters);
+        }
+        if accepted.search() != search {
+            next = next.with_search(search);
+        }
+        if next == accepted {
+            // The drafts settled back on supplied truth: nothing to ask the
+            // server, and nothing is ahead of it any more.
+            if local_filter_draft.get_untracked().is_some() {
+                local_filter_draft.set(None);
+            }
+            return;
+        }
+        query_state.propose(next.with_silent(true), on_query_change);
+    };
+    let schedule_local_first_refresh = move |debounce_ms: u64| {
+        // The draft narrows the loaded rows at once - by what the server
+        // has not applied yet (op-f6q0m) ...
+        let accepted = query_state.get_untracked();
+        local_filter_draft.set(Some(LocalFilterDraft::ahead_of(
+            column_filters.get_untracked(),
+            search_draft.get_untracked(),
+            accepted.filters(),
+            accepted.search(),
+        )));
+        // ... and the server hears about it once the edits settle.
+        if let Some(handle) = filter_refresh_handle.get_untracked() {
+            handle.clear();
+        }
+        let deadline = filter_refresh_debounce
+            .try_update_value(|debounce| debounce.record(browser_now_ms()))
+            .unwrap_or_default();
+        match set_timeout_with_handle(
+            move || {
+                // Late-firing guard, as the search debounce above: a timer
+                // that outlives the table is a no-op, never a disposed-signal
+                // panic.
+                if column_filters.try_get_untracked().is_none() {
+                    return;
+                }
+                let due = filter_refresh_debounce
+                    .try_update_value(|debounce| debounce.fire(deadline))
+                    .unwrap_or(false);
+                if due {
+                    propose_local_first_silently();
+                }
+                let _ = set_filter_refresh_handle.try_set(None);
+            },
+            std::time::Duration::from_millis(debounce_ms),
+        ) {
+            Ok(handle) => set_filter_refresh_handle.set(Some(handle)),
+            Err(_) => {
+                // No `window` to schedule on: propose at once rather than
+                // silently dropping the edit.
+                let pending = filter_refresh_debounce
+                    .try_update_value(ServerFilterRefreshDebounce::take_pending)
+                    .unwrap_or(false);
+                if pending {
+                    propose_local_first_silently();
+                }
+                set_filter_refresh_handle.set(None);
+            }
+        }
+    };
+    on_cleanup(move || {
+        if let Some(handle) = filter_refresh_handle.try_get_untracked().flatten() {
+            handle.clear();
+        }
+    });
+
     Effect::new(move |_| {
         let supplied = query_state.get();
+        if let (Some(debounce_ms), Some(draft)) =
+            (local_first_debounce_ms, local_filter_draft.get_untracked())
+        {
+            // Local-first (op-qjm7b): a draft is ahead of the server. Never
+            // re-project the controls over it -- an answer landing mid-word
+            // would erase what the person typed after asking. Three cases:
+            if *supplied.filters() == draft.filters && supplied.search() == draft.search {
+                // The server caught up with the draft: the controls already
+                // show this truth, and the rows are the server's again.
+                local_filter_draft.set(None);
+            } else if filter_refresh_debounce
+                .try_with_value(ServerFilterRefreshDebounce::is_pending)
+                .unwrap_or(false)
+            {
+                // A later edit is waiting; its timer proposes the settled
+                // draft over this newly accepted truth (sort, page, office).
+            } else {
+                // The draft's read was superseded or declined by whatever
+                // this acceptance was (a sort click, a navigation, a
+                // dataset reload landing first): ask again, once, silently,
+                // over the truth that landed -- a draft with no read behind
+                // it would otherwise narrow one slice for ever.
+                schedule_local_first_refresh(debounce_ms);
+            }
+            return;
+        }
         if search_draft.get_untracked() != supplied.search() {
             search_draft.set(supplied.search().to_owned());
         }
@@ -2177,6 +2553,21 @@ pub fn ServerDataTable(
         };
         let value = input.value();
         search_draft.set(value.clone());
+
+        if let Some(debounce_ms) = local_first_debounce_ms {
+            // Local-first (op-qjm7b): the draft narrows the loaded rows on
+            // this keystroke and the server hears ONE silent proposal once
+            // typing settles, through the same scheduler as the filter row;
+            // the box keeps what was typed instead of snapping back to
+            // supplied truth. The legacy `on_search` callback is not fired in
+            // this mode -- the typed query is the contract.
+            if let Some(handle) = debounce_handle.get_untracked() {
+                handle.clear();
+                set_debounce_handle.set(None);
+            }
+            schedule_local_first_refresh(debounce_ms);
+            return;
+        }
 
         // Clear previous timer, if any.
         if let Some(handle) = debounce_handle.get_untracked() {
@@ -2262,6 +2653,17 @@ pub fn ServerDataTable(
 
     let filter_change = Callback::new(move |filters: ColumnFilters| {
         if !filtering_enabled {
+            return;
+        }
+        if let Some(debounce_ms) = local_first_debounce_ms {
+            // Local-first: `column_filters` already holds the person's value
+            // (the filter row wrote it before calling here) and stays there as
+            // the draft; the rows narrow now and the server hears one silent
+            // proposal once the edits settle.
+            if column_filters.get_untracked() != filters {
+                column_filters.set(filters);
+            }
+            schedule_local_first_refresh(debounce_ms);
             return;
         }
         query_state.propose(
@@ -2881,6 +3283,7 @@ pub fn ServerDataTable(
             data-server-page-size-intent=move || if size_preference.get().is_auto() && auto_available.get() { "auto" } else { "fixed" }
             data-server-accepted-page-size=move || query_state.get().page_size().max(1).to_string()
             data-server-query-search=if query_capabilities.search_enabled() { "enabled" } else { "disabled" }
+            data-server-filter-refresh=match filter_refresh { ServerFilterRefresh::Immediate => "immediate", ServerFilterRefresh::LocalFirstDebounced { .. } => "local-first" }
             data-server-query-page-size=if query_capabilities.page_size_enabled() { "enabled" } else { "disabled" }
             data-server-query-sorting=if query_capabilities.sorting_enabled() { "enabled" } else { "disabled" }
             data-server-query-filtering=if query_capabilities.filtering_enabled() { "enabled" } else { "disabled" }
@@ -3755,6 +4158,197 @@ mod tests {
     use leptos::reactive::owner::Owner;
     use std::sync::{Arc, Mutex};
 
+    // ── Local-first filter refresh (Office op-qjm7b) ──
+
+    /// Three edits inside one quiet period are one proposal; an edit after
+    /// the period has passed is a second. Deliberate break: make `fire`
+    /// return `true` for any recorded deadline, and the first assertion's
+    /// stale timers fire too.
+    #[test]
+    fn local_first_debounce_coalesces_a_burst_into_one_proposal() {
+        let mut debounce = ServerFilterRefreshDebounce::new(350);
+        let first = debounce.record(0);
+        let second = debounce.record(50);
+        let third = debounce.record(100);
+        assert_eq!((first, second, third), (350, 400, 450));
+        // The two timers a later keystroke superseded are refused ...
+        assert!(!debounce.fire(first), "superseded timer must not propose");
+        assert!(!debounce.fire(second), "superseded timer must not propose");
+        // ... the settled one proposes, exactly once.
+        assert!(debounce.fire(third));
+        assert!(!debounce.fire(third), "a deadline fires once");
+        // A change after the quiet period is a second proposal.
+        let fourth = debounce.record(500);
+        assert_eq!(fourth, 850);
+        assert!(
+            debounce.is_pending(),
+            "a recorded change waits for its timer"
+        );
+        assert!(debounce.fire(fourth));
+        assert!(!debounce.is_pending());
+        assert!(!debounce.take_pending(), "nothing pending after a fire");
+    }
+
+    #[test]
+    fn local_first_debounce_fallback_takes_the_pending_change_once() {
+        let mut debounce = ServerFilterRefreshDebounce::new(350);
+        assert!(!debounce.take_pending(), "nothing recorded yet");
+        let deadline = debounce.record(10);
+        assert!(debounce.take_pending());
+        assert!(!debounce.fire(deadline), "taken pending is gone");
+    }
+
+    /// `silent` rides only the proposal the local-first mode builds; every
+    /// navigation, sort, page-size and reset builder clears it, so a stored
+    /// silent query cannot make the next page turn silent.
+    #[test]
+    fn silent_marks_filter_driven_proposals_and_never_navigation() {
+        let mut filters = ColumnFilters::new();
+        filters.insert("client", "ave".to_owned());
+        let silent = ServerCursorQuery::first_slice(50)
+            .with_filters(filters.clone())
+            .with_silent(true);
+        assert!(silent.silent);
+        assert_eq!(silent.request, ServerCursorRequest::First);
+        assert!(
+            !silent
+                .clone()
+                .with_request(ServerCursorRequest::Next(ServerCursorToken::new("n")))
+                .silent,
+            "cursor navigation is a visible reload"
+        );
+        let sorted = silent.clone().with_sort(Some(("client", SortOrder::Asc)));
+        assert!(!sorted.silent);
+        assert!(!silent.clone().with_page_size(25).silent);
+        assert!(!silent.clone().reset().silent);
+        assert!(!ServerCursorQuery::first_slice(50).silent);
+
+        let offset = TableQuery::first_page(25)
+            .with_filters(filters)
+            .with_silent(true);
+        assert!(offset.silent);
+        assert!(
+            !offset.clone().with_page(2).silent,
+            "offset navigation is a visible reload"
+        );
+        assert!(!offset.clone().with_search("x").silent);
+        assert!(!TableQuery::first_page(25).silent);
+
+        let snapshot = ServerQuerySnapshot::Cursor(ServerCursorQuery::first_slice(50));
+        assert!(matches!(
+            snapshot.with_silent(true),
+            ServerQuerySnapshot::Cursor(query) if query.silent
+        ));
+    }
+
+    #[test]
+    fn filter_refresh_defaults_to_the_immediate_historical_behavior() {
+        assert_eq!(
+            ServerFilterRefresh::default(),
+            ServerFilterRefresh::Immediate
+        );
+        assert_eq!(ServerFilterRefresh::Immediate.debounce_ms(), None);
+        assert_eq!(
+            ServerFilterRefresh::local_first().debounce_ms(),
+            Some(DEFAULT_LOCAL_FIRST_FILTER_DEBOUNCE_MS)
+        );
+    }
+
+    /// The interim narrowing is the local table's own matching: exact
+    /// selects by equality, text boxes by case-insensitive substring, the
+    /// search box across `searched` columns.
+    #[test]
+    fn local_narrowing_uses_the_local_tables_predicates() {
+        let columns = vec![
+            Column::new("client", "Client")
+                .filterable_text()
+                .searched(false),
+            Column::new("status", "Status").filterable().searched(false),
+            Column::new("subject", "Subject"),
+        ];
+        let row = |client: &str, status: &str, subject: &str| {
+            let mut row = TableRow::new();
+            row.insert("client", client.to_owned());
+            row.insert("status", status.to_owned());
+            row.insert("subject", subject.to_owned());
+            row
+        };
+        let rows = vec![
+            row("Avery Jones", "Open", "Retainer"),
+            row("Blake Smith", "Open", "Invoice"),
+            row("avery lee", "Closed", "Retainer"),
+        ];
+        let mut filters = ColumnFilters::new();
+        filters.insert("client", "AVERY".to_owned());
+        let draft =
+            LocalFilterDraft::ahead_of(filters.clone(), String::new(), &ColumnFilters::new(), "");
+        let narrowed = narrow_rows_locally(rows.clone(), &columns, &draft);
+        assert_eq!(narrowed.len(), 2, "contains is case-insensitive");
+
+        filters.insert("status", "Open".to_owned());
+        let draft =
+            LocalFilterDraft::ahead_of(filters, "retain".to_owned(), &ColumnFilters::new(), "");
+        let narrowed = narrow_rows_locally(rows, &columns, &draft);
+        assert_eq!(
+            narrowed.len(),
+            1,
+            "exact status AND searched subject narrow further"
+        );
+        assert_eq!(
+            narrowed[0].get("client").map(String::as_str),
+            Some("Avery Jones")
+        );
+    }
+
+    /// Office op-f6q0m: a filter the server has ALREADY applied does not
+    /// narrow again locally. Its wanted value can be a server word (a status
+    /// bucket) that no cell carries, so re-applying it emptied the table on
+    /// every keystroke. Only the new text narrows; the applied search is not
+    /// re-run either. BREAK: narrow by `draft.filters` again; the bucket
+    /// matches no row and the first assertion fails.
+    #[test]
+    fn local_narrowing_skips_filters_the_server_already_applied() {
+        let columns = vec![
+            Column::new("client", "Client")
+                .filterable_text()
+                .searched(true),
+            Column::new("status", "Status").filterable().searched(false),
+        ];
+        let row = |client: &str, status: &str| {
+            let mut row = TableRow::new();
+            row.insert("client", client.to_owned());
+            row.insert("status", status.to_owned());
+            row
+        };
+        // The server answered `status = AwaitingReply`; the cells carry the
+        // provider's own status words.
+        let rows = vec![
+            row("Avery Jones", "Needs Reply"),
+            row("Blake Smith", "Open - Warm"),
+            row("avery lee", "Ready To Be Called"),
+        ];
+        let mut applied = ColumnFilters::new();
+        applied.insert("status", "AwaitingReply".to_owned());
+        let mut draft_filters = applied.clone();
+        draft_filters.insert("client", "avery".to_owned());
+        let draft = LocalFilterDraft::ahead_of(draft_filters, String::new(), &applied, "");
+        let narrowed = narrow_rows_locally(rows.clone(), &columns, &draft);
+        assert_eq!(
+            narrowed.len(),
+            2,
+            "only the new client text narrows the loaded rows"
+        );
+        // The whole draft is kept for the catch-up comparison.
+        assert_eq!(
+            draft.filters.get("status").map(String::as_str),
+            Some("AwaitingReply")
+        );
+
+        // An unchanged search is not re-run locally either.
+        let draft = LocalFilterDraft::ahead_of(applied.clone(), "x".to_owned(), &applied, "x");
+        assert_eq!(narrow_rows_locally(rows, &columns, &draft).len(), 3);
+    }
+
     fn identified_row(id: &str) -> TableRow {
         HashMap::from([("id", id.to_owned())])
     }
@@ -4145,6 +4739,7 @@ mod tests {
             search: String::new(),
             sort: None,
             filters: ColumnFilters::new(),
+            silent: false,
         };
         let Some(next_size) = viewport_fit_page_size_proposal(
             436.0,
@@ -4176,6 +4771,7 @@ mod tests {
             search: String::new(),
             sort: None,
             filters: ColumnFilters::new(),
+            silent: false,
         };
         let Some(next_size) = viewport_fit_page_size_proposal(
             436.0,
@@ -4501,6 +5097,7 @@ mod tests {
             search: String::new(),
             sort: None,
             filters: ColumnFilters::new(),
+            silent: false,
         };
 
         assert_eq!(
@@ -4583,6 +5180,7 @@ mod tests {
                 search: "accepted".to_owned(),
                 sort: None,
                 filters: ColumnFilters::new(),
+                silent: false,
             });
             let proposals = Arc::new(Mutex::new(Vec::<TableQuery>::new()));
             let observed = Arc::clone(&proposals);
@@ -4643,6 +5241,7 @@ mod tests {
             search: String::new(),
             sort: None,
             filters: ColumnFilters::new(),
+            silent: false,
         };
 
         assert_eq!(query.clone().with_search("matter").page, 1);

@@ -248,6 +248,9 @@ pub fn ServerEntityTable(
                 on_page_change: Some(no_op_compatibility_page_change),
                 pagination: None,
                 query_capabilities,
+                // Office op-qjm7b: the EntityTable wrapper keeps the historical
+                // immediate proposal; only hosts that opt in go local-first.
+                filter_refresh: super::server_component::ServerFilterRefresh::Immediate,
                 loading,
                 retain_rows_while_loading: Signal::stored(true),
                 classes: DataTableClasses::default(),

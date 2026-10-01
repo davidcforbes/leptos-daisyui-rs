@@ -4026,6 +4026,58 @@ fn the_toolbar_actions_slot_sits_beside_the_column_chooser() {
     );
 }
 
+/// The optional `toolbar_trailing` slot (Office op-fxfxo) renders LAST in the
+/// toolbar's trailing cluster -- after the caller's actions, the column
+/// chooser and the reset actions -- so a caller's control sits in the action
+/// row's far-right corner, and nothing the table owns renders after it in
+/// that row. Absent, it emits no wrapper, so every
+/// existing table is unchanged. Deliberate break: move the
+/// `toolbar_trailing` block above the column chooser's dropdown (or above the
+/// reset actions), or render it unconditionally, and this fails.
+#[test]
+fn the_toolbar_trailing_slot_renders_last_in_the_trailing_cluster() {
+    let source = include_str!("component.rs").replace("\r\n", "\n");
+    assert!(
+        source.contains("toolbar_trailing: Option<Children>,"),
+        "the slot is an optional typed prop"
+    );
+    assert!(
+        source.contains("{toolbar_trailing.map(|render_trailing| view! {"),
+        "an absent slot renders nothing"
+    );
+    let toolbar_start = source
+        .find(r#"data-entity-table-toolbar="true""#)
+        .expect("the toolbar marker");
+    let toolbar = &source[toolbar_start..];
+    let cluster_start = toolbar
+        .find(r#"data-entity-quick-actions-trailing="true""#)
+        .expect("the trailing cluster");
+    let cluster = &toolbar[cluster_start..];
+    let chooser = cluster
+        .find(r#"data-entity-column-chooser="true""#)
+        .expect("the column chooser renders in the trailing cluster");
+    let resets = cluster
+        .find(r#"attr:data-entity-reset-columns="true""#)
+        .expect("the reset actions render in the trailing cluster");
+    let slot = cluster
+        .find(r#"data-entity-toolbar-trailing="true""#)
+        .expect("the trailing slot renders in the trailing cluster");
+    assert!(
+        chooser < slot && resets < slot,
+        "the gear and the resets first, then the caller's corner: \
+         chooser {chooser}, resets {resets}, slot {slot}"
+    );
+    let rest = &cluster[slot..];
+    let toolbar_end = rest
+        .find(r#"data-entity-sort-summary="true""#)
+        .expect("the toolbar closes before the sort summary");
+    assert!(
+        !rest[..toolbar_end].contains("<Button")
+            && !rest[..toolbar_end].contains("class=\"dropdown"),
+        "nothing the table owns renders after the trailing slot in the row"
+    );
+}
+
 #[test]
 fn filter_mode_survives_clone_and_shows_in_debug() {
     let column =

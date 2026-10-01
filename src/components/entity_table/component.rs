@@ -1003,6 +1003,15 @@ pub fn EntityTable<T>(
     /// wrapping; the caller owns all behavior.
     #[prop(optional)]
     toolbar_actions: Option<Children>,
+    /// Optional caller-rendered controls placed LAST in the toolbar's trailing
+    /// cluster -- after [`Self::toolbar_actions`], the framework column chooser
+    /// and the optional reset actions -- so they sit in the action row's
+    /// far-right corner (Office op-fxfxo: a table section's Assign Selected).
+    /// A separate slot rather than a reordering, for the same reason as
+    /// [`Self::toolbar_leading`]: every table already shipping keeps its
+    /// toolbar exactly as it is. `None` renders no wrapper at all.
+    #[prop(optional)]
+    toolbar_trailing: Option<Children>,
     /// Optional controlled saved-filters bar (`ldui` opinionated filter row):
     /// a left-justified **Save Filter** button plus one badge per consumer-owned
     /// saved filter set, rendered inside the toolbar. Every save/delete/apply
@@ -2702,6 +2711,14 @@ where
                     >
                         {move || texts.with(|texts| texts.reset_columns.clone())}
                     </Button>
+                })}
+                // Office op-fxfxo: the caller's trailing controls close the
+                // cluster -- the row's far-right corner, after the gear and the
+                // reset actions.
+                {toolbar_trailing.map(|render_trailing| view! {
+                    <div class="contents" data-entity-toolbar-trailing="true">
+                        {render_trailing()}
+                    </div>
                 })}
                 </div>
             </div>

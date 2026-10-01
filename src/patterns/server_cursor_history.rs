@@ -239,6 +239,9 @@ impl ServerCursorHistory {
             search: self.search.clone(),
             sort: self.sort,
             filters: self.filters.clone(),
+            // The accepted slice is what the server answered; nothing about
+            // it is a pending silent refresh.
+            silent: false,
         }
     }
 

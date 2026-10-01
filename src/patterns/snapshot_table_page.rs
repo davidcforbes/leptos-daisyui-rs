@@ -193,6 +193,8 @@ pub struct SnapshotEntityTableConfig<R: 'static> {
     page_reset_key: Option<Signal<String>>,
     viewport_fit: Option<EntityTableViewportFit>,
     toolbar_actions: Option<ChildrenFn>,
+    toolbar_leading: Option<ChildrenFn>,
+    toolbar_trailing: Option<ChildrenFn>,
     on_display_projection: Option<Callback<EntityTableDisplayProjection>>,
     projection_action_columns: EntityTableActionColumnPolicy,
     column_chooser_trigger: Signal<EntityColumnChooserTrigger>,
@@ -221,6 +223,8 @@ impl<R: 'static> SnapshotEntityTableConfig<R> {
             page_reset_key: None,
             viewport_fit: None,
             toolbar_actions: None,
+            toolbar_leading: None,
+            toolbar_trailing: None,
             on_display_projection: None,
             projection_action_columns: EntityTableActionColumnPolicy::default(),
             column_chooser_trigger: Signal::stored(EntityColumnChooserTrigger::default()),
@@ -306,6 +310,36 @@ impl<R: 'static> SnapshotEntityTableConfig<R> {
         render: impl Fn() -> AnyView + Send + Sync + 'static,
     ) -> Self {
         self.toolbar_actions = Some(Arc::new(render));
+        self
+    }
+
+    /// Toolbar content rendered at the LEADING edge of the table toolbar, for
+    /// an action on the current SELECTION (Office op-ps299).
+    ///
+    /// [`Self::with_toolbar_actions`] renders in the trailing cluster, which
+    /// is right for a utility acting on the VIEW (Export, Refresh) and wrong
+    /// for one acting on the ticked rows: that is the most consequential
+    /// control in the row and reads first. Mirrors
+    /// `EntityTable::toolbar_leading`, which is where this ends up. Like
+    /// every passthrough here, the renderer receives no rows, dataset,
+    /// revision, or generation from this config.
+    pub fn with_toolbar_leading(
+        mut self,
+        render: impl Fn() -> AnyView + Send + Sync + 'static,
+    ) -> Self {
+        self.toolbar_leading = Some(Arc::new(render));
+        self
+    }
+
+    /// Toolbar content rendered LAST in the table toolbar's trailing cluster,
+    /// after the caller's actions, the framework column chooser and any reset
+    /// actions -- the action row's far-right corner (Office op-fxfxo).
+    /// Mirrors `EntityTable::toolbar_trailing`, which is where this ends up.
+    pub fn with_toolbar_trailing(
+        mut self,
+        render: impl Fn() -> AnyView + Send + Sync + 'static,
+    ) -> Self {
+        self.toolbar_trailing = Some(Arc::new(render));
         self
     }
 
@@ -858,11 +892,19 @@ where
                     {entity_table.with_value(|config| {
                         // `ChildrenFn` is reusable (`Arc<dyn Fn() -> AnyView>`)
                         // because this whole block can re-run whenever `Show`
-                        // remounts the table, but `EntityTable::toolbar_actions`
+                        // remounts the table, but each `EntityTable` toolbar slot
                         // wants one single-shot `Children` per instance -- so a
-                        // fresh box is built from the stored renderer every time.
+                        // fresh box is built from each stored renderer every time.
+                        let toolbar_leading = config
+                            .toolbar_leading
+                            .clone()
+                            .map(|render| Box::new(move || render()) as Children);
                         let toolbar_actions = config
                             .toolbar_actions
+                            .clone()
+                            .map(|render| Box::new(move || render()) as Children);
+                        let toolbar_trailing = config
+                            .toolbar_trailing
                             .clone()
                             .map(|render| Box::new(move || render()) as Children);
                         view! {
@@ -884,7 +926,9 @@ where
                                 empty_row_range=config.empty_row_range
                                 page_size_control_id=format!("{contract_id}-rows-per-page")
                                 show_reset_actions=config.show_reset_actions
+                                nostrip:toolbar_leading=toolbar_leading
                                 nostrip:toolbar_actions=toolbar_actions
+                                nostrip:toolbar_trailing=toolbar_trailing
                                 nostrip:on_display_projection=config.on_display_projection
                                 projection_action_columns=config.projection_action_columns
                                 column_chooser_trigger=config.column_chooser_trigger
@@ -943,6 +987,8 @@ mod tests {
         assert!(table.page_reset_key.is_none());
         assert!(table.viewport_fit.is_none());
         assert!(table.toolbar_actions.is_none());
+        assert!(table.toolbar_leading.is_none());
+        assert!(table.toolbar_trailing.is_none());
         assert!(table.on_display_projection.is_none());
         assert_eq!(
             table.projection_action_columns,
@@ -1113,6 +1159,8 @@ mod tests {
             .with_page_reset_key(key)
             .with_viewport_fit(EntityTableViewportFit::fill_parent().with_min_rows(4))
             .with_toolbar_actions(|| view! { <button>"Export"</button> }.into_any())
+            .with_toolbar_leading(|| view! { <button>"Assign"</button> }.into_any())
+            .with_toolbar_trailing(|| view! { <button>"Assign Selected"</button> }.into_any())
             .on_display_projection(Callback::new(move |_: EntityTableDisplayProjection| {
                 projection_calls.update(|count| *count += 1);
             }))
@@ -1129,6 +1177,25 @@ mod tests {
         let viewport_fit = table.viewport_fit.expect("viewport_fit was set");
         assert_eq!(viewport_fit.min_rows(), 4);
         assert!(table.toolbar_actions.is_some());
+        // Office op-ps299 / op-fxfxo: the leading and trailing passthroughs
+        // land on their own fields and reach the table's own slots.
+        // Deliberate break: drop either `nostrip:` forward and the source
+        // assertion fails.
+        assert!(table.toolbar_leading.is_some());
+        assert!(table.toolbar_trailing.is_some());
+        let production = include_str!("snapshot_table_page.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .expect("the production half");
+        for forward in [
+            concat!("nostrip:toolbar_", "leading=toolbar_leading"),
+            concat!("nostrip:toolbar_", "trailing=toolbar_trailing"),
+        ] {
+            assert!(
+                production.contains(forward),
+                "the toolbar slot is forwarded to the EntityTable: {forward}"
+            );
+        }
         let on_display_projection = table
             .on_display_projection
             .expect("on_display_projection was set");

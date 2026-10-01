@@ -64,6 +64,7 @@ erase the compile-time distinction the snapshot component exists to provide.
 | `empty_row_range` | Optional reactive localized template for a page with no displayed rows; supports `{start}`, `{end}`, and `{total}` and falls back to `EntityTableTexts::row_range` with zero values. |
 | `page_size_control_id` | Optional stable caller-owned DOM ID for the rows-per-page select, which renders in the footer row (see below). |
 | `toolbar_actions` | Optional caller-rendered table utilities placed before the framework-owned column chooser, in the top toolbar. |
+| `toolbar_trailing` | Optional caller-rendered controls placed LAST in the top toolbar's trailing cluster, after `toolbar_actions`, the column chooser and the reset actions (the action row's far-right corner); `None` renders no wrapper. |
 | `on_page_size_resolved` | Optional callback receiving the resolved `EntityPageSize` whenever it changes, including after a `viewport_fit` resize. |
 | `on_display_projection` | Optional callback receiving one atomic read-only snapshot of ordered visible columns plus sorted/filtered rows and current-page bounds. |
 | `projection_action_columns` | `Exclude` by default; set `EntityTableActionColumnPolicy::Include` only when action-copy intentionally belongs in the projection. |
@@ -1916,6 +1917,12 @@ renders **after** it, ahead of the framework's `+`. There was formerly no way
 to place anything to the left of **Save Filter**, and the fix is a second slot
 rather than a reordering, because reordering `toolbar_actions` would move
 Export and `+ New` on every table already shipping.
+
+A third slot, `toolbar_trailing` (Office op-fxfxo), renders LAST in the
+trailing cluster: after `toolbar_actions`, the column chooser and the reset
+actions, in the action row's far-right corner (`data-entity-toolbar-trailing`).
+It is a slot for the same reason; `None` renders no wrapper, so every existing
+table keeps its toolbar.
 
 ## Row-action presets: icon actions only in rows (ldui-bmqj)
 

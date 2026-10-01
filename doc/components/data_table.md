@@ -588,6 +588,7 @@ limits for this implementation.
 | `on_page_change` | `Option<Callback<i64>>` | Legacy numbered-page callback |
 | `pagination` | `Option<ServerTablePagination>` | Explicit offset or cursor strategy; mutually exclusive with legacy offset props |
 | `query_capabilities` | `ServerQueryCapabilities` | Endpoint-supported search, page-size, sorting, and filtering controls; defaults to all enabled |
+| `filter_refresh` | `ServerFilterRefresh` | How a filter-row or search change reaches the server: `Immediate` (default) proposes at once; `LocalFirstDebounced` narrows the loaded rows locally and proposes once, silently, after a quiet period (see below) |
 | `on_search` | `Option<Callback<String>>` | Debounced search box; the parent performs the query |
 | `on_query_change` | `Option<Callback<TableQuery>>` | Reports the complete server query after paging, search, sort, or filter changes |
 | `query_ownership` | `Option<ServerTableQueryOwnership>` | Preferred explicit controlled/uncontrolled ownership; controlled mode supplies displayed-query truth and receives full replacements |
@@ -681,6 +682,26 @@ with `data-server-query-capability-config-error`.
 Runtime audits can read `data-server-query-search`,
 `data-server-query-page-size`, `data-server-query-sorting`, and
 `data-server-query-filtering` (`enabled` or `disabled`) from the table root.
+
+### Local-first filter refresh
+
+`filter_refresh` decides how a filter-row or search change reaches the
+server (Office op-qjm7b). `ServerFilterRefresh::Immediate`, the default,
+proposes each settled change at once, as before.
+`ServerFilterRefresh::LocalFirstDebounced { debounce_ms }` (or
+`ServerFilterRefresh::local_first()`, 350 ms) narrows the rows already loaded
+at once with the local table's own predicates, then proposes ONE query after
+the quiet period with `TableQuery::silent` / `ServerCursorQuery::silent` set,
+so the host may keep its rows and its ready state instead of announcing a
+reload on every keystroke. The local narrowing applies only the filters and
+search the server has not applied yet (Office op-f6q0m): an applied filter can
+carry a server value that no cell holds, such as a status bucket, and
+re-applying it locally would empty the table. The narrowing ends when the host
+accepts a query. Navigation, sort, page-size and reset proposals are never
+silent, and every query builder resets the flag (`with_silent` applies last).
+The mode is meant for controlled query ownership (cursor pagination or
+`ServerTableQueryOwnership::Controlled`). The root carries
+`data-server-filter-refresh` (`immediate` or `local-first`).
 
 ### Truthful server filter vocabularies
 
