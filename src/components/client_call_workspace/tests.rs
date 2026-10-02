@@ -772,3 +772,149 @@ fn default_wrap_up_incomplete_text() {
         "Choose an outcome (and callback instructions for a callback) to save."
     );
 }
+
+// Office op-flpq1: LAUNCHER MODE. When the host's own phone does the dialling
+// (a separate softphone window), the panel offers the saved numbers and Place
+// call only - no typed number, no number pad, no contact write.
+fn launcher() -> ClientCallWorkspaceState {
+    let mut state = ready();
+    state.destination_entry = ClientCallDestinationEntry::SavedOnly;
+    state
+}
+
+#[test]
+fn launcher_mode_renders_saved_numbers_and_the_launch_button_only() {
+    let mut state = launcher();
+    state.number_update = Some(ClientCallNumberUpdate {
+        field_id: "phone".into(),
+        targets: vec![target("phone"), target("mobile")],
+        ..Default::default()
+    });
+    state.wrap_up = None;
+    assert_eq!(
+        ClientCallControl::inventory(&state),
+        vec![
+            ClientCallControl::Dismiss,
+            ClientCallControl::SavedNumber("phone".into()),
+            ClientCallControl::Dial,
+        ]
+    );
+    // Every control it does render is still named, and each disabled one explained.
+    assert_named_and_explained(&state, "launcher");
+    let mut not_ready = state.clone();
+    not_ready.call.context_id = String::new();
+    assert_named_and_explained(&not_ready, "launcher-not-ready");
+    // Typed mode keeps the original panel for the same state.
+    state.destination_entry = ClientCallDestinationEntry::Typed;
+    let typed = ClientCallControl::inventory(&state);
+    for present in [
+        ClientCallControl::Destination,
+        ClientCallControl::Keypad,
+        ClientCallControl::Backspace,
+        ClientCallControl::NumberTarget,
+        ClientCallControl::SaveNumber,
+    ] {
+        assert!(typed.contains(&present), "{present:?}");
+    }
+}
+
+#[test]
+fn launcher_mode_refuses_typed_numbers_and_contact_writes() {
+    let mut state = launcher();
+    state.number_update = Some(ClientCallNumberUpdate {
+        field_id: "phone".into(),
+        targets: vec![target("phone"), target("mobile")],
+        ..Default::default()
+    });
+    assert!(!state.can_dispatch(&ClientCallAction::EditDestination("+1415".into())));
+    assert!(!state.can_dispatch(&ClientCallAction::ChooseNumberTarget("mobile".into())));
+    assert!(!state.can_dispatch(&ClientCallAction::SaveNumber {
+        field_id: "phone".into(),
+        number: state.destination.clone(),
+    }));
+    assert!(state.can_dispatch(&ClientCallAction::ChooseSavedNumber("phone".into())));
+    assert!(state.can_dispatch(&ClientCallAction::Dial {
+        number: state.destination.clone(),
+    }));
+    // A destination that is not one of the saved numbers is never dialled.
+    state.destination = "+14155550199".into();
+    assert!(!state.can_dispatch(&ClientCallAction::Dial {
+        number: state.destination.clone(),
+    }));
+    // The same draft is a valid typed number in the original panel.
+    state.destination_entry = ClientCallDestinationEntry::Typed;
+    assert!(state.can_dispatch(&ClientCallAction::Dial {
+        number: state.destination.clone(),
+    }));
+}
+
+#[test]
+fn launcher_mode_marks_the_chosen_number_and_asks_for_a_saved_one() {
+    let texts = ClientCallWorkspaceTexts::default();
+    let mut state = launcher();
+    assert!(state.saved_only());
+    assert!(state.is_selected_number("phone"));
+    assert!(!state.is_selected_number("other"));
+    state.destination = String::new();
+    assert!(!state.is_selected_number("phone"));
+    assert_eq!(
+        texts.disabled_reason(&ClientCallControl::Dial, &state),
+        Some(texts.needs_saved_number.clone())
+    );
+    state.destination_entry = ClientCallDestinationEntry::Typed;
+    assert!(!state.saved_only());
+    assert_eq!(
+        texts.disabled_reason(&ClientCallControl::Dial, &state),
+        Some(texts.needs_number.clone())
+    );
+}
+
+#[test]
+fn history_is_display_only_and_labels_each_direction() {
+    let texts = ClientCallWorkspaceTexts::default();
+    assert_eq!(texts.direction(ClientCallDirection::Outbound), "Outgoing");
+    assert_eq!(texts.direction(ClientCallDirection::Inbound), "Incoming");
+    assert_eq!(ClientCallDirection::Inbound.as_str(), "inbound");
+    assert_eq!(ClientCallDestinationEntry::SavedOnly.as_str(), "saved-only");
+    let state = ClientCallWorkspaceState::default();
+    assert_eq!(state.history, None, "absent history hides the section");
+    assert_eq!(
+        state.destination_entry,
+        ClientCallDestinationEntry::Typed,
+        "the original panel stays the default"
+    );
+    let mut with_history = ready();
+    with_history.history = Some(ClientCallHistory {
+        entries: vec![ClientCallHistoryEntry {
+            id: "4525415226".into(),
+            when: "Oct 2, 7:11 AM".into(),
+            who: "Chris".into(),
+            direction: ClientCallDirection::Outbound,
+            outcome: "No answer".into(),
+            talk_seconds: Some(0),
+        }],
+        ..Default::default()
+    });
+    assert_eq!(
+        ClientCallControl::inventory(&with_history),
+        ClientCallControl::inventory(&ready()),
+        "history adds no control"
+    );
+}
+
+#[test]
+fn default_launcher_and_history_texts() {
+    let texts = ClientCallWorkspaceTexts::default();
+    assert_eq!(texts.needs_saved_number, "Choose a saved number first.");
+    assert_eq!(
+        texts.no_saved_numbers,
+        "No saved numbers. Add a number to the contact before calling."
+    );
+    assert_eq!(
+        texts.destination_saved_hint,
+        "Choose one of the client's saved numbers."
+    );
+    assert_eq!(texts.history, "Recent calls");
+    assert_eq!(texts.history_empty, "No calls yet.");
+    assert_eq!(texts.history_talk_time, "Talk time");
+}

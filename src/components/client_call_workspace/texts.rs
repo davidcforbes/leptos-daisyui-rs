@@ -1,4 +1,7 @@
-use super::{ClientCallAttempt, ClientCallOutcome, ClientCallRefusal, ClientCallRegenerationState};
+use super::{
+    ClientCallAttempt, ClientCallDirection, ClientCallOutcome, ClientCallRefusal,
+    ClientCallRegenerationState,
+};
 use crate::components::SoftphoneTexts;
 
 /// Reactive user-facing copy. Outcome labels follow the fixed vocabulary order.
@@ -16,6 +19,10 @@ pub struct ClientCallWorkspaceTexts {
     pub saved_numbers: String,
     /// Empty saved-number list explanation.
     pub no_numbers: String,
+    /// Launcher-mode explanation under the destination heading.
+    pub destination_saved_hint: String,
+    /// Launcher-mode empty saved-number list explanation (nothing can be typed).
+    pub no_saved_numbers: String,
     /// Number pad disclosure label.
     pub keypad: String,
     /// Delete final character action.
@@ -90,12 +97,24 @@ pub struct ClientCallWorkspaceTexts {
     pub destination_full: String,
     /// Why Place call / Backspace are disabled with no usable number.
     pub needs_number: String,
+    /// Launcher-mode reason Place call is disabled before a saved number is chosen.
+    pub needs_saved_number: String,
     /// Why the contact write is disabled with no chosen field or no changed number.
     pub save_number_hint: String,
     /// Why the call-record fields are read-only once the record is saved.
     pub wrap_up_locked: String,
     /// Why Save call record is disabled on an incomplete draft after the call finished.
     pub wrap_up_incomplete: String,
+    /// Call-history heading.
+    pub history: String,
+    /// No past calls with this client.
+    pub history_empty: String,
+    /// The host is still reading the history.
+    pub history_loading: String,
+    /// Direction labels in Outbound, Inbound order.
+    pub history_directions: [String; 2],
+    /// Talk-time label on a history entry.
+    pub history_talk_time: String,
     /// Existing live-console labels and statuses.
     pub softphone: SoftphoneTexts,
 }
@@ -106,6 +125,8 @@ impl Default for ClientCallWorkspaceTexts {
             label: "Client call workspace".into(), close: "Close".into(), destination: "Number to call".into(),
             destination_hint: "Choose a saved number or enter a destination. Changes here do not update the contact.".into(),
             saved_numbers: "Saved numbers".into(), no_numbers: "No saved numbers. Enter a destination to continue.".into(),
+            destination_saved_hint: "Choose one of the client's saved numbers.".into(),
+            no_saved_numbers: "No saved numbers. Add a number to the contact before calling.".into(),
             keypad: "Number pad".into(), backspace: "Backspace".into(), save_number: "Save contact number".into(),
             saving: "Saving…".into(), call: "Place call".into(),
             number_target: "Contact field to update".into(),
@@ -131,9 +152,14 @@ impl Default for ClientCallWorkspaceTexts {
             destination_locked: "The number cannot change while a call is in progress or a record is saving.".into(),
             destination_full: "The number has reached its 64-character limit.".into(),
             needs_number: "Enter or choose a number first.".into(),
+            needs_saved_number: "Choose a saved number first.".into(),
             save_number_hint: "Choose a contact field and enter a different number to save it.".into(),
             wrap_up_locked: "This call record is saved and can no longer be edited.".into(),
             wrap_up_incomplete: "Choose an outcome (and callback instructions for a callback) to save.".into(),
+            history: "Recent calls".into(), history_empty: "No calls yet.".into(),
+            history_loading: "Loading calls…".into(),
+            history_directions: ["Outgoing", "Incoming"].map(String::from),
+            history_talk_time: "Talk time".into(),
             softphone: SoftphoneTexts::default(),
         }
     }
@@ -173,6 +199,15 @@ impl ClientCallWorkspaceTexts {
             ClientCallRegenerationState::Failed => 4,
         };
         self.regeneration_labels[index].clone()
+    }
+
+    /// Localized direction of a history entry.
+    pub fn direction(&self, direction: ClientCallDirection) -> String {
+        let index = match direction {
+            ClientCallDirection::Outbound => 0,
+            ClientCallDirection::Inbound => 1,
+        };
+        self.history_directions[index].clone()
     }
 
     /// Localized label for an explicit outcome.

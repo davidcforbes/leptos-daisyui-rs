@@ -118,17 +118,12 @@ fn Destination(
             .unwrap_or_default()
     });
     let keypad = RwSignal::new(false);
-    let controls = keypad_id.clone();
     let phones = Memo::new(move |_| state.get().call.client.phones);
+    // Launcher mode (Office op-flpq1): saved numbers and Place call only.
+    let saved_only = move || state.with(ClientCallWorkspaceState::saved_only);
     // Reason-line ids, minted once from the workspace id (Office op-stjm9).
     let saved_base = base_id.clone();
-    let destination_reason = reason_id(&base_id, "destination");
-    // Own line only: the pad's line carries the context reason too (ldui-eray).
-    let destination_described = destination_reason.clone();
-    let pad_described = described_by(&base_id, "pad");
-    let pad_reason = reason_id(&base_id, "pad");
-    let backspace_described = described_by(&base_id, "backspace");
-    let backspace_reason = reason_id(&base_id, "backspace");
+    let pad_base = base_id.clone();
     let save_number_described = described_by(&base_id, "save-number");
     let save_number_reason = reason_id(&base_id, "save-number");
     let dial_described = described_by(&base_id, "dial");
@@ -143,7 +138,9 @@ fn Destination(
         context
     });
     view! {
-        <div class="flex min-w-0 flex-col gap-4" data-call-destination="true">
+        <div class="flex min-w-0 flex-col gap-4" data-call-destination="true"
+            data-call-destination-entry=move || state.get().destination_entry.as_str()>
+            <Show when=move || !saved_only()>
             <Field label=Signal::derive(move || Some(texts.get().destination))
                 help_text={
                     let reason = control_reason(state, texts, ClientCallControl::Destination);
@@ -162,10 +159,15 @@ fn Destination(
                         if let Some(input) = input_ref.get_untracked() { input.set_value(&state.get_untracked().destination); }
                     }) />
             </Field>
+            </Show>
             <div class="flex flex-col gap-2">
-                <p class="text-sm font-medium">{move || texts.get().saved_numbers}</p>
+                // Launcher mode heads the saved numbers as the number to call.
+                <p class="text-sm font-medium">{move || if saved_only() { texts.get().destination } else { texts.get().saved_numbers }}</p>
+                <Show when=move || saved_only()>
+                    <p class="text-sm text-base-content/75" data-call-destination-hint="true">{move || texts.get().destination_saved_hint}</p>
+                </Show>
                 <Show when=move || state.get().call.client.phones.is_empty()>
-                    <p class="text-sm text-base-content/75">{move || texts.get().no_numbers}</p>
+                    <p class="text-sm text-base-content/75">{move || if saved_only() { texts.get().no_saved_numbers } else { texts.get().no_numbers }}</p>
                 </Show>
                 <div class="flex flex-col gap-2">
                     {move || phones.get().into_iter().enumerate().map(|(index, phone)| {
@@ -179,9 +181,16 @@ fn Destination(
                         let disabled = control_disabled(state, control);
                         let described = described_by(&saved_base, &key);
                         let own_id = reason_id(&saved_base, &key);
+                        // Launcher mode shows which saved number Place call will dial.
+                        let selected_id = phone.id.clone();
+                        let selected = Signal::derive(move || state.with(|s| s.saved_only() && s.is_selected_number(&selected_id)));
                         view! {
                             <div class="flex min-w-0 flex-col gap-2">
                             <Button class="h-auto min-h-10 w-full justify-start whitespace-normal py-2 text-left" attr:data-call-saved-number=phone.id
+                                color=Signal::derive(move || if selected.get() { ButtonColor::Primary } else { ButtonColor::Default })
+                                style=Signal::derive(move || if selected.get() { ButtonStyle::Outline } else { ButtonStyle::Default })
+                                attr:data-call-selected=move || selected.get().then_some("true")
+                                attr:aria-pressed=move || saved_only().then(|| selected.get().to_string())
                                 attr:aria-label=name
                                 attr:aria-describedby=described
                                 disabled=disabled
@@ -194,43 +203,12 @@ fn Destination(
                         }
                     }).collect_view()}
                 </div>
-                <Button style=ButtonStyle::Ghost attr:data-call-action="keypad" attr:aria-controls=controls
-                    attr:aria-expanded=move || keypad.get().to_string()
-                    attr:aria-label=control_name(state, texts, ClientCallControl::Keypad)
-                    attr:aria-describedby=destination_described
-                    disabled=control_disabled(state, ClientCallControl::Keypad)
-                    on_click=Callback::new(move |_| if state.with_untracked(ClientCallWorkspaceState::can_edit_destination) { keypad.update(|value| *value = !*value); })>
-                    {move || texts.get().keypad}
-                </Button>
-                {reason_line(destination_reason, "destination", local_reason(state, texts, ClientCallControl::Keypad))}
-                <Show when=move || keypad.get()>
-                    <div id=keypad_id.clone() class="grid grid-cols-3 gap-2" data-call-pad="true">
-                        {ClientCallControl::DIGITS.into_iter().map(|digit| view! {
-                            <Button attr:data-call-digit=digit.to_string()
-                                attr:aria-label=control_name(state, texts, ClientCallControl::Digit(digit))
-                                attr:aria-describedby=pad_described.clone()
-                                disabled=control_disabled(state, ClientCallControl::Digit(digit))
-                                on_click=Callback::new(move |_| {
-                                    let mut value = state.get_untracked().destination;
-                                    value.push(digit);
-                                    emit(state, on_command, ClientCallAction::EditDestination(value));
-                                })>{digit.to_string()}</Button>
-                        }).collect_view()}
-                        <Button class="col-span-3" attr:data-call-action="backspace"
-                            attr:aria-label=control_name(state, texts, ClientCallControl::Backspace)
-                            attr:aria-describedby=backspace_described.clone()
-                            disabled=control_disabled(state, ClientCallControl::Backspace)
-                            on_click=Callback::new(move |_| {
-                                let mut value = state.get_untracked().destination;
-                                value.pop();
-                                emit(state, on_command, ClientCallAction::EditDestination(value));
-                            })>{move || texts.get().backspace}</Button>
-                        {reason_line(pad_reason.clone(), "pad", local_reason(state, texts, ClientCallControl::Digit('0')))}
-                        {reason_line(backspace_reason.clone(), "backspace", local_reason(state, texts, ClientCallControl::Backspace))}
-                    </div>
+                <Show when=move || !saved_only()>
+                    <Keypad state=state texts=texts on_command=on_command keypad=keypad
+                        keypad_id=keypad_id.clone() base_id=pad_base.clone() />
                 </Show>
             </div>
-            <Show when=move || state.get().number_update.is_some()>
+            <Show when=move || state.get().number_update.is_some() && !saved_only()>
                 <div class="flex min-w-0 flex-col gap-2 rounded-box border border-base-300 p-3" data-call-number-update="true">
                     <Show when=move || !targets.get().is_empty()>
                         <Field label=Signal::derive(move || Some(texts.get().number_target)) label_class="whitespace-normal"
@@ -275,13 +253,128 @@ fn Destination(
             <Button color=ButtonColor::Primary class="w-full" attr:data-call-action="dial"
                 attr:aria-label=control_name(state, texts, ClientCallControl::Dial)
                 attr:aria-describedby=dial_described
-                disabled=control_disabled(state, ClientCallControl::Dial)
+                // Office op-1yxvd: the FULL reason (texts.disabled_reason, None only
+                // while the control is enabled) IS the disabled reason, so the
+                // framework renders it and can never stamp
+                // data-disabled-without-reason on the dial button; the visible hook
+                // paragraph and the shared context line keep their ids and text.
+                disabled_reason=Signal::derive(move || {
+                    control_reason(state, texts, ClientCallControl::Dial)
+                        .get()
+                        .unwrap_or_default()
+                })
                 on_click=Callback::new(move |_| emit(state, on_command, ClientCallAction::Dial { number: state.get_untracked().destination }))>
                 {move || texts.get().call}
             </Button>
             // Leads with the host's dial_blocked_reason, the line's former content.
             {reason_line(dial_reason, "dial", local_reason(state, texts, ClientCallControl::Dial))}
         </div>
+    }
+}
+
+/// The number-pad disclosure, its keys and their reason lines. Typed mode
+/// only: launcher mode renders none of it (Office op-flpq1).
+#[component]
+fn Keypad(
+    state: Signal<ClientCallWorkspaceState>,
+    texts: Signal<ClientCallWorkspaceTexts>,
+    on_command: Callback<ClientCallCommand>,
+    keypad: RwSignal<bool>,
+    keypad_id: String,
+    base_id: String,
+) -> impl IntoView {
+    let controls = keypad_id.clone();
+    let destination_reason = reason_id(&base_id, "destination");
+    // Own line only: the pad's line carries the context reason too (ldui-eray).
+    let destination_described = destination_reason.clone();
+    let pad_described = described_by(&base_id, "pad");
+    let pad_reason = reason_id(&base_id, "pad");
+    let backspace_described = described_by(&base_id, "backspace");
+    let backspace_reason = reason_id(&base_id, "backspace");
+    view! {
+                <Button style=ButtonStyle::Ghost attr:data-call-action="keypad" attr:aria-controls=controls
+                    attr:aria-expanded=move || keypad.get().to_string()
+                    attr:aria-label=control_name(state, texts, ClientCallControl::Keypad)
+                    attr:aria-describedby=destination_described
+                    disabled=control_disabled(state, ClientCallControl::Keypad)
+                    on_click=Callback::new(move |_| if state.with_untracked(ClientCallWorkspaceState::can_edit_destination) { keypad.update(|value| *value = !*value); })>
+                    {move || texts.get().keypad}
+                </Button>
+                {reason_line(destination_reason, "destination", local_reason(state, texts, ClientCallControl::Keypad))}
+                <Show when=move || keypad.get()>
+                    <div id=keypad_id.clone() class="grid grid-cols-3 gap-2" data-call-pad="true">
+                        {ClientCallControl::DIGITS.into_iter().map(|digit| view! {
+                            <Button attr:data-call-digit=digit.to_string()
+                                attr:aria-label=control_name(state, texts, ClientCallControl::Digit(digit))
+                                attr:aria-describedby=pad_described.clone()
+                                disabled=control_disabled(state, ClientCallControl::Digit(digit))
+                                on_click=Callback::new(move |_| {
+                                    let mut value = state.get_untracked().destination;
+                                    value.push(digit);
+                                    emit(state, on_command, ClientCallAction::EditDestination(value));
+                                })>{digit.to_string()}</Button>
+                        }).collect_view()}
+                        <Button class="col-span-3" attr:data-call-action="backspace"
+                            attr:aria-label=control_name(state, texts, ClientCallControl::Backspace)
+                            attr:aria-describedby=backspace_described.clone()
+                            disabled=control_disabled(state, ClientCallControl::Backspace)
+                            on_click=Callback::new(move |_| {
+                                let mut value = state.get_untracked().destination;
+                                value.pop();
+                                emit(state, on_command, ClientCallAction::EditDestination(value));
+                            })>{move || texts.get().backspace}</Button>
+                        {reason_line(pad_reason.clone(), "pad", local_reason(state, texts, ClientCallControl::Digit('0')))}
+                        {reason_line(backspace_reason.clone(), "backspace", local_reason(state, texts, ClientCallControl::Backspace))}
+                    </div>
+                </Show>
+    }
+}
+
+/// The host's call history with this client, newest first. Display only: it
+/// adds no control, and every line is host text (Office op-flpq1).
+#[component]
+fn History(
+    state: Signal<ClientCallWorkspaceState>,
+    texts: Signal<ClientCallWorkspaceTexts>,
+    base_id: String,
+) -> impl IntoView {
+    let history = Signal::derive(move || state.get().history.unwrap_or_default());
+    let entries = Memo::new(move |_| history.get().entries);
+    let heading_id = format!("{base_id}-history-heading");
+    view! {
+        <section class="flex min-w-0 flex-col gap-2 [overflow-wrap:anywhere]" aria-labelledby=heading_id.clone() data-call-history="true">
+            <h3 id=heading_id class="text-sm font-semibold">{move || texts.get().history}</h3>
+            <Show when=move || history.get().loading>
+                <p role="status" class="text-sm text-base-content/75" data-call-history-loading="true">{move || texts.get().history_loading}</p>
+            </Show>
+            {move || history.get().note.map(|note| view! { <p class="text-sm text-base-content/75" data-call-history-note="true">{note}</p> })}
+            <Show when=move || history.with(|h| !h.loading && h.entries.is_empty())>
+                <p class="text-sm text-base-content/75" data-call-history-empty="true">{move || texts.get().history_empty}</p>
+            </Show>
+            <Show when=move || !entries.get().is_empty()>
+                <ol class="flex min-w-0 flex-col gap-2" data-call-history-list="true">
+                    {move || entries.get().into_iter().map(|entry| {
+                        let copy = texts.get();
+                        // Absent talk time is unknown, never zero.
+                        let talk = entry
+                            .talk_seconds
+                            .map(crate::components::format_softphone_duration)
+                            .unwrap_or_else(|| copy.provider_talk_unknown.clone());
+                        view! {
+                            <li class="flex min-w-0 flex-col gap-1 rounded-box bg-base-200 p-2" data-call-history-entry=entry.id
+                                data-call-direction=entry.direction.as_str()>
+                                <div class="flex min-w-0 flex-wrap items-baseline justify-between gap-2">
+                                    <span class="text-sm font-medium">{entry.when}</span>
+                                    <span class="badge badge-ghost badge-sm">{copy.direction(entry.direction)}</span>
+                                </div>
+                                <p class="text-sm">{format!("{} · {}", entry.who, entry.outcome)}</p>
+                                <p class="text-xs text-base-content/75">{format!("{}: {}", copy.history_talk_time, talk)}</p>
+                            </li>
+                        }
+                    }).collect_view()}
+                </ol>
+            </Show>
+        </section>
     }
 }
 
@@ -456,6 +549,13 @@ fn WrapUp(
 ///
 /// Use inline or inside the host's Modal. The host owns authorization, operation
 /// correlation, telephony, dismissal and draft persistence. See the component guide.
+///
+/// **Launcher mode** (`state.destination_entry = ClientCallDestinationEntry::SavedOnly`,
+/// Office op-flpq1): when the host's own phone does the dialling (a separate softphone
+/// window, a desk phone), the panel offers the client's saved numbers and Place call
+/// only -- no typed number, no number pad and no contact write -- and marks the chosen
+/// number (`aria-pressed`). `state.history` (optional) lists past calls with the client,
+/// newest first; every line is host text and the section adds no control.
 #[component]
 pub fn ClientCallWorkspace(
     /// Unique region ID; also prefixes the nested call console and number pad IDs.
@@ -475,6 +575,10 @@ pub fn ClientCallWorkspace(
     /// Additional classes on the bounded region.
     #[prop(optional)]
     class: &'static str,
+    /// Short facts about the client shown as badges under the subtitle
+    /// (Office op-fg6s2: "Closed matter"). Empty renders no row.
+    #[prop(optional, into)]
+    badges: Signal<Vec<String>>,
 ) -> impl IntoView {
     let keypad_id = format!("{id}-destination-pad");
     let console_id = format!("{id}-session");
@@ -483,6 +587,7 @@ pub fn ClientCallWorkspace(
     let destination_base = base_id.clone();
     let guidance_base = base_id.clone();
     let wrap_base = base_id.clone();
+    let history_base = base_id.clone();
     let context_reason = context_reason_id(&base_id);
     let dismiss_described = described_by(&base_id, "dismiss");
     let dismiss_reason = reason_id(&base_id, "dismiss");
@@ -510,6 +615,13 @@ pub fn ClientCallWorkspace(
                     <p class="text-sm font-medium text-base-content/75">{move || texts.get().label}</p>
                     <h2 class="text-xl font-semibold">{move || state.get().call.client.name}</h2>
                     <p class="text-sm text-base-content/75">{move || state.get().call.client.subtitle}</p>
+                    <Show when=move || badges.with(|badges| !badges.is_empty())>
+                        <div class="flex flex-wrap gap-2" data-call-client-badges="true">
+                            {move || badges.get().into_iter().map(|badge| view! {
+                                <span class="badge badge-outline badge-sm">{badge}</span>
+                            }).collect_view()}
+                        </div>
+                    </Show>
                 </div>
                 <div class="flex shrink-0 flex-col items-end gap-2">
                     <Button style=ButtonStyle::Ghost class="shrink-0" attr:data-call-action="dismiss"
@@ -530,16 +642,24 @@ pub fn ClientCallWorkspace(
             </p>
             <div class="grid min-w-0 gap-6 p-5 @3xl:grid-cols-2">
                 <div class="flex min-w-0 flex-col gap-4">
+                    // Office op-fg6s2: before any attempt, with nothing to explain,
+                    // "Ready to call" and a talk time that cannot exist yet say
+                    // nothing; the block appears once there is something to say.
+                    <Show when=move || state.with(|s| s.attempt != ClientCallAttempt::Ready || !s.status_detail.trim().is_empty())>
                     <div role="status" class="flex flex-col gap-2 rounded-box bg-base-200 p-4 [overflow-wrap:anywhere]" data-call-status="true">
                         <p class="text-base font-semibold">{move || { let current = state.get(); if current.attempt == ClientCallAttempt::Managed { texts.get().softphone.phase(current.call.phase) } else { texts.get().attempt(current.attempt) } }}</p>
                         <Show when=move || state.get().attempt == ClientCallAttempt::AgentRinging><p class="text-sm">{move || texts.get().bridge_hint}</p></Show>
                         <Show when=move || state.get().attempt == ClientCallAttempt::Uncertain><p class="text-sm">{move || texts.get().uncertain_hint}</p></Show>
                         <p class="text-sm">{move || state.get().status_detail}</p>
+                        // The talk-time caveat travels with a call that happened, never
+                        // with one that has not (op-fg6s2).
+                        <Show when=move || state.with(|s| s.provider_talk_seconds.is_some() || matches!(s.attempt, ClientCallAttempt::Managed | ClientCallAttempt::Finished))>
                         <p class="text-sm" data-call-talk-time="true">{move || {
                             let copy = texts.get();
                             let time = state.get().provider_talk_seconds.map(crate::components::format_softphone_duration).unwrap_or(copy.provider_talk_unknown);
                             format!("{}: {}", copy.provider_talk_time, time)
                         }}</p>
+                        </Show>
                         <Show when=move || state.with(|s| s.finished() && matches!(s.call.timer, crate::components::SoftphoneTimer::Stopped { .. }))>
                             <p class="text-sm" data-call-final-duration="true">{move || state.with(|s| {
                                 let seconds = s.call.timer.elapsed_at(now.get()).unwrap_or(0);
@@ -547,11 +667,15 @@ pub fn ClientCallWorkspace(
                             })}</p>
                         </Show>
                     </div>
+                    </Show>
                     <Show when=move || state.with(|s| s.attempt == ClientCallAttempt::Managed && s.call.phase.is_live())
                         fallback=move || view! { <Destination state=state texts=texts on_command=on_command keypad_id=keypad_id.clone() base_id=destination_base.clone() /> }>
                         <Softphone id=console_id.clone() state=Signal::derive(move || state.get().call)
                             texts=Signal::derive(move || texts.get().softphone) on_command=session_command
                             now_ms=now class="max-w-none" />
+                    </Show>
+                    <Show when=move || state.get().history.is_some()>
+                        <History state=state texts=texts base_id=history_base.clone() />
                     </Show>
                 </div>
                 <div class="flex min-w-0 flex-col gap-6">

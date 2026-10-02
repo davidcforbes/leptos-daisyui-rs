@@ -73,6 +73,45 @@ fn office_state(context: &str) -> ClientCallWorkspaceState {
     state
 }
 
+/// Office op-flpq1: the host's own softphone window dials, so the panel is a
+/// launcher - saved numbers and Place call only - and shows the call history.
+fn launcher_state(context: &str) -> ClientCallWorkspaceState {
+    let mut state = office_state(context);
+    state.destination_entry = ClientCallDestinationEntry::SavedOnly;
+    state.number_update = None;
+    state.history = Some(ClientCallHistory {
+        entries: vec![
+            ClientCallHistoryEntry {
+                id: "call-3".into(),
+                when: "Today, 10:42 AM".into(),
+                who: "Jordan".into(),
+                direction: ClientCallDirection::Outbound,
+                outcome: "Answered".into(),
+                talk_seconds: Some(312),
+            },
+            ClientCallHistoryEntry {
+                id: "call-2".into(),
+                when: "Yesterday, 4:05 PM".into(),
+                who: "Elena".into(),
+                direction: ClientCallDirection::Inbound,
+                outcome: "Answered".into(),
+                talk_seconds: Some(95),
+            },
+            ClientCallHistoryEntry {
+                id: "call-1".into(),
+                when: "Sep 29, 9:15 AM".into(),
+                who: "Jordan".into(),
+                direction: ClientCallDirection::Outbound,
+                outcome: "No answer".into(),
+                talk_seconds: None,
+            },
+        ],
+        loading: false,
+        note: Some("Calls placed directly in the phone system appear here too.".into()),
+    });
+    state
+}
+
 #[component]
 pub fn ClientCallWorkspaceDemo() -> impl IntoView {
     let state = RwSignal::new(initial_state("elena/attempt-1"));
@@ -361,6 +400,12 @@ pub fn ClientCallWorkspaceDemo() -> impl IntoView {
                             request.set(None); regeneration_request.set(None); count.set(0); writes.set(0);
                             last.set(String::new()); closed.set(false); reject_edits.set(false); office.set(true);
                         })>"Office adoption scenario"</Button>
+                        <Button attr:id="call-workspace-launcher" on_click=Callback::new(move |_| {
+                            generation.update(|n| *n += 1);
+                            state.set(launcher_state(&format!("elena/launcher-{}", generation.get_untracked())));
+                            request.set(None); regeneration_request.set(None); count.set(0); writes.set(0);
+                            last.set(String::new()); closed.set(false); reject_edits.set(false); office.set(true);
+                        })>"Launcher scenario"</Button>
                     </div>
                     <Show when=move || office.get()>
                         <div class="flex flex-wrap gap-2">

@@ -53,13 +53,17 @@ impl ClientCallControl {
 
     /// The controls rendered for `state`, in document order (the destination
     /// block is replaced by the live console during a managed live call; the
-    /// number pad is listed whether or not it is expanded).
+    /// number pad is listed whether or not it is expanded; launcher mode
+    /// renders only the saved numbers and the launch button there).
     pub fn inventory(state: &ClientCallWorkspaceState) -> Vec<ClientCallControl> {
         let mut controls = vec![ClientCallControl::Dismiss];
         let console_live =
             state.attempt == super::ClientCallAttempt::Managed && state.call.phase.is_live();
         if !console_live {
-            controls.push(ClientCallControl::Destination);
+            let typed = !state.saved_only();
+            if typed {
+                controls.push(ClientCallControl::Destination);
+            }
             controls.extend(
                 state
                     .call
@@ -68,14 +72,16 @@ impl ClientCallControl {
                     .iter()
                     .map(|phone| ClientCallControl::SavedNumber(phone.id.clone())),
             );
-            controls.push(ClientCallControl::Keypad);
-            controls.extend(Self::DIGITS.into_iter().map(ClientCallControl::Digit));
-            controls.push(ClientCallControl::Backspace);
-            if let Some(update) = &state.number_update {
-                if !update.targets.is_empty() {
-                    controls.push(ClientCallControl::NumberTarget);
+            if typed {
+                controls.push(ClientCallControl::Keypad);
+                controls.extend(Self::DIGITS.into_iter().map(ClientCallControl::Digit));
+                controls.push(ClientCallControl::Backspace);
+                if let Some(update) = &state.number_update {
+                    if !update.targets.is_empty() {
+                        controls.push(ClientCallControl::NumberTarget);
+                    }
+                    controls.push(ClientCallControl::SaveNumber);
                 }
-                controls.push(ClientCallControl::SaveNumber);
             }
             controls.push(ClientCallControl::Dial);
         }
@@ -306,10 +312,16 @@ impl ClientCallWorkspaceTexts {
                 }
             }
         };
+        // Launcher mode asks for a saved number; a typed panel for any number.
+        let needs = if state.saved_only() {
+            &self.needs_saved_number
+        } else {
+            &self.needs_number
+        };
         reason
             .and_then(|r| some_text(&r))
             .or_else(|| {
-                some_text(&self.needs_number).filter(|_| {
+                some_text(needs).filter(|_| {
                     matches!(
                         control,
                         ClientCallControl::Dial | ClientCallControl::SavedNumber(_)

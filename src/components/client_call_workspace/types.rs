@@ -328,6 +328,79 @@ impl ClientCallWrapUp {
     }
 }
 
+/// How the operator chooses the number to call.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ClientCallDestinationEntry {
+    /// A typed destination, a number pad and the saved numbers (the original panel).
+    #[default]
+    Typed,
+    /// Launcher mode: the client's saved numbers only. No typed number, no
+    /// number pad and no contact write, because the host's own phone (a
+    /// separate softphone window, a desk phone) does the dialling and the
+    /// panel only launches it (Office op-flpq1).
+    SavedOnly,
+}
+
+impl ClientCallDestinationEntry {
+    /// Stable DOM and diagnostic identifier.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Typed => "typed",
+            Self::SavedOnly => "saved-only",
+        }
+    }
+}
+
+/// Which way a past call went.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ClientCallDirection {
+    /// Someone at the firm called the client.
+    #[default]
+    Outbound,
+    /// The client called in.
+    Inbound,
+}
+
+impl ClientCallDirection {
+    /// Stable DOM and diagnostic identifier.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Outbound => "outbound",
+            Self::Inbound => "inbound",
+        }
+    }
+}
+
+/// One past call with this client. Every text field is host-formatted plain text.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ClientCallHistoryEntry {
+    /// Stable identity supplied by the host (for example the provider's call id).
+    pub id: String,
+    /// When the call happened, already formatted for the viewer's time zone.
+    pub when: String,
+    /// Who handled the call.
+    pub who: String,
+    /// Which way the call went.
+    pub direction: ClientCallDirection,
+    /// The host's localized outcome ("Answered", "No answer", ...).
+    pub outcome: String,
+    /// Provider-confirmed talk seconds; absent is unknown, zero is confirmed zero.
+    pub talk_seconds: Option<u64>,
+}
+
+/// Host-owned call history, newest first. Absence on the state hides the section.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ClientCallHistory {
+    /// Past calls, newest first; the host bounds the list.
+    pub entries: Vec<ClientCallHistoryEntry>,
+    /// The host is still reading the history.
+    pub loading: bool,
+    /// A caveat or a read failure, shown as plain text under the heading.
+    pub note: Option<String>,
+}
+
 /// Atomic projection of a single client and attempt. The host owns all fields.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClientCallWorkspaceState {
@@ -351,6 +424,11 @@ pub struct ClientCallWorkspaceState {
     pub guidance: Option<ClientCallGuidance>,
     /// Optional work-record draft; absent hides the entire wrap-up section.
     pub wrap_up: Option<ClientCallWrapUp>,
+    /// How the operator chooses the number; [`ClientCallDestinationEntry::SavedOnly`]
+    /// renders the launcher panel (no typed number, no pad, no contact write).
+    pub destination_entry: ClientCallDestinationEntry,
+    /// Optional call history with this client; absent hides the section.
+    pub history: Option<ClientCallHistory>,
 }
 
 impl Default for ClientCallWorkspaceState {
@@ -366,6 +444,8 @@ impl Default for ClientCallWorkspaceState {
             number_update: None,
             guidance: None,
             wrap_up: Some(ClientCallWrapUp::default()),
+            destination_entry: ClientCallDestinationEntry::Typed,
+            history: None,
         }
     }
 }
@@ -420,6 +500,25 @@ pub struct ClientCallCommand {
 }
 
 impl ClientCallWorkspaceState {
+    /// Launcher mode: the saved numbers only, with no typed destination, pad
+    /// or contact write.
+    pub fn saved_only(&self) -> bool {
+        self.destination_entry == ClientCallDestinationEntry::SavedOnly
+    }
+
+    /// Whether the saved number `id` is the current destination, i.e. the
+    /// number the launcher will call.
+    pub fn is_selected_number(&self, id: &str) -> bool {
+        let destination = self.destination.trim();
+        !destination.is_empty()
+            && self
+                .call
+                .client
+                .phones
+                .iter()
+                .any(|phone| phone.id == id && phone.number.trim() == destination)
+    }
+
     /// Whether destination editing is currently safe.
     pub fn can_edit_destination(&self) -> bool {
         !self.call.context_id.trim().is_empty()
@@ -466,8 +565,9 @@ impl ClientCallWorkspaceState {
             .is_some_and(|wrap| !wrap.pending && !wrap.saved);
         match action {
             ClientCallAction::Dismiss => true,
+            // Launcher mode offers no typed number, so a typed edit is never adopted.
             ClientCallAction::EditDestination(value) => {
-                self.can_edit_destination() && value.chars().count() <= 64
+                !self.saved_only() && self.can_edit_destination() && value.chars().count() <= 64
             }
             ClientCallAction::ChooseSavedNumber(id) => {
                 self.can_edit_destination()
@@ -488,7 +588,8 @@ impl ClientCallWorkspaceState {
                     })
             }
             ClientCallAction::ChooseNumberTarget(field_id) => {
-                self.can_edit_destination()
+                !self.saved_only()
+                    && self.can_edit_destination()
                     && self
                         .number_update
                         .as_ref()
@@ -515,9 +616,18 @@ impl ClientCallWorkspaceState {
                         phone.blocked_reason.is_some() && phone.number.trim() == number.trim()
                     })
                     && *number == self.destination
+                    // Launcher mode dials a saved number, never a typed one.
+                    && (!self.saved_only()
+                        || self
+                            .call
+                            .client
+                            .phones
+                            .iter()
+                            .any(|phone| phone.number.trim() == number.trim()))
             }
             ClientCallAction::SaveNumber { field_id, number } => {
-                self.can_edit_destination()
+                !self.saved_only()
+                    && self.can_edit_destination()
                     && self.valid_destination()
                     && *number == self.destination
                     && self.number_update.as_ref().is_some_and(|update| {
