@@ -26,6 +26,9 @@ All types are exported from `leptos_daisyui_rs::components::*`.
 | `texts: Signal<ClientCallWorkspaceTexts>` | Optional reactive copy, including all fixed outcome labels and nested Softphone copy. Defaults to English. |
 | `now_ms: Option<Signal<i64>>` | Optional epoch clock. Browser default ticks once per second; native default is zero. |
 | `class: &'static str` | Optional outer classes. The default is a bordered, rounded, bounded region. |
+| `badges: Signal<Vec<String>>` | Optional short facts shown as badges under the client identity. Empty renders no row. |
+| `layout: ClientCallLayout` | `Full` (default) or `Compact` for a narrow side panel; see [Compact layout](#compact-layout). Not reactive: remount to switch. |
+| `header_actions: Option<ViewFn>` | Optional host content for the header's top-right, just before Close (Office: its "Open in CTM" link). Absent renders nothing. In the compact one-row header it never shrinks; the name truncates first. |
 
 `ClientCallWorkspaceState.call` is the single canonical `SoftphoneState`,
 including `context_id`, client identity and saved-number choices. During a
@@ -78,6 +81,48 @@ The composition sets label and button gaps to the shared 8px step, allows field
 help to wrap, and uses flat input/select/textarea surfaces with their native
 focus treatment retained. Its scoped visual audit has zero ceilings for every
 family. Container behavior follows [Tailwind's container-query contract](https://tailwindcss.com/docs/responsive-design#container-queries).
+
+## Launcher mode
+
+`state.destination_entry = ClientCallDestinationEntry::SavedOnly` (Office
+op-flpq1) is for hosts whose own phone does the dialling (a separate softphone
+window, a desk phone). The panel offers the client's saved numbers and Place
+call only. There is no typed number, no number pad and no contact write:
+`EditDestination`, `ChooseNumberTarget` and `SaveNumber` are refused, and
+`Dial` accepts only a saved number. `state.history` (optional) lists past calls
+with the client, newest first. It is host text only and adds no control.
+
+## Compact layout
+
+`layout = ClientCallLayout::Compact` (ldui-eq1e, Office op-flpq1) is for a
+narrow side panel. The owner measured the full panel in a 339 px rail: 26 text
+blocks, an h2 wrapping to four lines and `destination_locked` rendered six
+times. The compact layout says each thing once:
+
+| Region | Compact behavior |
+|---|---|
+| Header | One row: the name (truncated, full name in `title`), `·`, the muted subtitle, the host's optional `header_actions` and an icon Close named `texts.close`. There is no visible region-label line; the region keeps its `aria-label`. Badges, when supplied, wrap below. |
+| Status | One `role=status` line, hidden before any attempt with nothing to explain. `status_detail` beats the attempt label, then the final duration and `Talk time: …`, joined by ` · ` (`compact_status`). No bridge hint. `uncertain_hint` stays as a second line. |
+| Numbers | Launcher mode only: a radio group of saved numbers. A blocked number is disabled with its own reason inline. While the numbers are locked, ONE shared line sits under the group, and every radio's `aria-describedby` names it (`compact_lock_line`). It reads `numbers_locked` while a call is in progress or a save is pending, and `numbers_locked_after_call` once the call has finished and Call again is the next step. A choice the host does not adopt snaps back. |
+| Call button | Reads `call`, then `call_again` after a refused or finished attempt. After a refused attempt it is the ordinary Dial. After a finished one it dispatches `ClientCallAction::StartAnotherCall` (below). A disabled reason equal to the lock gets no separate line; any other reason shows once under the button (`compact_call_line`). |
+| Launch hint | `texts.launch_hint` under the button when non-blank (host text, blank by default). |
+| Recent calls | One tabular row per entry: direction icon (with an sr-only label), when, who, outcome, talk. The first three are shown, then a `Show all (n)` / `Show fewer` toggle. |
+| Script | A disclosure, collapsed by default. Its summary is the guidance title (`texts.script` when blank), plus the preparation state while the script is not ready. |
+| Wrap-up | Unchanged. |
+
+A typed panel (`destination_entry = Typed`) in the compact layout keeps its
+full destination block; the compact numbers block is the launcher's. With
+`guidance: None` and `wrap_up: None` (Office shows the script and the call
+notes elsewhere on the page) the compact panel is the numbers, the call button
+and the recent calls only. "Call again" still works with no record.
+
+**`StartAnotherCall`** proposes a new attempt and carries no number. It is
+enabled only when `state.finished()` and a context exists, and never while a
+call control, record save or contact save for the finished attempt is pending:
+a new context would orphan that response. The host mints a new context (Office:
+a new dial sequence) and may dial the selected saved number in the same step.
+`Dial` itself stays refused after a finished attempt (see the state machine
+below).
 
 ## Dispatch state machine
 

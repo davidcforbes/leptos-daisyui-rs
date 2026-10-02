@@ -11,8 +11,11 @@ use super::{
     ClientCallAction, ClientCallWorkspaceState, ClientCallWorkspaceTexts, ClientCallWrapUp,
 };
 
-/// Every interactive control the workspace itself renders (the nested live
-/// `Softphone` console owns its own controls).
+/// Every command-dispatching control the workspace itself renders (the nested
+/// live `Softphone` console owns its own controls). The compact layout's local
+/// disclosures (the recent-calls toggle and the script summary) dispatch
+/// nothing, are never disabled and are named by their visible text, so they
+/// are not listed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ClientCallControl {
     /// Header dismissal proposal.
@@ -33,6 +36,8 @@ pub enum ClientCallControl {
     SaveNumber,
     /// Launch the call.
     Dial,
+    /// The compact layout's "Call again" after a finished attempt (ldui-eq1e).
+    StartAnotherCall,
     /// Script regeneration request.
     Regenerate,
     /// Wrap-up outcome select.
@@ -140,6 +145,9 @@ impl ClientCallWorkspaceState {
             ClientCallControl::Dial => self.can_dispatch(&ClientCallAction::Dial {
                 number: self.destination.clone(),
             }),
+            ClientCallControl::StartAnotherCall => {
+                self.can_dispatch(&ClientCallAction::StartAnotherCall)
+            }
             ClientCallControl::Regenerate => {
                 self.can_dispatch(&ClientCallAction::RegenerateGuidance)
             }
@@ -161,7 +169,7 @@ impl ClientCallWorkspaceState {
     }
 }
 
-fn some_text(value: &str) -> Option<String> {
+pub(super) fn some_text(value: &str) -> Option<String> {
     let value = value.trim();
     (!value.is_empty()).then(|| value.to_owned())
 }
@@ -198,6 +206,7 @@ impl ClientCallWorkspaceTexts {
                 }
             }
             ClientCallControl::Dial => self.call.clone(),
+            ClientCallControl::StartAnotherCall => self.call_again.clone(),
             ClientCallControl::Regenerate => self.regenerate.clone(),
             ClientCallControl::Outcome => self.outcome.clone(),
             ClientCallControl::Notes => self.notes.clone(),
@@ -289,6 +298,12 @@ impl ClientCallWorkspaceTexts {
                         .find(|phone| phone.number.trim() == state.destination.trim())
                         .and_then(|phone| phone.blocked_reason.clone())
                 }),
+            // A host operation for the finished attempt is still in flight.
+            ClientCallControl::StartAnotherCall => {
+                let saving = state.wrap_up.as_ref().is_some_and(|w| w.pending)
+                    || state.number_update.as_ref().is_some_and(|u| u.pending);
+                saving.then(|| self.saving.clone())
+            }
             ClientCallControl::Regenerate => state
                 .guidance
                 .as_ref()

@@ -112,6 +112,51 @@ fn launcher_state(context: &str) -> ClientCallWorkspaceState {
     state
 }
 
+/// ldui-eq1e: the launcher in the COMPACT layout, as Office mounts it in a
+/// side rail, with enough history to need "Show all".
+fn compact_state(context: &str) -> ClientCallWorkspaceState {
+    let mut state = launcher_state(context);
+    let history = state.history.as_mut().unwrap();
+    history.entries.extend([
+        ClientCallHistoryEntry {
+            id: "call-0".into(),
+            when: "Sep 26, 2:30 PM".into(),
+            who: "Priya".into(),
+            direction: ClientCallDirection::Outbound,
+            outcome: "Left voicemail".into(),
+            talk_seconds: Some(41),
+        },
+        ClientCallHistoryEntry {
+            id: "call-00".into(),
+            when: "Sep 22, 11:05 AM".into(),
+            who: "Elena".into(),
+            direction: ClientCallDirection::Inbound,
+            outcome: "Answered".into(),
+            talk_seconds: Some(604),
+        },
+    ]);
+    history.note = None;
+    state.guidance.as_mut().unwrap().title = "Account review script".into();
+    state
+}
+
+/// Office's side panel: the script and the call notes live elsewhere on the
+/// page, so the compact panel is numbers, Call and recent calls only.
+fn compact_office_state(context: &str) -> ClientCallWorkspaceState {
+    let mut state = compact_state(context);
+    state.guidance = None;
+    state.wrap_up = None;
+    state
+}
+
+/// The compact demo's host copy: where Call opens.
+fn compact_texts() -> ClientCallWorkspaceTexts {
+    ClientCallWorkspaceTexts {
+        launch_hint: "Opens in the demo phone window.".into(),
+        ..Default::default()
+    }
+}
+
 #[component]
 pub fn ClientCallWorkspaceDemo() -> impl IntoView {
     let state = RwSignal::new(initial_state("elena/attempt-1"));
@@ -120,6 +165,7 @@ pub fn ClientCallWorkspaceDemo() -> impl IntoView {
     // through acceptance until the separate host completion arrives.
     let regeneration_request = RwSignal::new(None::<ClientCallCommand>);
     let office = RwSignal::new(false);
+    let compact = RwSignal::new(false);
     let last = RwSignal::new(String::new());
     let count = RwSignal::new(0_u32);
     let writes = RwSignal::new(0_u32);
@@ -197,6 +243,28 @@ pub fn ClientCallWorkspaceDemo() -> impl IntoView {
                 state.update(|s| s.wrap_up.as_mut().unwrap().follow_up = value)
             }
             ClientCallAction::Dismiss => closed.set(true),
+            // The host mints a new attempt and dials the chosen number in the
+            // same step, as Office's start-another-call does (ldui-eq1e).
+            ClientCallAction::StartAnotherCall => {
+                generation.update(|n| *n += 1);
+                let context = format!("elena/again-{}", generation.get_untracked());
+                state.update(|s| {
+                    s.call.context_id = context.clone();
+                    s.call.phase = SoftphonePhase::Ready;
+                    s.call.timer = SoftphoneTimer::NotStarted;
+                    s.attempt = ClientCallAttempt::Submitting;
+                    s.status_detail.clear();
+                    s.provider_talk_seconds = None;
+                    if s.wrap_up.is_some() {
+                        s.wrap_up = Some(ClientCallWrapUp::default());
+                    }
+                });
+                let number = state.with_untracked(|s| s.destination.clone());
+                request.set(Some(ClientCallCommand {
+                    context_id: context,
+                    action: ClientCallAction::Dial { number },
+                }));
+            }
             action @ (ClientCallAction::Dial { .. }
             | ClientCallAction::SaveNumber { .. }
             | ClientCallAction::SaveWrapUp(_)
@@ -384,7 +452,7 @@ pub fn ClientCallWorkspaceDemo() -> impl IntoView {
                         <Button attr:id="call-workspace-reset" on_click=Callback::new(move |_| {
                             generation.update(|n| *n += 1); state.set(initial_state(&format!("elena/attempt-{}", generation.get_untracked())));
                             request.set(None); count.set(0); writes.set(0); last.set(String::new()); closed.set(false); reject_edits.set(false);
-                            regeneration_request.set(None); office.set(false);
+                            regeneration_request.set(None); office.set(false); compact.set(false);
                         })>"New attempt"</Button>
                         <Button attr:id="call-workspace-switch" on_click=Callback::new(move |_| {
                             generation.update(|n| *n += 1); let mut next = initial_state(&format!("alex/attempt-{}", generation.get_untracked()));
@@ -398,22 +466,34 @@ pub fn ClientCallWorkspaceDemo() -> impl IntoView {
                             generation.update(|n| *n += 1);
                             state.set(office_state(&format!("elena/office-{}", generation.get_untracked())));
                             request.set(None); regeneration_request.set(None); count.set(0); writes.set(0);
-                            last.set(String::new()); closed.set(false); reject_edits.set(false); office.set(true);
+                            last.set(String::new()); closed.set(false); reject_edits.set(false); office.set(true); compact.set(false);
                         })>"Office adoption scenario"</Button>
                         <Button attr:id="call-workspace-launcher" on_click=Callback::new(move |_| {
                             generation.update(|n| *n += 1);
                             state.set(launcher_state(&format!("elena/launcher-{}", generation.get_untracked())));
                             request.set(None); regeneration_request.set(None); count.set(0); writes.set(0);
-                            last.set(String::new()); closed.set(false); reject_edits.set(false); office.set(true);
+                            last.set(String::new()); closed.set(false); reject_edits.set(false); office.set(true); compact.set(false);
                         })>"Launcher scenario"</Button>
+                        <Button attr:id="call-workspace-compact" on_click=Callback::new(move |_| {
+                            generation.update(|n| *n += 1);
+                            state.set(compact_state(&format!("elena/compact-{}", generation.get_untracked())));
+                            request.set(None); regeneration_request.set(None); count.set(0); writes.set(0);
+                            last.set(String::new()); closed.set(false); reject_edits.set(false); office.set(true); compact.set(true);
+                        })>"Compact launcher"</Button>
+                        <Button attr:id="call-workspace-compact-office" on_click=Callback::new(move |_| {
+                            generation.update(|n| *n += 1);
+                            state.set(compact_office_state(&format!("elena/compact-office-{}", generation.get_untracked())));
+                            request.set(None); regeneration_request.set(None); count.set(0); writes.set(0);
+                            last.set(String::new()); closed.set(false); reject_edits.set(false); office.set(true); compact.set(true);
+                        })>"Compact Office panel"</Button>
                     </div>
                     <Show when=move || office.get()>
                         <div class="flex flex-wrap gap-2">
                             <Button attr:id="call-workspace-preparing" on_click=Callback::new(move |_| state.update(|s| {
-                                s.guidance.as_mut().unwrap().state = ClientCallGuidanceState::Preparing { elapsed_secs: 12, typical_secs: 75 };
+                                if let Some(guidance) = s.guidance.as_mut() { guidance.state = ClientCallGuidanceState::Preparing { elapsed_secs: 12, typical_secs: 75 }; }
                             }))>"Preparing script"</Button>
                             <Button attr:id="call-workspace-script-failed" on_click=Callback::new(move |_| state.update(|s| {
-                                s.guidance.as_mut().unwrap().state = ClientCallGuidanceState::Failed { reason: "The script service could not prepare guidance.".into() };
+                                if let Some(guidance) = s.guidance.as_mut() { guidance.state = ClientCallGuidanceState::Failed { reason: "The script service could not prepare guidance.".into() }; }
                             }))>"Script unavailable"</Button>
                             <Button attr:id="call-workspace-regeneration-conflict" on_click=Callback::new(move |_| state.update(|s| {
                                 if let Some(regeneration) = s.guidance.as_mut().and_then(|guidance| guidance.regeneration.as_mut()) {
@@ -474,12 +554,23 @@ pub fn ClientCallWorkspaceDemo() -> impl IntoView {
                         data-talk-seconds=move || state.get().provider_talk_seconds.map(|seconds| seconds.to_string()).unwrap_or_default()
                         data-duration-minutes=move || state.get().wrap_up.map(|w| w.duration_minutes).unwrap_or_default()
                         data-regeneration-pending=move || regeneration_request.get().is_some().to_string()
-                        data-pending=move || request.get().is_some().to_string() data-closed=move || closed.get().to_string()>
+                        data-pending=move || request.get().is_some().to_string() data-closed=move || closed.get().to_string()
+                        data-layout=move || if compact.get() { "compact" } else { "full" }>
                         <p>"Host receipts: "{move || count.get()}" · Confirmed writes: "{move || writes.get()}</p>
                         <output class="whitespace-pre-wrap [overflow-wrap:anywhere]">{move || if last.get().is_empty() { "No command yet".into() } else { last.get() }}</output>
                     </div>
                     <Show when=move || !closed.get() fallback=move || view! { <p>"Workspace dismissed. The host retains the attempt and draft. Use Reopen to return."</p> }>
-                        <ClientCallWorkspace id="client-call-workspace-demo" state=state on_command=on_command now_ms=Signal::stored(1_000_000) />
+                        <Show when=move || compact.get()
+                            fallback=move || view! { <ClientCallWorkspace id="client-call-workspace-demo" state=state on_command=on_command now_ms=Signal::stored(1_000_000) /> }>
+                            // A side-rail width, as Office mounts it.
+                            <div class="w-full max-w-sm" data-testid="call-workspace-rail">
+                                <ClientCallWorkspace id="client-call-workspace-demo" state=state on_command=on_command now_ms=Signal::stored(1_000_000)
+                                    layout=ClientCallLayout::Compact texts=Signal::stored(compact_texts())
+                                    header_actions=move || view! {
+                                        <a class="link link-primary" href="#client-call-workspace-demo" data-testid="call-workspace-open-external">"Open in phone system"</a>
+                                    } />
+                            </div>
+                        </Show>
                     </Show>
                 </div>
             </Section>

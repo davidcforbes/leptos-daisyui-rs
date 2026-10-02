@@ -352,6 +352,34 @@ impl ClientCallDestinationEntry {
     }
 }
 
+/// How much of the workspace the panel shows (ldui-eq1e, Office op-flpq1).
+///
+/// A host prop, not part of the state: it is a presentation choice that never
+/// changes what a command means.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ClientCallLayout {
+    /// The full two-column workspace (the original panel).
+    #[default]
+    Full,
+    /// A narrow side-panel layout that says each thing once: a one-row header,
+    /// a one-line status, the saved numbers as a radio group under ONE shared
+    /// lock line, the first three recent calls and the script collapsed. It
+    /// streamlines the launcher ([`ClientCallDestinationEntry::SavedOnly`]); a
+    /// typed panel keeps its full destination block.
+    Compact,
+}
+
+impl ClientCallLayout {
+    /// Stable DOM and diagnostic identifier.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::Compact => "compact",
+        }
+    }
+}
+
 /// Which way a past call went.
 #[non_exhaustive]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -488,6 +516,10 @@ pub enum ClientCallAction {
     Session(SoftphoneAction),
     /// Propose closing the surface; does not hang up or discard drafts.
     Dismiss,
+    /// Propose a new attempt after this one finished (the compact layout's
+    /// "Call again", ldui-eq1e). Carries no number: the host mints a new
+    /// context and may dial the selected saved number in the same step.
+    StartAnotherCall,
 }
 
 /// Scoped command envelope. Host responses additionally need operation correlation.
@@ -660,6 +692,17 @@ impl ClientCallWorkspaceState {
                         .and_then(ClientCallWrapUp::payload)
                         .as_ref()
                         == Some(payload)
+            }
+            // Only after a finished attempt, and never while a host operation
+            // for it is in flight: a new context would orphan that response.
+            ClientCallAction::StartAnotherCall => {
+                self.finished()
+                    && self.call.pending.is_none()
+                    && !self.wrap_up.as_ref().is_some_and(|wrap| wrap.pending)
+                    && !self
+                        .number_update
+                        .as_ref()
+                        .is_some_and(|update| update.pending)
             }
             ClientCallAction::Session(action) => {
                 self.attempt == ClientCallAttempt::Managed

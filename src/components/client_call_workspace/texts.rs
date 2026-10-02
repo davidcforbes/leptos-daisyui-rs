@@ -115,6 +115,23 @@ pub struct ClientCallWorkspaceTexts {
     pub history_directions: [String; 2],
     /// Talk-time label on a history entry.
     pub history_talk_time: String,
+    /// Compact layout: the ONE line under the saved numbers while they are
+    /// locked by a call in progress or a pending save.
+    pub numbers_locked: String,
+    /// Compact layout: that line after a finished call, when Call again is
+    /// the next step.
+    pub numbers_locked_after_call: String,
+    /// Compact layout: the call button after a finished or refused attempt.
+    pub call_again: String,
+    /// Compact layout: optional host line under the call button (blank hides it),
+    /// e.g. where the call opens.
+    pub launch_hint: String,
+    /// Compact layout: expand the recent calls; `{n}` is replaced by the count.
+    pub history_show_all: String,
+    /// Compact layout: collapse the recent calls back to the first three.
+    pub history_show_fewer: String,
+    /// Compact layout: the script disclosure's summary when the guidance title is blank.
+    pub script: String,
     /// Existing live-console labels and statuses.
     pub softphone: SoftphoneTexts,
 }
@@ -160,6 +177,12 @@ impl Default for ClientCallWorkspaceTexts {
             history_loading: "Loading calls…".into(),
             history_directions: ["Outgoing", "Incoming"].map(String::from),
             history_talk_time: "Talk time".into(),
+            numbers_locked: "Numbers lock during a call.".into(),
+            numbers_locked_after_call: "Press Call again to choose a number.".into(),
+            call_again: "Call again".into(),
+            launch_hint: String::new(),
+            history_show_all: "Show all ({n})".into(), history_show_fewer: "Show fewer".into(),
+            script: "Call script".into(),
             softphone: SoftphoneTexts::default(),
         }
     }

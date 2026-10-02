@@ -419,10 +419,18 @@ fn localized_structured_statuses_preserve_host_distinctions() {
 // every disabled one a reason. The render path reads these same functions for
 // `aria-label`, `disabled` and the `aria-describedby` reason line.
 fn assert_named_and_explained(state: &ClientCallWorkspaceState, case: &str) -> usize {
+    assert_named_and_explained_in(state, ClientCallLayout::Full, case)
+}
+
+fn assert_named_and_explained_in(
+    state: &ClientCallWorkspaceState,
+    layout: ClientCallLayout,
+    case: &str,
+) -> usize {
     let texts = ClientCallWorkspaceTexts::default();
     let mut disabled = 0;
-    for control in ClientCallControl::inventory(state) {
-        let name = texts.control_name(&control, state);
+    for control in ClientCallControl::inventory_for(state, layout) {
+        let name = texts.control_name_for(&control, state, layout);
         assert!(
             !name.trim().is_empty(),
             "{case}: {control:?} has no accessible name"
@@ -627,6 +635,7 @@ fn inventoried(control: &ClientCallControl) {
         | ClientCallControl::NumberTarget
         | ClientCallControl::SaveNumber
         | ClientCallControl::Dial
+        | ClientCallControl::StartAnotherCall
         | ClientCallControl::Regenerate
         | ClientCallControl::Outcome
         | ClientCallControl::Notes
@@ -917,4 +926,429 @@ fn default_launcher_and_history_texts() {
     assert_eq!(texts.history, "Recent calls");
     assert_eq!(texts.history_empty, "No calls yet.");
     assert_eq!(texts.history_talk_time, "Talk time");
+}
+
+// ldui-eq1e (Office op-flpq1): the COMPACT layout says each thing once. The
+// owner measured `destination_locked` rendered six times in a 339 px rail.
+fn compact_launcher() -> ClientCallWorkspaceState {
+    let mut state = launcher();
+    state.call.client.phones.push(SoftphoneNumber {
+        id: "mobile".into(),
+        label: "Mobile".into(),
+        number: "+14155550199".into(),
+        blocked_reason: Some("Mobile calling is restricted.".into()),
+    });
+    state
+}
+
+/// Every line the compact numbers block can show, in render order: the
+/// shared context line, each number's own line, the shared lock line and the
+/// call button's line.
+fn compact_lines(state: &ClientCallWorkspaceState) -> Vec<String> {
+    let texts = ClientCallWorkspaceTexts::default();
+    let mut lines = Vec::new();
+    if state.context_missing() {
+        lines.push(texts.not_ready.clone());
+    }
+    for phone in &state.call.client.phones {
+        lines.extend(texts.compact_number_line(state, &phone.id));
+    }
+    lines.extend(texts.compact_lock_line(state));
+    lines.extend(texts.compact_call_line(state));
+    lines
+}
+
+fn locked_states() -> Vec<(&'static str, ClientCallWorkspaceState)> {
+    let mut cases = Vec::new();
+    for attempt in [
+        ClientCallAttempt::Submitting,
+        ClientCallAttempt::AgentRinging,
+        ClientCallAttempt::Uncertain,
+        ClientCallAttempt::Finished,
+    ] {
+        let mut state = compact_launcher();
+        state.attempt = attempt;
+        cases.push((attempt.as_str(), state));
+    }
+    let mut saving = compact_launcher();
+    saving.attempt = ClientCallAttempt::Finished;
+    saving.wrap_up.as_mut().unwrap().outcome = Some(ClientCallOutcome::Interested);
+    saving.wrap_up.as_mut().unwrap().pending = true;
+    cases.push(("record-saving", saving));
+    let mut blocked = compact_launcher();
+    blocked.attempt = ClientCallAttempt::AgentRinging;
+    blocked.dial_blocked_reason = Some("Set yourself Available".into());
+    cases.push(("ringing-and-dial-blocked", blocked));
+    cases
+}
+
+#[test]
+fn compact_locked_numbers_show_exactly_one_lock_line() {
+    let texts = ClientCallWorkspaceTexts::default();
+    for (case, state) in locked_states() {
+        assert!(state.saved_numbers_locked(), "{case}");
+        let lines = compact_lines(&state);
+        let locks = lines
+            .iter()
+            .filter(|line| {
+                **line == texts.numbers_locked || **line == texts.numbers_locked_after_call
+            })
+            .count();
+        assert_eq!(locks, 1, "{case}: {lines:?}");
+        // After a finished call the line names the next step instead of a
+        // call that is over; a pending save still locks "during a call".
+        let expected = if case == "finished" {
+            &texts.numbers_locked_after_call
+        } else {
+            &texts.numbers_locked
+        };
+        assert_eq!(
+            texts.compact_lock_line(&state).as_ref(),
+            Some(expected),
+            "{case}"
+        );
+        assert!(
+            !lines.contains(&texts.destination_locked),
+            "{case}: the full lock sentence must not appear: {lines:?}"
+        );
+        // The blocked number still says why it is blocked, inline, once.
+        assert_eq!(
+            lines
+                .iter()
+                .filter(|line| *line == "Mobile calling is restricted.")
+                .count(),
+            1,
+            "{case}: {lines:?}"
+        );
+        // A disabled launch whose cause is the lock says the lock line's words.
+        if ClientCallControl::compact_call(&state) == ClientCallControl::Dial {
+            assert_eq!(
+                texts.compact_call_reason(&state),
+                Some(texts.numbers_locked.clone()),
+                "{case}"
+            );
+        }
+    }
+    // The full layout's own per-control reason is still the full sentence.
+    let (_, ringing) = &locked_states()[1];
+    assert_eq!(
+        texts.disabled_reason(&ClientCallControl::Dial, ringing),
+        Some(texts.destination_locked.clone())
+    );
+}
+
+#[test]
+fn compact_unlocked_numbers_show_no_lock_line_and_other_reasons_once() {
+    let texts = ClientCallWorkspaceTexts::default();
+    let state = compact_launcher();
+    assert!(!state.saved_numbers_locked());
+    assert_eq!(texts.compact_lock_line(&state), None);
+    assert_eq!(texts.compact_call_line(&state), None, "enabled launch");
+    assert_eq!(texts.compact_call_reason(&state), None);
+    // A host dial block shows once, under the button.
+    let mut blocked = state.clone();
+    blocked.dial_blocked_reason = Some("Set yourself Available".into());
+    assert_eq!(
+        texts.compact_call_line(&blocked).as_deref(),
+        Some("Set yourself Available")
+    );
+    assert_eq!(
+        compact_lines(&blocked)
+            .iter()
+            .filter(|line| *line == "Set yourself Available")
+            .count(),
+        1
+    );
+    // No number chosen yet.
+    let mut unchosen = state.clone();
+    unchosen.destination = String::new();
+    assert_eq!(
+        texts.compact_call_line(&unchosen),
+        Some(texts.needs_saved_number.clone())
+    );
+    // No context: the shared context line says why; nothing else repeats it.
+    let mut missing = state;
+    missing.call.context_id = String::new();
+    assert!(!missing.saved_numbers_locked());
+    assert_eq!(texts.compact_lock_line(&missing), None);
+    assert_eq!(texts.compact_call_line(&missing), None);
+    assert_eq!(
+        texts.compact_call_reason(&missing),
+        Some(texts.not_ready.clone())
+    );
+    assert_eq!(
+        compact_lines(&missing)
+            .iter()
+            .filter(|line| **line == texts.not_ready)
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn compact_status_line_composition() {
+    let texts = ClientCallWorkspaceTexts::default();
+    let mut state = compact_launcher();
+    assert_eq!(
+        texts.compact_status(&state),
+        None,
+        "hidden before any attempt"
+    );
+    state.status_detail = "  ".into();
+    assert_eq!(
+        texts.compact_status(&state),
+        None,
+        "blank detail says nothing"
+    );
+    // Ready with something to explain shows it.
+    state.status_detail = "Calling opens the Office phone.".into();
+    assert_eq!(
+        texts.compact_status(&state).as_deref(),
+        Some("Calling opens the Office phone.")
+    );
+    // The host's detail beats the attempt label.
+    state.attempt = ClientCallAttempt::AgentRinging;
+    state.status_detail = "Dialing +1 415 555 0142 from the Office phone".into();
+    assert_eq!(
+        texts.compact_status(&state).as_deref(),
+        Some("Dialing +1 415 555 0142 from the Office phone")
+    );
+    state.status_detail.clear();
+    assert_eq!(
+        texts.compact_status(&state).as_deref(),
+        Some("Ringing your phone"),
+        "no bridge hint in compact"
+    );
+    // Finished: the attempt label, the final duration, then the talk time.
+    state.attempt = ClientCallAttempt::Finished;
+    state.call.phase = SoftphonePhase::Ended;
+    state.call.timer = SoftphoneTimer::Stopped { seconds: 4 };
+    state.provider_talk_seconds = Some(0);
+    assert_eq!(
+        texts.compact_status(&state).as_deref(),
+        Some("Call finished · 00:04 · Talk time: 00:00")
+    );
+    // Unknown talk time is never zero.
+    state.provider_talk_seconds = None;
+    assert_eq!(
+        texts.compact_status(&state).as_deref(),
+        Some("Call finished · 00:04 · Talk time: Not confirmed")
+    );
+    // Uncertain keeps its safety warning as a second line.
+    let mut uncertain = compact_launcher();
+    uncertain.attempt = ClientCallAttempt::Uncertain;
+    uncertain.status_detail = "The provider response was lost.".into();
+    assert_eq!(
+        texts.compact_status(&uncertain).as_deref(),
+        Some("The provider response was lost.")
+    );
+    assert_eq!(
+        texts.compact_uncertain_hint(&uncertain),
+        Some(texts.uncertain_hint.clone())
+    );
+    assert_eq!(texts.compact_uncertain_hint(&state), None);
+    assert_eq!(uncertain.compact_status_tone(), "status status-warning");
+}
+
+#[test]
+fn compact_call_button_reads_call_again_and_starts_another_call_after_finish() {
+    let texts = ClientCallWorkspaceTexts::default();
+    let mut state = compact_launcher();
+    assert_eq!(
+        ClientCallControl::compact_call(&state),
+        ClientCallControl::Dial
+    );
+    assert_eq!(texts.compact_call_label(&state), texts.call);
+    // Refused: the same Dial, relabelled.
+    for attempt in [
+        ClientCallAttempt::Refused,
+        ClientCallAttempt::RefusedWith(ClientCallRefusal::AgentNotReady),
+    ] {
+        state.attempt = attempt;
+        assert_eq!(
+            ClientCallControl::compact_call(&state),
+            ClientCallControl::Dial
+        );
+        assert_eq!(texts.compact_call_label(&state), texts.call_again);
+        assert_eq!(
+            texts.control_name_for(&ClientCallControl::Dial, &state, ClientCallLayout::Compact),
+            texts.call_again
+        );
+        // The full layout keeps its label.
+        assert_eq!(
+            texts.control_name_for(&ClientCallControl::Dial, &state, ClientCallLayout::Full),
+            texts.call
+        );
+        assert!(state.can_dispatch(&ClientCallAction::Dial {
+            number: state.destination.clone()
+        }));
+    }
+    // Finished: Call again proposes a new attempt; Dial stays refused.
+    state.attempt = ClientCallAttempt::Finished;
+    assert_eq!(
+        ClientCallControl::compact_call(&state),
+        ClientCallControl::StartAnotherCall
+    );
+    assert_eq!(texts.compact_call_label(&state), texts.call_again);
+    assert!(state.can_dispatch(&ClientCallAction::StartAnotherCall));
+    assert!(!state.can_dispatch(&ClientCallAction::Dial {
+        number: state.destination.clone()
+    }));
+    assert_eq!(
+        texts.compact_call_reason(&state),
+        None,
+        "Call again is operable"
+    );
+    let inventory = ClientCallControl::inventory_for(&state, ClientCallLayout::Compact);
+    assert!(inventory.contains(&ClientCallControl::StartAnotherCall));
+    assert!(!inventory.contains(&ClientCallControl::Dial));
+    assert!(
+        ClientCallControl::inventory_for(&state, ClientCallLayout::Full)
+            .contains(&ClientCallControl::Dial),
+        "the full layout is unchanged"
+    );
+    // A record still saving holds the new attempt back, and says why.
+    let mut saving = state.clone();
+    saving.wrap_up.as_mut().unwrap().outcome = Some(ClientCallOutcome::Interested);
+    saving.wrap_up.as_mut().unwrap().pending = true;
+    assert!(!saving.can_dispatch(&ClientCallAction::StartAnotherCall));
+    assert_eq!(
+        texts.compact_call_reason(&saving),
+        Some(texts.saving.clone())
+    );
+    // A managed call that ended counts as finished.
+    let mut managed = compact_launcher();
+    managed.attempt = ClientCallAttempt::Managed;
+    managed.call.phase = SoftphonePhase::Ended;
+    assert!(managed.can_dispatch(&ClientCallAction::StartAnotherCall));
+}
+
+#[test]
+fn start_another_call_is_never_offered_before_completion() {
+    let mut state = compact_launcher();
+    for attempt in [
+        ClientCallAttempt::Ready,
+        ClientCallAttempt::Submitting,
+        ClientCallAttempt::AgentRinging,
+        ClientCallAttempt::Uncertain,
+        ClientCallAttempt::Refused,
+        ClientCallAttempt::Managed,
+    ] {
+        state.attempt = attempt;
+        assert!(
+            !state.can_dispatch(&ClientCallAction::StartAnotherCall),
+            "{attempt:?}"
+        );
+    }
+    state.attempt = ClientCallAttempt::Finished;
+    state.call.context_id = String::new();
+    assert!(!state.can_dispatch(&ClientCallAction::StartAnotherCall));
+    // A typed panel in the compact layout keeps the ordinary launch.
+    let mut typed = ready();
+    typed.attempt = ClientCallAttempt::Finished;
+    assert_eq!(
+        ClientCallControl::compact_call(&typed),
+        ClientCallControl::Dial
+    );
+}
+
+#[test]
+fn compact_inventory_is_named_and_explained() {
+    let mut cases = vec![("compact-ready", compact_launcher())];
+    cases.extend(locked_states());
+    let mut missing = compact_launcher();
+    missing.call.context_id = String::new();
+    cases.push(("compact-not-ready", missing));
+    let mut refused = compact_launcher();
+    refused.attempt = ClientCallAttempt::Refused;
+    cases.push(("compact-refused", refused));
+    let mut guided = compact_launcher();
+    guided.guidance = Some(ClientCallGuidance {
+        regeneration: Some(ClientCallRegeneration::default()),
+        ..Default::default()
+    });
+    cases.push(("compact-guided", guided));
+    for (case, state) in &cases {
+        assert_named_and_explained_in(state, ClientCallLayout::Compact, case);
+        let inventory = ClientCallControl::inventory_for(state, ClientCallLayout::Compact);
+        for control in &inventory {
+            inventoried(control);
+        }
+    }
+    // The launcher renders Dismiss, each saved number, then the call button.
+    let mut finished = compact_launcher();
+    finished.attempt = ClientCallAttempt::Finished;
+    finished.wrap_up = None;
+    assert_eq!(
+        ClientCallControl::inventory_for(&finished, ClientCallLayout::Compact),
+        vec![
+            ClientCallControl::Dismiss,
+            ClientCallControl::SavedNumber("phone".into()),
+            ClientCallControl::SavedNumber("mobile".into()),
+            ClientCallControl::StartAnotherCall,
+        ]
+    );
+}
+
+#[test]
+fn compact_history_shows_three_then_toggles() {
+    let texts = ClientCallWorkspaceTexts::default();
+    assert_eq!(COMPACT_HISTORY_VISIBLE, 3);
+    assert_eq!(texts.history_toggle(false, 8), "Show all (8)");
+    assert_eq!(texts.history_toggle(true, 8), "Show fewer");
+    let spanish = ClientCallWorkspaceTexts {
+        history_show_all: "Ver todas ({n})".into(),
+        ..Default::default()
+    };
+    assert_eq!(spanish.history_toggle(false, 12), "Ver todas (12)");
+}
+
+#[test]
+fn compact_script_summary_names_the_disclosure() {
+    let texts = ClientCallWorkspaceTexts::default();
+    let mut guidance = ClientCallGuidance {
+        title: "Payment call script".into(),
+        ..Default::default()
+    };
+    assert_eq!(
+        texts.compact_script_summary(&guidance),
+        "Payment call script"
+    );
+    guidance.state = ClientCallGuidanceState::Preparing {
+        elapsed_secs: 3,
+        typical_secs: 20,
+    };
+    assert_eq!(
+        texts.compact_script_summary(&guidance),
+        "Payment call script · Preparing script"
+    );
+    guidance.title = " ".into();
+    guidance.state = ClientCallGuidanceState::Ready;
+    assert_eq!(texts.compact_script_summary(&guidance), "Call script");
+}
+
+#[test]
+fn default_compact_texts_and_layout() {
+    let texts = ClientCallWorkspaceTexts::default();
+    assert_eq!(texts.numbers_locked, "Numbers lock during a call.");
+    assert_eq!(
+        texts.numbers_locked_after_call,
+        "Press Call again to choose a number."
+    );
+    assert_eq!(texts.call_again, "Call again");
+    assert_eq!(texts.launch_hint, "", "host text; blank hides the line");
+    assert_eq!(texts.compact_launch_hint(), None);
+    assert_eq!(texts.history_show_all, "Show all ({n})");
+    assert_eq!(texts.history_show_fewer, "Show fewer");
+    assert_eq!(texts.script, "Call script");
+    assert_eq!(ClientCallLayout::default(), ClientCallLayout::Full);
+    assert_eq!(ClientCallLayout::Compact.as_str(), "compact");
+    let hinted = ClientCallWorkspaceTexts {
+        launch_hint: "Opens in the Office phone window.".into(),
+        ..Default::default()
+    };
+    assert_eq!(
+        hinted.compact_launch_hint().as_deref(),
+        Some("Opens in the Office phone window.")
+    );
 }

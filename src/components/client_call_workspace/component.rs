@@ -5,7 +5,7 @@ use crate::components::{
 };
 use leptos::prelude::*;
 
-fn emit(
+pub(super) fn emit(
     state: Signal<ClientCallWorkspaceState>,
     callback: Callback<ClientCallCommand>,
     action: ClientCallAction,
@@ -21,7 +21,7 @@ fn emit(
 
 /// The reactive accessible name, as a closure so it serves both an
 /// `attr:aria-label` spread and (through `Signal::derive`) a `label` prop.
-fn control_name(
+pub(super) fn control_name(
     state: Signal<ClientCallWorkspaceState>,
     texts: Signal<ClientCallWorkspaceTexts>,
     control: ClientCallControl,
@@ -29,7 +29,7 @@ fn control_name(
     move || state.with(|s| texts.with(|t| t.control_name(&control, s)))
 }
 
-fn control_disabled(
+pub(super) fn control_disabled(
     state: Signal<ClientCallWorkspaceState>,
     control: ClientCallControl,
 ) -> Signal<bool> {
@@ -79,11 +79,11 @@ fn local_reason(
     Signal::derive(move || state.with(|s| texts.with(|t| own_line_reason(&control, s, t))))
 }
 
-fn context_reason_id(base_id: &str) -> String {
+pub(super) fn context_reason_id(base_id: &str) -> String {
     format!("{base_id}-reason-context")
 }
 
-fn reason_id(base_id: &str, key: &str) -> String {
+pub(super) fn reason_id(base_id: &str, key: &str) -> String {
     format!("{base_id}-reason-{key}")
 }
 
@@ -100,8 +100,11 @@ fn reason_line(id: String, key: &'static str, text: Signal<Option<String>>) -> i
     }
 }
 
+/// The bounded region's classes, shared by both layouts.
+const ROOT_CLASS: &str = "@container w-full min-w-0 max-w-5xl rounded-box border border-base-300 bg-base-100 text-base-content [&_.label]:gap-2 [&_.label]:whitespace-normal [&_.label]:[overflow-wrap:anywhere] [&_.btn]:gap-2 [&_.input]:shadow-none [&_.select]:shadow-none [&_.textarea]:shadow-none";
+
 #[component]
-fn Destination(
+pub(super) fn Destination(
     state: Signal<ClientCallWorkspaceState>,
     texts: Signal<ClientCallWorkspaceTexts>,
     on_command: Callback<ClientCallCommand>,
@@ -382,11 +385,15 @@ fn History(
 }
 
 #[component]
-fn Guidance(
+pub(super) fn Guidance(
     state: Signal<ClientCallWorkspaceState>,
     texts: Signal<ClientCallWorkspaceTexts>,
     on_command: Callback<ClientCallCommand>,
     base_id: String,
+    /// Inside the compact layout's disclosure, whose summary carries the
+    /// title: no heading of its own and no left rule.
+    #[prop(optional)]
+    embedded: bool,
 ) -> impl IntoView {
     let guidance = Signal::derive(move || state.get().guidance.unwrap_or_default());
     let regeneration_status = format!("{base_id}-regeneration-status");
@@ -401,14 +408,14 @@ fn Guidance(
     // Content, including a replaced beat with the same ID, is host-controlled.
     let beats = Memo::new(move |_| guidance.get().beats);
     view! {
-        <aside class="flex min-w-0 flex-col gap-4 border-l-4 border-primary pl-4 [overflow-wrap:anywhere]"
+        <aside class=if embedded { "flex min-w-0 flex-col gap-4 [overflow-wrap:anywhere]" } else { "flex min-w-0 flex-col gap-4 border-l-4 border-primary pl-4 [overflow-wrap:anywhere]" }
             data-call-guidance="true" data-call-guidance-state=move || match guidance.get().state {
                 ClientCallGuidanceState::Ready => "ready",
                 ClientCallGuidanceState::Preparing { .. } => "preparing",
                 ClientCallGuidanceState::Failed { .. } => "failed",
             }>
             <div class="flex min-w-0 flex-col gap-2">
-                <h3 class="text-lg font-semibold">{move || guidance.get().title}</h3>
+                {(!embedded).then(|| view! { <h3 class="text-lg font-semibold">{move || guidance.get().title}</h3> })}
                 <p class="whitespace-pre-wrap text-sm">{move || guidance.get().body}</p>
                 <p class="text-xs text-base-content/75">{move || guidance.get().source}</p>
             </div>
@@ -452,7 +459,7 @@ fn Guidance(
 }
 
 #[component]
-fn WrapUp(
+pub(super) fn WrapUp(
     state: Signal<ClientCallWorkspaceState>,
     texts: Signal<ClientCallWorkspaceTexts>,
     on_command: Callback<ClientCallCommand>,
@@ -559,6 +566,20 @@ fn WrapUp(
 /// only -- no typed number, no number pad and no contact write -- and marks the chosen
 /// number (`aria-pressed`). `state.history` (optional) lists past calls with the client,
 /// newest first; every line is host text and the section adds no control.
+///
+/// **Compact layout** (`layout = ClientCallLayout::Compact`, ldui-eq1e): for a narrow
+/// side panel. A one-row header (name · subtitle, an icon Close), one status line, the
+/// launcher's saved numbers as a radio group under ONE shared `numbers_locked` line,
+/// a call button that reads `call_again` after a finished or refused attempt (after a
+/// finished one it dispatches [`ClientCallAction::StartAnotherCall`]), the host's
+/// optional `launch_hint`, the first three recent calls behind a "Show all (n)" toggle
+/// and the script in a disclosure, collapsed. The wrap-up is unchanged. Every line it
+/// shows comes from the `compact_*` functions on [`ClientCallWorkspaceTexts`].
+///
+/// ### Add to `input.css`
+/// ```css
+/// @source inline("radio radio-sm status status-info status-warning status-error status-success status-neutral grid-cols-subgrid");
+/// ```
 #[component]
 pub fn ClientCallWorkspace(
     /// Unique region ID; also prefixes the nested call console and number pad IDs.
@@ -582,6 +603,16 @@ pub fn ClientCallWorkspace(
     /// (Office op-fg6s2: "Closed matter"). Empty renders no row.
     #[prop(optional, into)]
     badges: Signal<Vec<String>>,
+    /// [`ClientCallLayout::Compact`] for a narrow side panel (ldui-eq1e). Not
+    /// reactive: a host that switches layouts remounts the workspace.
+    #[prop(optional)]
+    layout: ClientCallLayout,
+    /// Host content for the header's top-right, just before Close (Office:
+    /// its "Open in CTM" link). Absent renders nothing. Keep it to a link or
+    /// two: in the compact layout's one-row header the client's name
+    /// truncates first to make room.
+    #[prop(optional, into)]
+    header_actions: Option<ViewFn>,
 ) -> impl IntoView {
     let keypad_id = format!("{id}-destination-pad");
     let console_id = format!("{id}-session");
@@ -609,10 +640,22 @@ pub fn ClientCallWorkspace(
             emit(state, on_command, ClientCallAction::Session(command.action));
         }
     });
+    if layout == ClientCallLayout::Compact {
+        return view! {
+            <section id=id aria-label=move || texts.get().label data-client-call-workspace="true"
+                data-call-attempt=move || state.get().attempt.as_str() data-call-layout=layout.as_str()
+                class=crate::merge_classes!(ROOT_CLASS, class)>
+                <super::compact_view::CompactWorkspace state=state texts=texts on_command=on_command now=now
+                    badges=badges base_id=base_id keypad_id=keypad_id console_id=console_id session_command=session_command
+                    header_actions=header_actions />
+            </section>
+        }
+        .into_any();
+    }
     view! {
         <section id=id aria-label=move || texts.get().label data-client-call-workspace="true"
-            data-call-attempt=move || state.get().attempt.as_str()
-            class=crate::merge_classes!("@container w-full min-w-0 max-w-5xl rounded-box border border-base-300 bg-base-100 text-base-content [&_.label]:gap-2 [&_.label]:whitespace-normal [&_.label]:[overflow-wrap:anywhere] [&_.btn]:gap-2 [&_.input]:shadow-none [&_.select]:shadow-none [&_.textarea]:shadow-none", class)>
+            data-call-attempt=move || state.get().attempt.as_str() data-call-layout=layout.as_str()
+            class=crate::merge_classes!(ROOT_CLASS, class)>
             <header class="flex items-start justify-between gap-4 border-b border-base-300 p-5">
                 <div class="flex min-w-0 flex-col gap-2 [overflow-wrap:anywhere]">
                     <p class="text-sm font-medium text-base-content/75">{move || texts.get().label}</p>
@@ -627,6 +670,9 @@ pub fn ClientCallWorkspace(
                     </Show>
                 </div>
                 <div class="flex shrink-0 flex-col items-end gap-2">
+                    {header_actions.map(|actions| view! {
+                        <div class="flex flex-wrap items-center justify-end gap-2" data-call-header-actions="true">{actions.run()}</div>
+                    })}
                     <Button style=ButtonStyle::Ghost class="shrink-0" attr:data-call-action="dismiss"
                         attr:aria-label=control_name(state, texts, ClientCallControl::Dismiss)
                         attr:aria-describedby=dismiss_described
@@ -690,4 +736,5 @@ pub fn ClientCallWorkspace(
             </div>
         </section>
     }
+    .into_any()
 }

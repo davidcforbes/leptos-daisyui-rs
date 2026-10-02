@@ -14,7 +14,7 @@ async fn snapshot(h: &Harness) -> Value {
         const host = document.querySelector('[data-testid=call-workspace-host]');
         return {host:{...host.dataset}, fields:Object.fromEntries([...root.querySelectorAll('[data-call-field]')].map(e => [e.dataset.callField,{value:e.value,disabled:e.disabled,label:document.querySelector(`label[for="${e.id}"]`)?.textContent.trim()}])),
           actions:Object.fromEntries([...root.querySelectorAll('[data-call-action]')].map(e => [e.dataset.callAction,{disabled:e.disabled,name:e.textContent.trim()}])),
-          status:root.querySelector('[data-call-status]').textContent.trim(),
+          status:root.querySelector('[data-call-status]')?.textContent.trim() ?? null,
           savedNumber:root.querySelector('[data-call-confirmed-number]')?.textContent.trim() ?? null,
           guidance:root.querySelector('[data-call-guidance-state]')?.textContent.trim() ?? null,
           guidanceState:root.querySelector('[data-call-guidance-state]')?.getAttribute('data-call-guidance-state') ?? null,
@@ -70,7 +70,11 @@ async fn workspace_office_targets_refusals_and_provider_duration() {
     let initial = snapshot(&h).await;
     assert_eq!(initial["fields"]["number-target"]["value"], "contact-phone");
     assert_eq!(initial["host"]["talkSeconds"], "");
-    assert!(initial["talk"].as_str().unwrap().contains("Not confirmed"));
+    assert_eq!(
+        initial["talk"],
+        Value::Null,
+        "op-fg6s2: no talk-time caveat before a call"
+    );
     assert_eq!(
         eval(
             &h,
@@ -154,6 +158,13 @@ async fn workspace_office_targets_refusals_and_provider_duration() {
     click(&h, "#call-workspace-uncertain").await;
     assert_eq!(snapshot(&h).await["actions"]["dial"]["disabled"], true);
     click(&h, "#call-workspace-finished").await;
+    // Unknown talk time after a finished call is "Not confirmed", never zero.
+    assert!(
+        snapshot(&h).await["talk"]
+            .as_str()
+            .unwrap()
+            .contains("Not confirmed")
+    );
     click(&h, "#call-workspace-talk-zero").await;
     let zero = snapshot(&h).await;
     assert_eq!(zero["host"]["talkSeconds"], "0");
@@ -664,4 +675,356 @@ async fn workspace_wrap_up_keyboard_rejection_and_responsive_evidence() {
         "workspace accessibility: {violations}"
     );
     assert_no_browser_errors(&h, "workspace wrap-up, managed controls and compact layout").await;
+}
+
+/// ldui-eq1e (Office op-flpq1): the COMPACT layout in a side-rail width says
+/// each thing once -- one header row, one status line, ONE visible lock line
+/// while the numbers are locked (production rendered the lock sentence six
+/// times), "Call again" after a finished call dispatching StartAnotherCall,
+/// three recent calls behind a toggle and the script collapsed.
+async fn compact_snapshot(h: &Harness) -> Value {
+    eval(h, r#"(() => {
+        const root = document.querySelector('#client-call-workspace-demo');
+        const host = document.querySelector('[data-testid=call-workspace-host]');
+        const shown = e => e.checkVisibility({visibilityProperty:true}) && !e.closest('.sr-only,[aria-hidden=true]');
+        const leaf = [...root.querySelectorAll('p,span,li,h2,h3,summary,label,button')].filter(shown);
+        const said = text => leaf.filter(e => e.textContent.trim() === text).length;
+        const radios = [...root.querySelectorAll('input[type=radio][data-call-saved-number]')];
+        const call = root.querySelector('[data-call-action=dial],[data-call-action=start-another-call]');
+        const h2 = root.querySelector('h2');
+        const toggle = root.querySelector('[data-call-history-toggle]');
+        return {host:{...host.dataset}, layout:root.dataset.callLayout,
+          name:h2.textContent.trim(), nameTitle:h2.title, nameOneLine:h2.getBoundingClientRect().height <= 32,
+          regionLabelShown:said('Client call workspace'),
+          status:shown(root.querySelector('[data-call-status]')) ? root.querySelector('[data-call-status-line]').textContent.trim() : null,
+          uncertainHint:shown(root.querySelector('[data-call-uncertain-hint]')),
+          radios:radios.map(r => ({id:r.dataset.callSavedNumber, checked:r.checked, disabled:r.disabled,
+            described:(r.getAttribute('aria-describedby')||'').split(/\s+/).map(id => document.getElementById(id)?.textContent.trim()).filter(Boolean)})),
+          blockedLines:[...root.querySelectorAll('[data-call-number-blocked]')].filter(shown).map(e => e.textContent.trim()),
+          lockLines:said('Numbers lock during a call.'),
+          afterCallLines:said('Press Call again to choose a number.'),
+          fullLockSentence:leaf.filter(e => e.textContent.includes('cannot change while a call is in progress')).length,
+          call:{action:call.dataset.callAction, text:[...call.childNodes].filter(n => !(n.nodeType===1 && n.matches('[data-button-disabled-reason]'))).map(n => n.textContent).join('').trim(), disabled:call.disabled,
+            description:(call.getAttribute('aria-describedby')||'').split(/\s+/).map(id => document.getElementById(id)?.textContent.trim()).filter(Boolean).join(' ')},
+          callLine:shown(root.querySelector('[data-call-disabled-reason=dial]')) ? root.querySelector('[data-call-disabled-reason=dial]').textContent.trim() : null,
+          launchHint:root.querySelector('[data-call-launch-hint]')?.textContent.trim() ?? null,
+          historyRows:root.querySelectorAll('[data-call-history-entry]').length,
+          toggle:toggle ? {text:toggle.textContent.trim(), expanded:toggle.getAttribute('aria-expanded')} : null,
+          scriptOpen:root.querySelector('[data-call-script-disclosure]')?.open ?? null,
+          scriptSummary:root.querySelector('[data-call-script-disclosure] summary')?.textContent.trim() ?? null,
+          header:(() => {
+            const a=root.querySelector('[data-call-header-actions]'), x=root.querySelector('[data-call-action=dismiss]');
+            if (!a) return null;
+            const ar=a.getBoundingClientRect(), xr=x.getBoundingClientRect(), nr=h2.getBoundingClientRect();
+            return {text:a.textContent.trim(), beforeClose:ar.right<=xr.left+0.5, afterName:ar.left>=nr.right-0.5,
+              sameRow:Math.abs((ar.top+ar.bottom)/2-(xr.top+xr.bottom)/2)<=2, nameTruncatesFirst:ar.width>0 && a.scrollWidth<=a.clientWidth+1};
+          })(),
+          sections:[...root.querySelector('[data-call-body=compact]').children].filter(shown).map(e =>
+            e.matches('[data-call-status]') ? 'status' : e.matches('[data-call-destination]') ? 'numbers'
+            : e.matches('[data-call-history]') ? 'history' : e.matches('[data-call-script-disclosure]') ? 'script'
+            : e.matches('[data-call-wrap-up]') ? 'wrap-up' : e.tagName.toLowerCase())};
+    })()"#).await
+}
+
+/// The compact panel's declared depth vocabulary, beyond `ui_tokens`'
+/// elevation levels: the demo's button press shadow (the same two layers the
+/// office script test declares) and daisyUI 5's resting `.radio` inset, which
+/// is the `.checkbox` rule `tests/style_audit_smoke.rs` already declares
+/// (`0 1px oklch(0% 0 0 / calc(var(--depth)*.1)) inset`).
+fn compact_profile(font_family: String) -> ldui_audit::StyleProfile {
+    let base = ldui_audit::from_ui_tokens(font_family);
+    let mut shadows = base.shadows.clone();
+    shadows.extend([
+        ldui_audit::ShadowSpec::new(0.0, 6.0, 12.0, 0.15).with_spread(-2.0),
+        ldui_audit::ShadowSpec::new(0.0, 3.0, 6.0, 0.10).with_spread(-2.0),
+        ldui_audit::ShadowSpec::new(0.0, 1.0, 0.0, 0.10).with_inset(),
+    ]);
+    let mut ramp = base.type_ramp.clone();
+    ramp.push(18.0);
+    base.shadows(shadows).type_ramp(ramp)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires release demo host (cargo xtask test-softphone)"]
+async fn workspace_compact_launcher_says_each_thing_once() {
+    let h = harness_at("/components/client-call-workspace").await;
+    begin_browser_error_capture(&h).await;
+    wait_for_selector(&h, ROOT).await;
+    click(&h, "#call-workspace-compact").await;
+    wait_for_selector(&h, "#client-call-workspace-demo[data-call-layout=compact]").await;
+    let rest = compact_snapshot(&h).await;
+    assert_eq!(rest["layout"], "compact");
+    assert_eq!(rest["name"], "Elena Martinez");
+    assert_eq!(rest["nameTitle"], "Elena Martinez");
+    assert_eq!(rest["nameOneLine"], true, "{rest}");
+    assert_eq!(rest["regionLabelShown"], 0, "no visible region-label line");
+    assert_eq!(rest["status"], Value::Null, "no status before any attempt");
+    let radios = rest["radios"].as_array().unwrap();
+    assert_eq!(
+        radios
+            .iter()
+            .map(|r| r["id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["phone", "alternate", "mobile"]
+    );
+    assert_eq!(radios[0]["checked"], true);
+    assert_eq!(radios[2]["disabled"], true);
+    assert_eq!(
+        radios[2]["described"],
+        json!(["Mobile calling is restricted for this contact."]),
+        "a blocked number is described by its own reason"
+    );
+    assert_eq!(
+        rest["blockedLines"],
+        json!(["Mobile calling is restricted for this contact."])
+    );
+    assert_eq!(rest["lockLines"], 0);
+    assert_eq!(rest["call"]["action"], "dial");
+    assert_eq!(rest["call"]["text"], "Place call");
+    assert_eq!(rest["call"]["disabled"], false);
+    assert_eq!(rest["callLine"], Value::Null);
+    assert_eq!(rest["launchHint"], "Opens in the demo phone window.");
+    assert_eq!(rest["historyRows"], 3);
+    assert_eq!(
+        rest["toggle"],
+        json!({"text":"Show all (5)","expanded":"false"})
+    );
+    assert_eq!(rest["scriptOpen"], false);
+    assert_eq!(rest["scriptSummary"], "Account review script");
+    assert_eq!(
+        rest["header"],
+        json!({"text":"Open in phone system","beforeClose":true,"afterName":true,"sameRow":true,"nameTruncatesFirst":true}),
+        "the host's header actions sit between the name and Close: {rest}"
+    );
+    assert_eq!(
+        rest["sections"],
+        json!(["numbers", "history", "script", "wrap-up"])
+    );
+
+    // A radio is a choice the host must adopt: a rejected one snaps back.
+    click(&h, "#call-workspace-reject-edits").await;
+    click(
+        &h,
+        "#client-call-workspace-demo [data-call-saved-number=alternate]",
+    )
+    .await;
+    let rejected = compact_snapshot(&h).await;
+    assert_eq!(rejected["host"]["destination"], "+1 (415) 555-0142");
+    assert_eq!(rejected["radios"][0]["checked"], true);
+    assert_eq!(rejected["radios"][1]["checked"], false);
+    click(&h, "#call-workspace-reject-edits").await;
+    click(
+        &h,
+        "#client-call-workspace-demo [data-call-saved-number=alternate]",
+    )
+    .await;
+    let chosen = compact_snapshot(&h).await;
+    assert_eq!(chosen["host"]["destination"], "+1 (415) 555-0186");
+    assert_eq!(chosen["radios"][1]["checked"], true);
+    assert_eq!(chosen["radios"][0]["checked"], false);
+
+    // During a call: ONE lock line, named by every radio and the button.
+    click(&h, "#client-call-workspace-demo [data-call-action=dial]").await;
+    for (step, button) in [
+        ("submitting", None),
+        ("agent-ringing", Some("#call-workspace-accept")),
+    ] {
+        if let Some(button) = button {
+            click(&h, button).await;
+        }
+        let locked = compact_snapshot(&h).await;
+        assert_eq!(locked["host"]["attempt"], step);
+        assert_eq!(locked["lockLines"], 1, "{step}: {locked}");
+        assert_eq!(locked["fullLockSentence"], 0, "{step}: {locked}");
+        assert!(locked["status"].as_str().is_some(), "{step}: {locked}");
+        for radio in locked["radios"].as_array().unwrap() {
+            assert_eq!(radio["disabled"], true, "{step}");
+            assert!(
+                radio["described"]
+                    .as_array()
+                    .unwrap()
+                    .contains(&json!("Numbers lock during a call.")),
+                "{step}: {radio}"
+            );
+        }
+        assert_eq!(locked["call"]["disabled"], true);
+        assert_eq!(locked["call"]["description"], "Numbers lock during a call.");
+        assert_eq!(
+            locked["callLine"],
+            Value::Null,
+            "the lock is not repeated under the button"
+        );
+    }
+
+    // Finished: one status line, then Call again proposes a new attempt.
+    click(&h, "#call-workspace-finished").await;
+    click(&h, "#call-workspace-talk-125").await;
+    let finished = compact_snapshot(&h).await;
+    assert_eq!(
+        finished["status"], "Call finished · Talk time: 02:05",
+        "{finished}"
+    );
+    assert_eq!(finished["call"]["action"], "start-another-call");
+    assert_eq!(finished["call"]["text"], "Call again");
+    assert_eq!(finished["call"]["disabled"], false);
+    assert_eq!(finished["lockLines"], 0, "the call is over: {finished}");
+    assert_eq!(finished["afterCallLines"], 1, "{finished}");
+    for radio in finished["radios"].as_array().unwrap() {
+        assert_eq!(radio["disabled"], true);
+        assert!(
+            radio["described"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("Press Call again to choose a number.")),
+            "{radio}"
+        );
+    }
+
+    click(&h, "#client-call-workspace-demo [data-call-history-toggle]").await;
+    click(
+        &h,
+        "#client-call-workspace-demo [data-call-script-disclosure] summary",
+    )
+    .await;
+    let open = compact_snapshot(&h).await;
+    assert_eq!(open["historyRows"], 5);
+    assert_eq!(
+        open["toggle"],
+        json!({"text":"Show fewer","expanded":"true"})
+    );
+    assert_eq!(open["scriptOpen"], true);
+
+    for width in [1280, 375] {
+        h.set_viewport(ViewportSize::new(width, 2400))
+            .await
+            .unwrap();
+        common::prepare_region_capture(&h, ROOT, ViewportSize::new(width, 2400)).await;
+        let geometry = eval(&h, r#"(() => {
+            const r=document.querySelector('#client-call-workspace-demo'), b=r.getBoundingClientRect();
+            return {overflow:r.scrollWidth>r.clientWidth+1, rail:b.width<=384+1,
+              controlsFit:[...r.querySelectorAll('input,select,textarea,button')].filter(e=>e.getClientRects().length).every(e=>{
+                const c=e.getBoundingClientRect(); return c.left>=b.left&&c.right<=b.right+1&&c.width>0;})};
+        })()"#).await;
+        assert_eq!(
+            geometry,
+            json!({"overflow":false,"rail":true,"controlsFit":true})
+        );
+        let header = compact_snapshot(&h).await["header"].clone();
+        assert_eq!(
+            header,
+            json!({"text":"Open in phone system","beforeClose":true,"afterName":true,"sameRow":true,"nameTruncatesFirst":true}),
+            "{width}px header"
+        );
+        let profile = compact_profile(common::body_font_family(&h).await);
+        let report = ldui_audit::audit_page(
+            &h,
+            &profile,
+            &ldui_audit::SweepOptions {
+                mount_selector: ROOT.into(),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        common::assert_not_truncated(&report, "compact call panel");
+        println!("Compact call panel {width}px audit: {report:#?}");
+        ldui_audit::verify("compact call panel", &report, &[]).unwrap();
+        std::fs::write(
+            format!("target/client-call-workspace-compact-{width}.png"),
+            h.screenshot_bytes().await.unwrap(),
+        )
+        .unwrap();
+    }
+    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js").unwrap();
+    axe.run(h.page()).await.unwrap();
+    let violations = eval(&h, r#"(async () => {const r=await axe.run(document.querySelector('#client-call-workspace-demo'),{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21aa']}});return r.violations.filter(v=>['serious','critical'].includes(v.impact));})()"#).await;
+    assert_eq!(
+        violations,
+        json!([]),
+        "compact call panel accessibility: {violations}"
+    );
+
+    click(
+        &h,
+        "#client-call-workspace-demo [data-call-action=start-another-call]",
+    )
+    .await;
+    let again = compact_snapshot(&h).await;
+    assert_eq!(again["host"]["last"], "StartAnotherCall");
+    assert!(
+        again["host"]["context"]
+            .as_str()
+            .unwrap()
+            .starts_with("elena/again-"),
+        "{again}"
+    );
+    assert_eq!(again["host"]["attempt"], "submitting");
+    assert_eq!(again["host"]["destination"], "+1 (415) 555-0186");
+    assert_eq!(again["lockLines"], 1);
+    assert_no_browser_errors(&h, "compact launcher layout").await;
+}
+
+/// ldui-eq1e: Office's side panel passes no script and no call record (the
+/// page shows both elsewhere), so the compact panel is the numbers, Call and
+/// the recent calls -- and "Call again" still works with no record.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires release demo host (cargo xtask test-softphone)"]
+async fn workspace_compact_office_panel_is_numbers_call_and_recent_calls() {
+    let h = harness_at("/components/client-call-workspace").await;
+    begin_browser_error_capture(&h).await;
+    wait_for_selector(&h, ROOT).await;
+    click(&h, "#call-workspace-compact-office").await;
+    wait_for_selector(&h, "#client-call-workspace-demo[data-call-layout=compact]").await;
+    let rest = compact_snapshot(&h).await;
+    assert_eq!(rest["sections"], json!(["numbers", "history"]), "{rest}");
+    assert_eq!(rest["scriptOpen"], Value::Null);
+    assert_eq!(rest["call"]["text"], "Place call");
+    assert_eq!(rest["header"]["text"], "Open in phone system");
+
+    click(&h, "#client-call-workspace-demo [data-call-action=dial]").await;
+    click(&h, "#call-workspace-accept").await;
+    click(&h, "#call-workspace-finished").await;
+    let finished = compact_snapshot(&h).await;
+    assert_eq!(
+        finished["sections"],
+        json!(["status", "numbers", "history"]),
+        "{finished}"
+    );
+    assert_eq!(finished["lockLines"], 0);
+    assert_eq!(finished["afterCallLines"], 1);
+    assert_eq!(finished["call"]["text"], "Call again");
+    assert_eq!(finished["call"]["disabled"], false);
+
+    h.set_viewport(ViewportSize::new(375, 1600)).await.unwrap();
+    common::prepare_region_capture(&h, ROOT, ViewportSize::new(375, 1600)).await;
+    let profile = compact_profile(common::body_font_family(&h).await);
+    let report = ldui_audit::audit_page(
+        &h,
+        &profile,
+        &ldui_audit::SweepOptions {
+            mount_selector: ROOT.into(),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    common::assert_not_truncated(&report, "compact office panel");
+    println!("Compact office panel 375px audit: {report:#?}");
+    ldui_audit::verify("compact office panel", &report, &[]).unwrap();
+    std::fs::write(
+        "target/client-call-workspace-compact-office-375.png",
+        h.screenshot_bytes().await.unwrap(),
+    )
+    .unwrap();
+
+    click(
+        &h,
+        "#client-call-workspace-demo [data-call-action=start-another-call]",
+    )
+    .await;
+    let again = compact_snapshot(&h).await;
+    assert_eq!(again["host"]["last"], "StartAnotherCall");
+    assert_eq!(again["host"]["attempt"], "submitting");
+    assert_eq!(again["sections"], json!(["status", "numbers", "history"]));
+    assert_no_browser_errors(&h, "compact office panel").await;
 }
