@@ -507,6 +507,173 @@ async fn a_side_panel_sits_beside_the_table_and_an_empty_filter_frame_collapses(
     assert_no_browser_errors(&harness, "side panel and filter-frame collapse").await;
 }
 
+/// ldui-pt0x (Office op-zwrly): with a side panel, the aside is in its final
+/// place BEFORE the table mounts. 4iiz-Office No-Hire painted the Client
+/// Coordinator panel at x=243, then 215, while its table loaded, and only
+/// then moved it to x=1041 -- one 0.2016 layout shift -- because the status
+/// panel standing in for the table was a content-sized flex item.
+///
+/// `#snapshot-side` is measured loaded (the baseline), then in two states
+/// whose table is NOT mounted -- the initial load and an initial-load failure,
+/// the two content-sized panel shapes -- and loaded again. The aside's left
+/// edge must not move, the placeholder must sit in front of it at the table's
+/// width, and the slot must not overflow sideways. Each unmounted state first
+/// asserts that the table really is gone, so a pass cannot come from the
+/// table simply still being there. Deliberate break: drop the placeholder's
+/// `w-full` and the aside lands just right of the status sentence, hundreds
+/// of pixels left of the baseline.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-snapshot-table-page-filter-actions)"]
+async fn a_side_panel_is_in_its_final_place_before_the_table_mounts() {
+    use pixelproof_web::ViewportSize;
+
+    const TABLE: &str = "#snapshot-side [data-snapshot-page-slot=\"table\"] [data-entity-table]";
+
+    async fn geometry(harness: &pixelproof_web::Harness) -> Value {
+        eval_json(
+            harness,
+            r#"(() => {
+                const slot = document.querySelector('#snapshot-side [data-snapshot-page-slot="table"]');
+                const aside = slot.querySelector(':scope > [data-snapshot-page-slot="side-panel"]');
+                const placeholder = slot.querySelector(':scope > [data-snapshot-page-table-placeholder]');
+                const table = slot.querySelector(':scope > [data-entity-table]');
+                const lead = placeholder ?? table;
+                const a = aside.getBoundingClientRect();
+                const l = lead ? lead.getBoundingClientRect() : null;
+                return {
+                    table: table !== null,
+                    placeholder: placeholder !== null,
+                    placeholderCount: document
+                        .querySelectorAll('[data-snapshot-page-table-placeholder]').length,
+                    panel: placeholder
+                        ?.querySelector(':scope > [data-page-state-panel]')
+                        ?.getAttribute('data-page-state-panel') ?? null,
+                    placeholderAriaHidden: placeholder?.getAttribute('aria-hidden') ?? null,
+                    leadBeforeAside: lead
+                        ? (lead.compareDocumentPosition(aside) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
+                        : null,
+                    asideVisible: aside.checkVisibility({ visibilityProperty: true }),
+                    asideLeft: a.left,
+                    leadWidth: l ? l.width : null,
+                    sameRow: l ? Math.abs(l.top - a.top) < 1 : null,
+                    slotOverflow: slot.scrollWidth - slot.clientWidth,
+                };
+            })()"#,
+        )
+        .await
+    }
+
+    let harness = harness_at("/components/snapshot-table-page-filter-actions").await;
+    begin_browser_error_capture(&harness).await;
+    harness
+        .set_viewport(ViewportSize::new(1440, 900))
+        .await
+        .expect("set a viewport wide enough for lg:flex-row");
+    wait_for_selector(&harness, TABLE).await;
+
+    let loaded = geometry(&harness).await;
+    assert_eq!(
+        loaded["table"],
+        json!(true),
+        "baseline: the table is mounted: {loaded}"
+    );
+    assert_eq!(
+        loaded["placeholder"],
+        json!(false),
+        "a mounted table needs no placeholder: {loaded}"
+    );
+    assert_eq!(loaded["placeholderCount"], json!(0), "{loaded}");
+    assert_eq!(loaded["asideVisible"], json!(true), "{loaded}");
+    assert_eq!(
+        loaded["sameRow"],
+        json!(true),
+        "baseline is the lg row: {loaded}"
+    );
+    let baseline_left = loaded["asideLeft"].as_f64().expect("aside left");
+    let baseline_width = loaded["leadWidth"].as_f64().expect("table width");
+
+    for (button, slug) in [
+        ("side-state-loading", "initial-loading"),
+        ("side-state-failed", "initial-error"),
+    ] {
+        click(&harness, &format!("[data-testid=\"{button}\"]")).await;
+        wait_for_selector(
+            &harness,
+            &format!(
+                "#snapshot-side [data-snapshot-page-table-placeholder] [data-page-state-panel=\"{slug}\"]"
+            ),
+        )
+        .await;
+        let unmounted = geometry(&harness).await;
+        assert_eq!(
+            unmounted["table"],
+            json!(false),
+            "{slug}: the table must really be unmounted, or this proves nothing: {unmounted}"
+        );
+        assert_eq!(unmounted["placeholder"], json!(true), "{slug}: {unmounted}");
+        assert_eq!(
+            unmounted["panel"],
+            json!(slug),
+            "{slug}: the placeholder holds the state panel: {unmounted}"
+        );
+        assert_eq!(
+            unmounted["placeholderAriaHidden"],
+            json!(null),
+            "{slug}: the placeholder holds a live status; aria-hidden would silence it: {unmounted}"
+        );
+        assert_eq!(
+            unmounted["placeholderCount"],
+            json!(1),
+            "{slug}: only the side-panel page reserves the table's place: {unmounted}"
+        );
+        assert_eq!(
+            unmounted["leadBeforeAside"],
+            json!(true),
+            "{slug}: the placeholder stands in front of the aside: {unmounted}"
+        );
+        assert_eq!(
+            unmounted["asideVisible"],
+            json!(true),
+            "{slug}: {unmounted}"
+        );
+        assert_eq!(unmounted["sameRow"], json!(true), "{slug}: {unmounted}");
+        let left = unmounted["asideLeft"].as_f64().expect("aside left");
+        assert!(
+            (left - baseline_left).abs() < 1.0,
+            "{slug}: the aside must already be where the table will leave it \
+             (loaded x={baseline_left}): {unmounted}"
+        );
+        let width = unmounted["leadWidth"].as_f64().expect("placeholder width");
+        assert!(
+            (width - baseline_width).abs() < 1.0,
+            "{slug}: the placeholder takes the table's width (loaded {baseline_width}): {unmounted}"
+        );
+        assert!(
+            unmounted["slotOverflow"]
+                .as_f64()
+                .is_some_and(|overflow| overflow <= 0.0),
+            "{slug}: reserving the place must not overflow the slot: {unmounted}"
+        );
+    }
+
+    click(&harness, "[data-testid=\"side-state-loaded\"]").await;
+    wait_for_selector(&harness, TABLE).await;
+    let reloaded = geometry(&harness).await;
+    assert_eq!(reloaded["table"], json!(true), "{reloaded}");
+    assert_eq!(reloaded["placeholder"], json!(false), "{reloaded}");
+    let left = reloaded["asideLeft"].as_f64().expect("aside left");
+    assert!(
+        (left - baseline_left).abs() < 1.0,
+        "the table mounting must not move the aside (loaded x={baseline_left}): {reloaded}"
+    );
+
+    assert_no_browser_errors(
+        &harness,
+        "side panel holds its place before the table mounts",
+    )
+    .await;
+}
+
 /// ldui-8ia5 (4iiz-Office /no-hires/, measured on 4671d75): a `filters` slot
 /// whose ONLY child is a FilterBar that collapsed itself still spent a row
 /// gap -- two gaps between the dataset select and the table, not one.

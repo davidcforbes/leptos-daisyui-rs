@@ -758,6 +758,30 @@ pub fn SnapshotTablePageFilterActionsFixture() -> impl IntoView {
         initial
     }
 
+    // ldui-pt0x: two states in which `#snapshot-side`'s table is NOT mounted,
+    // one per content-sized panel shape (the status alert and the error
+    // alert), so the lane can prove the side panel already sits where the
+    // table will leave it. The loading request is never completed on purpose.
+    fn loading_state() -> State {
+        let mut initial = State::new();
+        let _pending = initial
+            .start_request("office-mx".to_owned())
+            .expect("initial side-panel loading request");
+        initial
+    }
+
+    fn failed_state() -> State {
+        let mut initial = State::new();
+        let request = initial
+            .start_request("office-mx".to_owned())
+            .expect("initial side-panel failing request");
+        assert_eq!(
+            initial.fail(request, "Dataset service unavailable.".to_owned()),
+            SnapshotTransitionDisposition::Applied
+        );
+        initial
+    }
+
     fn selector_config() -> SnapshotDatasetSelectorConfig<String> {
         SnapshotDatasetSelectorConfig::new(
             "Office",
@@ -912,6 +936,24 @@ pub fn SnapshotTablePageFilterActionsFixture() -> impl IntoView {
                     on_click=Callback::new(move |_| plain_state.set(empty_state()))
                 >
                     "Empty plain snapshot"
+                </Button>
+                <Button
+                    attr:data-testid="side-state-loading"
+                    on_click=Callback::new(move |_| side_state.set(loading_state()))
+                >
+                    "Side panel page: loading"
+                </Button>
+                <Button
+                    attr:data-testid="side-state-failed"
+                    on_click=Callback::new(move |_| side_state.set(failed_state()))
+                >
+                    "Side panel page: load failed"
+                </Button>
+                <Button
+                    attr:data-testid="side-state-loaded"
+                    on_click=Callback::new(move |_| side_state.set(seeded_state()))
+                >
+                    "Side panel page: loaded"
                 </Button>
                 <Button
                     attr:data-testid="actions-save-dirty"

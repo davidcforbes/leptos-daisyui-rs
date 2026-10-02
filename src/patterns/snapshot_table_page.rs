@@ -4,7 +4,7 @@ use super::{
     ActionFeedback, ActionFeedbackModel, ActionFeedbackTexts, ActiveFilterChip, DatasetOption,
     DatasetSelector, DatasetSelectorTexts, FilterBar, FilterBarTexts, FilterResultSummary,
     LocalResultSummary, PageStatePanel, PageStatePanelTexts, SnapshotDefaultSave,
-    SnapshotLocalRowProjection, SnapshotTablePhase, SnapshotTableState,
+    SnapshotLocalRowProjection, SnapshotRenderDecision, SnapshotTablePhase, SnapshotTableState,
 };
 use crate::components::{
     EntityColumnChooserTrigger, EntityColumnFilters, EntityColumns, EntityCompactRow, EntityRowKey,
@@ -73,6 +73,57 @@ fn snapshot_table_slot_class(
         (class, false) => class,
         (Some(_), true) => Some("flex min-h-0 flex-1 flex-col gap-4 lg:flex-row"),
         (None, true) => Some("flex flex-col gap-4 lg:flex-row"),
+    }
+}
+
+/// What the table slot holds in front of an optional side panel
+/// (ldui-pt0x, Office op-zwrly).
+///
+/// With a side panel the slot is a row and the `<aside>` comes AFTER the
+/// table. Until the table mounts, `Show` renders the replacement
+/// [`PageStatePanel`] there instead, and that panel is a content-sized flex
+/// item -- a daisyUI alert sets no width, so it is as wide as its one
+/// sentence -- so the aside painted just right of the sentence and jumped to
+/// the right edge when the table mounted. 4iiz-Office No-Hire measured the
+/// Client Coordinator panel at x=243, then 215, then 1041 once the table
+/// arrived: one 0.2016 layout shift. Every replacement state (never loaded,
+/// initial loading, initial error, empty dataset, no local results, expired,
+/// forbidden) therefore renders its panel inside a placeholder sized like
+/// the table, so the aside is in its final place from the first frame.
+/// Without a side panel nothing follows the table, and the panel stays bare
+/// exactly as before.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SnapshotTableSlotLead {
+    /// The table is mounted; a retained notice, if any, overlays it.
+    Table,
+    /// No side panel: the replacement panel renders bare, as it always has.
+    Panel,
+    /// A side panel follows: the replacement panel renders inside the
+    /// [`SNAPSHOT_TABLE_PLACEHOLDER_CLASS`] placeholder.
+    ReservedPanel,
+}
+
+/// The placeholder's whole class: `EntityTable`'s root sizing, which is
+/// `w-full min-w-0` in both its natural and its viewport-fit class. In the
+/// `lg:flex-row` slot it therefore takes the table's flex basis and shrinks
+/// the same way beside the `shrink-0` aside, so the aside lands exactly where
+/// the table will leave it. Nothing else -- no padding, border, background or
+/// overflow -- so it paints nothing and adds no scrollbar. It is a role-less
+/// `div` with no text of its own, and it is NOT `aria-hidden`: the panel it
+/// holds is a live status that must still be announced.
+const SNAPSHOT_TABLE_PLACEHOLDER_CLASS: &str = "w-full min-w-0";
+
+/// The one decision both halves of the table slot's `Show` read: `when`
+/// mounts the table only for [`SnapshotTableSlotLead::Table`], and the
+/// fallback wraps the panel only for [`SnapshotTableSlotLead::ReservedPanel`].
+fn snapshot_table_slot_lead(
+    decision: SnapshotRenderDecision,
+    has_side_panel: bool,
+) -> SnapshotTableSlotLead {
+    match (decision.table_mounted(), has_side_panel) {
+        (true, _) => SnapshotTableSlotLead::Table,
+        (false, false) => SnapshotTableSlotLead::Panel,
+        (false, true) => SnapshotTableSlotLead::ReservedPanel,
     }
 }
 
@@ -530,6 +581,11 @@ pub fn SnapshotTablePage<R, V, E, M, K>(
     /// its rail leaves a dead column (4iiz-Office measured 40px and 276px).
     /// It scrolls internally rather than stretching the row, so a tall panel
     /// cannot push a `fill_parent` table out of its height budget.
+    ///
+    /// Until the table mounts (loading, a load error, an empty or filtered-out
+    /// dataset, an access panel) a placeholder sized like the table holds its
+    /// place, so the column is where it will stay from the first frame
+    /// instead of painting at the left edge and jumping right (ldui-pt0x).
     #[prop(optional)]
     side_panel: Option<Children>,
     /// Controlled local-filter utility content.
@@ -746,6 +802,45 @@ where
     // overflowing it.
     let has_side_panel = side_panel.is_some();
     let table_slot_class = snapshot_table_slot_class(table_slot_class, has_side_panel);
+    // ldui-pt0x: both halves of the table slot's `Show` read
+    // `snapshot_table_slot_lead`, so "mount the table" and "hold its place in
+    // front of a side panel" come from one decision.
+    let table_mounted = move || {
+        state.with(|state| {
+            let summary = effective_local_result.get();
+            let decision = state.view(summary.as_ref()).render_decision();
+            snapshot_table_slot_lead(decision, has_side_panel) == SnapshotTableSlotLead::Table
+        })
+    };
+    let table_fallback = move || {
+        state.with(|state| {
+            let summary = effective_local_result.get();
+            let view = state.view(summary.as_ref());
+            let decision = view.render_decision();
+            let panel = decision.panel().map(|kind| {
+                view! {
+                    <PageStatePanel
+                        kind=kind
+                        texts=panel_texts
+                        nostrip:on_retry=on_retry
+                        detail=Signal::stored(view.load_error().map(ToString::to_string))
+                    />
+                }
+            });
+            match snapshot_table_slot_lead(decision, has_side_panel) {
+                SnapshotTableSlotLead::ReservedPanel => view! {
+                    <div
+                        class=SNAPSHOT_TABLE_PLACEHOLDER_CLASS
+                        data-snapshot-page-table-placeholder="true"
+                    >
+                        {panel}
+                    </div>
+                }
+                .into_any(),
+                SnapshotTableSlotLead::Panel | SnapshotTableSlotLead::Table => panel.into_any(),
+            }
+        })
+    };
 
     view! {
         <section
@@ -870,25 +965,9 @@ where
                         }
                     })
                 })}
-                <Show
-                    when=move || state.with(|state| {
-                        let summary = effective_local_result.get();
-                        state.view(summary.as_ref()).render_decision().table_mounted()
-                    })
-                    fallback=move || state.with(|state| {
-                        let summary = effective_local_result.get();
-                        let view = state.view(summary.as_ref());
-                        let decision = view.render_decision();
-                        decision.panel().map(|kind| view! {
-                            <PageStatePanel
-                                kind=kind
-                                texts=panel_texts
-                                nostrip:on_retry=on_retry
-                                detail=Signal::stored(view.load_error().map(ToString::to_string))
-                            />
-                        })
-                    })
-                >
+                // ldui-pt0x: the fallback holds the table's place in front of
+                // a side panel (see `snapshot_table_slot_lead`).
+                <Show when=table_mounted fallback=table_fallback>
                     {entity_table.with_value(|config| {
                         // `ChildrenFn` is reusable (`Arc<dyn Fn() -> AnyView>`)
                         // because this whole block can re-run whenever `Show`
@@ -956,7 +1035,8 @@ mod tests {
     use super::*;
     use crate::components::{EntityTablePreferenceOwnership, EntityTablePreferences};
     use crate::patterns::{
-        FilterSchema, SnapshotDefaultSaveState, SnapshotViewDefaults, filter_result_summary,
+        FilterSchema, PageStatePanelKind, SnapshotAccess, SnapshotData, SnapshotDefaultSaveState,
+        SnapshotTransitionDisposition, SnapshotViewDefaults, filter_result_summary,
     };
 
     #[derive(Clone)]
@@ -1259,6 +1339,170 @@ mod tests {
             let (root, slot) = snapshot_page_layout(fit.as_ref());
             assert_eq!(root, "flex w-full min-w-0 flex-col gap-4");
             assert!(slot.is_none());
+        }
+    }
+
+    /// ldui-pt0x (Office op-zwrly): EVERY state in which the table is not
+    /// mounted holds the table's place in front of a side panel, so the
+    /// aside never paints beside a content-sized status sentence and then
+    /// jumps right; a mounted table needs no placeholder; and without a side
+    /// panel the replacement panel stays bare, exactly as before. The
+    /// decisions come from real controller states, not hand-built ones, and
+    /// the render path is checked to read this same function.
+    #[test]
+    fn a_side_panel_row_holds_the_tables_place_in_every_unmounted_state() {
+        type State = SnapshotTableState<Row, &'static str, &'static str, (), &'static str>;
+
+        fn displaying(rows: Vec<Row>) -> State {
+            let mut state = State::new();
+            let request = state.start_request("mx").expect("first request");
+            let count = rows.len();
+            let data = SnapshotData::new("mx", Rc::new(rows), "r1", count, None)
+                .expect("complete snapshot");
+            assert_eq!(
+                state.complete(request, data),
+                SnapshotTransitionDisposition::Applied
+            );
+            state
+        }
+
+        fn decide(state: &State, filtered: Option<usize>) -> SnapshotRenderDecision {
+            let summary = filtered.and_then(|count| state.local_result_summary(count));
+            state.view(summary.as_ref()).render_decision()
+        }
+
+        let never_loaded = State::new();
+        let mut initial_loading = State::new();
+        let _pending = initial_loading.start_request("mx").expect("first request");
+        let mut initial_error = State::new();
+        let failing = initial_error.start_request("mx").expect("first request");
+        assert_eq!(
+            initial_error.fail(failing, "down"),
+            SnapshotTransitionDisposition::Applied
+        );
+        let loaded = displaying(vec![Row, Row]);
+        let empty = displaying(Vec::new());
+        let mut expired = displaying(vec![Row]);
+        expired.replace_access(SnapshotAccess::Expired);
+        let mut forbidden = displaying(vec![Row]);
+        forbidden.replace_access(SnapshotAccess::Forbidden);
+        let mut replacing = displaying(vec![Row]);
+        let _replacement = replacing.start_request("us").expect("replacement request");
+        let mut retained_error = displaying(vec![Row]);
+        let replacement = retained_error
+            .start_request("us")
+            .expect("replacement request");
+        assert_eq!(
+            retained_error.fail(replacement, "down"),
+            SnapshotTransitionDisposition::Applied
+        );
+
+        let unmounted = [
+            (decide(&never_loaded, None), PageStatePanelKind::NeverLoaded),
+            (
+                decide(&initial_loading, None),
+                PageStatePanelKind::InitialLoading,
+            ),
+            (
+                decide(&initial_error, None),
+                PageStatePanelKind::InitialError,
+            ),
+            (decide(&empty, Some(0)), PageStatePanelKind::EmptyDataset),
+            (decide(&loaded, Some(0)), PageStatePanelKind::NoLocalResults),
+            (decide(&expired, None), PageStatePanelKind::Expired),
+            (decide(&forbidden, None), PageStatePanelKind::Forbidden),
+        ];
+        for (decision, kind) in unmounted {
+            assert_eq!(decision.panel(), Some(kind), "the fixture reaches {kind:?}");
+            assert!(!decision.table_mounted(), "{kind:?} replaces the table");
+            assert_eq!(
+                snapshot_table_slot_lead(decision, true),
+                SnapshotTableSlotLead::ReservedPanel,
+                "{kind:?} with a side panel must hold the table's place, or the aside \
+                 paints beside the status sentence and jumps right when the table mounts"
+            );
+            assert_eq!(
+                snapshot_table_slot_lead(decision, false),
+                SnapshotTableSlotLead::Panel,
+                "{kind:?} without a side panel renders the bare panel, exactly as before"
+            );
+        }
+
+        // A mounted table -- whole, locally filtered, authoritatively empty
+        // with no local proof, or under a retained notice -- needs no
+        // placeholder, with or without a side panel.
+        for decision in [
+            decide(&loaded, None),
+            decide(&loaded, Some(1)),
+            decide(&empty, None),
+            decide(&replacing, None),
+            decide(&retained_error, None),
+        ] {
+            assert!(decision.table_mounted(), "{decision:?}");
+            for has_side_panel in [true, false] {
+                assert_eq!(
+                    snapshot_table_slot_lead(decision, has_side_panel),
+                    SnapshotTableSlotLead::Table,
+                    "{decision:?}, side panel {has_side_panel}"
+                );
+            }
+        }
+
+        // Both halves of the `Show` read this decision. Deliberate break:
+        // restore the old inline `when`/`fallback` and this fails.
+        let production = include_str!("snapshot_table_page.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .expect("the production half");
+        assert_eq!(
+            production
+                .matches(concat!(
+                    "snapshot_table_slot_lead(",
+                    "decision, has_side_panel)"
+                ))
+                .count(),
+            2,
+            "the table slot's `when` and `fallback` must both read snapshot_table_slot_lead"
+        );
+        assert!(production.contains(concat!(
+            "<Show when=table_mounted ",
+            "fallback=table_fallback>"
+        )));
+    }
+
+    /// ldui-pt0x: the placeholder takes the table's flex basis -- exactly
+    /// the sizing of `EntityTable`'s root -- and nothing that paints or
+    /// scrolls, so reserving the place cannot move the final geometry. If
+    /// either EntityTable root class stops being `w-full min-w-0`, the
+    /// placeholder no longer matches the table it stands in for.
+    #[test]
+    fn the_table_placeholder_is_sized_like_the_entity_table_root_and_paints_nothing() {
+        let placeholder: Vec<&str> = SNAPSHOT_TABLE_PLACEHOLDER_CLASS
+            .split_ascii_whitespace()
+            .collect();
+        assert_eq!(placeholder, ["w-full", "min-w-0"]);
+
+        let source = include_str!("../components/entity_table/component.rs");
+        let start = source
+            .find("let root_class = if viewport_fit_enabled")
+            .expect("EntityTable chooses its root class by viewport fit");
+        let choice = &source[start..];
+        let choice = &choice[..choice.find("};").expect("the end of the root-class choice")];
+        let roots: Vec<&str> = choice
+            .split("merge_classes!(\"")
+            .skip(1)
+            .map(|rest| &rest[..rest.find('"').expect("a closed class literal")])
+            .collect();
+        assert_eq!(roots.len(), 2, "natural and viewport-fit roots: {roots:?}");
+        for root in roots {
+            for required in &placeholder {
+                assert!(
+                    root.split_ascii_whitespace()
+                        .any(|class| class == *required),
+                    "EntityTable root `{root}` lost `{required}`; the side-panel placeholder \
+                     must keep the table's sizing or the aside moves when the table mounts"
+                );
+            }
         }
     }
 }
