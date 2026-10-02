@@ -1428,3 +1428,104 @@ fn a_watchdog_failure_never_renders_as_the_actor_pressing_stop() {
         "and the two cancels stay distinguishable"
     );
 }
+
+// ldui-pe34 (Office op-8bkqp): `EngineHeaderMode::WhenNotable` hides the idle
+// "<engine> · Ready to answer" card a host heading already repeats, and only
+// that: every honesty state, refusal, notice and unfinished turn still shows.
+fn record_in(lifecycle: AttemptLifecycle) -> TurnRecord {
+    TurnRecord {
+        id: "t".into(),
+        engine_id: "claude-code".into(),
+        lifecycle,
+        usage: None,
+        tokens_per_sec: None,
+        evidence: None,
+        outcome: None,
+        notices: vec![],
+    }
+}
+
+fn reason() -> AssistantReason {
+    AssistantReason {
+        code: "engine_error".into(),
+        message: "the engine stopped".into(),
+    }
+}
+
+#[test]
+fn an_idle_header_is_not_notable_and_every_honesty_state_is() {
+    // Ready and idle: nothing the host's own heading does not already say.
+    let (ready, _) = honesty_for(false, None, None, false);
+    assert_eq!(ready, "ready");
+    assert!(!header_is_notable(ready, None, false, false, false));
+    // A turn the actor canceled settles back to quiet.
+    let canceled = record_in(AttemptLifecycle::Canceled { discarded: false });
+    assert!(!header_is_notable(
+        ready,
+        Some(&canceled),
+        false,
+        false,
+        false
+    ));
+
+    // A refusal carries its single next step.
+    assert!(header_is_notable(ready, None, true, false, false));
+    // A denied tier, the watchdog, a failed turn: the honesty verdicts.
+    let (denied, _) = honesty_for(true, None, None, false);
+    assert!(header_is_notable(denied, None, false, false, false));
+    let (timed_out, _) = honesty_for(false, None, None, true);
+    assert!(header_is_notable(timed_out, None, false, false, false));
+    let failed = record_in(AttemptLifecycle::Failed { reason: reason() });
+    let (broke, _) = honesty_for(false, None, Some(&failed), false);
+    assert!(header_is_notable(broke, Some(&failed), false, false, false));
+    // An unready active engine.
+    let (unready, _) = honesty_for(
+        false,
+        Some(&AvailabilityReasonCode::NotSignedIn),
+        None,
+        false,
+    );
+    assert!(header_is_notable(unready, None, false, false, false));
+    // A turn in flight, or ended without an answer while honesty reads ready.
+    for lifecycle in [
+        AttemptLifecycle::Admitted,
+        AttemptLifecycle::Queued,
+        AttemptLifecycle::Running,
+        AttemptLifecycle::Validating,
+        AttemptLifecycle::Denied { reason: reason() },
+        AttemptLifecycle::Interrupted { reason: reason() },
+        AttemptLifecycle::Unknown("later".into()),
+    ] {
+        let record = record_in(lifecycle);
+        assert!(
+            header_is_notable(ready, Some(&record), false, false, false),
+            "{:?}",
+            record.lifecycle
+        );
+    }
+    // A notice, and an engine the picker cannot ask.
+    assert!(header_is_notable(ready, None, false, true, false));
+    assert!(header_is_notable(ready, None, false, false, true));
+
+    assert_eq!(EngineHeaderMode::default(), EngineHeaderMode::Always);
+    assert_eq!(EngineHeaderMode::WhenNotable.as_str(), "when-notable");
+}
+
+/// A completed turn settles back to quiet too: usage alone is not notable.
+#[cfg(feature = "test-mode")]
+#[test]
+fn a_completed_turn_is_not_notable() {
+    let done = turn_record(None, "hello");
+    assert!(
+        matches!(done.lifecycle, AttemptLifecycle::Completed(_)),
+        "{:?}",
+        done.lifecycle
+    );
+    assert!(!header_is_notable(
+        "ready",
+        Some(&done),
+        false,
+        false,
+        false
+    ));
+}

@@ -21,8 +21,8 @@ use client_snapshot_list::ClientSnapshotListDemo;
 use leptos::mount::mount_to_body;
 use leptos::prelude::*;
 use leptos_daisyui_rs::patterns::{
-    AiChatWorkspaceLayout, AvailabilityReasonCode, ChatWorkspaceFault, FixtureClock,
-    SEED_CHAT_NOW_MS,
+    AiChatWorkspaceLayout, AvailabilityReasonCode, ChatWorkspaceFault, EngineHeaderMode,
+    FixtureClock, SEED_CHAT_NOW_MS,
 };
 use leptos_daisyui_rs::test_mode;
 use leptos_daisyui_rs::tokens::{UiAnimationsPreamble, UiTokensPreamble};
@@ -117,6 +117,7 @@ fn main() {
         let ai_chat_cancel = ai_chat_path().ends_with("/ai-chat-fixture-cancel");
         let ai_chat_knowledge = ai_chat_path().ends_with("/ai-chat-fixture-knowledge");
         let ai_chat_rail = ai_chat_path().ends_with("/ai-chat-fixture-rail");
+        let ai_chat_when_notable = ai_chat_path().ends_with("/ai-chat-fixture-when-notable");
         let ai_chat_fixture = ai_chat_path().ends_with("/ai-chat-fixture");
         let helpdesk_fixture = web_sys::window()
             .and_then(|window| window.location().pathname().ok())
@@ -317,6 +318,28 @@ fn main() {
                                 <ai_chat_fixture::AiChatFixture case="workbench" oracle=false />
                             </div>
                         </div>
+                    }
+                        .into_any()
+                } else if ai_chat_when_notable {
+                    // ldui-pe34: THREE workspaces, each the others' control.
+                    // `quiet` hides its idle engine card and must show it
+                    // again for a failed turn; `always` is the unchanged
+                    // default, so a hidden header here is the mode and not
+                    // the build; `denied` proves a not-enabled tier is never
+                    // hidden by the same mode.
+                    view! {
+                        <ai_chat_fixture::AiChatFixture
+                            case="quiet"
+                            scripted=true
+                            engine_header=EngineHeaderMode::WhenNotable
+                        />
+                        <ai_chat_fixture::AiChatFixture case="always" oracle=false />
+                        <ai_chat_fixture::AiChatFixture
+                            case="denied"
+                            oracle=false
+                            fault=ChatWorkspaceFault::TierDisabled
+                            engine_header=EngineHeaderMode::WhenNotable
+                        />
                     }
                         .into_any()
                 } else if ai_chat_fixture {

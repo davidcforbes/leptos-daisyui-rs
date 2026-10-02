@@ -249,6 +249,57 @@ pub fn header_failure_kind(record: Option<&TurnRecord>, timed_out: bool) -> Opti
     record.and_then(|r| failure_kind(r).map(str::to_owned))
 }
 
+/// When the engine header renders (ldui-pe34, Office op-8bkqp).
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum EngineHeaderMode {
+    /// Always (the original header).
+    #[default]
+    Always,
+    /// Only while it has something to say ([`header_is_notable`]). For a host
+    /// whose own heading already names the engine, so an idle
+    /// `<engine> · Ready to answer` card only repeats it.
+    WhenNotable,
+}
+
+impl EngineHeaderMode {
+    /// Stable DOM and diagnostic identifier.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Always => "always",
+            Self::WhenNotable => "when-notable",
+        }
+    }
+}
+
+/// Whether the header has anything to say beyond the engine's name and
+/// "Ready to answer". It does for every non-ready honesty state (a denied
+/// tier, an unready active engine, the watchdog, a failed or unavailable
+/// turn), a refusal with its next step, a turn still in flight or ended
+/// without an answer (denied, interrupted, unknown), declined limitations, a
+/// notice, and any engine the picker cannot ask. It does not for an idle
+/// header, a completed turn or a turn the actor canceled: usage and budget
+/// alone are not notable.
+pub fn header_is_notable(
+    honesty_state: &str,
+    record: Option<&TurnRecord>,
+    refusal: bool,
+    notices: bool,
+    unready_engines: bool,
+) -> bool {
+    honesty_state != "ready"
+        || refusal
+        || notices
+        || unready_engines
+        || record.is_some_and(|r| {
+            !declined_limitations(r).is_empty()
+                || !matches!(
+                    r.lifecycle,
+                    AttemptLifecycle::Completed(_) | AttemptLifecycle::Canceled { .. }
+                )
+        })
+}
+
 /// The workspace's engine status, honesty strip, usage line and refusal.
 #[component]
 pub fn EngineHeader(
@@ -284,6 +335,10 @@ pub fn EngineHeader(
     /// Invoked when the actor presses the refusal's single next-step button.
     #[prop(into)]
     on_refusal_action: Callback<RefusalNextAction>,
+    /// [`EngineHeaderMode::WhenNotable`] hides the header while it has nothing
+    /// to say. Hidden, not unmounted: its `data-ai-chat-*` hooks stay readable.
+    #[prop(optional, into)]
+    mode: Signal<EngineHeaderMode>,
 ) -> impl IntoView {
     let status_id = move || {
         turn.get()
@@ -385,10 +440,22 @@ pub fn EngineHeader(
             })
             .collect::<Vec<_>>()
     };
+    let notable = move || {
+        header_is_notable(
+            honesty().0,
+            turn.get().as_ref(),
+            refusal.with(Option::is_some),
+            notices.with(|n| !n.is_empty()),
+            !unready().is_empty(),
+        )
+    };
 
     view! {
         <header
             class="lds-aichat-workspace-header flex flex-col gap-2 rounded-box border border-base-300 bg-base-100 p-4"
+            class:hidden=move || mode.get() == EngineHeaderMode::WhenNotable && !notable()
+            data-ai-chat-header-mode=move || mode.get().as_str()
+            data-ai-chat-header-notable=move || notable().to_string()
             data-ai-chat-workspace-header=""
             data-ai-chat-turn-status=status_id
             data-ai-chat-honesty=move || honesty().0

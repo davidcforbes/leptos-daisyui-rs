@@ -2891,3 +2891,78 @@ async fn composer_label_is_the_substituted_placeholder_not_the_template() {
     assert_eq!(composer["labels"], json!(1), "{composer}");
     assert_no_browser_errors(&h, "ai chat composer label").await;
 }
+
+// ── ldui-pe34 ───────────────────────────────────────────────────────────────
+
+const PAGE_WHEN_NOTABLE: &str = "/ai-chat-fixture-when-notable";
+
+/// One workspace's engine header: whether it is on screen, and the honesty
+/// hooks it publishes either way.
+async fn engine_header_seen(h: &pixelproof_web::Harness, root: &str) -> Value {
+    eval_json(
+        h,
+        &format!(
+            r#"(() => {{
+                const header = document.querySelector('{root} [data-ai-chat-workspace-header]');
+                if (!header) return null;
+                return {{
+                    shown: header.checkVisibility({{visibilityProperty: true}}),
+                    mode: header.getAttribute('data-ai-chat-header-mode'),
+                    notable: header.getAttribute('data-ai-chat-header-notable'),
+                    honesty: header.getAttribute('data-ai-chat-honesty'),
+                }};
+            }})()"#
+        ),
+    )
+    .await
+}
+
+/// `EngineHeaderMode::WhenNotable` hides the idle "<engine> · Ready to answer"
+/// card a host heading already repeats (Office op-8bkqp), and nothing else: a
+/// failed turn and a denied tier still show it. Three workspaces on one
+/// document are each other's controls.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-ai-chat)"]
+async fn when_notable_hides_only_the_idle_engine_header() {
+    let h = harness_at(PAGE_WHEN_NOTABLE).await;
+    begin_browser_error_capture(&h).await;
+    let quiet = case_root("quiet");
+    let always = case_root("always");
+    let denied = case_root("denied");
+    ready_at(&h, &quiet).await;
+    ready_at(&h, &always).await;
+    wait_for_selector(&h, &format!("{denied} [data-ai-chat-workspace-header]")).await;
+
+    // Idle and ready: hidden in WhenNotable, still mounted with its hooks.
+    let idle = engine_header_seen(&h, &quiet).await;
+    assert_eq!(
+        idle,
+        json!({"shown": false, "mode": "when-notable", "notable": "false", "honesty": "ready"}),
+        "{idle}"
+    );
+    // The default on the same document and build: the card is still there.
+    let control = engine_header_seen(&h, &always).await;
+    assert_eq!(
+        control,
+        json!({"shown": true, "mode": "always", "notable": "false", "honesty": "ready"}),
+        "{control}"
+    );
+    // A denied tier is never hidden by the same mode.
+    let tier = engine_header_seen(&h, &denied).await;
+    assert_eq!(tier["shown"], json!(true), "{tier}");
+    assert_eq!(tier["honesty"], json!("not_enabled"), "{tier}");
+
+    // A turn that completes settles back to quiet...
+    ask(&h, &quiet, "hello").await;
+    let done = engine_header_seen(&h, &quiet).await;
+    assert_eq!(done["shown"], json!(false), "{done}");
+    // ...and one that breaks shows the header with its honest verdict.
+    ask(&h, &quiet, "error").await;
+    let broke = engine_header_seen(&h, &quiet).await;
+    assert_eq!(
+        broke,
+        json!({"shown": true, "mode": "when-notable", "notable": "true", "honesty": "failed"}),
+        "{broke}"
+    );
+    assert_no_browser_errors(&h, "engine header when notable").await;
+}

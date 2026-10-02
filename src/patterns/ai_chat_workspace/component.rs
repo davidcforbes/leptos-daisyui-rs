@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use wasm_bindgen_futures::spawn_local;
 
 use super::backend::{ChatWorkspaceBackend, ChatWorkspaceErrorKind, WorkspaceRefusal};
-use super::engine_header::EngineHeader;
+use super::engine_header::{EngineHeader, EngineHeaderMode};
 use super::evidence_rail::EvidenceRail;
 use super::knowledge::{
     CorpusScope, KnowledgeSelection, KnowledgeSource, MemoryDraft, MemoryRefusal, RecallReceipt,
@@ -357,6 +357,14 @@ pub fn AiChatWorkspace(
     /// `true`.
     #[prop(optional, into, default = Signal::stored(true))]
     show_evidence_rail: Signal<bool>,
+    /// When the engine header renders (ldui-pe34, Office op-8bkqp).
+    /// [`EngineHeaderMode::Always`] (the default) is today's header.
+    /// [`EngineHeaderMode::WhenNotable`] is for a host whose own heading
+    /// already names the engine: the idle `<engine> · Ready to answer` card is
+    /// hidden, and every refusal, unready or failed state, notice and turn in
+    /// flight still shows it ([`super::header_is_notable`]).
+    #[prop(optional, into)]
+    engine_header: Signal<EngineHeaderMode>,
     /// Extra classes merged onto the root.
     #[prop(optional, into)]
     class: &'static str,
@@ -1041,6 +1049,7 @@ pub fn AiChatWorkspace(
                 notices=header_notices
                 texts=texts
                 on_refusal_action=refusal_action
+                mode=engine_header
             />
             <Show when=move || show_quick_actions.get()>
                 <QuickActionBar

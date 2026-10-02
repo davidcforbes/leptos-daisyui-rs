@@ -36,8 +36,8 @@ pub use active_filter_chips::{
 pub use ai_chat_workspace::{
     AiChatWorkspace, AiChatWorkspaceLayout, AiChatWorkspaceTexts, AvailabilityReasonCode,
     ChatPosture, ChatWorkspaceBackend, ChatWorkspaceError, ChatWorkspaceErrorKind, CodexLever,
-    CodexLevers, CorpusQueryMode, CorpusScope, EngineHeader, EvidenceRail, GroqTuning,
-    GroundingVerdict, IngestPhase, IngestStatus, KnowledgeDraft, KnowledgeSelection,
+    CodexLevers, CorpusQueryMode, CorpusScope, EngineHeader, EngineHeaderMode, EvidenceRail,
+    GroqTuning, GroundingVerdict, IngestPhase, IngestStatus, KnowledgeDraft, KnowledgeSelection,
     KnowledgeSource, KnowledgeSourceRail, MemoryDraft, MemoryRefusal, ModelSource,
     OfficeKnowledgeScope, ProviderCard, ProviderSettingsRows, ProviderTuning, QuickAction,
     QuickActionBar, ReasoningEffort, RecallCorpus, RecallHit, RecallReceipt, ReopenReason,
@@ -58,10 +58,11 @@ pub use ai_chat_workspace::{
     cancel_notice as ai_chat_cancel_notice, failure_kind as ai_chat_failure_kind,
     header_cancel_discarded as ai_chat_header_cancel_discarded,
     header_failure_kind as ai_chat_header_failure_kind,
-    header_outcome_id as ai_chat_header_outcome_id, honesty_for as ai_chat_honesty_for,
-    honesty_state_for_code as ai_chat_honesty_state_for_code, honesty_tone as ai_chat_honesty_tone,
-    is_terminal as ai_chat_turn_is_terminal, scope_label as ai_chat_scope_label,
-    scope_value as ai_chat_scope_value, settings_for as ai_chat_settings_for_card,
+    header_is_notable as ai_chat_header_is_notable, header_outcome_id as ai_chat_header_outcome_id,
+    honesty_for as ai_chat_honesty_for, honesty_state_for_code as ai_chat_honesty_state_for_code,
+    honesty_tone as ai_chat_honesty_tone, is_terminal as ai_chat_turn_is_terminal,
+    scope_label as ai_chat_scope_label, scope_value as ai_chat_scope_value,
+    settings_for as ai_chat_settings_for_card,
     watchdog_should_fire as ai_chat_watchdog_should_fire,
 };
 // `BackendCall` and `SEED_NOW_MS` are also the names `helpdesk` uses for its

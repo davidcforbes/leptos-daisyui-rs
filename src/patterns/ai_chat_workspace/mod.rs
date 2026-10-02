@@ -38,9 +38,10 @@ pub use component::{
     tick_turn_id, watchdog_should_fire,
 };
 pub use engine_header::{
-    EngineHeader, UsageFigures, WATCHDOG_FAILURE_KIND, cost_line, engine_is_metered,
-    header_cancel_discarded, header_failure_kind, header_outcome_id, honesty_for,
-    honesty_state_for_code, honesty_tone, usage_figures, usage_line,
+    EngineHeader, EngineHeaderMode, UsageFigures, WATCHDOG_FAILURE_KIND, cost_line,
+    engine_is_metered, header_cancel_discarded, header_failure_kind, header_is_notable,
+    header_outcome_id, honesty_for, honesty_state_for_code, honesty_tone, usage_figures,
+    usage_line,
 };
 pub use evidence::{GroundingVerdict, TurnEvidence};
 pub use evidence_rail::{EvidenceRail, citations_of, evidence_of, facts_of};
