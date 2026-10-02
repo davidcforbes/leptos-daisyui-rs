@@ -2810,8 +2810,13 @@ fn the_save_filter_dialog_closes_through_its_own_cancel_path() {
     // but no longer modal. The Modal tag must carry the controlled close,
     // and it must route to the same state the Cancel button clears.
     let source = include_str!("saved_filters_bar.rs");
-    let start = source.find("<Modal").expect("the Save Filter bar renders a Modal");
-    let tag_end = start + source[start..].find("<ModalBox").expect("the Modal wraps a ModalBox");
+    let start = source
+        .find("<Modal")
+        .expect("the Save Filter bar renders a Modal");
+    let tag_end = start
+        + source[start..]
+            .find("<ModalBox")
+            .expect("the Modal wraps a ModalBox");
     let tag = &source[start..tag_end];
     assert!(
         tag.contains("on_close_request=Callback::new(move |_| dialog_open.set(false))"),
