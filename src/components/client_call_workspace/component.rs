@@ -341,8 +341,11 @@ fn History(
     let history = Signal::derive(move || state.get().history.unwrap_or_default());
     let entries = Memo::new(move |_| history.get().entries);
     let heading_id = format!("{base_id}-history-heading");
+    // Bound before the view: the macro moves the heading's id before it
+    // evaluates the section's attributes.
+    let labelled_by = heading_id.clone();
     view! {
-        <section class="flex min-w-0 flex-col gap-2 [overflow-wrap:anywhere]" aria-labelledby=heading_id.clone() data-call-history="true">
+        <section class="flex min-w-0 flex-col gap-2 [overflow-wrap:anywhere]" aria-labelledby=labelled_by data-call-history="true">
             <h3 id=heading_id class="text-sm font-semibold">{move || texts.get().history}</h3>
             <Show when=move || history.get().loading>
                 <p role="status" class="text-sm text-base-content/75" data-call-history-loading="true">{move || texts.get().history_loading}</p>
