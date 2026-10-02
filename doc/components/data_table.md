@@ -552,7 +552,10 @@ accepted query and page; this UI neither cancels requests nor fetches data.
 
 Auto pauses while loading. Repeated measurements of the same accepted query
 and proposed size do not repeatedly request it; an explicit selection permits
-a retry. Size changes retain the existing offset page-one / cursor First reset
+a retry. An empty slice (a search that matches nothing) has no row to measure,
+so Auto keeps the row height it last measured at the same density instead of
+re-deriving from the 40px fallback (ldui-t6pb); only a table that has never
+rendered a row, or whose density changed, uses the fallback. Size changes retain the existing offset page-one / cursor First reset
 semantics. Unsupported page-size capabilities continue to fail closed.
 
 For consumers migrating from a numeric-only selector:
@@ -697,7 +700,9 @@ reload on every keystroke. The local narrowing applies only the filters and
 search the server has not applied yet (Office op-f6q0m): an applied filter can
 carry a server value that no cell holds, such as a status bucket, and
 re-applying it locally would empty the table. The narrowing ends when the host
-accepts a query. Navigation, sort, page-size and reset proposals are never
+accepts a query. `viewport_fit` neither measures nor proposes while a draft
+narrows the body (Office op-jxtxx): the narrowed rows are not the page the
+server will return, so Auto re-measures once the server's rows land. Navigation, sort, page-size and reset proposals are never
 silent, and every query builder resets the flag (`with_silent` applies last).
 The mode is meant for controlled query ownership (cursor pagination or
 `ServerTableQueryOwnership::Controlled`). The root carries
