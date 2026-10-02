@@ -2804,6 +2804,26 @@ fn the_empty_state_message_spans_the_selection_cell_too() {
 }
 
 #[test]
+fn the_save_filter_dialog_closes_through_its_own_cancel_path() {
+    // Office op-1wvpj: without on_close_request, Escape closes the native
+    // <dialog> while `dialog_open` stays true, leaving the dialog visible
+    // but no longer modal. The Modal tag must carry the controlled close,
+    // and it must route to the same state the Cancel button clears.
+    let source = include_str!("saved_filters_bar.rs");
+    let start = source.find("<Modal").expect("the Save Filter bar renders a Modal");
+    let tag_end = start + source[start..].find("<ModalBox").expect("the Modal wraps a ModalBox");
+    let tag = &source[start..tag_end];
+    assert!(
+        tag.contains("on_close_request=Callback::new(move |_| dialog_open.set(false))"),
+        "the Save Filter Modal must close through dialog_open on Escape and backdrop"
+    );
+    assert!(
+        source.contains("on_click=Callback::new(move |_| dialog_open.set(false))"),
+        "Cancel must clear the same dialog_open state"
+    );
+}
+
+#[test]
 fn the_selection_column_is_never_synthesized_as_a_data_column() {
     // Structurally absent from the chooser, the sort model, the filter
     // vocabulary and the display projection -- rather than filtered out of

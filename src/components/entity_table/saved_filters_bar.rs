@@ -169,10 +169,15 @@ pub(crate) fn saved_filters_bar(model: EntitySavedFilters, bar_id: String) -> An
                 .into_any()
             }}
 
+            // Controlled close (Office op-1wvpj): Escape and the backdrop are
+            // proposals routed through the same path as Cancel. Without it
+            // the native <dialog> closed while `dialog_open` stayed true, so
+            // the dialog stayed visible but was no longer modal.
             <Modal
                 open=Signal::derive(move || dialog_open.get())
                 backdrop=true
                 labelled_by=title_id.clone()
+                on_close_request=Callback::new(move |_| dialog_open.set(false))
             >
                 <ModalBox class="max-w-md">
                     <h3 id=title_id.clone() class="text-lg font-bold" data-entity-saved-filters-title="true">
