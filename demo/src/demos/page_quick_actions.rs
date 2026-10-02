@@ -2,8 +2,8 @@ use crate::core::{ContentLayout, Section};
 use leptos::prelude::*;
 use leptos_daisyui_rs::components::*;
 use leptos_daisyui_rs::patterns::{
-    PageHeader, PageHeaderDivider, PageQuickActionContent, PageQuickActionLabelVisibility,
-    PageQuickActions,
+    PageHeader, PageHeaderCrumb, PageHeaderDivider, PageHeaderNavigationLayout,
+    PageQuickActionContent, PageQuickActionLabelVisibility, PageQuickActions,
 };
 
 /// Seven cross-surface quick actions -- the exact count the originating
@@ -91,6 +91,32 @@ pub fn PageQuickActionsDemo() -> impl IntoView {
                         subtitle="Composed directly against an AppShell content area -- no header rule needed."
                         divider=PageHeaderDivider::Hidden
                         actions=Box::new(|| view! { <SevenActions /> }.into_any())
+                    />
+                </div>
+            </Section>
+
+            <Section title="Back and breadcrumb trail on the divider row (OnDivider)">
+                <div class="w-full" data-testid="page-quick-actions-on-divider">
+                    <PageHeader
+                        title="Account Conversations"
+                        navigation_layout=PageHeaderNavigationLayout::OnDivider
+                        breadcrumbs=vec![
+                            PageHeaderCrumb::link("Coordinator", "#coordinator"),
+                            PageHeaderCrumb::text("Account Conversations"),
+                        ]
+                        back=Box::new(|| view! {
+                            <LinkButton href="#coordinator" style=ButtonStyle::Ghost size=ButtonSize::Sm>
+                                "\u{2190} Back"
+                            </LinkButton>
+                        }.into_any())
+                        actions=Box::new(|| view! {
+                            <PageQuickActions label="Account actions">
+                                <Button style=ButtonStyle::Outline size=ButtonSize::Sm>"Call"</Button>
+                                <Button style=ButtonStyle::Outline size=ButtonSize::Sm>"SMS"</Button>
+                                <Button style=ButtonStyle::Outline size=ButtonSize::Sm>"Email"</Button>
+                                <Button style=ButtonStyle::Outline size=ButtonSize::Sm>"CRM"</Button>
+                            </PageQuickActions>
+                        }.into_any())
                     />
                 </div>
             </Section>

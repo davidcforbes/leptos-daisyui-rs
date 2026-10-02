@@ -106,7 +106,7 @@ pub use kpi_strip::{
     kpi_strip_gap_px, kpi_strip_row_fit,
 };
 pub use list_page::{LIST_PAGE_BASE_CLASS, ListPage, list_page_class};
-pub use page_header::{PageHeader, PageHeaderDivider, PageHeaderNavigationLayout};
+pub use page_header::{PageHeader, PageHeaderCrumb, PageHeaderDivider, PageHeaderNavigationLayout};
 pub use page_quick_actions::{
     PageQuickActionContent, PageQuickActionLabelVisibility, PageQuickActions,
 };

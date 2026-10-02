@@ -143,6 +143,40 @@ fn Example() -> impl IntoView {
 which pass it) renders exactly the border it already has -- source-compatible
 by construction.
 
+## Back and breadcrumbs on the divider (`OnDivider`, ldui-rhnr)
+
+`PageHeaderNavigationLayout::OnDivider` keeps every page title in the same
+place (Office's page-layout rule, op-davsp and op-i8ljm). Row 1 is the title
+and the actions, as before. Row 2 is the divider itself: the `back` control,
+then the `breadcrumbs` trail, then a rule filling to the right edge. The row
+is a `<nav>` named by `navigation_label`, and it replaces the header's bottom
+border, so exactly one rule renders and there is no `pb-4` gap.
+
+```rust
+<PageHeader
+    title="Account Conversations"
+    navigation_layout=PageHeaderNavigationLayout::OnDivider
+    breadcrumbs=vec![
+        PageHeaderCrumb::link("Coordinator", "/coordinator"),
+        PageHeaderCrumb::text("Account Conversations"),
+    ]
+    back=Box::new(|| view! {
+        <LinkButton href="/coordinator" style=ButtonStyle::Ghost size=ButtonSize::Sm>"\u{2190} Back"</LinkButton>
+    }.into_any())
+    actions=Box::new(|| view! { <PageQuickActions label="Account actions">/* buttons */</PageQuickActions> }.into_any())
+/>
+```
+
+The last crumb is always the current page (`aria-current="page"`, plain
+text). Earlier crumbs and the separators are muted (`/75`). At narrow widths
+the trail truncates first, and the row never wraps under the title. With no
+`back` and no crumbs, the header renders today's plain divider. With
+`divider=Hidden`, the back control and the trail render without the rule.
+`page_header_divider_parts` decides the row's parts in order; the render
+reads it, and the unit tests pin it. The stable hooks are
+`data-page-header-divider-row`, `-back`, `-trail`, `-crumb`
+(`link`/`text`/`current`), `-crumb-separator` and `-rule`.
+
 ## Reference fixture
 
 `/components/page_quick_actions` in the showcase demo

@@ -71,7 +71,7 @@ pub struct PatternPage {
     pub page_header_layout: Option<&'static str>,
 }
 
-pub const PAGES: [PatternPage; 10] = [
+pub const PAGES: [PatternPage; 11] = [
     PatternPage {
         host: Host::Demo,
         route: "/components/badge",
@@ -131,6 +131,12 @@ pub const PAGES: [PatternPage; 10] = [
         route: "/components/snapshot-table-page",
         patterns: &["SnapshotTable", "PageHeader"],
         page_header_layout: Some("dedicated-row"),
+    },
+    PatternPage {
+        host: Host::Demo,
+        route: "/components/page_quick_actions",
+        patterns: &["PageHeader"],
+        page_header_layout: Some("on-divider"),
     },
 ];
 

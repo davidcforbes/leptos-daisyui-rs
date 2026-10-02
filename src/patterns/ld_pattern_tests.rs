@@ -49,7 +49,7 @@ struct Declaration {
     /// The file's source.
     source: &'static str,
     /// Root elements the component can render: one per `view!` branch it
-    /// returns (`PageHeader` has two navigation layouts, `PageStatePanel` an
+    /// returns (`PageHeader` has three navigation layouts, `PageStatePanel` an
     /// error and a status branch).
     roots: usize,
 }
@@ -61,7 +61,7 @@ fn declarations() -> [Declaration; 14] {
             component: "PageHeader",
             file: "src/patterns/page_header.rs",
             source: include_str!("page_header.rs"),
-            roots: 2,
+            roots: 3,
         },
         Declaration {
             pattern: "KpiStrip",
