@@ -1382,6 +1382,42 @@ fn viewport_fit_rows_change_is_own_induced(
     pending_proposal == Some(accepted_page_size)
 }
 
+/// Whether `viewport_fit` may measure the body it can see (Office op-jxtxx).
+///
+/// Under [`ServerFilterRefresh::LocalFirstDebounced`] the body shows the
+/// supplied slice NARROWED by a draft the server has not answered yet, and
+/// its height says nothing about the page the server will return. Measuring
+/// it proposed a visible page-size read over the pre-edit query while the
+/// person was still typing (six rows narrowed to none measured the fallback
+/// row height). Measurement therefore waits until no draft is ahead of the
+/// server and the body is the server's own slice again.
+fn viewport_fit_measures_rows(draft: Option<&LocalFilterDraft>) -> bool {
+    draft.is_none()
+}
+
+/// The row height a `viewport_fit` pass derives the page size from
+/// (ldui-t6pb): the era's own high-water mark, else the last height this
+/// table measured at the same density, else [`FALLBACK_ROW_HEIGHT`].
+///
+/// An empty server answer (a search that matches nothing) has no row to
+/// measure and starts a fresh era, so the bare fallback re-derived the page
+/// size from a 40 px guess: a visible page-size read right after the empty
+/// answer, and another once real rows came back. The wrapper's height is
+/// definite (see the container style), so the last measured height still
+/// describes the page. A density change moves the row-height ceiling
+/// (ldui-wgc3) and carries nothing; first paint, with nothing ever
+/// measured, keeps the fallback.
+fn viewport_fit_row_height(
+    era: RowHeightEra,
+    density: &'static str,
+    last_measured: Option<(&'static str, f64)>,
+) -> f64 {
+    let fallback = last_measured
+        .filter(|(measured_density, _)| *measured_density == density)
+        .map_or(FALLBACK_ROW_HEIGHT, |(_, height)| height);
+    era.effective_row_height(fallback)
+}
+
 /// Guards a scheduled (macrotask-delayed) `viewport_fit` measurement pass
 /// against applying a stale result after a *newer* pass has already been
 /// scheduled -- e.g. two `ResizeObserver` callbacks fire in quick
@@ -2798,8 +2834,12 @@ pub fn ServerDataTable(
         }
     });
     let viewport_fit_data_revision: StoredValue<u64> = StoredValue::new(0);
+    // Keyed on the SUPPLIED slice, not the displayed one (Office op-jxtxx):
+    // a local-first draft narrowing the loaded rows is not a new server page,
+    // so it neither starts a fresh era nor consumes a pending proposal's
+    // own-induced classification before the server's answer lands.
     Effect::new(move |ran_before: Option<()>| {
-        let _ = rows.get();
+        let _ = supplied_rows.get();
         if ran_before.is_some() {
             let accepted_page_size = query_state.get_untracked().page_size();
             let own_induced = viewport_fit_rows_change_is_own_induced(
@@ -2822,6 +2862,10 @@ pub fn ServerDataTable(
         }
     });
     let viewport_fit_row_era: StoredValue<Option<RowHeightEra>> = StoredValue::new(None);
+    // The last real row height measured, with the density it was measured
+    // at -- what an era with nothing to measure derives from (ldui-t6pb).
+    let viewport_fit_last_row_height: StoredValue<Option<(&'static str, f64)>> =
+        StoredValue::new(None);
     let viewport_fit_epoch: StoredValue<ViewportFitEpoch> =
         StoredValue::new(ViewportFitEpoch::new());
 
@@ -2831,6 +2875,15 @@ pub fn ServerDataTable(
         // navigation that disposes this table's reactive owner before the
         // timer fires must degrade to a no-op, not panic the whole wasm app.
         if viewport_fit_active.try_get_untracked() != Some(true) {
+            return;
+        }
+        // A locally narrowed body is not the server's page (Office
+        // op-jxtxx). This also covers a pass the `ResizeObserver` scheduled
+        // just before a draft started; the measure effect below re-runs when
+        // the draft clears.
+        if local_filter_draft.try_with_untracked(|draft| viewport_fit_measures_rows(draft.as_ref()))
+            != Some(true)
+        {
             return;
         }
         // Stale-measurement guard (ldui-2bt3): a newer pass may already have
@@ -2884,17 +2937,24 @@ pub fn ServerDataTable(
         // row-height ceiling itself, so it must start a fresh era even while
         // an own-induced refetch proposal is pending -- the density
         // dimension changes the key regardless of `viewport_fit_data_revision`.
+        let density = table_size.try_get_untracked().unwrap_or_default().as_str();
         let era_key = (
             viewport_fit_data_revision.get_value(),
             wrapper.offset_width(),
-            table_size.try_get_untracked().unwrap_or_default().as_str(),
+            density,
         );
         let era = viewport_fit_row_era
             .get_value()
             .unwrap_or(RowHeightEra::empty(era_key))
             .observe(era_key, measured_max);
         viewport_fit_row_era.set_value(Some(era));
-        let row_height = era.effective_row_height(FALLBACK_ROW_HEIGHT);
+        let row_height =
+            viewport_fit_row_height(era, density, viewport_fit_last_row_height.get_value());
+        // A zero fallback reads back only what this era really measured.
+        let measured_height = era.effective_row_height(0.0);
+        if measured_height > 0.0 {
+            viewport_fit_last_row_height.set_value(Some((density, measured_height)));
+        }
 
         let accepted_page_size = query_state.get_untracked().page_size().max(1);
         let min_rows = viewport_fit_min_rows
@@ -2988,7 +3048,9 @@ pub fn ServerDataTable(
     // to measure, the visible column set (widths drive wrapping), whether a
     // filter row is present, and the currently accepted page size (a
     // re-measure right after a size change corrects a height latched from
-    // an unsettled layout).
+    // an unsettled layout). Never while a local-first draft narrows the body
+    // (Office op-jxtxx): the draft is tracked, so the pass runs once the
+    // server's rows are back.
     Effect::new(move |_| {
         let _ = viewport_fit_active.get();
         let _ = size_retry.get();
@@ -2998,7 +3060,9 @@ pub fn ServerDataTable(
         let _ = effective_columns.get();
         let _ = show_filter_row.get();
         let _ = query_state.get().page_size();
-        schedule_viewport_fit_measure();
+        if local_filter_draft.with(|draft| viewport_fit_measures_rows(draft.as_ref())) {
+            schedule_viewport_fit_measure();
+        }
     });
 
     // Attach the `ResizeObserver` once, when the wrapper first enters the
@@ -4347,6 +4411,78 @@ mod tests {
         // An unchanged search is not re-run locally either.
         let draft = LocalFilterDraft::ahead_of(applied.clone(), "x".to_owned(), &applied, "x");
         assert_eq!(narrow_rows_locally(rows, &columns, &draft).len(), 3);
+    }
+
+    /// Office op-jxtxx (ldui-o0nm): `viewport_fit` sizes the page from the
+    /// supplied slice, never from the rows a local-first draft narrowed.
+    /// Measuring the narrowed body (no rows at all when nothing loaded
+    /// matches, so the fallback height) proposed a visible page-size read
+    /// with the pre-edit filters mid-typing, and the draft's own silent read
+    /// then queued behind it. BREAK: return `true` from
+    /// `viewport_fit_measures_rows`; the second assertion fails.
+    #[test]
+    fn viewport_fit_never_measures_a_locally_narrowed_body() {
+        assert!(
+            viewport_fit_measures_rows(None),
+            "no draft ahead: the body is the supplied slice"
+        );
+        let applied = ColumnFilters::new();
+        let mut typed = ColumnFilters::new();
+        typed.insert("client", "obet".to_owned());
+        let draft = LocalFilterDraft::ahead_of(typed, String::new(), &applied, "");
+        assert!(
+            !viewport_fit_measures_rows(Some(&draft)),
+            "a draft ahead of the server narrows the body; it is not measured"
+        );
+    }
+
+    /// ldui-t6pb: an empty server answer (a search matching nothing) starts
+    /// a fresh era with nothing to measure. It derives from the last height
+    /// this table measured, so the accepted size holds and no page-size read
+    /// is proposed; only a table that never measured a row, or one whose
+    /// density changed, uses the fallback. BREAK: ignore `last_measured` in
+    /// `viewport_fit_row_height`; the empty answer proposes 10 rows over the
+    /// accepted 7 and the second assertion fails.
+    #[test]
+    fn viewport_fit_an_empty_answer_keeps_the_measured_page_size() {
+        let measured =
+            RowHeightEra::empty((0, 400, "table-md")).observe((0, 400, "table-md"), 56.0);
+        let row_height = viewport_fit_row_height(measured, "table-md", None);
+        assert_eq!(
+            viewport_fit_page_size_proposal(436.0, 36.0, row_height, 5, 5, 5),
+            Some(7),
+            "56 px rows: 400 px of body fits seven"
+        );
+
+        let last = Some(("table-md", 56.0));
+        let empty = RowHeightEra::empty((1, 400, "table-md")).observe((1, 400, "table-md"), 0.0);
+        assert_eq!(
+            viewport_fit_page_size_proposal(
+                436.0,
+                36.0,
+                viewport_fit_row_height(empty, "table-md", last),
+                7,
+                5,
+                7,
+            ),
+            None,
+            "the empty answer keeps the size measured from real rows"
+        );
+        assert_eq!(
+            viewport_fit_row_height(empty, "table-md", None),
+            FALLBACK_ROW_HEIGHT,
+            "first paint, nothing ever measured: the fallback"
+        );
+        assert_eq!(
+            viewport_fit_row_height(empty, "table-xs", last),
+            FALLBACK_ROW_HEIGHT,
+            "another density is another ceiling (ldui-wgc3): nothing carries"
+        );
+        assert_eq!(
+            viewport_fit_row_height(measured, "table-md", Some(("table-md", 30.0))),
+            56.0,
+            "an era that measured rows uses its own high-water mark"
+        );
     }
 
     fn identified_row(id: &str) -> TableRow {
