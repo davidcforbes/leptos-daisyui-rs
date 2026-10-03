@@ -74,6 +74,45 @@ pub(crate) fn filter_sidebar_header_actions_wrapper(
     })
 }
 
+/// Builds the optional TITLE-ACTIONS slot (Office op-8bkqp): controls that
+/// sit immediately after the title TEXT, read in the same left-to-right order
+/// on both sides. `header_actions` cannot do this on a right-docked panel --
+/// the header row is `flex-row-reverse` there, so anything written between
+/// the title and the toggle renders visually LEFT of the title. This slot
+/// lives inside the title's own (non-reversed) group instead, so a host gets
+/// "Title [gear]" whichever edge the panel docks against.
+///
+/// `None` emits nothing, so a panel without the slot keeps its original
+/// markup byte-for-byte. Collapsing zeroes the wrapper's footprint and makes
+/// it `inert` exactly like [`filter_sidebar_header_actions_wrapper`]
+/// (`ldui-8hba`): hidden in place, never unmounted, never reachable.
+pub(crate) fn filter_sidebar_title_actions_wrapper(
+    title_actions: Option<Children>,
+    collapsed: Signal<bool>,
+) -> Option<impl IntoView> {
+    title_actions.map(|title_actions| {
+        view! {
+            <div
+                class=move || {
+                    format!(
+                        "flex items-center gap-2 transition-opacity duration-[150ms] {}",
+                        if collapsed.get() {
+                            "w-0 overflow-hidden opacity-0 pointer-events-none"
+                        } else {
+                            "shrink-0 opacity-100"
+                        },
+                    )
+                }
+                inert=move || collapsed.get()
+                aria-hidden=move || collapsed.get().to_string()
+                data-filter-sidebar-title-actions="true"
+            >
+                {title_actions()}
+            </div>
+        }
+    })
+}
+
 /// Renders the ONE toggle-button markup shared by [`FilterSidebar`]'s own
 /// internal header toggle and the externally placed [`FilterSidebarToggle`]
 /// (`ldui-vshu`) -- a single source of truth so the two can never drift
@@ -326,6 +365,16 @@ pub fn FilterSidebar(
     /// stays at the panel's inner edge.
     #[prop(optional)]
     header_actions: Option<Children>,
+    /// Optional controls rendered INLINE right after the title text (Office
+    /// op-8bkqp: an assistant panel's setup gear reads "Codex Coach [gear]").
+    /// Unlike `header_actions`, the slot sits inside the title's own
+    /// non-reversed group, so it follows the title on BOTH sides -- on a
+    /// right-docked panel `header_actions` renders left of the title because
+    /// the header row is `flex-row-reverse`. `None` keeps the title's markup
+    /// unchanged; collapsing hides, zeroes and `inert`s it like
+    /// `header_actions` (see `filter_sidebar_title_actions_wrapper`).
+    #[prop(optional)]
+    title_actions: Option<Children>,
     /// Optional filter-search box. `None` omits it entirely rather than rendering
     /// a disabled one — a search field that cannot search is worse than none.
     #[prop(optional, into)]
@@ -405,6 +454,11 @@ pub fn FilterSidebar(
     // `search_input_id` -- cheap, and it means the id assignment does not
     // itself depend on whether `search` happens to be `Some` this call.
     let search_input_id = next_filter_sidebar_search_id();
+    // Office op-8bkqp: with a title-actions slot the title and its actions
+    // share one left-to-right group (the group takes the title's `flex-1`, so
+    // the title itself only shrinks); without one the title renders exactly as
+    // before.
+    let title_actions = filter_sidebar_title_actions_wrapper(title_actions, collapsed);
 
     view! {
         <aside
@@ -437,17 +491,40 @@ pub fn FilterSidebar(
                     side.get().as_header_class(),
                 )
             }>
-                <h3
-                    class=move || {
-                        format!(
-                            "min-w-0 flex-1 truncate text-[15px] font-bold \
-                             transition-opacity duration-[150ms] {}",
-                            hidden_when_collapsed(),
-                        )
+                {match title_actions {
+                    Some(actions) => view! {
+                        <div
+                            class=move || {
+                                format!(
+                                    "flex min-w-0 flex-1 items-center gap-2 \
+                                     transition-opacity duration-[150ms] {}",
+                                    hidden_when_collapsed(),
+                                )
+                            }
+                            data-filter-sidebar-title-group="true"
+                        >
+                            <h3 class="min-w-0 truncate text-[15px] font-bold">
+                                {move || title.get()}
+                            </h3>
+                            {actions}
+                        </div>
                     }
-                >
-                    {move || title.get()}
-                </h3>
+                    .into_any(),
+                    None => view! {
+                        <h3
+                            class=move || {
+                                format!(
+                                    "min-w-0 flex-1 truncate text-[15px] font-bold \
+                                     transition-opacity duration-[150ms] {}",
+                                    hidden_when_collapsed(),
+                                )
+                            }
+                        >
+                            {move || title.get()}
+                        </h3>
+                    }
+                    .into_any(),
+                }}
                 {filter_sidebar_header_actions_wrapper(header_actions, collapsed)}
                 // `ldui-vshu`: rendered only for the default
                 // `Internal` placement -- `External` omits this node

@@ -7,7 +7,9 @@
 //! matches the product it exists to match — and nothing else in the build would
 //! object.
 
-use super::component::filter_sidebar_header_actions_wrapper;
+use super::component::{
+    filter_sidebar_header_actions_wrapper, filter_sidebar_title_actions_wrapper,
+};
 use super::style::{FilterSidebarTogglePlacement, SidebarSide, join_side_class};
 use leptos::prelude::*;
 use leptos::reactive::owner::Owner;
@@ -692,4 +694,124 @@ fn header_actions_fades_with_the_title_on_collapse() {
         wrapper_fn.contains("collapsed.get()"),
         "the fade must be driven by the same `collapsed` signal as the title"
     );
+}
+
+// ── Office op-8bkqp: the title-actions slot ───────────────────────────────
+//
+// The owner asked for an assistant panel's setup gear to the RIGHT of its
+// title ("Codex Coach [gear]"). On a right-docked panel the header row is
+// `flex-row-reverse`, so `header_actions` (written between the title and the
+// toggle) renders LEFT of the title. `title_actions` lives inside the title's
+// own non-reversed group instead.
+
+/// The `FilterSidebar` body's header section, as the source-order test above
+/// scopes it.
+fn header_section() -> &'static str {
+    VIEW_SRC
+        .split("pub fn FilterSidebar(")
+        .nth(1)
+        .expect("FilterSidebar must exist")
+        .split("── expanded content")
+        .next()
+        .expect("the header section must exist")
+}
+
+#[test]
+fn title_actions_wrapper_is_absent_when_no_slot_is_supplied() {
+    let owner = Owner::new();
+    owner.with(|| {
+        let collapsed = Signal::stored(false);
+        assert!(
+            filter_sidebar_title_actions_wrapper(None, collapsed).is_none(),
+            "an absent title_actions slot must emit no wrapper, so the title keeps its markup"
+        );
+    });
+}
+
+#[test]
+fn title_actions_wrapper_is_present_when_a_slot_is_supplied() {
+    let owner = Owner::new();
+    owner.with(|| {
+        let collapsed = Signal::stored(false);
+        assert!(
+            filter_sidebar_title_actions_wrapper(
+                Some(ToChildren::to_children(|| view! { "setup gear" })),
+                collapsed,
+            )
+            .is_some(),
+            "a supplied title_actions slot must emit its wrapper"
+        );
+    });
+}
+
+#[test]
+fn title_actions_slot_is_typed_and_optional_in_the_props() {
+    assert!(
+        VIEW_SRC.contains("title_actions: Option<Children>"),
+        "title_actions must be an optional typed composition slot"
+    );
+}
+
+#[test]
+fn title_actions_follow_the_title_inside_one_non_reversed_group() {
+    let header = header_section();
+    let group = header
+        .split("data-filter-sidebar-title-group=\"true\"")
+        .nth(1)
+        .expect("the title-actions branch must render a title group");
+    let group = group
+        .split("None =>")
+        .next()
+        .expect("the group branch must end before the None arm");
+    let title_pos = group
+        .find("{move || title.get()}")
+        .expect("the group must hold the title");
+    let actions_pos = group
+        .find("{actions}")
+        .expect("the group must hold the title actions");
+    assert!(
+        title_pos < actions_pos,
+        "title_actions must come AFTER the title text in the group, so it reads 'Title [gear]' on both sides"
+    );
+    assert!(
+        !group.contains("flex-row-reverse"),
+        "the title group must never be reversed - that is the whole point of the slot"
+    );
+    assert!(
+        header.contains("\"flex min-w-0 flex-1 items-center gap-2"),
+        "the group takes the title's flex-1, so the title only shrinks and the actions stay beside it"
+    );
+}
+
+#[test]
+fn without_title_actions_the_title_markup_is_unchanged() {
+    let header = header_section();
+    let none_arm = header
+        .split("None =>")
+        .nth(1)
+        .expect("the title must keep a no-slot arm");
+    assert!(
+        none_arm.contains("\"min-w-0 flex-1 truncate text-[15px] font-bold"),
+        "with no title_actions the h3 keeps its original classes byte-for-byte"
+    );
+}
+
+#[test]
+fn collapsed_title_actions_claim_zero_width_and_are_inert() {
+    let wrapper_fn = VIEW_SRC
+        .split("pub(crate) fn filter_sidebar_title_actions_wrapper")
+        .nth(1)
+        .expect("the title_actions wrapper function must exist");
+    for needle in [
+        "w-0",
+        "overflow-hidden",
+        "opacity-0 pointer-events-none",
+        "inert=move || collapsed.get()",
+        "aria-hidden=move || collapsed.get().to_string()",
+    ] {
+        assert!(
+            wrapper_fn.contains(needle),
+            "collapsed title actions must carry {needle} (ldui-8hba's rule)"
+        );
+    }
 }
