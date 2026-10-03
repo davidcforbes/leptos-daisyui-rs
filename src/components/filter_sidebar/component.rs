@@ -80,7 +80,7 @@ pub(crate) fn filter_sidebar_header_actions_wrapper(
 /// the header row is `flex-row-reverse` there, so anything written between
 /// the title and the toggle renders visually LEFT of the title. This slot
 /// lives inside the title's own (non-reversed) group instead, so a host gets
-/// "Title [gear]" whichever edge the panel docks against.
+/// `Title [gear]` whichever edge the panel docks against.
 ///
 /// `None` emits nothing, so a panel without the slot keeps its original
 /// markup byte-for-byte. Collapsing zeroes the wrapper's footprint and makes
@@ -366,7 +366,7 @@ pub fn FilterSidebar(
     #[prop(optional)]
     header_actions: Option<Children>,
     /// Optional controls rendered INLINE right after the title text (Office
-    /// op-8bkqp: an assistant panel's setup gear reads "Codex Coach [gear]").
+    /// op-8bkqp: an assistant panel's setup gear reads `Codex Coach [gear]`).
     /// Unlike `header_actions`, the slot sits inside the title's own
     /// non-reversed group, so it follows the title on BOTH sides -- on a
     /// right-docked panel `header_actions` renders left of the title because
