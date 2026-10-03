@@ -279,6 +279,10 @@ reports only "the compiler unexpectedly panicked" and lints *nothing* for that
 crate, so the gate's clippy step is effectively off while real lints pile up
 behind it. If `cargo xtask verify` shows clippy FAIL with no lint output, suspect
 this and run `cargo clippy -p <crate> --all-targets -- -D warnings` to see the panic.
+A bare `<word>` in `///` text (a placeholder like `<engine>`) is an unclosed
+HTML tag to rustdoc, and only the gate's LAST step (`doc-lib`) fails on it:
+put it in a code span. `RUSTDOCFLAGS="-D warnings" cargo doc -p
+leptos-daisyui-rs --no-deps` checks it without the whole gate.
 
 **Running the demo needs `npm install` in `demo/` first** (`node_modules` is not
 committed). Without it, trunk's Tailwind pre-build hook fails and trunk serves a
