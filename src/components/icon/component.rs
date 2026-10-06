@@ -163,6 +163,7 @@ const SUPPORTED_ICON_NAMES: &[&str] = &[
     "arrow-left",
     "arrow-right",
     "bar-chart-3",
+    "bell",
     "calendar",
     "check",
     "chevron-down",
@@ -302,6 +303,10 @@ fn lucide_to_sprite_inner(name: &str) -> Option<&'static str> {
         // for a notebook glyph and carried `pencil` while the host sprite had
         // none; 4iiz-Office `assets/icons.svg` now defines the symbol.
         "notebook" => "notebook",
+        // Office op-lbkd1.3 (2026-10-05): the shell title bar's broadcast
+        // bell ("a Message Bell icon in the Title Bar"); the host sprite had
+        // no bell, and 4iiz-Office `assets/icons.svg` now defines the symbol.
+        "bell" => "bell",
         // Same concept under the sprite's naming.
         "triangle-alert" => "triangle-exclamation",
         "circle-alert" => "circle-exclamation-fill",

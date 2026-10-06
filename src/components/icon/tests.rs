@@ -368,3 +368,23 @@ fn notebook_maps_to_notebook() {
         "notebook is its own glyph, not an alias onto the pencil"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Broadcast bell (Office op-lbkd1.3)
+// ---------------------------------------------------------------------------
+
+/// The shell title bar's broadcast bell asked for a bell glyph and the host
+/// sprite had none. The symbol now exists in the host sprite under the same
+/// name, so the mapping is same-concept-same-name, and it is published.
+/// Deliberate break: delete the `"bell" => "bell"` arm; the lookup answers
+/// `None` and the first assertion fails (and the published-name check in
+/// `an_unmapped_icon_name_is_distinguishable_from_a_mapped_one` names it).
+/// Revert; passes.
+#[test]
+fn bell_maps_to_bell() {
+    use super::component::{lucide_sprite_lookup, lucide_sprite_names};
+
+    assert_eq!(lucide_sprite_lookup("bell"), Some("bell"));
+    assert_eq!(lucide_to_sprite("bell"), "bell");
+    assert!(lucide_sprite_names().contains(&"bell"));
+}
