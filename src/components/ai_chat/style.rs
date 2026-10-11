@@ -247,6 +247,65 @@ pub fn clamp_composer_height(scroll_height: f64, base_height: f64, max_height: f
     scroll_height.max(base_height).min(max_height)
 }
 
+/// Composer height for one auto-grow pass, honouring a height the user
+/// dragged the composer to with its resize grip (ldui-ms9u).
+///
+/// `content_px` is the textarea's natural `scrollHeight`; the post-send
+/// collapse passes `0.0`. With no drag this is exactly
+/// `clamp_composer_height`: the content, at least `base_px`, at most
+/// `max_px`. A dragged height is a FLOOR from then on: the composer still
+/// grows with its content up to `max_px`, never shrinks below the floor, and
+/// collapses back to the floor -- not to `base_px` -- after a send. A floor
+/// above `max_px` is kept as it is, because `max_px` caps only what the
+/// auto-grow chooses; the drag itself is bounded by the textarea's CSS
+/// `max-height`. A floor below `base_px` is lifted to `base_px`.
+pub fn composer_height(
+    content_px: f64,
+    user_floor_px: Option<f64>,
+    base_px: f64,
+    max_px: f64,
+) -> f64 {
+    let floor = user_floor_px.map_or(base_px, |floor| floor.max(base_px));
+    clamp_composer_height(content_px, floor, max_px.max(floor))
+}
+
+/// How far (px) the composer's inline height may sit from the height the
+/// auto-grow last wrote and still count as that write rather than a drag.
+/// Absorbs a browser re-serialising a fractional value; no deliberate drag is
+/// that small.
+pub const COMPOSER_DRAG_TOLERANCE_PX: f64 = 1.0;
+
+/// The composer's INLINE `height` (its `style` attribute's value, e.g.
+/// `"213px"`) in pixels. `None` for no inline height, `auto`, a non-px unit
+/// or a non-positive value, none of which a resize grip writes.
+pub fn composer_inline_height_px(value: &str) -> Option<f64> {
+    value
+        .trim()
+        .strip_suffix("px")
+        .and_then(|number| number.trim().parse::<f64>().ok())
+        .filter(|px| px.is_finite() && *px > 0.0)
+}
+
+/// Whether the user dragged the composer's resize grip since the auto-grow
+/// last wrote its height (ldui-ms9u).
+///
+/// A textarea fires no resize event, but the grip writes the element's
+/// INLINE `height`, which nothing but the auto-grow otherwise writes. So an
+/// inline height that differs from `last_written_px` is the user's, and an
+/// inline height before anything was written is a drag before the first
+/// keystroke. The comparison is on the inline value, never the rendered
+/// `offsetHeight`: daisyUI's `.textarea` has `min-height: 5rem`, so the
+/// rendered height already differs from the 48px base the auto-grow writes,
+/// and a CSS `max-height` clamp would make it differ too. Neither is a drag,
+/// and neither changes the inline value.
+pub fn composer_was_dragged(inline_height_px: Option<f64>, last_written_px: Option<f64>) -> bool {
+    match (inline_height_px, last_written_px) {
+        (None, _) => false,
+        (Some(_), None) => true,
+        (Some(inline), Some(written)) => (inline - written).abs() > COMPOSER_DRAG_TOLERANCE_PX,
+    }
+}
+
 /// Composer hint caption over a localized [`AiChatTexts`] table: the
 /// keybinding reminder while idle, the in-flight hint while a turn is busy.
 pub fn composer_hint_for(waiting: bool, texts: &AiChatTexts) -> String {

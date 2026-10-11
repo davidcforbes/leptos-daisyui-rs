@@ -143,6 +143,22 @@ pinned set is swept from the browser-suite sources rather than listed by hand
 (`every_byte_pinned_field_survives_markdown_rendering`), so a newly pinned
 field cannot be silently missed.
 
+## The composer (ldui-ms9u)
+
+The inner panel's composer spans the conversation's full width, with Send
+(Stop while a turn runs) right-aligned on a row beneath it and the keybinding
+hint beside the button. Its bottom-right grip drags it taller or shorter, up
+to `60vh`. A dragged height becomes the auto-grow's floor: typing still grows
+the box past it, up to the 320px auto-grow cap, but never below it, and a send
+collapses it back to the dragged height rather than to the base.
+
+A textarea fires no resize event, so the panel detects a drag lazily, just
+before each height it writes: the grip writes the element's inline `height`,
+so an inline height that differs from the panel's own last write is the
+user's. It compares the inline value, not `offsetHeight`, because daisyUI's
+`.textarea` `min-height: 5rem` already makes the rendered height differ from
+the 48px base. No listener or observer is installed.
+
 ## DOM hooks
 
 - `data-ai-chat-workspace-layout` on the root: `workbench` or `rail`.
@@ -152,6 +168,10 @@ field cannot be silently missed.
   `knowledge`.
 - `data-ai-chat-composer-label` on the composer's `sr-only` label, whose text
   is the substituted placeholder (ldui-iay0), never the raw template.
+- `data-ai-chat-composer` on the composer textarea, and
+  `data-ai-chat-composer-actions` on the right-justified row beneath it that
+  holds Send (`data-ai-chat-send`) or, mid-turn, Stop (`data-ai-chat-stop`)
+  (ldui-ms9u).
 
 Stable `data-*` attributes, for tests and for host CSS. **Query by these, never
 by document position** — a positional selector does not fail when the layout

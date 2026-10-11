@@ -1,9 +1,10 @@
 use super::style::{
-    ComposerAction, chat_state_attr, clamp_composer_height, composer_hint, composer_hint_for,
-    composer_key_action, composer_placeholder_for, default_composer_placeholder,
-    effective_assistant_label, is_markdown, is_thinking, role_avatar_bg, role_avatar_initial,
-    role_avatar_initial_with, role_classes, role_data_attr, role_label, role_label_for,
-    role_label_with, should_stick_to_bottom, show_welcome_chips, tool_phase_data_attr,
+    ComposerAction, chat_state_attr, clamp_composer_height, composer_height, composer_hint,
+    composer_hint_for, composer_inline_height_px, composer_key_action, composer_placeholder_for,
+    composer_was_dragged, default_composer_placeholder, effective_assistant_label, is_markdown,
+    is_thinking, role_avatar_bg, role_avatar_initial, role_avatar_initial_with, role_classes,
+    role_data_attr, role_label, role_label_for, role_label_with, should_stick_to_bottom,
+    show_welcome_chips, tool_phase_data_attr,
 };
 use super::texts::AiChatTexts;
 use super::types::{
@@ -276,6 +277,226 @@ fn clamp_composer_height_above_max_uses_max() {
 fn clamp_composer_height_exactly_at_bounds_is_inclusive() {
     assert_eq!(clamp_composer_height(48.0, 48.0, 320.0), 48.0);
     assert_eq!(clamp_composer_height(320.0, 48.0, 320.0), 320.0);
+}
+
+// --- ldui-ms9u: a dragged composer height is the auto-grow's floor ---
+
+#[test]
+fn composer_height_without_a_drag_is_the_plain_auto_grow_clamp() {
+    for content in [0.0, 20.0, 48.0, 150.0, 320.0, 900.0] {
+        assert_eq!(
+            composer_height(content, None, 48.0, 320.0),
+            clamp_composer_height(content, 48.0, 320.0),
+            "content {content}px"
+        );
+    }
+}
+
+#[test]
+fn a_dragged_height_is_a_floor_the_auto_grow_grows_above() {
+    // Dragged to 120px: short content keeps the dragged height...
+    assert_eq!(composer_height(20.0, Some(120.0), 48.0, 320.0), 120.0);
+    // ...taller content grows past it...
+    assert_eq!(composer_height(200.0, Some(120.0), 48.0, 320.0), 200.0);
+    // ...up to the auto-grow cap, beyond which the box scrolls.
+    assert_eq!(composer_height(900.0, Some(120.0), 48.0, 320.0), 320.0);
+}
+
+#[test]
+fn the_post_send_collapse_returns_to_the_dragged_height() {
+    // The collapse passes no content: it lands on the user's height...
+    assert_eq!(composer_height(0.0, Some(120.0), 48.0, 320.0), 120.0);
+    // ...and on the base only when nobody dragged.
+    assert_eq!(composer_height(0.0, None, 48.0, 320.0), 48.0);
+}
+
+#[test]
+fn a_drag_above_the_auto_grow_cap_is_kept() {
+    // The 320px cap bounds what the auto-grow picks, not the user's drag
+    // (the textarea's own `max-h-[60vh]` bounds that).
+    assert_eq!(composer_height(0.0, Some(450.0), 48.0, 320.0), 450.0);
+    assert_eq!(composer_height(900.0, Some(450.0), 48.0, 320.0), 450.0);
+}
+
+#[test]
+fn a_drag_below_the_base_is_lifted_to_the_base() {
+    assert_eq!(composer_height(0.0, Some(20.0), 48.0, 320.0), 48.0);
+    assert_eq!(composer_height(100.0, Some(20.0), 48.0, 320.0), 100.0);
+}
+
+#[test]
+fn the_inline_height_parses_only_what_a_resize_grip_writes() {
+    assert_eq!(composer_inline_height_px("213px"), Some(213.0));
+    assert_eq!(composer_inline_height_px(" 48.5px "), Some(48.5));
+    for not_a_drag in ["", "auto", "12em", "50%", "0px", "-4px", "px", "NaNpx"] {
+        assert_eq!(
+            composer_inline_height_px(not_a_drag),
+            None,
+            "{not_a_drag:?}"
+        );
+    }
+}
+
+#[test]
+fn a_drag_is_an_inline_height_the_auto_grow_did_not_write() {
+    // No inline height at all: nobody has resized the box.
+    assert!(!composer_was_dragged(None, None));
+    assert!(!composer_was_dragged(None, Some(48.0)));
+    // The auto-grow's own write, read back (within the tolerance).
+    assert!(!composer_was_dragged(Some(48.0), Some(48.0)));
+    assert!(!composer_was_dragged(Some(48.5), Some(48.0)));
+    // The grip moved it, taller or shorter.
+    assert!(composer_was_dragged(Some(150.0), Some(48.0)));
+    assert!(composer_was_dragged(Some(90.0), Some(150.0)));
+    // A drag before the first keystroke: an inline height, nothing written.
+    assert!(composer_was_dragged(Some(150.0), None));
+}
+
+/// The sequence the panel runs, over the same functions its
+/// `resize_textarea` and `reset_textarea_height` call: a drag survives
+/// typing and a send, and a later drag moves the floor.
+#[test]
+fn a_dragged_height_survives_typing_and_a_send() {
+    let (base, max) = (48.0, 320.0);
+    let mut written: Option<f64> = None;
+    let mut floor: Option<f64> = None;
+    // One write: detect a drag first, then pick the height and remember it.
+    // Arguments: the inline height read back, the rendered height, content.
+    let mut write = |inline: Option<f64>, rendered: f64, content: f64| {
+        if composer_was_dragged(inline, written) {
+            floor = Some(rendered);
+        }
+        let height = composer_height(content, floor, base, max);
+        written = Some(height);
+        height
+    };
+    // Typing before any drag auto-grows as it always did.
+    assert_eq!(write(None, 80.0, 60.0), 60.0);
+    // The user drags the grip to 200px; the next keystroke keeps it.
+    assert_eq!(write(Some(200.0), 200.0, 60.0), 200.0);
+    // More typing reads back the panel's OWN write: no new drag, still 200.
+    assert_eq!(write(Some(200.0), 200.0, 90.0), 200.0);
+    // A send collapses to the dragged height, not the 48px base.
+    assert_eq!(write(Some(200.0), 200.0, 0.0), 200.0);
+    // Dragging shorter later lowers the floor.
+    assert_eq!(write(Some(120.0), 120.0, 0.0), 120.0);
+}
+
+// --- ldui-ms9u: the stacked composer, guarded at source ---
+//
+// This crate has no DOM renderer in native tests (see `button/tests.rs`), so
+// the composer's layout is guarded on the `view!` source. The browser lanes
+// (`cargo xtask test-ai-chat`) drive the rendered panel.
+
+const COMPONENT_SRC: &str = include_str!("component.rs");
+
+/// The composer only: from the input area's opening tag to the next
+/// component, so neither the class safelist in the doc comment nor
+/// `MessageBubble` can satisfy a guard.
+fn composer_src() -> &'static str {
+    let from = COMPONENT_SRC
+        .find("<div class=\"lds-aichat-input")
+        .expect("the composer's input area");
+    let rest = &COMPONENT_SRC[from..];
+    let to = rest
+        .find("fn MessageBubble(")
+        .expect("MessageBubble follows the AiChat view");
+    &rest[..to]
+}
+
+/// Where the opening tag carrying `hook` starts in `src`, and that tag's
+/// whitespace-split classes.
+fn tag_with<'a>(src: &'a str, hook: &str) -> (usize, Vec<&'a str>) {
+    let at = src
+        .find(hook)
+        .unwrap_or_else(|| panic!("`{hook}` in the composer"));
+    let open = src[..at].rfind('<').expect("the hook's opening tag");
+    let close = at + src[at..].find('>').expect("the tag closes");
+    let classes = src[open..close]
+        .split_once("class=\"")
+        .and_then(|(_, rest)| rest.split_once('"'))
+        .map(|(value, _)| value.split_whitespace().collect())
+        .unwrap_or_default();
+    (open, classes)
+}
+
+/// How many `div`s are still open at the end of `fragment`.
+fn open_divs(fragment: &str) -> isize {
+    fragment.matches("<div").count() as isize - fragment.matches("</div>").count() as isize
+}
+
+#[test]
+fn the_composer_textarea_is_full_width_and_drag_resizable() {
+    let (_, classes) = tag_with(composer_src(), "data-ai-chat-composer=\"\"");
+    // daisyUI's `.textarea` stops at 20rem without `w-full`; `resize-y` is
+    // the bottom-right grip, height only, so the box stays full width; the
+    // drag is bounded by `max-h-[60vh]`, not the auto-grow's 320px cap.
+    for wanted in ["textarea", "w-full", "resize-y", "max-h-[60vh]"] {
+        assert!(
+            classes.contains(&wanted),
+            "the composer textarea lacks `{wanted}`: {classes:?}"
+        );
+    }
+    // `resize-none` removes the grip; `resize`/`resize-x` let a drag pull it
+    // off full width; `flex-1` is the beside-the-button sizing; the 320px
+    // cap would stop a drag at the auto-grow's own limit.
+    for gone in [
+        "resize-none",
+        "resize",
+        "resize-x",
+        "flex-1",
+        "max-h-[320px]",
+    ] {
+        assert!(
+            !classes.contains(&gone),
+            "the composer textarea must not carry `{gone}`: {classes:?}"
+        );
+    }
+}
+
+#[test]
+fn send_and_stop_sit_in_a_right_justified_row_below_the_composer() {
+    let src = composer_src();
+    let (_, column) = tag_with(src, "lds-aichat-input");
+    let (textarea, _) = tag_with(src, "data-ai-chat-composer=\"\"");
+    let (row, row_classes) = tag_with(src, "data-ai-chat-composer-actions");
+    // A column, so the next child renders BELOW the textarea...
+    assert!(
+        column.contains(&"flex-col"),
+        "the composer must stack: {column:?}"
+    );
+    // ...and the textarea is its direct child, not wrapped in a row with
+    // anything beside it.
+    assert_eq!(
+        open_divs(&src[..textarea]),
+        1,
+        "the textarea must sit directly in the composer column, not in a row beside the buttons"
+    );
+    // The action row follows the textarea and right-justifies its contents.
+    assert!(
+        textarea < row,
+        "the action row must render after the textarea"
+    );
+    for wanted in ["flex", "justify-end"] {
+        assert!(
+            row_classes.contains(&wanted),
+            "the action row lacks `{wanted}`: {row_classes:?}"
+        );
+    }
+    // Both buttons render after the row opens, and before it closes.
+    for hook in ["data-ai-chat-send=\"\"", "data-ai-chat-stop=\"\""] {
+        let at = src
+            .find(hook)
+            .unwrap_or_else(|| panic!("`{hook}` in the composer"));
+        assert!(
+            row < at,
+            "`{hook}` must render in the action row below the textarea"
+        );
+        assert!(
+            open_divs(&src[row..at]) >= 1,
+            "`{hook}` must still be inside the right-justified action row"
+        );
+    }
 }
 
 // --- Settings popover: allowed-tools comma-split parse/format ---

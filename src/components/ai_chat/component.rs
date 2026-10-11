@@ -1,8 +1,8 @@
 use super::style::{
-    ComposerAction, annotation_bubble_class, chat_state_attr, clamp_composer_height,
-    composer_hint_for, composer_key_action, composer_placeholder_for, effective_assistant_label,
-    is_markdown, is_thinking, role_avatar_bg, role_avatar_initial_with, role_classes,
-    role_data_attr, role_label_for, should_stick_to_bottom, show_welcome_chips,
+    ComposerAction, annotation_bubble_class, chat_state_attr, composer_height, composer_hint_for,
+    composer_inline_height_px, composer_key_action, composer_placeholder_for, composer_was_dragged,
+    effective_assistant_label, is_markdown, is_thinking, role_avatar_bg, role_avatar_initial_with,
+    role_classes, role_data_attr, role_label_for, should_stick_to_bottom, show_welcome_chips,
     tool_phase_data_attr,
 };
 use super::texts::AiChatTexts;
@@ -29,7 +29,9 @@ static AI_CHAT_SEQ: AtomicU64 = AtomicU64::new(0);
 const STICK_THRESHOLD_PX: f64 = 40.0;
 /// Composer's collapsed height (px) — matches the old `rows="2"` sizing.
 const COMPOSER_BASE_HEIGHT_PX: f64 = 48.0;
-/// Composer's max auto-grow height (px) before it scrolls internally.
+/// Composer's max AUTO-grow height (px) before it scrolls internally. A
+/// height the user drags the grip to may exceed it; the textarea's own
+/// `max-h-[60vh]` bounds the drag instead (ldui-ms9u).
 const COMPOSER_MAX_HEIGHT_PX: f64 = 320.0;
 
 /// One option in the chat scope selector (e.g. "This file" / "This folder" /
@@ -75,6 +77,11 @@ impl ChatScopeOption {
 /// auto-stick-to-bottom scrolling, per-message copy, welcome/prompt chips, and a
 /// header with a New-session (restart) action and optional subtitle.
 ///
+/// The composer spans the panel's full width with Send/Stop right-aligned on a
+/// row beneath it, and its bottom-right grip drags it taller or shorter. A
+/// dragged height is kept: typing still grows the box past it but never below
+/// it, and a send collapses it back to the dragged height (ldui-ms9u).
+///
 /// ## Staying generic
 /// The panel adapts to the SELECTED backend's `ai_chat_core::Capabilities` —
 /// the Model row becomes a free-text box, a picker or a pinned value, the
@@ -105,12 +112,12 @@ impl ChatScopeOption {
 /// ```css
 /// @source inline("chat chat-start chat-end chat-header chat-bubble chat-bubble-primary chat-bubble-info chat-bubble-warning chat-bubble-neutral chat-bubble-ghost chat-image avatar avatar-placeholder");
 /// @source inline("link text-error");
-/// @source inline("flex flex-col flex-1 flex-wrap items-center justify-between justify-start gap-1 gap-2 h-full min-h-0 w-full w-72 w-52 w-6 h-6 overflow-y-auto p-1 p-2 p-3 p-4 space-y-3 space-y-2 contents");
-/// @source inline("border-t border-b border-base-300 text-xs text-sm opacity-50 opacity-60 text-right whitespace-pre-wrap resize-none max-h-[320px] text-[10px]");
+/// @source inline("flex flex-col flex-1 flex-wrap items-center justify-between justify-end justify-start gap-1 gap-2 h-full min-h-0 w-full w-72 w-52 w-6 h-6 overflow-y-auto p-1 p-2 p-3 p-4 space-y-3 space-y-2 contents");
+/// @source inline("border-t border-b border-base-300 text-xs text-sm opacity-50 opacity-60 text-right whitespace-pre-wrap resize-y max-h-[60vh] text-[10px]");
 /// @source inline("btn btn-primary btn-error btn-ghost btn-sm btn-xs textarea textarea-bordered loading loading-dots loading-sm rounded-full");
 /// @source inline("select select-sm select-bordered");
 /// @source inline("dropdown-content bg-base-100 rounded-box z-10 shadow border");
-/// @source inline("bg-primary bg-neutral bg-info bg-base-300 text-primary-content text-neutral-content text-info-content text-base-content");
+/// @source inline("bg-primary bg-neutral bg-info bg-base-300 text-primary-content text-neutral-content text-info-content text-base-content text-base-content/75");
 /// ```
 #[component]
 pub fn AiChat(
@@ -278,31 +285,69 @@ pub fn AiChat(
     let id_show_tool_calls = move || format!("aichat-{instance}-show-tool-calls");
     let id_composer = move || format!("aichat-{instance}-composer");
 
+    // ldui-ms9u: the user can drag the composer taller or shorter from its
+    // bottom-right grip (`resize-y`), and a dragged height is the auto-grow's
+    // FLOOR from then on (`composer_height`): typing grows past it, never
+    // below it, and the post-send collapse returns to it instead of the base.
+    // Neither value renders anything, and only this panel's own synchronous
+    // handlers touch them, so they are plain stored values.
+    let composer_written_px: StoredValue<Option<f64>> = StoredValue::new(None);
+    let composer_floor_px: StoredValue<Option<f64>> = StoredValue::new(None);
+    // A textarea fires no resize event, so a drag is detected LAZILY, just
+    // before every write that would clobber it (the auto-grow on input, the
+    // collapse after a send or restart). The grip writes the element's
+    // inline `height`, which only this panel otherwise writes, so an inline
+    // height that differs from the last one written here is the user's
+    // (`composer_was_dragged`), and the rendered `offsetHeight` becomes the
+    // floor. No listener or observer is installed: nothing to clean up, and
+    // no late callback can outlive the panel.
+    //
+    // `.style()` is ambiguous between `web_sys::HtmlElement`'s inherent
+    // getter and tachys' `ElementExt::style` (a setter); UFCS picks the
+    // web_sys inherent method unambiguously.
+    let note_composer_drag = move |el: &web_sys::HtmlElement| {
+        let inline = web_sys::HtmlElement::style(el)
+            .get_property_value("height")
+            .ok()
+            .and_then(|value| composer_inline_height_px(&value));
+        if composer_was_dragged(inline, composer_written_px.try_get_value().flatten()) {
+            let _ = composer_floor_px.try_set_value(Some(f64::from(el.offset_height())));
+        }
+    };
+    let write_composer_height = move |el: &web_sys::HtmlElement, px: f64| {
+        let _ = web_sys::HtmlElement::style(el).set_property("height", &format!("{px}px"));
+        let _ = composer_written_px.try_set_value(Some(px));
+    };
     // Auto-grow the composer to fit its content, up to `COMPOSER_MAX_HEIGHT_PX`
-    // (beyond which it scrolls internally via the `overflow-y-auto` class).
-    // Reset `height:auto` first so `scroll_height` reflects a shrink (e.g. a
-    // deleted line), not just growth.
+    // (beyond which it scrolls internally via the `overflow-y-auto` class), and
+    // never below a dragged height. Reset `height:auto` first so
+    // `scroll_height` reflects a shrink (e.g. a deleted line), not just growth.
     let resize_textarea = move || {
         if let Some(el) = textarea_ref.get() {
-            // `.style()` is ambiguous between `web_sys::HtmlElement`'s inherent
-            // getter and tachys' `ElementExt::style` (a setter); UFCS picks the
-            // web_sys inherent method unambiguously.
-            let style = web_sys::HtmlElement::style(&el);
-            let _ = style.set_property("height", "auto");
-            let clamped = clamp_composer_height(
-                el.scroll_height() as f64,
+            note_composer_drag(&el);
+            let _ = web_sys::HtmlElement::style(&el).set_property("height", "auto");
+            let height = composer_height(
+                f64::from(el.scroll_height()),
+                composer_floor_px.try_get_value().flatten(),
                 COMPOSER_BASE_HEIGHT_PX,
                 COMPOSER_MAX_HEIGHT_PX,
             );
-            let _ = style.set_property("height", &format!("{clamped}px"));
+            write_composer_height(&el, height);
         }
     };
-    // Collapse back to the base height after a turn is sent/the composer is
-    // cleared, rather than leaving a tall empty textarea.
+    // Collapse after a turn is sent/the composer is cleared, rather than
+    // leaving a tall empty textarea: to the base height, or to the height the
+    // user dragged it to.
     let reset_textarea_height = move || {
         if let Some(el) = textarea_ref.get() {
-            let _ = web_sys::HtmlElement::style(&el)
-                .set_property("height", &format!("{COMPOSER_BASE_HEIGHT_PX}px"));
+            note_composer_drag(&el);
+            let height = composer_height(
+                0.0,
+                composer_floor_px.try_get_value().flatten(),
+                COMPOSER_BASE_HEIGHT_PX,
+                COMPOSER_MAX_HEIGHT_PX,
+            );
+            write_composer_height(&el, height);
         }
     };
 
@@ -513,8 +558,9 @@ pub fn AiChat(
         format_usage(session.with_value(|s| s.last_usage()))
     };
     // Composer hint: keybinding reminder while idle, "Esc to stop" while busy.
-    // Always on (no gating prop) — a single unobtrusive caption line, matching
-    // the header subtitle's text-xs/opacity-60 styling.
+    // Always on (no gating prop) — a single unobtrusive caption beside the
+    // Send/Stop button (ldui-ms9u), in `text-xs` at the `/75` muted step: `/60`
+    // fails WCAG AA at that size on the light theme (ldui-zy37).
     let hint_text = move || composer_hint_for(waiting(), &texts.get());
 
     // Auto-stick-to-bottom: after each transcript change, if the user is pinned
@@ -1019,63 +1065,81 @@ pub fn AiChat(
                 </div>
             </Show>
 
-            <div class="lds-aichat-input border-t border-base-300 p-3 flex flex-col gap-1">
-                <div class="flex gap-2">
-                    // The textarea's accessible name. sr-only: the placeholder
-                    // carries the visible hint, but a placeholder stops being a
-                    // name the moment text is typed (ldui-iilm.11, drift
-                    // input-outside-field).
-                    // ldui-iay0: the SAME text the placeholder shows -- the
-                    // template substituted ({assistant} -> the engine's
-                    // name), or the host's own placeholder -- never the raw
-                    // `composer_placeholder` template.
-                    <label class="sr-only" for=id_composer data-ai-chat-composer-label="">
-                        {move || {
-                            let p = placeholder.get();
-                            if p.is_empty() {
-                                composer_placeholder_for(&assistant.get(), &texts.get())
-                            } else {
-                                p
-                            }
-                        }}
-                    </label>
-                    <textarea
-                        node_ref=textarea_ref
-                        id=id_composer
-                        data-ai-chat-composer=""
-                        class="textarea textarea-bordered flex-1 resize-none max-h-[320px] overflow-y-auto"
-                        rows="2"
-                        placeholder=move || {
-                            let p = placeholder.get();
-                            if p.is_empty() {
-                                composer_placeholder_for(&assistant.get(), &texts.get())
-                            } else {
-                                p
-                            }
+            // ldui-ms9u: a stacked composer. The textarea takes the panel's
+            // full width (`w-full`, because daisyUI's `.textarea` is
+            // `width: clamp(3rem, 20rem, 100%)`) and Send/Stop sit in a
+            // right-justified row BELOW it, not beside it. `gap-2` equals the
+            // textarea's 8px `padding-block`, keeping the layout audit's
+            // internal-vs-external rule at zero on the ai-chat routes.
+            <div class="lds-aichat-input border-t border-base-300 p-3 flex flex-col gap-2">
+                // The textarea's accessible name. sr-only: the placeholder
+                // carries the visible hint, but a placeholder stops being a
+                // name the moment text is typed (ldui-iilm.11, drift
+                // input-outside-field).
+                // ldui-iay0: the SAME text the placeholder shows -- the
+                // template substituted ({assistant} -> the engine's
+                // name), or the host's own placeholder -- never the raw
+                // `composer_placeholder` template.
+                <label class="sr-only" for=id_composer data-ai-chat-composer-label="">
+                    {move || {
+                        let p = placeholder.get();
+                        if p.is_empty() {
+                            composer_placeholder_for(&assistant.get(), &texts.get())
+                        } else {
+                            p
                         }
-                        prop:value=move || input.get()
-                        on:input=move |e| {
-                            input.set(event_target_value(&e));
-                            resize_textarea();
+                    }}
+                </label>
+                // `resize-y` puts the drag grip on the bottom-right corner and
+                // moves the height only, so the box stays full width;
+                // `max-h-[60vh]` bounds the drag, while the auto-grow stops at
+                // `COMPOSER_MAX_HEIGHT_PX` by itself (ldui-ms9u).
+                <textarea
+                    node_ref=textarea_ref
+                    id=id_composer
+                    data-ai-chat-composer=""
+                    class="textarea textarea-bordered w-full resize-y max-h-[60vh] overflow-y-auto"
+                    rows="2"
+                    placeholder=move || {
+                        let p = placeholder.get();
+                        if p.is_empty() {
+                            composer_placeholder_for(&assistant.get(), &texts.get())
+                        } else {
+                            p
                         }
-                        on:keydown=move |e| {
-                            // Esc cancels an in-flight turn — matches the composer
-                            // hint's "Esc to stop" while `waiting`.
-                            if e.key() == "Escape" && waiting() {
+                    }
+                    prop:value=move || input.get()
+                    on:input=move |e| {
+                        input.set(event_target_value(&e));
+                        resize_textarea();
+                    }
+                    on:keydown=move |e| {
+                        // Esc cancels an in-flight turn — matches the composer
+                        // hint's "Esc to stop" while `waiting`.
+                        if e.key() == "Escape" && waiting() {
+                            e.prevent_default();
+                            cancel();
+                            return;
+                        }
+                        match composer_key_action(&e.key(), e.shift_key(), e.is_composing()) {
+                            ComposerAction::Send => {
                                 e.prevent_default();
-                                cancel();
-                                return;
+                                submit();
                             }
-                            match composer_key_action(&e.key(), e.shift_key(), e.is_composing()) {
-                                ComposerAction::Send => {
-                                    e.prevent_default();
-                                    submit();
-                                }
-                                // Newline / Ignore: let the textarea handle it natively.
-                                ComposerAction::Newline | ComposerAction::Ignore => {}
-                            }
+                            // Newline / Ignore: let the textarea handle it natively.
+                            ComposerAction::Newline | ComposerAction::Ignore => {}
                         }
-                    />
+                    }
+                />
+                <div class="flex items-center justify-end gap-2" data-ai-chat-composer-actions="">
+                    <div class="flex flex-1 flex-wrap items-center justify-between gap-2 text-xs text-base-content/75">
+                        <span>{hint_text}</span>
+                        <Show when=move || usage_caption().is_some()>
+                            <span class="lds-aichat-usage text-right">
+                                {move || usage_caption().unwrap_or_default()}
+                            </span>
+                        </Show>
+                    </div>
                     <Show
                         when=waiting
                         fallback=move || view! {
@@ -1097,14 +1161,6 @@ pub fn AiChat(
                         >
                             {move || texts.get().stop}
                         </button>
-                    </Show>
-                </div>
-                <div class="flex items-center justify-between gap-2 text-xs opacity-60">
-                    <span>{hint_text}</span>
-                    <Show when=move || usage_caption().is_some()>
-                        <span class="lds-aichat-usage text-right">
-                            {move || usage_caption().unwrap_or_default()}
-                        </span>
                     </Show>
                 </div>
             </div>
