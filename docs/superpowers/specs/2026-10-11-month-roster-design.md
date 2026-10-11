@@ -182,7 +182,8 @@ are text and the grid has no roving focus (`role="grid"` only when interactive, 
   and the long name `sr-only select-none`.
 - A date box: `h-28 border border-table-grid p-1 align-top`; outside `bg-base-200/40
   text-base-content/75`; closed `bg-base-200/60`; holiday `bg-accent/10`; weekend `bg-base-200/30`;
-  today `ring-2 ring-inset ring-primary` plus the visible word "Today".
+  today `outline-2 -outline-offset-2 outline-primary` plus the visible word "Today". (The kit's
+  `ring-2 ring-inset` became an outline at build time: a box-shadow ring is a DEPTH finding.)
 - The head: the day number as a button (`on_navigate(Day, day)`), "Today", "Holiday: X" (with
   "(half day)" when `half_day`), "Closed: reason", then "3 of 4 needed" (`font-semibold` when short).
 - Chips: a `<ul>`, one `<li>` each, three lines: the name (`truncate font-semibold`,
@@ -202,8 +203,8 @@ are text and the grid has no roving focus (`role="grid"` only when interactive, 
   same day of the new month once the host has rendered it. Escape inside a box returns focus to the
   box. Alt/Ctrl/Meta chords are left to the browser.
 - Each box's `aria-label`: "Wednesday, Oct 14, 2026, Today, 5 working, 4 out, Holiday: X" or
-  "..., no one scheduled" / "..., no schedule published". Never "0 people". Today is the ring and
-  the word, not `aria-current` alone.
+  "..., no one scheduled" / "..., no schedule published". Never "0 people". Today is the outline
+  and the word, not `aria-current` alone.
 - The data refresh keeps focus: boxes are keyed by date, so a new `days` value restyles them in
   place. Chips are keyed by their whole content (the `<For>` key lesson).
 

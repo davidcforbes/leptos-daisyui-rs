@@ -106,7 +106,7 @@ RosterDay::new(day)
 | `Escape` | From a chip back to its day; in Week back to Month; in Day back to Week |
 
 Each date box is a `gridcell` named in words: "Wednesday, Oct 14, 2026, Today, 5 working, 4 out,
-5 of 6 needed". Today is the ring AND the word. From the month, the Week and Day switch buttons zoom
+5 of 6 needed". Today is the outline AND the word. From the month, the Week and Day switch buttons zoom
 to the active day, so a keyboard user arrows to a day and then picks its week. The row week buttons
 take no tab stop for that reason.
 
@@ -137,7 +137,8 @@ in the host:
 The look is the kit's: `table-fixed border-collapse border-table-grid`, header cells
 `bg-table-header`, date boxes `h-28 p-1`, adjacent-month days `bg-base-200/40`, closed
 `bg-base-200/60`, holiday `bg-accent/10`, weekend `bg-base-200/30`, and today
-`ring-2 ring-inset ring-primary`. The weekend defaults to Saturday and Sunday (`weekend` prop). The
+`outline-2 -outline-offset-2 outline-primary`. The kit draws a `ring-2 ring-inset`; the roster
+uses an outline because a box-shadow ring is a DEPTH finding in the style audit. The weekend defaults to Saturday and Sunday (`weekend` prop). The
 class list for `input.css` is in the component's rustdoc (`@source inline(...)`). A native test
 fails if a class the roster can emit is missing from it.
 
