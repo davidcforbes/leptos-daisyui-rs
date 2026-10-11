@@ -56,6 +56,7 @@ cargo xtask test-selectable-summary    # SelectableSummaryGroup radiogroup contr
 cargo xtask test-bar-chart-divergence  # BarChart signed divergence + a11y (ldui-y2ed)
 cargo xtask test-heatmap-matrix        # Heatmap two-axis grid + hidden matrix (ldui-8d94)
 cargo xtask test-week-planner          # WeekView planner: day+time keyboard moves on one node, work-day mask, EN/ES (ldui-9sip)
+cargo xtask test-month-roster          # MonthRoster: month grid +N, one tab stop, Week/Day zoom, container agenda, print (ldui-5lmt)
 cargo xtask test-collapse-naming       # Collapse toggle id/name + title-derived accessible name (ldui-3k00)
 cargo xtask test-data-table-fit        # DataTable undeclared columns fit w-full; declared tracks scroll (ldui-qsqz)
 cargo xtask test-snapshot-table-page-filter-actions  # SnapshotTablePage's opt-in count/Reset/Save row (ldui-nj3q)

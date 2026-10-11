@@ -92,6 +92,9 @@ pub mod mermaid_display;
 pub mod message_bar;
 /// Variants and class helpers of ldui's `metric_row` component.
 pub mod metric_row;
+/// Variants and class helpers of ldui's `month_roster` pattern
+/// (`leptos_daisyui_rs::patterns::MonthRoster`).
+pub mod month_roster;
 /// Variants and class helpers of ldui's `nav_rail` component.
 pub mod nav_rail;
 /// Variants and class helpers of ldui's `pagination` component.
@@ -194,6 +197,7 @@ pub use menu::*;
 pub use mermaid_display::*;
 pub use message_bar::*;
 pub use metric_row::*;
+pub use month_roster::*;
 pub use nav_rail::*;
 pub use pagination::*;
 pub use persona::*;

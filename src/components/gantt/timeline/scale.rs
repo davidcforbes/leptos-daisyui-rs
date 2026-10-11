@@ -113,7 +113,8 @@ fn generate_major_headers(
             // Major: Months
             while current <= end {
                 let month_label = current.format("%B %Y").to_string();
-                let days_in_month = days_in_month(current.year(), current.month());
+                let days_in_month =
+                    crate::components::days_in_month(i64::from(current.year()), current.month());
                 headers.push(ScaleHeader {
                     label: month_label,
                     width: column_width * days_in_month,
@@ -259,22 +260,4 @@ fn next_month(dt: DateTime<Utc>) -> DateTime<Utc> {
             .with_ymd_and_hms(dt.year(), dt.month() + 1, 1, 0, 0, 0)
             .unwrap()
     }
-}
-
-fn days_in_month(year: i32, month: u32) -> u32 {
-    let next_month = if month == 12 {
-        chrono::Utc
-            .with_ymd_and_hms(year + 1, 1, 1, 0, 0, 0)
-            .unwrap()
-    } else {
-        chrono::Utc
-            .with_ymd_and_hms(year, month + 1, 1, 0, 0, 0)
-            .unwrap()
-    };
-
-    let this_month = chrono::Utc
-        .with_ymd_and_hms(year, month, 1, 0, 0, 0)
-        .unwrap();
-
-    (next_month - this_month).num_days() as u32
 }

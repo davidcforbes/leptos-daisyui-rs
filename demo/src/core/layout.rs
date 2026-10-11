@@ -359,6 +359,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     value: "roster-grid",
                 },
                 ComponentItem {
+                    name: "Month Roster (Staff Calendar)",
+                    href: "/components/month-roster",
+                    value: "month-roster",
+                },
+                ComponentItem {
                     name: "Diff",
                     href: "/components/diff",
                     value: "diff",

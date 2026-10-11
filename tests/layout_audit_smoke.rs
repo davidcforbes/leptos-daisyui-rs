@@ -136,6 +136,15 @@ const PAGES: &[(&str, usize, usize)] = &[
     // with EN at every stage. No slack: the next violation is the first.
     ("/components/ai-chat", 0, 0),
     ("/components/ai-chat-es", 0, 0),
+    // ldui-5lmt.2: the MonthRoster staff calendar. 0 is MEASURED, not a
+    // placeholder: the first sweep read grid 15, depth 1 and component-drift
+    // 122, all fixed at source. daisyUI's 6px `.btn` gap applied because the
+    // header arrows and week buttons had a glyph plus an sr-only name (now
+    // aria-label); the "+N" label was inline-block (now block); today's mark
+    // was a box-shadow ring (now an outline); the grid was a raw <table> (now
+    // `.table`); and the chip and day-number buttons now declare
+    // `data-pressable`. No slack: the next violation is the first.
+    ("/components/month-roster", 0, 0),
 ];
 
 async fn audit_page(path: &str, max_grid: usize, max_internal: usize) {
@@ -213,6 +222,9 @@ audit_test!(helpdesk_layout_is_clean, 13);
 // counts, which is where a layout regression hides.
 audit_test!(ai_chat_layout_is_clean, 14);
 audit_test!(ai_chat_es_layout_is_clean, 15);
+
+// ldui-5lmt.2. Its own invocation: a PAGES entry alone sweeps nothing.
+audit_test!(month_roster_layout_is_clean, 16);
 
 /// Negative control: prove the sweep actually detects things.
 ///

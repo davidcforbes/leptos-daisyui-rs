@@ -43,6 +43,7 @@
 //!   The rendered control marks itself `aria-invalid` and carries a localized
 //!   description. A silent no-match is the one outcome this module refuses.
 
+use crate::components::days_in_month;
 use std::fmt;
 
 /// A timezone-free civil date -- the only value an EntityTable date filter
@@ -73,7 +74,8 @@ impl EntityDate {
         if !(1..=9999).contains(&year) || !(1..=12).contains(&month) {
             return None;
         }
-        if !(1..=days_in_month(year, month)).contains(&day) {
+        let month_len = days_in_month(i64::from(year), u32::from(month));
+        if !(1..=month_len).contains(&u32::from(day)) {
             return None;
         }
         Some(Self { year, month, day })
@@ -146,20 +148,6 @@ fn parse_digits(text: &str) -> Option<i32> {
         return None;
     }
     text.parse().ok()
-}
-
-fn days_in_month(year: i32, month: u8) -> u8 {
-    match month {
-        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-        4 | 6 | 9 | 11 => 30,
-        2 if is_leap_year(year) => 29,
-        2 => 28,
-        _ => 0,
-    }
-}
-
-fn is_leap_year(year: i32) -> bool {
-    year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
 }
 
 /// Why one piece of text is not an [`EntityDate`].

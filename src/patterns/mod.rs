@@ -11,6 +11,7 @@ mod helpdesk;
 mod kpi_strip;
 mod list_page;
 mod macros;
+mod month_roster;
 mod page_header;
 mod page_quick_actions;
 mod page_state_panel;
@@ -107,6 +108,15 @@ pub use kpi_strip::{
     kpi_strip_gap_px, kpi_strip_row_fit,
 };
 pub use list_page::{LIST_PAGE_BASE_CLASS, ListPage, list_page_class};
+// The roster's pure date functions are aliased: bare `step` or
+// `visible_range` would read as the whole `patterns` module's vocabulary.
+pub use month_roster::{
+    AbsenceKind, DayCounts, DayMark, EntryGroup, EntryKind, MonthRoster, MonthRosterTexts,
+    RosterDay, RosterEntry, RosterLayout, RosterZoom, Staffing, add_months as roster_add_months,
+    day_counts as roster_day_counts, iso_week, month_span as roster_month_span,
+    sort_entries as sort_roster_entries, step as roster_step,
+    visible_range as roster_visible_range,
+};
 pub use page_header::{PageHeader, PageHeaderCrumb, PageHeaderDivider, PageHeaderNavigationLayout};
 pub use page_quick_actions::{
     PageQuickActionContent, PageQuickActionLabelVisibility, PageQuickActions,

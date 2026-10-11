@@ -479,6 +479,25 @@ const PAGES: &[(&str, &[(&str, usize)])] = &[
             (family::COMPONENT_DRIFT, 0),
         ],
     ),
+    // ldui-5lmt.2: the MonthRoster staff calendar. 0 is MEASURED, not a
+    // placeholder: the first sweep read grid 15, depth 1 and component-drift
+    // 122, all fixed at source. daisyUI's 6px `.btn` gap applied because the
+    // header arrows and week buttons had a glyph plus an sr-only name (now
+    // aria-label); the "+N" label was inline-block (now block); today's mark
+    // was a box-shadow ring (now an outline); the grid was a raw <table> (now
+    // `.table`); and the chip and day-number buttons now declare
+    // `data-pressable`. No slack: the next violation is the first.
+    (
+        "/components/month-roster",
+        &[
+            (family::TYPOGRAPHY, 0),
+            (family::SHAPE, 0),
+            (family::DEPTH, 0),
+            (family::GRID, 0),
+            (family::INTERNAL, 0),
+            (family::COMPONENT_DRIFT, 0),
+        ],
+    ),
 ];
 
 async fn audit_page(path: &str, ceilings: &[(&str, usize)]) {
@@ -537,6 +556,9 @@ style_audit_test!(helpdesk_style_is_within_ceiling, 11);
 // locale routes.
 style_audit_test!(ai_chat_style_is_within_ceiling, 12);
 style_audit_test!(ai_chat_es_style_is_within_ceiling, 13);
+
+// ldui-5lmt.2. Its own invocation: a PAGES entry alone sweeps nothing.
+style_audit_test!(month_roster_style_is_within_ceiling, 14);
 
 /// Negative control: prove the sweep + merge actually detects things, across
 /// both the engine's style families and the daisyUI drift heuristics.

@@ -200,6 +200,39 @@ pub fn civil_from_days(days: i64) -> (i64, u32, u32) {
     (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
+/// The epoch day (days since 1970-01-01) of the civil date `year`-`month`-
+/// `day`: the inverse of [`civil_from_days`] (Howard Hinnant's
+/// `days_from_civil`). `month` is `1..=12`; `day` is not range-checked, so
+/// day 0 is the last day of the previous month.
+pub fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400; // [0, 399]
+    let m = i64::from(month);
+    let mp = if m > 2 { m - 3 } else { m + 9 }; // [0, 11]
+    let doy = (153 * mp + 2) / 5 + i64::from(day) - 1; // [0, 365]
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy; // [0, 146096]
+    era * 146_097 + doe - 719_468
+}
+
+/// Whether `year` is a Gregorian leap year.
+pub fn is_leap_year(year: i64) -> bool {
+    year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
+}
+
+/// The number of days in `month` (`1..=12`) of `year`; `0` for a month out
+/// of range. The crate's one copy: `EntityTable`'s date filter and the
+/// Gantt timeline scale both call it.
+pub fn days_in_month(year: i64, month: u32) -> u32 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if is_leap_year(year) => 29,
+        2 => 28,
+        _ => 0,
+    }
+}
+
 /// The epoch day (days since 1970-01-01) of the Monday of the week
 /// containing `epoch_day`.
 ///
