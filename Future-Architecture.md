@@ -138,7 +138,7 @@ The required portfolio is:
 | Term | Meaning |
 |---|---|
 | **Core** | The primary application that owns master authentication, master session state, navigation, and workflows that genuinely require shared in-process state. |
-| **Satellite** | A same-origin, independently compiled and deployed Wasm page opened in its own tab. It does not import the core or another satellite. |
+| **Satellite** | A same-origin, independently compiled and deployed Wasm page, opened in the current tab by default or in a new tab on request (§5.5). It does not import the core or another satellite. |
 | **Surface** | Any independently versioned browser artifact: the core or one satellite. |
 | **Page contract** | Typed declaration of a page's archetype, dataset selector, local controls, persisted settings, states, capabilities, and test obligations. |
 | **Surface release descriptor** | CI/CD metadata binding an explicitly coded surface ID to immutable artifacts, compatibility versions, and verification evidence. It does not create routes or navigation. |
@@ -265,8 +265,12 @@ code.
 
 ### 5.5 Browser-tab model
 
-- Core launches a satellite with `window.open` or an ordinary target-blank
-  navigation after a successful launch POST.
+- Core launches a satellite through a launch POST. By default the satellite
+  replaces the current page in the SAME tab. It opens in a new tab when the
+  user Ctrl-, Shift- or middle-clicks the launch, or has turned on the
+  per-person "Open pages in new tabs" setting. Record actions (Call, SMS,
+  WhatsApp, Email), the CTM phone window and outside sites always open
+  separately.
 - Every launch creates a distinct tab-scoped child session, even for the same
   user and page.
 - A satellite is self-contained after boot and keeps transient page state in
@@ -278,10 +282,26 @@ code.
 - Core logout MAY broadcast a best-effort close-or-lock notification through
   `BroadcastChannel`. Server-side revocation is authoritative because
   browsers cannot reliably force-close unrelated tabs.
-- A satellite has no logout action. The user closes its tab.
+- A satellite has no logout action. The user moves on, or closes its tab.
 
-This model intentionally permits side-by-side work. Separate tabs are an
-interaction requirement, not an accidental consequence of routing.
+This model permits side-by-side work without imposing it.
+
+**Amended 2026-10-12 by the owner.** The 4iiz-Office leadership team asked to
+stop opening a new tab on every click. The owner's verbatim choices were:
+"Ctrl+click + setting (Recommended)", "Pages visited in this tab
+(Recommended)", "No warning", and "Also Call/SMS/Email". The record is 4iiz-Office
+`docs/superpowers/specs/2026-10-12-single-tab-navigation-design.md`, bead
+op-mhr29. Under that ruling:
+
+- Same tab is the default. Side-by-side work comes from a modifier-click
+  (Ctrl, Shift or middle) or from the per-person setting.
+- The breadcrumb trail is the pages visited in this tab, and browser Back and
+  Forward work.
+- Leaving a page with unsaved typing gives no warning.
+
+This replaces the earlier rule that "separate tabs are an interaction
+requirement, not an accidental consequence of routing". Each launch still
+creates its own tab-scoped child session, whichever tab it lands in.
 
 ### 5.6 Physical package topology
 
@@ -1445,7 +1465,11 @@ Unless the owner explicitly changes this document:
 - Full-scale implementation is approved and in progress; No-Hires is the first
   production conversion, not an experiment or adoption gate.
 - No-Hires is a production satellite, not only a test capsule.
-- Satellites open in their own tabs.
+- Satellites open in the SAME tab by default. A new tab opens only on a
+  modifier-click (Ctrl, Shift or middle) or with the per-person "Open pages in
+  new tabs" setting. Record actions (Call, SMS, WhatsApp, Email), the CTM phone
+  window and outside sites stay separate. The owner made this change on
+  2026-10-12 (§5.5); it replaces "Satellites open in their own tabs".
 - User-facing routes do not contain `/satellites/`.
 - The core owns the master session; satellites use minimal tab-scoped child
   sessions.
