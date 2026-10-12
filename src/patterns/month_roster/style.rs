@@ -96,15 +96,21 @@ pub const TABLE_BASE: &str = "table w-full table-fixed border-collapse border bo
 /// A weekday header cell.
 pub const WEEKDAY_HEAD: &str = "border border-table-grid bg-table-header px-1 py-1 text-center text-xs font-semibold text-table-header-content";
 
-/// The week-button column's cells.
-pub const WEEK_HEAD: &str =
-    "w-10 border border-table-grid bg-table-header p-1 text-center align-top";
+/// The week-button column's cells. They paint the header fill, so they
+/// carry the header's content colour too, as [`WEEKDAY_HEAD`] does: the
+/// week button is `btn-ghost`, which draws in `currentColor` at rest
+/// (ldui-on0i; Office measured base-content on the navy header at 1.06:1).
+/// Its hover and focus fill is the ghost's own light one with base-content
+/// text, so the colour must stay on the cell, never on the button.
+pub const WEEK_HEAD: &str = "w-10 border border-table-grid bg-table-header p-1 text-center align-top text-table-header-content";
 
 /// A date box.
 pub const DAY_BOX: &str = "h-28 border border-table-grid p-1 align-top print:h-auto";
 
-/// A day of an adjacent month.
-pub const DAY_OUTSIDE: &str = "bg-base-200/40 text-base-content/75";
+/// A day of an adjacent month. Dimmed to `/85`, not the crate's usual muted
+/// `/75`: a chip's 12px text sits on the chip's tint over this surface, and
+/// `/75` measured 4.4:1 there (ldui-on0i, Office's axe).
+pub const DAY_OUTSIDE: &str = "bg-base-200/40 text-base-content/85";
 
 /// A closed day's surface.
 pub const DAY_CLOSED: &str = "bg-base-200/60";

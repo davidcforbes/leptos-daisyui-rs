@@ -31,6 +31,7 @@ callbacks (Future-Architecture.md:478-533).
   roving active day.
 - What the port drops (decision 5): add, edit, move, remove and drag. The kit's move form, its
   dialogs and its htmx swaps have no counterpart. A later bead can add editing if a host asks.
+  (4iiz-Office asked on 2026-10-12: ldui-k145 added the editing HOOKS, below.)
 
 ## 3. Decisions
 
@@ -69,7 +70,11 @@ The epic's decisions are defaults. This spec refines some of them; it drops none
 4. **Order inside a day:** working (by start time, untimed last, then name), then out (by kind in
    the order Vacation, Out of office, Sick, Other, then name), then holiday, then off (by name).
 5. **Read-only in v1.** Activating a chip calls `on_entry_activate(entry id)`. There is no add,
-   edit, move, remove or drag.
+   edit, move, remove or drag. *Amended 2026-10-12 (ldui-k145, Office op-rrfr4):* the roster still
+   never edits, but it can now PROPOSE edits through three optional hooks, `on_day_activate(day)`
+   (double-click, double-tap or Enter on a day), `on_day_add(day)` (a "+" on each `addable` day)
+   and `on_entry_remove(id)` (an "x" on each `removable` entry). The host opens its own dialogs and
+   answers by changing `days`. See `doc/components/month-roster.md`, "Editing hooks".
 6. **CSR only**, like the rest of ldui.
 7. **Strings.** `MonthRosterTexts` (`Default` = English, plus `es()`), passed as a `Signal`,
    includes the month and weekday names and every template. A switch from EN to ES and back renames

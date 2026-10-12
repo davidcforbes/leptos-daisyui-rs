@@ -257,6 +257,8 @@ fn the_content_key_sees_every_field() {
         base.clone().times(8 * 60, 12 * 60).content_key(),
         RosterEntry::absent("s", "Sam", AbsenceKind::Vacation).content_key(),
         RosterEntry::absent("s", "Samuel", AbsenceKind::Sick).content_key(),
+        // ldui-k145: a chip that gains or loses its "x" must re-render.
+        base.clone().removable().content_key(),
     ];
     for (i, a) in keys.iter().enumerate() {
         for b in &keys[i + 1..] {
@@ -530,6 +532,8 @@ fn spanish_translates_every_word_and_leaves_no_template_empty() {
             t.no_one_working.clone(),
             t.holiday_line.clone(),
             t.off_line.clone(),
+            t.add_to_day.clone(),
+            t.remove_entry.clone(),
         ]
     };
     for (english, spanish) in words(&en).into_iter().zip(words(&es)) {
@@ -581,6 +585,9 @@ fn emitted_classes() -> Vec<&'static str> {
         DAY_TODAY,
         CHIP,
         "btn-ghost btn-sm btn-square join-item btn-active print:hidden",
+        // ldui-k145's "+" / "x" buttons, the chip row that holds an "x", and
+        // the activatable box or column.
+        "btn-ghost btn-xs btn-square gap-0 shrink-0 print:hidden flex items-start items-center gap-1 gap-2 min-w-0 flex-1 touch-manipulation",
     ]);
     for kind in AbsenceKind::ALL {
         strings.push(kind.as_class());
@@ -680,4 +687,110 @@ fn zoom_and_absence_slugs_are_distinct() {
     slugs.extend(["full", "half", "holiday", "off"]);
     let unique: std::collections::BTreeSet<&str> = slugs.iter().copied().collect();
     assert_eq!(unique.len(), slugs.len());
+}
+
+// ---- ldui-k145: editing hooks -----------------------------------------------
+
+#[test]
+fn days_and_entries_are_not_editable_unless_the_host_says_so() {
+    let day = RosterDay::new(d(2026, 10, 20));
+    assert!(
+        !day.addable,
+        "a day takes a \"+\" only when the host marks it"
+    );
+    assert!(day.clone().addable().addable);
+    let entry = RosterEntry::working("a", "Ana Lopez", ShiftState::Full);
+    assert!(
+        !entry.removable,
+        "an entry takes an \"x\" only when the host marks it"
+    );
+    assert!(entry.clone().removable().removable);
+    // The flag is independent of every other field.
+    assert_eq!(
+        RosterDay {
+            addable: false,
+            ..day.clone().addable()
+        },
+        day
+    );
+}
+
+#[test]
+fn the_add_and_remove_buttons_say_the_day_and_the_person() {
+    let day = d(2026, 10, 20);
+    let (en, es) = (MonthRosterTexts::default(), MonthRosterTexts::es());
+    assert_eq!(
+        en.add_to_day_of(day),
+        "Add someone on Tuesday, Oct 20, 2026"
+    );
+    assert_eq!(
+        en.remove_entry_of("Ana Lopez", day),
+        "Remove Ana Lopez from Tuesday, Oct 20, 2026"
+    );
+    assert_eq!(
+        es.add_to_day_of(day),
+        "A\u{f1}adir a alguien el martes, 20 oct 2026"
+    );
+    assert_eq!(
+        es.remove_entry_of("Ana Lopez", day),
+        "Quitar a Ana Lopez del martes, 20 oct 2026"
+    );
+}
+
+/// Every new control is a real, named button with the data hook a host's
+/// tests address it by, and none is drawn without the host's callback.
+///
+/// Deliberate break: drop `aria-label` from the "+" -> the first loop fails.
+#[test]
+fn the_editing_controls_are_named_buttons_behind_their_callbacks() {
+    let source = include_str!("component.rs");
+    for hook in ["data-day-add=", "data-entry-remove="] {
+        let at = source
+            .find(hook)
+            .unwrap_or_else(|| panic!("no {hook} in component.rs"));
+        let button = source[..at].rfind("<button").expect("inside a <button>");
+        let end = at + source[at..].find("on:click").expect("its handler");
+        let tag = &source[button..end];
+        assert!(tag.contains("type=\"button\""), "{hook}: {tag}");
+        assert!(tag.contains("aria-label="), "{hook} is unnamed: {tag}");
+        assert!(
+            tag.contains("tabindex="),
+            "{hook} ignores the roving Tab order"
+        );
+    }
+    assert!(source.contains("match ctx.on_day_add {"));
+    assert!(source.contains("ctx.on_entry_remove.filter(|_| entry.removable)"));
+    let day = include_str!("day.rs");
+    assert!(day.contains("ctx.on_entry_remove.filter(|_| entry.removable)"));
+}
+
+// ---- ldui-on0i: contrast on the month grid ----------------------------------
+
+/// Office's axe (2026-10-12, 1440, its theme) found the week buttons at
+/// 1.06:1 and an adjacent month's chips at 4.4:1. The week column's cells
+/// paint the header fill, so they carry the header's content colour, and the
+/// ghost week button inherits it at rest; the button itself must NOT carry a
+/// text colour, or its light hover and focus fill would draw that white text
+/// on white. An adjacent month's days dim to /85, never the /75 that failed.
+///
+/// Deliberate break: drop `text-table-header-content` from `WEEK_HEAD` ->
+/// the first assertion fails. Revert; passes.
+#[test]
+fn the_week_column_and_adjacent_days_keep_readable_text() {
+    let classes = |s: &'static str| s.split_whitespace().collect::<Vec<_>>();
+    assert!(classes(WEEK_HEAD).contains(&"text-table-header-content"));
+    assert!(classes(WEEK_HEAD).contains(&"bg-table-header"));
+    assert!(classes(WEEKDAY_HEAD).contains(&"text-table-header-content"));
+    let source = include_str!("component.rs");
+    let at = source
+        .find("data-month-roster-action=\"week\"")
+        .expect("the week button");
+    let tag = &source[at..at + source[at..].find("aria-label").expect("its label")];
+    assert!(tag.contains("btn-ghost"), "{tag}");
+    assert!(
+        !tag.contains(" text-"),
+        "the week button inherits the cell's colour: {tag}"
+    );
+    assert!(classes(DAY_OUTSIDE).contains(&"text-base-content/85"));
+    assert!(!DAY_OUTSIDE.contains("/75"), "4.4:1 on a chip's tint");
 }

@@ -190,6 +190,61 @@ fn october(es: bool) -> Vec<RosterDay> {
     days
 }
 
+/// The editable fixture's data (ldui-k145): the same October plus the last
+/// days of September and the first of November, which the month grid shows
+/// as an adjacent month's days. Like 4iiz-Office, the host lets only days
+/// AFTER today change: those are addable and their working entries
+/// removable. It keeps its own edits (removed ids, people added per day)
+/// and answers with new `days`.
+fn editable(es: bool, removed: &[String], added: &[i64]) -> Vec<RosterDay> {
+    let mut days = october(es);
+    for day in [
+        days_from_civil(2026, 9, 28),
+        days_from_civil(2026, 9, 29),
+        days_from_civil(2026, 9, 30),
+        days_from_civil(2026, 11, 1),
+    ] {
+        let weekday = Weekday::from_epoch_day(day).index_from_monday();
+        let entries: Vec<RosterEntry> = regulars(weekday)
+            .into_iter()
+            .map(|(person, shift, half)| working(person, day, shift, half))
+            .collect();
+        days.push(RosterDay::new(day).entries(entries));
+    }
+    days.into_iter()
+        .map(|mut roster| {
+            let day = roster.day;
+            let future = day > TODAY;
+            roster.entries.retain(|e| !removed.contains(&e.id));
+            for (n, _) in added.iter().enumerate().filter(|(_, d)| **d == day) {
+                roster.entries.push(
+                    RosterEntry::working(
+                        format!("new-{n}"),
+                        format!("New person {}", n + 1),
+                        ShiftState::Full,
+                    )
+                    .times(DAY.0, DAY.1),
+                );
+            }
+            if future {
+                roster.entries = roster
+                    .entries
+                    .into_iter()
+                    .map(|e| {
+                        if e.kind.group() == EntryGroup::Working {
+                            e.removable()
+                        } else {
+                            e
+                        }
+                    })
+                    .collect();
+                roster = roster.addable();
+            }
+            roster
+        })
+        .collect()
+}
+
 #[component]
 pub fn MonthRosterDemo() -> impl IntoView {
     let zoom = RwSignal::new(RosterZoom::Month);
@@ -217,6 +272,23 @@ pub fn MonthRosterDemo() -> impl IntoView {
         last_nav.set(format!("{}:{}", to.as_str(), iso(day)));
         zoom.set(to);
         anchor.set(day);
+    });
+
+    // The editable fixture (ldui-k145): its own zoom and anchor, and the
+    // host's edits. A real host opens a dialog on each proposal.
+    let edit_zoom = RwSignal::new(RosterZoom::Month);
+    let edit_anchor = RwSignal::new(TODAY);
+    let removed = RwSignal::new(Vec::<String>::new());
+    let added = RwSignal::new(Vec::<i64>::new());
+    let opened = RwSignal::new(String::new());
+    let opened_count = RwSignal::new(0_u32);
+    let last_add = RwSignal::new(String::new());
+    let last_remove = RwSignal::new(String::new());
+    let edit_days =
+        Signal::derive(move || removed.with(|r| added.with(|a| editable(es.get(), r, a))));
+    let edit_navigate = Callback::new(move |(to, day): (RosterZoom, i64)| {
+        edit_zoom.set(to);
+        edit_anchor.set(day);
     });
 
     view! {
@@ -262,6 +334,51 @@ pub fn MonthRosterDemo() -> impl IntoView {
                         on_navigate=navigate
                         on_entry_activate=Callback::new(move |id: String| activated.set(id))
                         attr:id="fixture-roster"
+                    />
+                </div>
+            </Section>
+            <Section title="Editing hooks">
+                <p class="text-sm text-base-content/75">
+                    "The same office with the host's editing hooks. Double-click a day, double-tap it, "
+                    "or press Enter on it to open it; the day number still zooms to the Day view. "
+                    "Days after today are addable (+) and their working people removable (x). "
+                    "The roster only proposes; this host applies the change to its data."
+                </p>
+                <div class="flex flex-wrap items-center gap-4 text-sm">
+                    <span>"Opened: " <code data-testid="editable-opened">{move || opened.get()}</code></span>
+                    <span>"Times opened: " <code data-testid="editable-opened-count">{move || opened_count.get()}</code></span>
+                    <span>"Add: " <code data-testid="editable-added">{move || last_add.get()}</code></span>
+                    <span>"Remove: " <code data-testid="editable-removed">{move || last_remove.get()}</code></span>
+                </div>
+                <div id="editable-roster-host" class="w-full">
+                    <MonthRoster
+                        days=edit_days
+                        anchor_day=edit_anchor
+                        today=Signal::stored(TODAY)
+                        zoom=edit_zoom
+                        now_min=Signal::stored(Some(10 * 60 + 30))
+                        texts=texts
+                        label=Signal::derive(move || {
+                            if es.get() {
+                                "Horario editable de la oficina de Raleigh".to_string()
+                            } else {
+                                "Raleigh office schedule, editable".to_string()
+                            }
+                        })
+                        on_navigate=edit_navigate
+                        on_day_activate=Callback::new(move |day: i64| {
+                            opened.set(iso(day));
+                            opened_count.update(|n| *n += 1);
+                        })
+                        on_day_add=Callback::new(move |day: i64| {
+                            last_add.set(iso(day));
+                            added.update(|a| a.push(day));
+                        })
+                        on_entry_remove=Callback::new(move |id: String| {
+                            last_remove.set(id.clone());
+                            removed.update(|r| r.push(id));
+                        })
+                        attr:id="editable-roster"
                     />
                 </div>
             </Section>

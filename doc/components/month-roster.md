@@ -14,7 +14,7 @@ levels of one data set. It is a port of the 4iiz-kit `MonthRoster`, so 4iiz-Offi
 Demo: `/components/month-roster`. Browser lane: `cargo xtask test-month-roster` (inside
 `verify-full`).
 
-## The contract: controlled, data-agnostic, read-only
+## The contract: controlled, data-agnostic, it proposes and never edits
 
 The roster never fetches, never reads a clock and never mutates its data. The host owns the zoom
 and the anchor day. Every prev / next / Today / zoom switch / week button / day number / Enter /
@@ -56,7 +56,9 @@ view! {
 - **Without `on_navigate` the roster is display-only:** no header controls, no week buttons, plain
   day numbers and no roving focus. With only `on_entry_activate` the chips are buttons and the grid
   keeps its single tab stop.
-- **v1 is read-only.** There is no add, edit, move, remove or drag. Chip activation goes to the host.
+- **The roster never edits.** Opening a day, adding someone and removing an entry are proposals
+  the host answers by changing `days` (see [Editing hooks](#editing-hooks-ldui-k145)). There is no
+  move or drag. Chip activation goes to the host.
 - `actions` is a slot at the end of the header for the host's own controls (Office puts its office
   select there).
 
@@ -94,6 +96,46 @@ RosterDay::new(day)
   writes "08:00-16:30" from `times`. Times are locale-free, so a language switch changes no entry,
   and the chips are renamed in place rather than rebuilt.
 
+## Editing hooks (ldui-k145)
+
+4iiz-Office edits People schedules from its Monthly Schedule. Three optional props let a host open
+its own dialogs; a host that passes none of them gets exactly the read-only roster.
+
+```rust
+RosterDay::new(day).addable()                       // this day takes a "+"
+RosterEntry::working(id, name, ShiftState::Full).removable()   // this entry takes an "x"
+
+view! {
+    <MonthRoster
+        // ...
+        on_day_activate=move |day: i64| open_day_dialog(day)
+        on_day_add=move |day: i64| open_add_form(day)
+        on_entry_remove=move |id: String| ask_reason_then_remove(id)
+    />
+}
+```
+
+- **`on_day_activate`** opens a day from a double-click on a date box (Month) or a day column
+  (Week), a touch double-tap, or `Enter` on the focused box or column. A double-click or a
+  double-tap on one of the day's own controls (a chip's button or link, the day number, "+", "x",
+  "+N") keeps that control's meaning. The double-click's word selection is cleared. With the hook
+  set, `Enter` no longer zooms, so the day number joins the active box's Tab order and still zooms
+  on a click or `Enter`. In the Week view, each column takes a tab stop. Boxes and columns carry
+  `touch-action: manipulation`, so the browser does not zoom on the second tap.
+- **`on_day_add`** draws a labelled "+" (`data-day-add="2026-10-21"`, named "Add someone on
+  Wednesday, Oct 21, 2026") at the top right of each day the host marks `addable`, in all three
+  zooms. The host decides which days: Office marks only the days after today.
+- **`on_entry_remove`** draws a labelled "x" (`data-entry-remove="<entry id>"`, named "Remove Mia
+  Chen from Wednesday, Oct 21, 2026") beside each entry the host marks `removable`. In a chip it sits
+  beside the chip's own `on_entry_activate` button or link, never inside it. In the Day timeline it
+  sits beside the person's name.
+- Every new control is a real `<button type="button">` with its name from `texts` (`add_to_day`,
+  `remove_entry`, both EN and ES). In the month grid each one follows the box's roving Tab order like
+  the chips do, and `Escape` returns from it to its box. They are `print:hidden`.
+- **Focus after a removal is the host's job.** When the host's answer removes the entry, its "x"
+  goes with it. Return focus to the day's box, `td[data-day="<iso date>"]`, or the Week column,
+  `[data-week-column][data-day="<iso date>"]`.
+
 ## Keyboard (the month grid)
 
 | Key | Effect |
@@ -102,7 +144,7 @@ RosterDay::new(day)
 | Arrows | One day / one week, within the shown weeks |
 | `Home` / `End` | The ends of the week row |
 | `PageUp` / `PageDown` | Propose the previous / next month, same day of the month; focus lands on it once rendered |
-| `Enter` | Propose the Day zoom of that day |
+| `Enter` | Propose the Day zoom of that day; with `on_day_activate`, open the day instead |
 | `Escape` | From a chip back to its day; in Week back to Month; in Day back to Week |
 
 Each date box is a `gridcell` named in words: "Wednesday, Oct 14, 2026, Today, 5 working, 4 out,
@@ -139,6 +181,11 @@ The look is the kit's: `table-fixed border-collapse border-table-grid`, header c
 `bg-base-200/60`, holiday `bg-accent/10`, weekend `bg-base-200/30`, and today
 `outline-2 -outline-offset-2 outline-primary`. The kit draws a `ring-2 ring-inset`; the roster
 uses an outline because a box-shadow ring is a DEPTH finding in the style audit. The weekend defaults to Saturday and Sunday (`weekend` prop). The
+week-button column's cells carry `text-table-header-content` with the header fill, and the ghost
+week button inherits it; giving the button its own text colour would put that light text on the
+ghost's light hover fill. Adjacent-month days dim their text to `/85`, not the crate's usual `/75`,
+because a chip's 12px text sits on a tint over that surface (ldui-on0i, measured by Office at 4.4:1).
+The
 class list for `input.css` is in the component's rustdoc (`@source inline(...)`). A native test
 fails if a class the roster can emit is missing from it.
 

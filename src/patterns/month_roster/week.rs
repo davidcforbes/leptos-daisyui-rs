@@ -3,7 +3,7 @@
 //! has 20+ people, and an hour grid with that many lanes is unreadable. It
 //! reuses WeekView's date math, not its grid.
 
-use super::component::{Chip, Ctx, DayHead, DayStatus};
+use super::component::{Chip, Ctx, DayHead, DayStatus, day_dblclick, day_pointerup};
 use super::style::{DAY_CLOSED, DAY_HOLIDAY, DAY_TODAY, DAY_WEEKEND, RosterZoom, WEEK_COLUMNS};
 use super::texts::fill;
 use super::types::{EntryGroup, RosterEntry, iso_date, sorted_entries};
@@ -90,10 +90,25 @@ fn WeekColumn(ctx: Ctx, day: i64) -> impl IntoView {
         if is_today() {
             classes.push(DAY_TODAY);
         }
+        if ctx.activatable() {
+            // A tab stop that Enter opens; no double-tap zoom.
+            classes.push("ld-focus-ring touch-manipulation");
+        }
         classes.join(" ")
     };
     let always = Signal::stored(true);
-    let chip = move |entry: RosterEntry| view! { <Chip ctx=ctx entry=entry in_tab_order=always prefer_times=true /> };
+    let chip = move |entry: RosterEntry| view! { <Chip ctx=ctx day=day entry=entry in_tab_order=always prefer_times=true /> };
+    // Enter on the column itself (not on one of its controls) opens the day.
+    let on_keydown = move |ev: web_sys::KeyboardEvent| {
+        if let Some(activate) = ctx.on_day_activate
+            && ev.key() == "Enter"
+            && ev.target() == ev.current_target()
+            && !(ev.alt_key() || ev.ctrl_key() || ev.meta_key() || ev.shift_key())
+        {
+            ev.prevent_default();
+            activate.run(day);
+        }
+    };
 
     view! {
         <section
@@ -101,11 +116,15 @@ fn WeekColumn(ctx: Ctx, day: i64) -> impl IntoView {
             data-day=iso_date(day)
             data-today=move || is_today().then_some("")
             aria-labelledby=head_id.clone()
+            tabindex=ctx.activatable().then_some(0)
             class=class
+            on:keydown=on_keydown
+            on:dblclick=move |ev| day_dblclick(ctx, day, ev)
+            on:pointerup=move |ev| day_pointerup(ctx, day, ev)
         >
             <header id=head_id.clone() class="sticky top-0 z-10 flex flex-col gap-1 bg-base-100">
                 <h3 class="sr-only">{move || ctx.texts.with(|t| t.date_long_of(day))}</h3>
-                <DayHead ctx=ctx day=day data=data tabbable=true with_weekday=true />
+                <DayHead ctx=ctx day=day data=data tabbable=true in_tab_order=always with_weekday=true />
             </header>
             <DayStatus ctx=ctx data=data />
             <ul data-week-working="" class="flex flex-col gap-1">

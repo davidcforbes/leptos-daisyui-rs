@@ -35,6 +35,10 @@ pub struct RosterDay {
     pub staffing: Option<Staffing>,
     /// The people on this day, in any order (the roster sorts them).
     pub entries: Vec<RosterEntry>,
+    /// The host lets someone be added to this day: with `on_day_add` the
+    /// day shows a labelled "+" (ldui-k145). The host decides which days
+    /// (4iiz-Office marks only days after today).
+    pub addable: bool,
 }
 
 impl RosterDay {
@@ -85,6 +89,12 @@ impl RosterDay {
     /// Add several entries.
     pub fn entries(mut self, entries: impl IntoIterator<Item = RosterEntry>) -> Self {
         self.entries.extend(entries);
+        self
+    }
+
+    /// Let someone be added to this day (see the `addable` field).
+    pub fn addable(mut self) -> Self {
+        self.addable = true;
         self
     }
 }
@@ -240,6 +250,9 @@ pub struct RosterEntry {
     pub kind: EntryKind,
     /// Where the chip links when the roster has no `on_entry_activate`.
     pub link: Option<String>,
+    /// The host lets this entry be removed: with `on_entry_remove` the chip
+    /// shows a labelled "x" (ldui-k145).
+    pub removable: bool,
 }
 
 impl RosterEntry {
@@ -252,6 +265,7 @@ impl RosterEntry {
             end_min: None,
             kind,
             link: None,
+            removable: false,
         }
     }
 
@@ -320,6 +334,12 @@ impl RosterEntry {
         self
     }
 
+    /// Let this entry be removed (see the `removable` field).
+    pub fn removable(mut self) -> Self {
+        self.removable = true;
+        self
+    }
+
     /// Both times, when the entry has them.
     pub fn time_span(&self) -> Option<(u16, u16)> {
         self.start_min.zip(self.end_min)
@@ -336,6 +356,7 @@ impl RosterEntry {
         self.start_min.hash(&mut hasher);
         self.end_min.hash(&mut hasher);
         self.link.hash(&mut hasher);
+        self.removable.hash(&mut hasher);
         match self.kind {
             EntryKind::Working(shift) => (0u8, shift).hash(&mut hasher),
             EntryKind::Absent {

@@ -137,6 +137,11 @@ pub struct MonthRosterTexts {
     pub holiday_line: String,
     /// The Day view's off line: `{names}`.
     pub off_line: String,
+    /// The "+" on an addable day (`on_day_add`): `{date}` (long form).
+    pub add_to_day: String,
+    /// The "x" on a removable entry (`on_entry_remove`): `{person}`,
+    /// `{date}` (long form).
+    pub remove_entry: String,
 }
 
 fn strings<const N: usize>(words: [&str; N]) -> [String; N] {
@@ -229,6 +234,8 @@ impl Default for MonthRosterTexts {
             no_one_working: "No one is working".to_owned(),
             holiday_line: "Holiday: {names}".to_owned(),
             off_line: "Off: {names}".to_owned(),
+            add_to_day: "Add someone on {date}".to_owned(),
+            remove_entry: "Remove {person} from {date}".to_owned(),
         }
     }
 }
@@ -320,6 +327,8 @@ impl MonthRosterTexts {
             no_one_working: "Nadie trabaja".to_owned(),
             holiday_line: "Festivo: {names}".to_owned(),
             off_line: "Libres: {names}".to_owned(),
+            add_to_day: "Añadir a alguien el {date}".to_owned(),
+            remove_entry: "Quitar a {person} del {date}".to_owned(),
         }
     }
 
@@ -338,6 +347,20 @@ impl MonthRosterTexts {
     /// A day's name: "Wednesday, Oct 14, 2026".
     pub fn date_long_of(&self, day: i64) -> String {
         self.date_with(&self.date_long, day)
+    }
+
+    /// The "+" button's name: "Add someone on Wednesday, Oct 14, 2026".
+    pub fn add_to_day_of(&self, day: i64) -> String {
+        fill(&self.add_to_day, &[("date", &self.date_long_of(day))])
+    }
+
+    /// The "x" button's name: "Remove Ana Lopez from Wednesday, Oct 14,
+    /// 2026".
+    pub fn remove_entry_of(&self, person: &str, day: i64) -> String {
+        fill(
+            &self.remove_entry,
+            &[("person", person), ("date", &self.date_long_of(day))],
+        )
     }
 
     /// A day in full: "Wednesday, October 14, 2026".

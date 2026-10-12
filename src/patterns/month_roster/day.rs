@@ -2,7 +2,7 @@
 //! bar per working person on a shared hour axis) and who is out, grouped by
 //! kind. Bars are positioned in percent of the axis, so the pane can resize.
 
-use super::component::{Chip, Ctx, DayHead, DayStatus};
+use super::component::{Chip, Ctx, DayHead, DayStatus, RemoveButton};
 use super::style::{ODD_HOUR, RosterZoom, TIMELINE_ROW};
 use super::texts::fill;
 use super::types::{
@@ -88,7 +88,7 @@ fn DayBody(ctx: Ctx, day: i64) -> impl IntoView {
     let coverage_id = ctx.id("coverage");
     let out_id = ctx.id("out-today");
     let always = Signal::stored(true);
-    let chip = move |entry: RosterEntry| view! { <Chip ctx=ctx entry=entry in_tab_order=always prefer_times=true /> };
+    let chip = move |entry: RosterEntry| view! { <Chip ctx=ctx day=day entry=entry in_tab_order=always prefer_times=true /> };
     let last_hour = move || axis.get().1 / 60;
 
     view! {
@@ -100,7 +100,7 @@ fn DayBody(ctx: Ctx, day: i64) -> impl IntoView {
             on:keydown=on_keydown
         >
             <div class="flex flex-col gap-1">
-                <DayHead ctx=ctx day=day data=data tabbable=false no_number=true />
+                <DayHead ctx=ctx day=day data=data tabbable=false in_tab_order=always no_number=true />
                 <DayStatus ctx=ctx data=data />
             </div>
             <Show
@@ -179,7 +179,7 @@ fn DayBody(ctx: Ctx, day: i64) -> impl IntoView {
                             each=timed
                             key=|entry| entry.content_key()
                             children=move |entry| {
-                                view! { <TimelineRow ctx=ctx entry=entry axis=axis now_pct=now_pct /> }
+                                view! { <TimelineRow ctx=ctx day=day entry=entry axis=axis now_pct=now_pct /> }
                             }
                         />
                     </div>
@@ -241,6 +241,7 @@ fn DayBody(ctx: Ctx, day: i64) -> impl IntoView {
 #[component]
 fn TimelineRow(
     ctx: Ctx,
+    day: i64,
     entry: RosterEntry,
     axis: Memo<(u16, u16)>,
     now_pct: Memo<Option<f64>>,
@@ -272,10 +273,32 @@ fn TimelineRow(
         "absolute inset-y-1 flex items-center overflow-hidden rounded-sm border px-1 text-xs {}",
         entry.kind.colour_classes()
     );
+    let name = match ctx.on_entry_remove.filter(|_| entry.removable) {
+        None => view! {
+            <span translate="no" data-day-row-name="" class="truncate text-sm leading-7">
+                {entry.person.clone()}
+            </span>
+        }
+        .into_any(),
+        Some(remove) => view! {
+            <div data-day-row-name="" class="flex min-w-0 items-center gap-1">
+                <span translate="no" class="truncate text-sm leading-7">
+                    {entry.person.clone()}
+                </span>
+                <RemoveButton
+                    ctx=ctx
+                    day=day
+                    id=entry.id.clone()
+                    person=entry.person.clone()
+                    remove=remove
+                    in_tab_order=Signal::stored(true)
+                />
+            </div>
+        }
+        .into_any(),
+    };
     view! {
-        <span translate="no" data-day-row-name="" class="truncate text-sm leading-7">
-            {entry.person.clone()}
-        </span>
+        {name}
         <div data-day-track="" class="relative h-7">
             <div
                 data-day-bar=entry.id.clone()

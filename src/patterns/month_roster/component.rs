@@ -17,10 +17,14 @@ use leptos::{html::Div, prelude::*};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
+use wasm_bindgen::JsCast;
 
 /// Per-instance sequence so each roster on a page mints collision-free DOM
 /// ids for its date boxes, toggles and headings.
 static MONTH_ROSTER_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// Two taps on the same day within this many milliseconds are a double-tap.
+const DOUBLE_TAP_MS: f64 = 400.0;
 
 fn default_weekend() -> WeekdaySet {
     WeekdaySet::from_days([Weekday::Saturday, Weekday::Sunday])
@@ -43,6 +47,15 @@ pub(super) struct Ctx {
     pub layout: Signal<Option<RosterLayout>>,
     pub on_navigate: Option<Callback<(RosterZoom, i64)>>,
     pub on_entry_activate: Option<Callback<String>>,
+    pub on_day_activate: Option<Callback<i64>>,
+    pub on_day_add: Option<Callback<i64>>,
+    pub on_entry_remove: Option<Callback<String>>,
+    /// The last touch tap on a day, `(day, event time)`: the first half of a
+    /// double-tap.
+    pub last_tap: StoredValue<Option<(i64, f64)>>,
+    /// When a double-tap last opened a day, so the browser's compatibility
+    /// `dblclick` that follows it does not open the day a second time.
+    pub tapped_at: StoredValue<f64>,
     /// The month grid's remembered tab stop: `(day, month_first)`, where
     /// `month_first` is the first day of the month shown when it was set.
     pub focus: RwSignal<Option<(i64, i64)>>,
@@ -78,6 +91,67 @@ impl Ctx {
 
     pub fn layout_classes(&self, classes: super::style::LayoutClasses) -> &'static str {
         classes.pick(self.layout.get())
+    }
+
+    /// The host opens a day (`on_day_activate`).
+    pub fn activatable(&self) -> bool {
+        self.on_day_activate.is_some()
+    }
+}
+
+/// Whether `ev` came from one of the day's own controls (a chip, the day
+/// number, "+", "x", the overflow toggle). Those keep their own meaning, so
+/// a double-click or a double-tap on them never opens the day.
+fn on_control(ev: &web_sys::Event) -> bool {
+    let element = |target: Option<web_sys::EventTarget>| {
+        target.and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+    };
+    let (Some(target), Some(day)) = (element(ev.target()), element(ev.current_target())) else {
+        return false;
+    };
+    match target.closest("button, a, input, label, select, textarea") {
+        Ok(Some(control)) => control != day && day.contains(Some(&control)),
+        _ => false,
+    }
+}
+
+/// A double-click on a day, away from its controls, opens it.
+pub(super) fn day_dblclick(ctx: Ctx, day: i64, ev: web_sys::MouseEvent) {
+    let Some(activate) = ctx.on_day_activate else {
+        return;
+    };
+    // A double-tap already opened the day; the compatibility `dblclick` a
+    // touch browser fires after it must not open it again.
+    if on_control(&ev) || ev.time_stamp() - ctx.tapped_at.get_value() < 2.0 * DOUBLE_TAP_MS {
+        return;
+    }
+    ev.prevent_default();
+    // The double-click also selected the word under the pointer.
+    if let Ok(Some(selection)) = window().get_selection() {
+        let _ = selection.remove_all_ranges();
+    }
+    activate.run(day);
+}
+
+/// Touch (and pen) taps: a second tap on the same day within
+/// [`DOUBLE_TAP_MS`] opens it. Touch browsers do not reliably fire
+/// `dblclick`, so the roster counts the taps itself.
+pub(super) fn day_pointerup(ctx: Ctx, day: i64, ev: web_sys::PointerEvent) {
+    let Some(activate) = ctx.on_day_activate else {
+        return;
+    };
+    if ev.pointer_type() == "mouse" || on_control(&ev) {
+        ctx.last_tap.set_value(None);
+        return;
+    }
+    let now = ev.time_stamp();
+    match ctx.last_tap.get_value() {
+        Some((tapped, at)) if tapped == day && now - at <= DOUBLE_TAP_MS => {
+            ctx.last_tap.set_value(None);
+            ctx.tapped_at.set_value(now);
+            activate.run(day);
+        }
+        _ => ctx.last_tap.set_value(Some((day, now))),
     }
 }
 
@@ -122,8 +196,28 @@ impl Ctx {
 /// | Arrows | One day / one week, within the shown weeks |
 /// | `Home` / `End` | The ends of the week row |
 /// | `PageUp` / `PageDown` | The previous / next month, same day of the month |
-/// | `Enter` | Zoom to that day |
+/// | `Enter` | Zoom to that day; with `on_day_activate`, open it |
 /// | `Escape` | From a chip back to its day; in Week back to Month; in Day back to Week |
+///
+/// ### Editing hooks (ldui-k145)
+///
+/// The roster still never edits: these only PROPOSE, and the host opens its
+/// own dialog and answers by changing `days`. All are optional.
+///
+/// - `on_day_activate` opens a day: a double-click on a date box (Month) or
+///   a day column (Week), away from the day's own controls, a double-tap on
+///   a touch screen, or `Enter` on the focused box or column. With it the
+///   Week columns take a tab stop each, and in the month grid the day
+///   number joins the active box's Tab order, so the drill to the Day view
+///   stays a click and a key away.
+/// - `on_day_add` draws a labelled "+" (`data-day-add`) on each day the host
+///   marks [`addable`](RosterDay::addable()), in all three zooms.
+/// - `on_entry_remove` draws a labelled "x" (`data-entry-remove`) in each
+///   entry the host marks [`removable`](RosterEntry::removable()), apart from
+///   the chip's own `on_entry_activate` button or link. It receives the id.
+///
+/// Every new control is a real `<button>` named from `texts`, and inside the
+/// month grid it follows the box's roving Tab order like the chips do.
 ///
 /// ```rust
 /// use leptos::prelude::*;
@@ -159,7 +253,8 @@ impl Ctx {
 /// ```css
 /// @source inline("@container flex w-full flex-col gap-3 items-center justify-between flex-wrap gap-1 gap-2 gap-x-2 gap-y-1 text-lg text-sm text-xs font-semibold");
 /// @source inline("table table-fixed border-collapse border border-table-grid bg-table-header text-table-header-content text-center px-1 py-1 p-1 p-2 align-top w-10 h-28 mt-1");
-/// @source inline("bg-base-200/40 text-base-content/75 bg-base-200/60 bg-accent/10 bg-base-200/30 outline-2 -outline-offset-2 outline-primary sr-only not-sr-only select-none");
+/// @source inline("bg-base-200/40 text-base-content/75 text-base-content/85 bg-base-200/60 bg-accent/10 bg-base-200/30 outline-2 -outline-offset-2 outline-primary sr-only not-sr-only select-none");
+/// @source inline("touch-manipulation items-start min-w-0 flex-1 shrink-0 items-center gap-0");
 /// @source inline("rounded-sm border-l-4 leading-tight truncate break-words translate-x-0 -translate-x-1/2 -translate-x-full");
 /// @source inline("bg-success/15 bg-info/15 bg-warning/15 bg-secondary/15 bg-error/15 bg-accent/15 border-success border-info border-warning border-secondary border-error border-accent border-base-300 border-solid border-dashed");
 /// @source inline("peer peer-checked:not-sr-only peer-checked:flex focus-within:not-sr-only focus-within:flex peer-focus-visible:ring-2 peer-focus-visible:ring-primary");
@@ -231,6 +326,22 @@ pub fn MonthRoster(
     #[prop(optional, into)]
     on_entry_activate: Option<Callback<String>>,
 
+    /// A day was opened (a double-click, a double-tap or `Enter` on the
+    /// day, in Month and Week); receives the epoch day. With it `Enter`
+    /// opens the day instead of zooming to it.
+    #[prop(optional, into)]
+    on_day_activate: Option<Callback<i64>>,
+
+    /// A day's "+" was pressed; receives the epoch day. Drawn only on days
+    /// the host marks `addable`.
+    #[prop(optional, into)]
+    on_day_add: Option<Callback<i64>>,
+
+    /// An entry's "x" was pressed; receives the entry's `id`. Drawn only in
+    /// entries the host marks `removable`.
+    #[prop(optional, into)]
+    on_entry_remove: Option<Callback<String>>,
+
     /// The host's own controls, at the end of the header (an office
     /// select).
     #[prop(optional)]
@@ -271,9 +382,18 @@ pub fn MonthRoster(
         layout,
         on_navigate,
         on_entry_activate,
+        on_day_activate,
+        on_day_add,
+        on_entry_remove,
+        last_tap: StoredValue::new(None),
+        tapped_at: StoredValue::new(f64::NEG_INFINITY),
         focus,
         active,
-        interactive: on_navigate.is_some() || on_entry_activate.is_some(),
+        interactive: on_navigate.is_some()
+            || on_entry_activate.is_some()
+            || on_day_activate.is_some()
+            || on_day_add.is_some()
+            || on_entry_remove.is_some(),
     };
 
     let title_id = ctx.id("title");
@@ -586,6 +706,10 @@ fn MonthCell(ctx: Ctx, day: i64, span: Memo<(i64, i64)>) -> impl IntoView {
         if ctx.interactive {
             classes.push("ld-focus-ring");
         }
+        if ctx.activatable() {
+            // No double-tap zoom: the second tap opens the day.
+            classes.push("touch-manipulation");
+        }
         if outside.get() {
             classes.push(DAY_OUTSIDE);
             classes.push(ctx.layout_classes(OUTSIDE_LAYOUT));
@@ -632,18 +756,20 @@ fn MonthCell(ctx: Ctx, day: i64, span: Memo<(i64, i64)>) -> impl IntoView {
             class=class
             on:keydown=on_keydown
             on:focusin=on_focusin
+            on:dblclick=move |ev| day_dblclick(ctx, day, ev)
+            on:pointerup=move |ev| day_pointerup(ctx, day, ev)
         >
             <h3 class=move || merge_classes!("text-sm font-semibold", ctx.layout_classes(DATE_HEADING))>
                 {move || ctx.texts.with(|t| t.date_long_of(day))}
             </h3>
-            <DayHead ctx=ctx day=day data=data tabbable=false />
+            <DayHead ctx=ctx day=day data=data tabbable=false in_tab_order=in_tab_order />
             <DayStatus ctx=ctx data=data />
             <ul data-chips="" class="mt-1 flex flex-col gap-1">
                 <For
                     each=visible
                     key=|entry| entry.content_key()
                     children=move |entry| {
-                        view! { <Chip ctx=ctx entry=entry in_tab_order=in_tab_order prefer_times=false /> }
+                        view! { <Chip ctx=ctx day=day entry=entry in_tab_order=in_tab_order prefer_times=false /> }
                     }
                 />
             </ul>
@@ -675,7 +801,7 @@ fn MonthCell(ctx: Ctx, day: i64, span: Memo<(i64, i64)>) -> impl IntoView {
                         each=extra
                         key=|entry| entry.content_key()
                         children=move |entry| {
-                            view! { <Chip ctx=ctx entry=entry in_tab_order=in_tab_order prefer_times=false /> }
+                            view! { <Chip ctx=ctx day=day entry=entry in_tab_order=in_tab_order prefer_times=false /> }
                         }
                     />
                 </ul>
@@ -704,9 +830,12 @@ fn cell_keydown(ctx: Ctx, day: i64, span: Memo<(i64, i64)>, ev: web_sys::Keyboar
             ev.prevent_default();
             focus_element_by_id(&ctx.cell_id(day));
         }
-        "Enter" if on_box && ctx.navigable() => {
+        "Enter" if on_box && (ctx.activatable() || ctx.navigable()) => {
             ev.prevent_default();
-            ctx.navigate(RosterZoom::Day, day);
+            match ctx.on_day_activate {
+                Some(activate) => activate.run(day),
+                None => ctx.navigate(RosterZoom::Day, day),
+            }
         }
         "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown" | "Home" | "End" if on_box => {
             // Bare arrows are stopped even at an edge, or they scroll the
@@ -738,8 +867,13 @@ pub(super) fn DayHead(
     day: i64,
     data: Memo<Option<RosterDay>>,
     /// The day-number button takes a tab stop (Week view); in the month
-    /// grid it never does, because Enter on the box does the same.
+    /// grid it does only when `on_day_activate` has taken Enter, and then
+    /// only in the active box, because otherwise Enter on the box does the
+    /// same.
     tabbable: bool,
+    /// Whether the day's own controls are in the Tab order (the month grid
+    /// takes every box but the active one out of it).
+    in_tab_order: Signal<bool>,
     /// Show the weekday before the number (Week view).
     #[prop(optional)]
     with_weekday: bool,
@@ -773,11 +907,12 @@ pub(super) fn DayHead(
         })
     };
     let staffing = move || data.with(|d| d.as_ref().and_then(|d| d.staffing));
+    let number_tabbable = move || tabbable || (ctx.activatable() && in_tab_order.get());
     let number_view = if ctx.navigable() {
         view! {
             <button
                 type="button"
-                tabindex=(!tabbable).then_some(-1)
+                tabindex=move || (!number_tabbable()).then_some(-1)
                 data-day-number=""
                 data-pressable="true"
                 aria-label=move || ctx.texts.with(|t| fill(&t.show_day, &[("date", &t.date_long_of(day))]))
@@ -797,33 +932,103 @@ pub(super) fn DayHead(
         .into_any()
     };
 
+    let marks = view! {
+        {(!no_number).then_some(number_view)}
+        <Show when=is_today>
+            <span data-today-mark="" class="font-semibold">
+                {move || ctx.texts.with(|t| t.today.clone())}
+            </span>
+        </Show>
+        {move || holiday().map(|text| view! { <span data-day-mark="holiday" class="font-semibold">{text}</span> })}
+        {move || closed().map(|text| view! { <span data-day-mark="closed" class="font-semibold">{text}</span> })}
+        {move || {
+            staffing()
+                .map(|staffing| {
+                    let text = ctx.texts.with(|t| t.staffing_of(staffing));
+                    let short = staffing.is_short();
+                    view! {
+                        <span
+                            data-staffing=""
+                            data-staffing-short=short.then_some("")
+                            class=if short { "font-semibold" } else { "text-base-content/75" }
+                        >
+                            {text}
+                        </span>
+                    }
+                })
+        }}
+    };
+
+    match ctx.on_day_add {
+        None => view! {
+            <div data-day-head="" class="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs">
+                {marks}
+            </div>
+        }
+        .into_any(),
+        // The "+" sits at the head's top right; the marks wrap beside it.
+        Some(add) => {
+            let addable = move || data.with(|d| d.as_ref().is_some_and(|d| d.addable));
+            view! {
+                <div class="flex items-start gap-2">
+                    <div
+                        data-day-head=""
+                        class="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-1 text-xs"
+                    >
+                        {marks}
+                    </div>
+                    <Show when=addable>
+                        <button
+                            type="button"
+                            data-day-add=iso_date(day)
+                            tabindex=move || (!in_tab_order.get()).then_some(-1)
+                            class="btn ld-eased ld-pressable ld-focus-ring btn-ghost btn-xs btn-square gap-0 shrink-0 print:hidden"
+                            aria-label=move || ctx.texts.with(|t| t.add_to_day_of(day))
+                            on:click=move |_| add.run(day)
+                        >
+                            <PlusIcon />
+                        </button>
+                    </Show>
+                </div>
+            }
+            .into_any()
+        }
+    }
+}
+
+/// The "+" of an addable day.
+#[component]
+fn PlusIcon() -> impl IntoView {
     view! {
-        <div data-day-head="" class="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs">
-            {(!no_number).then_some(number_view)}
-            <Show when=is_today>
-                <span data-today-mark="" class="font-semibold">
-                    {move || ctx.texts.with(|t| t.today.clone())}
-                </span>
-            </Show>
-            {move || holiday().map(|text| view! { <span data-day-mark="holiday" class="font-semibold">{text}</span> })}
-            {move || closed().map(|text| view! { <span data-day-mark="closed" class="font-semibold">{text}</span> })}
-            {move || {
-                staffing()
-                    .map(|staffing| {
-                        let text = ctx.texts.with(|t| t.staffing_of(staffing));
-                        let short = staffing.is_short();
-                        view! {
-                            <span
-                                data-staffing=""
-                                data-staffing-short=short.then_some("")
-                                class=if short { "font-semibold" } else { "text-base-content/75" }
-                            >
-                                {text}
-                            </span>
-                        }
-                    })
-            }}
-        </div>
+        <svg
+            aria-hidden="true"
+            viewBox="0 0 16 16"
+            class="size-4"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+        >
+            <path d="M8 3v10M3 8h10" />
+        </svg>
+    }
+}
+
+/// The "x" of a removable entry.
+#[component]
+fn CloseIcon() -> impl IntoView {
+    view! {
+        <svg
+            aria-hidden="true"
+            viewBox="0 0 16 16"
+            class="size-4"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+        >
+            <path d="M4 4l8 8M12 4l-8 8" />
+        </svg>
     }
 }
 
@@ -859,6 +1064,8 @@ pub(super) fn DayStatus(ctx: Ctx, data: Memo<Option<RosterDay>>) -> impl IntoVie
 #[component]
 pub(super) fn Chip(
     ctx: Ctx,
+    /// The day the chip is on (the "x" button's name says it).
+    day: i64,
     entry: RosterEntry,
     /// Whether the chip's control is in the Tab order (the month grid takes
     /// every chip outside the active box out of it).
@@ -917,15 +1124,66 @@ pub(super) fn Chip(
         .into_any(),
         (None, None) => view! { <div class="min-w-0">{lines()}</div> }.into_any(),
     };
+    let remove = ctx.on_entry_remove.filter(|_| entry.removable);
+    let class = format!(
+        "{CHIP} {}{}",
+        kind.colour_classes(),
+        if remove.is_some() {
+            " flex items-start gap-1"
+        } else {
+            ""
+        }
+    );
+    let body = match remove {
+        None => body,
+        // The "x" is its own button beside the chip's open control, never
+        // inside it (a button cannot hold a button).
+        Some(remove) => view! {
+            <div class="min-w-0 flex-1">{body}</div>
+            <RemoveButton
+                ctx=ctx
+                day=day
+                id=id.clone()
+                person=entry.person.clone()
+                remove=remove
+                in_tab_order=in_tab_order
+            />
+        }
+        .into_any(),
+    };
 
     view! {
         <li
             data-entry=id
             data-entry-state=kind.slug()
             data-entry-pending=kind.is_pending().then_some("")
-            class=format!("{CHIP} {}", kind.colour_classes())
+            class=class
         >
             {body}
         </li>
+    }
+}
+
+/// An entry's "x": a chip's, or a Day timeline row's beside the name.
+#[component]
+pub(super) fn RemoveButton(
+    ctx: Ctx,
+    day: i64,
+    id: String,
+    person: String,
+    remove: Callback<String>,
+    in_tab_order: Signal<bool>,
+) -> impl IntoView {
+    view! {
+        <button
+            type="button"
+            data-entry-remove=id.clone()
+            tabindex=move || (!in_tab_order.get()).then_some(-1)
+            class="btn ld-eased ld-pressable ld-focus-ring btn-ghost btn-xs btn-square gap-0 shrink-0 print:hidden"
+            aria-label=move || ctx.texts.with(|t| t.remove_entry_of(&person, day))
+            on:click=move |_| remove.run(id.clone())
+        >
+            <CloseIcon />
+        </button>
     }
 }
