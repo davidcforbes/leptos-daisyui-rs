@@ -122,32 +122,7 @@ async fn collapse_toggle_is_identified_and_named_by_its_title() {
     // The fixture is what a consumer's form-field audit sees: zero blocking
     // axe findings, scoped to the fixture so unrelated catalog examples on
     // the page cannot obscure this contract.
-    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
-        .expect("load vendored axe-core");
-    let _page_report = axe.run(h.page()).await.expect("inject and run axe-core");
-    let scoped_axe = eval_json(
-        &h,
-        &format!(
-            r#"(async () => {{
-                const report = await axe.run(document.querySelector('{FIXTURE}'), {{
-                    runOnly: {{ type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa'] }},
-                    resultTypes: ['violations'],
-                }});
-                return report.violations
-                    .filter(v => v.impact === 'serious' || v.impact === 'critical')
-                    .map(v => ({{
-                        id: v.id,
-                        nodes: v.nodes.map(node => ({{ target: node.target, html: node.html }})),
-                    }}));
-            }})()"#
-        ),
-    )
-    .await;
-    assert_eq!(
-        scoped_axe,
-        json!([]),
-        "the collapse naming fixture has blocking axe findings: {scoped_axe}"
-    );
+    common::axe::assert_axe_clean(&h, Some(FIXTURE), "the collapse naming fixture").await;
 
     assert_no_browser_errors(&h, "collapse toggle naming").await;
 }

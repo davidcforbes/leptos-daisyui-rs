@@ -2100,18 +2100,8 @@ async fn controlled_preferences_reorder_columns_and_compose_sort_clauses() {
         json!(true),
         "column chooser must be open for the accessibility audit"
     );
-    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
-        .expect("load vendored axe-core");
-    let report = axe.run(harness.page()).await.expect("run axe-core");
-    report
-        .assert_no_blocking("controlled-entity-table-multi-sort-chooser")
-        .unwrap_or_else(|error| {
-            panic!(
-                "{error}; {}\nviolations: {:#?}",
-                report.summary(),
-                report.violations
-            )
-        });
+    common::axe::assert_axe_clean(&harness, None, "controlled-entity-table-multi-sort-chooser")
+        .await;
 
     assert_eq!(
         eval_json(
@@ -4002,12 +3992,12 @@ async fn hybrid_filters_localization_defaults_and_focus_recovery_are_framework_o
     assert_eq!(cross_dataset_focus["action"], Value::Null);
     assert_eq!(cross_dataset_focus["allNewDataset"], json!(true));
 
-    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
-        .expect("load vendored axe-core");
-    let report = axe.run(harness.page()).await.expect("run axe-core");
-    report
-        .assert_no_blocking("hybrid filters, localization, defaults, and focus recovery")
-        .unwrap_or_else(|error| panic!("{error}; {}", report.summary()));
+    common::axe::assert_axe_clean(
+        &harness,
+        None,
+        "hybrid filters, localization, defaults, and focus recovery",
+    )
+    .await;
     assert_no_browser_errors(&harness, "hybrid EntityTable foundation").await;
 }
 
@@ -4246,12 +4236,7 @@ async fn entity_table_selection_drives_master_detail_and_survives_removal() {
         "removing the selected row's data must leave no row selected, without crashing"
     );
 
-    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
-        .expect("load vendored axe-core");
-    let report = axe.run(harness.page()).await.expect("run axe-core");
-    report
-        .assert_no_blocking("entity table controlled selection")
-        .unwrap_or_else(|error| panic!("{error}; {}", report.summary()));
+    common::axe::assert_axe_clean(&harness, None, "entity table controlled selection").await;
     assert_no_browser_errors(&harness, "entity table controlled selection").await;
 }
 
@@ -4786,12 +4771,7 @@ async fn entity_table_row_emphasis_survives_sort_and_composes_with_selection() {
         "selecting the totals row must add the selected background without disturbing its emphasis"
     );
 
-    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
-        .expect("load vendored axe-core");
-    let report = axe.run(harness.page()).await.expect("run axe-core");
-    report
-        .assert_no_blocking("entity table row emphasis")
-        .unwrap_or_else(|error| panic!("{error}; {}", report.summary()));
+    common::axe::assert_axe_clean(&harness, None, "entity table row emphasis").await;
     assert_no_browser_errors(&harness, "entity table row emphasis").await;
 }
 
@@ -5022,18 +5002,7 @@ async fn interactive_rows_get_the_framework_hover_and_selection_suppresses_it() 
     )
     .await;
 
-    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
-        .expect("load vendored axe-core");
-    let report = axe.run(harness.page()).await.expect("run axe-core");
-    report
-        .assert_no_blocking("entity table interactive-row hover")
-        .unwrap_or_else(|error| {
-            panic!(
-                "{error}; {}\nviolations: {:#?}",
-                report.summary(),
-                report.violations
-            )
-        });
+    common::axe::assert_axe_clean(&harness, None, "entity table interactive-row hover").await;
     assert_no_browser_errors(&harness, "entity table interactive-row hover").await;
 }
 
@@ -5136,18 +5105,7 @@ async fn page_size_select_gets_unique_identity_without_an_override_and_honors_on
         );
     }
 
-    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
-        .expect("load vendored axe-core");
-    let report = axe.run(harness.page()).await.expect("run axe-core");
-    report
-        .assert_no_blocking("entity-table-page-size-identity")
-        .unwrap_or_else(|error| {
-            panic!(
-                "{error}; {}\nviolations: {:#?}",
-                report.summary(),
-                report.violations
-            )
-        });
+    common::axe::assert_axe_clean(&harness, None, "entity-table-page-size-identity").await;
 
     assert_no_browser_errors(&harness, "EntityTable page-size select identity").await;
 }
@@ -7760,37 +7718,13 @@ async fn empty_state_cell_clears_aa_contrast() {
         "the 65% step measured 3.83:1 and must not return: {cell}"
     );
 
-    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
-        .expect("load vendored axe-core");
-    let report = axe.run(harness.page()).await.expect("run axe-core");
-    report
-        .assert_no_blocking("entity-table-empty-state")
-        .unwrap_or_else(|error| {
-            panic!(
-                "{error}; {}\nviolations: {:#?}",
-                report.summary(),
-                report.violations
-            )
-        });
-    let contrast_on_cell = eval_json(
+    common::axe::assert_axe_clean(&harness, None, "entity-table-empty-state").await;
+    common::axe::assert_contrast_clean(
         &harness,
-        r#"(async () => {
-            const report = await axe.run(document.querySelector('td[data-entity-empty-state]'), {
-                runOnly: { type: 'rule', values: ['color-contrast'] },
-                resultTypes: ['violations'],
-            });
-            return report.violations.map(v => ({
-                id: v.id,
-                nodes: v.nodes.map(node => ({ target: node.target, summary: node.failureSummary })),
-            }));
-        })()"#,
+        Some("td[data-entity-empty-state]"),
+        "the empty-state cell",
     )
     .await;
-    assert_eq!(
-        contrast_on_cell,
-        json!([]),
-        "axe color-contrast must pass on the empty-state cell: {contrast_on_cell}"
-    );
     assert_no_browser_errors(&harness, "entity table empty-state contrast").await;
 }
 
@@ -7854,12 +7788,7 @@ async fn scrolling_region_with_non_interactive_rows_is_keyboard_reachable() {
         "{region}"
     );
 
-    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
-        .expect("load vendored axe-core");
-    let _page_report = axe
-        .run(harness.page())
-        .await
-        .expect("inject and run axe-core");
+    common::axe::inject_axe(&harness).await;
     let scrollable = eval_json(
         &harness,
         r#"(async () => {
@@ -7983,12 +7912,7 @@ async fn empty_interactive_table_moves_the_keyboard_stop_to_its_region_and_back(
     assert_eq!(empty["sameRegion"], json!(true), "{empty}");
     assert_eq!(empty["focused"], json!(true), "{empty}");
 
-    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
-        .expect("load vendored axe-core");
-    let _page_report = axe
-        .run(harness.page())
-        .await
-        .expect("inject and run axe-core");
+    common::axe::inject_axe(&harness).await;
     let scrollable = eval_json(
         &harness,
         r#"(async () => {
@@ -8068,32 +7992,12 @@ async fn compact_row_labels_clear_aa_contrast_on_a_narrow_viewport() {
         "every compact label uses the 75% step: {labels}"
     );
 
-    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
-        .expect("load vendored axe-core");
-    let _page_report = axe
-        .run(harness.page())
-        .await
-        .expect("inject and run axe-core");
-    let contrast = eval_json(
+    common::axe::assert_contrast_clean(
         &harness,
-        r#"(async () => {
-            const report = await axe.run(document.querySelector('[data-entity-table-grid]'), {
-                runOnly: { type: 'rule', values: ['color-contrast'] },
-                resultTypes: ['violations'],
-            });
-            return report.violations.map(v => ({
-                id: v.id,
-                nodes: v.nodes.slice(0, 5).map(node => ({ target: node.target, summary: node.failureSummary })),
-                count: v.nodes.length,
-            }));
-        })()"#,
+        Some("[data-entity-table-grid]"),
+        "the compact table at 390x844",
     )
     .await;
-    assert_eq!(
-        contrast,
-        json!([]),
-        "axe color-contrast must pass on the compact table at 390x844: {contrast}"
-    );
     assert_no_browser_errors(&harness, "compact row label contrast").await;
 }
 
@@ -8118,36 +8022,11 @@ async fn entity_table_saved_filter_badges_are_named_by_their_visible_caption() {
     begin_browser_error_capture(&harness).await;
     wait_for_selector(&harness, "[data-entity-saved-filters-bar]").await;
 
-    /// axe `color-contrast` scoped to the saved-filters bar.
+    /// Contrast scoped to the saved-filters bar: axe `color-contrast` plus
+    /// the button text axe files as unjudged (ldui-3kix).
     async fn bar_contrast(harness: &pixelproof_web::Harness) -> Value {
-        eval_json(
-            harness,
-            r#"(async () => {
-                const report = await axe.run(
-                    document.querySelector('[data-entity-saved-filters-bar]'),
-                    {
-                        runOnly: { type: 'rule', values: ['color-contrast'] },
-                        resultTypes: ['violations'],
-                    },
-                );
-                return report.violations.map(v => ({
-                    id: v.id,
-                    nodes: v.nodes.slice(0, 5).map(node => ({
-                        target: node.target,
-                        summary: node.failureSummary,
-                    })),
-                    count: v.nodes.length,
-                }));
-            })()"#,
-        )
-        .await
+        common::axe::contrast_problems(harness, Some("[data-entity-saved-filters-bar]")).await
     }
-    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
-        .expect("load vendored axe-core");
-    let _page_report = axe
-        .run(harness.page())
-        .await
-        .expect("inject and run axe-core");
 
     async fn snapshot(harness: &pixelproof_web::Harness) -> Value {
         eval_json(

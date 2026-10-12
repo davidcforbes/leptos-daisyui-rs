@@ -2715,12 +2715,7 @@ async fn axe_clean_with_settings_drawer_refusal_and_es_locale() {
     click(&h, &format!("{ROOT} [data-ai-chat-settings]")).await;
     wait_for_selector(&h, &format!("{ROOT} [data-ai-chat-provider-rows]")).await;
 
-    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
-        .expect("load vendored axe-core");
-    let report = axe.run(h.page()).await.expect("run axe-core");
-    report
-        .assert_no_blocking("ai-chat settings + refusal + es")
-        .unwrap_or_else(|error| panic!("{error}; {}", report.summary()));
+    common::axe::assert_axe_clean(&h, None, "ai-chat settings + refusal + es").await;
 
     assert_no_browser_errors(&h, "es axe").await;
 }

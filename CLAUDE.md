@@ -229,6 +229,20 @@ against a threshold far below the signal (48 per channel, where a glyph on the
 fill is 100+) -- never a MEAN score, which lets a few pixels of a letter vanish.
 `image` is a PNG-only dev-dependency for this.
 
+**axe never fails a daisyUI button's text contrast; run it through
+`tests/common/axe.rs` (ldui-3kix).** daisyUI 5's `.btn` declares
+`background-image: none, var(--btn-noise)`. A plain button therefore computes
+`none, none`, which axe-core treats as an image. axe files the button text's
+contrast as *incomplete* (`bgImage`), never as a violation, and
+`assert_no_blocking` reads violations only: MonthRoster's week buttons sat at
+1.79:1 under a green axe run. Every browser suite calls axe through
+`common::axe::{assert_axe_clean, assert_contrast_clean, contrast_problems}`.
+Those helpers re-measure exactly those nodes: the background comes from
+`elementsFromPoint`, with translucent fills composited. Never call
+`pixelproof_web::a11y::Axe` directly. axe also skips text outside the visible
+part of the demo's `main` scroll container, and reports it nowhere, so scroll
+the subject into view first.
+
 **An `sr-only` copy of visible text is still SELECTABLE text (ldui-q7yl).**
 Pairing `aria-hidden` visible lines with an `sr-only` accessible copy makes a
 mouse selection take both: copying an EntityTable name cell pasted the name

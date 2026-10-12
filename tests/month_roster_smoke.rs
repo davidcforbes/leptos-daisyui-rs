@@ -127,16 +127,7 @@ async fn focus(h: &Harness, selector: &str) {
 }
 
 async fn axe_clean(h: &Harness, context: &str) {
-    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
-        .expect("load vendored axe-core");
-    let report = axe.run(h.page()).await.expect("run axe-core");
-    report.assert_no_blocking(context).unwrap_or_else(|e| {
-        panic!(
-            "{e}; {}\nviolations: {:#?}",
-            report.summary(),
-            report.violations
-        )
-    });
+    common::axe::assert_axe_clean(h, None, context).await;
 }
 
 async fn set_theme(h: &Harness, theme: &str) {
@@ -1348,4 +1339,83 @@ async fn the_grid_text_is_readable_on_its_own_fills() {
         lowest(&broken, "week")
     );
     assert_no_browser_errors(&h, "contrast").await;
+}
+
+// ---- ldui-3kix: the shared axe gate judges what axe cannot -------------------
+
+/// axe files a daisyUI button's text contrast as incomplete (`bgImage`,
+/// from the `.btn`'s `none, none` background image) and never fails it, so
+/// the shared gate re-measures those nodes. With the week buttons put back to
+/// the old base-content-on-navy colour and scrolled into view, the gate must
+/// name them; restored, it must be clean. axe's own violations stay empty
+/// throughout, which is the blind spot itself.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-month-roster)"]
+async fn the_shared_axe_gate_judges_the_button_text_axe_cannot() {
+    let h = open().await;
+    h.set_viewport(ViewportSize::new(1440, 900))
+        .await
+        .expect("a wide grid");
+    eval_json(
+        &h,
+        &format!(
+            "document.querySelector('{ROOT} [data-month-roster-action=\"week\"]').scrollIntoView({{ block: 'center' }}), true"
+        ),
+    )
+    .await;
+    settle().await;
+    let in_view = |findings: &Value| {
+        findings["unjudged"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|n| {
+                n["html"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("data-month-roster-action=\"week\"")
+            })
+            .collect::<Vec<_>>()
+    };
+
+    let clean = common::axe::axe_findings(&h, Some(ROOT)).await;
+    assert_eq!(clean["violations"], json!([]), "{clean}");
+    assert_eq!(clean["unjudged"], json!([]), "{clean}");
+
+    eval_json(
+        &h,
+        &format!(
+            "document.querySelectorAll('{ROOT} tbody th').forEach((th) => th.classList.remove('text-table-header-content')), true"
+        ),
+    )
+    .await;
+    settle().await;
+    let broken = common::axe::axe_findings(&h, Some(ROOT)).await;
+    let hits = in_view(&broken);
+    assert!(
+        !hits.is_empty(),
+        "the gate missed the week buttons at the old colour: {broken}"
+    );
+    assert!(
+        hits.iter().all(|n| n["ratio"].as_f64() < Some(3.0)),
+        "{hits:?}"
+    );
+    assert_eq!(
+        broken["violations"],
+        json!([]),
+        "axe now fails the buttons itself; the blind spot may be gone: {broken}"
+    );
+
+    eval_json(
+        &h,
+        &format!(
+            "document.querySelectorAll('{ROOT} tbody th').forEach((th) => th.classList.add('text-table-header-content')), true"
+        ),
+    )
+    .await;
+    settle().await;
+    let restored = common::axe::axe_findings(&h, Some(ROOT)).await;
+    assert_eq!(restored["unjudged"], json!([]), "{restored}");
+    assert_no_browser_errors(&h, "shared axe gate").await;
 }

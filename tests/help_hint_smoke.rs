@@ -371,25 +371,7 @@ async fn variants_and_subject_keep_stable_accessible_semantics() {
     )
     .expect("save HelpHint evidence screenshot");
 
-    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
-        .expect("load vendored axe-core");
-    let _ = axe.run(harness.page()).await.expect("inject axe-core");
-    let blocking = eval_json(
-        &harness,
-        r#"(async () => {
-            const report = await axe.run(document.querySelector('#help-hint-fixture'), {
-                runOnly: {type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa']},
-                resultTypes: ['violations'],
-            });
-            return report.violations.filter(v => v.impact === 'serious' || v.impact === 'critical');
-        })()"#,
-    )
-    .await;
-    assert_eq!(
-        blocking,
-        json!([]),
-        "blocking HelpHint axe findings: {blocking}"
-    );
+    common::axe::assert_axe_clean(&harness, Some("#help-hint-fixture"), "HelpHint").await;
     assert_no_browser_errors(&harness, "HelpHint variants and subject").await;
 }
 

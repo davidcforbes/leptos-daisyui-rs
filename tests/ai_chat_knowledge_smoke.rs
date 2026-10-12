@@ -1055,12 +1055,7 @@ async fn axe_clean_with_knowledge_panel_open() {
     );
     assert_eq!(down["hits"].as_array().map(Vec::len), Some(0), "{down}");
 
-    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
-        .expect("load vendored axe-core");
-    let report = axe.run(h.page()).await.expect("run axe-core");
-    report
-        .assert_no_blocking("ai-chat knowledge rail")
-        .unwrap_or_else(|error| panic!("{error}; {}", report.summary()));
+    common::axe::assert_axe_clean(&h, None, "ai-chat knowledge rail").await;
 
     assert_no_browser_errors(&h, "knowledge axe").await;
 }

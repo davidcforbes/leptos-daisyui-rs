@@ -940,31 +940,9 @@ async fn server_entity_history_standard_controls_preserve_accepted_truth() {
         "wide History columns must remain available through horizontal scrolling when needed"
     );
 
-    // Layer C: inject the vendored axe runtime, then scope blocking WCAG
-    // findings to this deterministic fixture rather than unrelated examples.
-    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
-        .expect("load vendored axe-core");
-    let _page_report = axe
-        .run(harness.page())
-        .await
-        .expect("inject and run axe-core");
-    let blocking = eval_json(
-        &harness,
-        r#"(async () => {
-            const report = await axe.run(document.querySelector('#server-entity-history'), {
-                runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa'] }
-            });
-            return report.violations
-                .filter(v => v.impact === 'serious' || v.impact === 'critical')
-                .map(v => ({ id: v.id, impact: v.impact, nodes: v.nodes.length }));
-        })()"#,
-    )
-    .await;
-    assert_eq!(
-        blocking,
-        json!([]),
-        "blocking History axe findings: {blocking}"
-    );
+    // Layer C: blocking WCAG findings, scoped to this deterministic fixture
+    // rather than unrelated examples.
+    common::axe::assert_axe_clean(&harness, Some("#server-entity-history"), "History").await;
     assert_no_browser_errors(&harness, "ServerEntityTable complete interaction contract").await;
 }
 

@@ -409,14 +409,7 @@ async fn number_guards_keypad_and_responsive_accessible_controls() {
         "long identity must wrap inside the 375px console: {text_geometry}"
     );
 
-    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js").unwrap();
-    axe.run(h.page()).await.unwrap();
-    let violations = eval(&h, r#"(async () => { const r = await axe.run(document.querySelector('#softphone-demo'), {runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21aa']}}); return r.violations.filter(v => ['serious','critical'].includes(v.impact)); })()"#).await;
-    assert_eq!(
-        violations,
-        json!([]),
-        "softphone accessibility: {violations}"
-    );
+    common::axe::assert_axe_clean(&h, Some("#softphone-demo"), "softphone accessibility").await;
 
     action(&h, "voicemail").await;
     pending(&h, "voicemail").await;

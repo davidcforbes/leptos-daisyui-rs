@@ -506,31 +506,11 @@ async fn axe_clean_with_drawer_and_dialog_open() {
     )
     .await;
     wait_for_selector(&h, &format!("{SUPPORT} [data-helpdesk-drawer-header]")).await;
-    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
-        .expect("load vendored axe-core");
-    let report = axe.run(h.page()).await.expect("run axe-core");
-    report
-        .assert_no_blocking("helpdesk drawer open")
-        .unwrap_or_else(|e| {
-            panic!(
-                "{e}; {}\nviolations: {:#?}",
-                report.summary(),
-                report.violations
-            )
-        });
+    common::axe::assert_axe_clean(&h, None, "helpdesk drawer open").await;
     click(&h, &format!("{SUPPORT} [data-helpdesk-drawer-close]")).await;
     click(&h, &format!("{SUPPORT} [data-helpdesk-new-request]")).await;
     wait_for_selector(&h, &format!("{SUPPORT} [data-helpdesk-summary]")).await;
-    let report = axe.run(h.page()).await.expect("run axe-core");
-    report
-        .assert_no_blocking("helpdesk dialog open")
-        .unwrap_or_else(|e| {
-            panic!(
-                "{e}; {}\nviolations: {:#?}",
-                report.summary(),
-                report.violations
-            )
-        });
+    common::axe::assert_axe_clean(&h, None, "helpdesk dialog open").await;
 }
 
 /// Poll until the rendered row count of `root`'s table satisfies `pred`

@@ -320,24 +320,10 @@ async fn cards_wrap_at_360px_distinguish_unknown_and_pass_contrast() {
         "the activity caption renders: {layout}"
     );
 
-    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
-        .expect("load vendored axe-core");
-    let _page_report = axe.run(h.page()).await.expect("inject axe-core");
+    /// Contrast scoped to the picker: axe `color-contrast` plus the button
+    /// text axe files as unjudged (ldui-3kix).
     async fn contrast(h: &pixelproof_web::Harness) -> Value {
-        eval_json(
-            h,
-            r#"(async () => {
-                const report = await axe.run(document.querySelector('[data-person-picker]'), {
-                    runOnly: { type: 'rule', values: ['color-contrast'] },
-                    resultTypes: ['violations'],
-                });
-                return report.violations.map(v => ({
-                    id: v.id,
-                    nodes: v.nodes.slice(0, 5).map(n => ({ target: n.target, summary: n.failureSummary })),
-                }));
-            })()"#,
-        )
-        .await
+        common::axe::contrast_problems(h, Some("[data-person-picker]")).await
     }
     let rest = contrast(&h).await;
     assert_eq!(rest, json!([]), "AA contrast at rest: {rest}");

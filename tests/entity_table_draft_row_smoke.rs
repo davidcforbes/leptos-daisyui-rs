@@ -713,18 +713,7 @@ async fn compact_editing_is_labeled_ordered_and_geometry_safe() {
     assert_eq!(cancel["rowCancel"], json!(true), "{cancel}");
     assert_eq!(cancel["compact"], json!(true), "{cancel}");
 
-    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
-        .expect("load vendored axe-core");
-    let report = axe.run(harness.page()).await.expect("run axe-core");
-    report
-        .assert_no_blocking("EntityTable compact inline edit")
-        .unwrap_or_else(|error| {
-            panic!(
-                "{error}; {}; blocking details: {:#?}",
-                report.summary(),
-                report.blocking()
-            )
-        });
+    common::axe::assert_axe_clean(&harness, None, "EntityTable compact inline edit").await;
 
     press_escape(&harness).await;
     assert_eq!(snapshot(&harness).await["phase"], json!("idle"));

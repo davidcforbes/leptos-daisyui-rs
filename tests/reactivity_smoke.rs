@@ -379,18 +379,7 @@ async fn data_table_sort_is_keyboard_operable_for_client_and_server_tables() {
         "server descending semantics: {semantics}"
     );
 
-    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
-        .expect("load vendored axe-core");
-    let report = axe.run(h.page()).await.expect("run axe-core");
-    report
-        .assert_no_blocking("shared-data-table-sort")
-        .unwrap_or_else(|error| {
-            panic!(
-                "{error}; {}; violations: {:#?}",
-                report.summary(),
-                report.violations
-            )
-        });
+    common::axe::assert_axe_clean(&h, None, "shared-data-table-sort").await;
     assert_no_browser_errors(&h, "shared DataTable sort keyboard journey").await;
 }
 
@@ -1839,19 +1828,7 @@ async fn line_chart_axe_clean() {
     let h = harness_at("/components/charts").await;
     common::wait_for_selector(&h, CHART_OVERLAY).await;
 
-    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
-        .expect("load vendored axe-core");
-    let report = axe.run(h.page()).await.expect("run axe-core");
-    report
-        .assert_no_blocking("interactive-line-chart")
-        .unwrap_or_else(|e| {
-            panic!(
-                "{e}; {}
-violations: {:#?}",
-                report.summary(),
-                report.violations
-            )
-        });
+    common::axe::assert_axe_clean(&h, None, "interactive-line-chart").await;
 }
 
 /// Tab entry, arrow traversal containment, and Tab exit (ldui-9tr.6): the
@@ -2005,12 +1982,7 @@ async fn data_table_search_and_filter_controls_have_associated_names() {
         assert_eq!(filter["labelText"][0], filter["aria"]);
     }
 
-    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
-        .expect("load vendored axe-core");
-    let report = axe.run(h.page()).await.expect("run axe-core");
-    report
-        .assert_no_blocking("associated DataTable search/filter names")
-        .unwrap_or_else(|error| panic!("{error}; {}", report.summary()));
+    common::axe::assert_axe_clean(&h, None, "associated DataTable search/filter names").await;
     assert_no_browser_errors(&h, "DataTable associated search/filter names").await;
 }
 
@@ -2278,34 +2250,16 @@ async fn field_ids_and_associations_are_unique_in_real_wasm() {
         "Chrome must not see a duplicate form-field id: {snapshot}"
     );
 
-    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
-        .expect("load vendored axe-core");
-    // Inject axe through PixelProof, then scope the release assertion to this
-    // fixture. The component-catalog page intentionally contains older raw
-    // form examples outside this form; those cannot be allowed to obscure the
-    // six-control Field contract being proven here.
-    let _page_report = axe.run(h.page()).await.expect("inject and run axe-core");
-    let scoped_axe = eval_json(
+    // Scope the release assertion to this fixture. The component-catalog
+    // page intentionally contains older raw form examples outside this form;
+    // those cannot be allowed to obscure the six-control Field contract being
+    // proven here.
+    common::axe::assert_axe_clean(
         &h,
-        r#"(async () => {
-            const report = await axe.run(document.querySelector('#field-unique-associations'), {
-                runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa'] },
-                resultTypes: ['violations'],
-            });
-            return report.violations
-                .filter(violation => violation.impact === 'serious' || violation.impact === 'critical')
-                .map(violation => ({
-                    id: violation.id,
-                    nodes: violation.nodes.map(node => ({ target: node.target, html: node.html })),
-                }));
-        })()"#,
+        Some("#field-unique-associations"),
+        "the six-control Field fixture",
     )
     .await;
-    assert_eq!(
-        scoped_axe,
-        json!([]),
-        "the six-control Field fixture has blocking axe findings: {scoped_axe}"
-    );
     assert_no_browser_errors(&h, "Field unique-association fixture").await;
 }
 
@@ -4311,12 +4265,7 @@ async fn filter_sidebar_search_accessible_name_covers_every_variant() {
         "input-outside-field still reports on the filter-sidebar page: {outstanding:?}"
     );
 
-    let axe = pixelproof_web::a11y::Axe::from_path("tests/vendor/axe-core/axe.min.js")
-        .expect("load vendored axe-core");
-    let axe_report = axe.run(h.page()).await.expect("run axe-core");
-    axe_report
-        .assert_no_blocking("FilterSidebar search accessible name")
-        .unwrap_or_else(|error| panic!("{error}; {}", axe_report.summary()));
+    common::axe::assert_axe_clean(&h, None, "FilterSidebar search accessible name").await;
 
     assert_no_browser_errors(&h, "FilterSidebar search accessible name").await;
 }
