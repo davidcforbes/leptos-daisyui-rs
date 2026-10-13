@@ -241,7 +241,11 @@ Those helpers re-measure exactly those nodes: the background comes from
 `elementsFromPoint`, with translucent fills composited. Never call
 `pixelproof_web::a11y::Axe` directly. axe also skips text outside the visible
 part of the demo's `main` scroll container, and reports it nowhere, so scroll
-the subject into view first.
+the subject into view first. The gate also runs WCAG 2.2 AA (`wcag22aa`,
+i.e. axe's `target-size`, ldui-35xn). axe only asks "Is this a target?"
+about an undersized control at `tabindex="-1"`, so the gate counts those as
+failures itself (`small_targets`): a roving widget's off-stop controls are
+pointer targets too.
 
 **An `sr-only` copy of visible text is still SELECTABLE text (ldui-q7yl).**
 Pairing `aria-hidden` visible lines with an `sr-only` accessible copy makes a

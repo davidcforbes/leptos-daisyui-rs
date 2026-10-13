@@ -16,6 +16,17 @@
 //! first opaque fill. A stack with a REAL image or gradient stays unjudged,
 //! because axe is right that it cannot be measured from colours.
 //!
+//! The gate runs WCAG 2.2 AA too (`wcag22aa`, ldui-35xn), which in axe
+//! 4.13 is the `target-size` rule (2.5.8). 4iiz-Office's axe runs it, and
+//! MonthRoster's 7.8x20 day numbers failed there with every ldui lane green
+//! (ldui-3lxs). axe files an undersized target with `tabindex="-1"` as
+//! INCOMPLETE ("Is this a target?"), never as a violation. In this crate's
+//! roving-tabindex widgets, every stop but the active one is `-1` and is
+//! still a pointer target. So `small_targets` counts those nodes as failures
+//! when the element is a native control or has a widget role. A
+//! `tabindex="-1"` focus container (a modal box, a region) is not a pointer
+//! target and stays exempt.
+//!
 //! One limit remains and is axe's own: it does not contrast-check text
 //! outside the visible part of the page's scroll container (the demo scrolls
 //! inside `main`), and reports such nodes nowhere. Scroll the subject into
@@ -35,7 +46,7 @@ const AXE_GATE_JS: &str = r#"async (scopeSelector, ruleIds) => {
     const report = await axe.run(scope, {
         runOnly: ruleIds
             ? { type: 'rule', values: ruleIds }
-            : { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa'] },
+            : { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa'] },
         resultTypes: ['violations', 'incomplete'],
     });
     const violations = report.violations
@@ -106,7 +117,28 @@ const AXE_GATE_JS: &str = r#"async (scopeSelector, ruleIds) => {
             }
         }
     }
-    return { violations, unjudged };
+    // target-size: an undersized CONTROL parked at tabindex="-1" (a roving
+    // stop) is a pointer target, whatever axe's "Is this a target?".
+    const control = 'button, a[href], input, select, textarea, summary, [role="button"], [role="link"], '
+        + '[role="checkbox"], [role="radio"], [role="switch"], [role="tab"], [role="menuitem"], '
+        + '[role="option"], [role="gridcell"][tabindex]';
+    const small_targets = [];
+    for (const rule of report.incomplete) {
+        if (rule.id !== 'target-size') continue;
+        for (const node of rule.nodes) {
+            if (node.target.length !== 1) continue;
+            const el = document.querySelector(node.target[0]);
+            if (!el || el.getAttribute('tabindex') !== '-1' || !el.matches(control)) continue;
+            const box = el.getBoundingClientRect();
+            small_targets.push({
+                target: node.target,
+                html: node.html.slice(0, 200),
+                size: [Math.round(box.width * 10) / 10, Math.round(box.height * 10) / 10],
+                why: [...node.any, ...node.all, ...node.none].map((c) => c.message),
+            });
+        }
+    }
+    return { violations, unjudged, small_targets };
 }"#;
 
 /// Inject the vendored axe-core once per page.
@@ -225,5 +257,12 @@ pub async fn assert_axe_clean(h: &Harness, scope: Option<&str>, context: &str) {
         "{context}: text below AA that axe filed as unjudged (a daisyUI button's \
          `none, none` background image, ldui-3kix): {:#}",
         findings["unjudged"]
+    );
+    assert_eq!(
+        findings["small_targets"],
+        json!([]),
+        "{context}: controls under 24x24 that axe filed as \"Is this a target?\" \
+         because they sit at tabindex=-1 (WCAG 2.5.8, ldui-35xn): {:#}",
+        findings["small_targets"]
     );
 }

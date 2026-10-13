@@ -1564,6 +1564,17 @@ async fn the_day_numbers_meet_the_wcag22_target_size() {
         on_monday,
         "at the old size, target-size did not fire on Monday 5 Oct ({gap}px from the week button): {broken}"
     );
+    // The off-stop numbers stay at tabindex=-1, which axe files only as
+    // "Is this a target?". The shared gate must still name them (ldui-35xn).
+    let gate = common::axe::axe_findings(&h, Some(EDIT)).await;
+    let parked = gate["small_targets"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        !parked.is_empty(),
+        "the gate did not count the undersized tabindex=-1 day numbers: {gate}"
+    );
     eval_json(
         &h,
         &format!(
