@@ -1425,6 +1425,155 @@ async fn the_shared_axe_gate_judges_the_button_text_axe_cannot() {
     assert_no_browser_errors(&h, "shared axe gate").await;
 }
 
+// ---- ldui-3lxs: WCAG 2.2 target size ------------------------------------------
+
+/// WCAG 2.2 2.5.8 (4iiz-Office staging): the day-number button measured
+/// 7.8x20 for a one-digit day, and axe `target-size` (wcag22aa, outside the
+/// shared gate's default tags) fired in Month zoom on a one-digit Monday,
+/// whose 24 px spacing circle reaches the week button beside it. With the
+/// row holding Monday 5 Oct in view, the rule must be clean on both rosters
+/// and every day number must be at least 24x24. Then, with the week buttons
+/// pulled as close as Office's layout put them, the fixed numbers must still
+/// pass, and stripping the minimum size must make the rule fire on that
+/// Monday, which shows the check can fail.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-month-roster)"]
+async fn the_day_numbers_meet_the_wcag22_target_size() {
+    let h = open().await;
+    h.set_viewport(ViewportSize::new(1440, 900))
+        .await
+        .expect("Office's width");
+    let monday = format!("{ROOT} td[data-day=\"2026-10-05\"] [data-day-number]");
+    eval_json(
+        &h,
+        &format!("document.querySelector('{monday}').scrollIntoView({{ block: 'center' }}), true"),
+    )
+    .await;
+    settle().await;
+    let sizes = eval_json(
+        &h,
+        &format!(
+            "[...document.querySelectorAll('{ROOT} button[data-day-number]')].map((b) => {{ const r = b.getBoundingClientRect(); return [Math.round(r.width * 10) / 10, Math.round(r.height * 10) / 10]; }})"
+        ),
+    )
+    .await;
+    let sizes = sizes.as_array().cloned().unwrap_or_default();
+    assert!(!sizes.is_empty(), "no day-number buttons");
+    assert!(
+        sizes
+            .iter()
+            .all(|s| s[0].as_f64() >= Some(24.0) && s[1].as_f64() >= Some(24.0)),
+        "a day number is under 24x24: {sizes:?}"
+    );
+    for roster in [ROOT, EDIT] {
+        common::axe::assert_axe_rules_clean(
+            &h,
+            Some(roster),
+            &["target-size"],
+            &format!("{roster} month zoom"),
+        )
+        .await;
+    }
+
+    // Office's case, reproduced on the editable roster. axe files an
+    // undersized target with tabindex="-1" as INCOMPLETE ("Is this a
+    // target?"), never as a violation, and every day number in a roster
+    // without `on_day_activate` is -1. With `on_day_activate` the ACTIVE
+    // box's day number is tabbable, as on Office's page, so focus Monday
+    // 5 Oct's box first. Office's week button also ended 7 px from that day
+    // number (ours, about 12 px, which a 24 px spacing circle clears), so
+    // pull the week buttons flush against the column edge. The fixed day
+    // number must still pass. Stripped to its old size, target-size must
+    // fire on it, and the size check must see it under 24 px.
+    let edit_monday = format!("{EDIT} td[data-day=\"2026-10-05\"] [data-day-number]");
+    focus(&h, &format!("{EDIT} td[data-day=\"2026-10-05\"]")).await;
+    let tabbable = eval_json(
+        &h,
+        &format!("!document.querySelector('{edit_monday}').hasAttribute('tabindex')"),
+    )
+    .await;
+    assert_eq!(
+        tabbable,
+        json!(true),
+        "Monday 5 Oct's day number is not in the Tab order"
+    );
+    eval_json(
+        &h,
+        &format!(
+            "document.querySelectorAll('{EDIT} tbody th').forEach((th) => {{ th.style.paddingRight = '0px'; }}), document.querySelectorAll('{EDIT} [data-month-roster-action=\"week\"]').forEach((b) => {{ b.style.width = '100%'; }}), true"
+        ),
+    )
+    .await;
+    settle().await;
+    let gap = eval_json(
+        &h,
+        &format!(
+            "(() => {{ const w = document.querySelector('{EDIT} tr[data-month-week=\"2026-10-05\"] [data-month-roster-action=\"week\"]').getBoundingClientRect(); const d = document.querySelector('{edit_monday}').getBoundingClientRect(); return Math.round((d.left - w.right) * 10) / 10; }})()"
+        ),
+    )
+    .await;
+    assert!(
+        gap.as_f64() < Some(8.0),
+        "the week button is not close enough to reproduce Office's layout: {gap}px"
+    );
+    common::axe::assert_axe_rules_clean(
+        &h,
+        Some(EDIT),
+        &["target-size"],
+        "the fixed day numbers in Office's tighter geometry",
+    )
+    .await;
+
+    eval_json(
+        &h,
+        &format!(
+            "document.querySelectorAll('{EDIT} button[data-day-number]').forEach((b) => b.classList.remove('min-w-6', 'min-h-6')), true"
+        ),
+    )
+    .await;
+    settle().await;
+    let small = eval_json(
+        &h,
+        &format!("(() => {{ const r = document.querySelector('{edit_monday}').getBoundingClientRect(); return [r.width, r.height]; }})()"),
+    )
+    .await;
+    assert!(
+        small[0].as_f64() < Some(24.0),
+        "stripping the minimum did not shrink the day number: {small}"
+    );
+    let broken = common::axe::axe_rule_findings(&h, Some(EDIT), &["target-size"]).await;
+    // Resolve each node's selector in the page: axe's html snippet truncates.
+    let targets: Vec<Value> = broken["violations"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .flat_map(|v| v["nodes"].as_array().cloned().unwrap_or_default())
+        .map(|n| n["target"][0].clone())
+        .collect();
+    let on_monday = eval_json(
+        &h,
+        &format!(
+            "{}.some((t) => document.querySelector(t)?.closest('td[data-day]')?.dataset.day === '2026-10-05')",
+            json!(targets)
+        ),
+    )
+    .await
+        == json!(true);
+    assert!(
+        on_monday,
+        "at the old size, target-size did not fire on Monday 5 Oct ({gap}px from the week button): {broken}"
+    );
+    eval_json(
+        &h,
+        &format!(
+            "document.querySelectorAll('{EDIT} button[data-day-number]').forEach((b) => b.classList.add('min-w-6', 'min-h-6')), document.querySelectorAll('{EDIT} tbody th').forEach((th) => th.style.removeProperty('padding-right')), document.querySelectorAll('{EDIT} [data-month-roster-action=\"week\"]').forEach((b) => b.style.removeProperty('width')), true"
+        ),
+    )
+    .await;
+    assert_no_browser_errors(&h, "target size").await;
+}
+
 // ---- ldui-u0yr: the week button in ANY daisyUI build --------------------------
 
 /// The rule the daisyUI build 4iiz-Office serves applies to a ghost button

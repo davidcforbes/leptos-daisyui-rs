@@ -765,6 +765,26 @@ fn the_editing_controls_are_named_buttons_behind_their_callbacks() {
     assert!(day.contains("ctx.on_entry_remove.filter(|_| entry.removable)"));
 }
 
+/// WCAG 2.2 2.5.8 (ldui-3lxs, 4iiz-Office staging): the day-number button
+/// measured 7.8x20 for a one-digit day, and axe target-size fired on a
+/// one-digit Monday beside the week column. It keeps a 24x24 minimum.
+///
+/// Deliberate break: drop `min-w-6` -> fails. Revert; passes.
+#[test]
+fn the_day_number_button_is_at_least_24_by_24() {
+    let source = include_str!("component.rs");
+    let at = source.find("data-day-number=\"\"").expect("the day number");
+    let button = source[..at].rfind("<button").expect("a button");
+    let end = at + source[at..].find("on:click").expect("its handler");
+    let tag = &source[button..end];
+    for class in ["inline-flex", "min-h-6", "min-w-6", "items-center"] {
+        assert!(
+            tag.split(['"', ' ']).any(|c| c == class),
+            "{class} missing: {tag}"
+        );
+    }
+}
+
 // ---- ldui-on0i: contrast on the month grid ----------------------------------
 
 /// Office's axe (2026-10-12, 1440, its theme) found the week buttons at

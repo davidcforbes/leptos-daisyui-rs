@@ -149,6 +149,34 @@ async fn run_gate(h: &Harness, scope: Option<&str>, rules: Option<&[&str]>) -> V
         .unwrap_or(Value::Null)
 }
 
+/// Fails `context` on any violation of the named axe `rules` on `scope`,
+/// whatever its tag, e.g. WCAG 2.2's `target-size`, which the default
+/// wcag2a/2aa/21aa run does not include.
+pub async fn assert_axe_rules_clean(
+    h: &Harness,
+    scope: Option<&str>,
+    rules: &[&str],
+    context: &str,
+) {
+    let findings = axe_rule_findings(h, scope, rules).await;
+    assert!(
+        findings["error"].is_null() && findings["violations"].is_array(),
+        "{context}: axe did not run: {findings}"
+    );
+    assert_eq!(
+        findings["violations"],
+        json!([]),
+        "{context}: axe {rules:?} findings: {:#}",
+        findings["violations"]
+    );
+}
+
+/// The named axe `rules` on `scope`: `{ violations, unjudged }`, every
+/// violation of those rules whatever its impact.
+pub async fn axe_rule_findings(h: &Harness, scope: Option<&str>, rules: &[&str]) -> Value {
+    run_gate(h, scope, Some(rules)).await
+}
+
 /// Every contrast problem on `scope`: axe's `color-contrast` violations
 /// followed by the unjudged button text below AA, as one array (empty when
 /// clean), for suites that compare the result across states.
