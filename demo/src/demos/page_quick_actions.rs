@@ -32,7 +32,10 @@ fn SevenActions(
             <LinkButton href="#reports" style=ButtonStyle::Outline size=ButtonSize::Sm>
                 <PageQuickActionContent icon="file-text" label="Reports" label_visibility=label_visibility />
             </LinkButton>
-            <form action="/office/launch" method="post" target="_blank">
+            // An Office page launch opens in this tab (`_self`); the host opens a
+            // new tab on a modifier-click or the person's setting
+            // (Future-Architecture.md §5.5, owner ruling 2026-10-12).
+            <form action="/office/launch" method="post" target="_self">
                 <input type="hidden" name="doc_id" value="42" />
                 <Button
                     button_type=ButtonType::Submit
@@ -41,7 +44,7 @@ fn SevenActions(
                     color=ButtonColor::Secondary
                 >
                     <PageQuickActionContent
-                        icon="external-link"
+                        icon="arrow-right"
                         label="Open in Office"
                         label_visibility=label_visibility
                     />

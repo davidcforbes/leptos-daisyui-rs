@@ -166,14 +166,17 @@ pub fn PageQuickActionContent(
 /// fn Example() -> impl IntoView {
 ///     view! {
 ///         <PageQuickActions label="Satellite launch actions">
-///             <form action="/office/launch" method="post" target="_blank">
+///             // An Office page opens in this tab (`_self`); the host opens a
+///             // new tab on a modifier-click or the person's setting
+///             // (Future-Architecture.md §5.5, 2026-10-12).
+///             <form action="/office/launch" method="post" target="_self">
 ///                 <input type="hidden" name="doc_id" value="42" />
 ///                 <Button
 ///                     button_type=ButtonType::Submit
 ///                     style=ButtonStyle::Outline
 ///                     size=ButtonSize::Sm
 ///                 >
-///                     <PageQuickActionContent icon="external-link" label="Open in Office" />
+///                     <PageQuickActionContent icon="arrow-right" label="Open in Office" />
 ///                 </Button>
 ///             </form>
 ///         </PageQuickActions>

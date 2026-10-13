@@ -79,10 +79,15 @@ pub(crate) fn resolve_native_disabled(
 /// element itself.
 ///
 /// ```rust,ignore
-/// // Native POST launch form: the form owns action/method, the button just
-/// // triggers a real submit, no on_click / on:submit JS required.
+/// // Native POST launch form: the form owns action/method/target, the button
+/// // just triggers a real submit, no on_click / on:submit JS required.
+/// // An Office page opens in THIS tab: say `target="_self"` explicitly, because
+/// // a host launch script may treat a missing target as a new tab. The host,
+/// // not the button, opens a new tab on a Ctrl/Shift/middle-click or the
+/// // person's setting. A record action (Call, SMS, Email) keeps
+/// // `target="_blank"`. Owner ruling 2026-10-12, Future-Architecture.md §5.5.
 /// view! {
-///     <form action="/office/launch" method="post" target="_blank">
+///     <form action="/office/launch" method="post" target="_self">
 ///         <input type="hidden" name="doc_id" value=doc_id />
 ///         <Button button_type=ButtonType::Submit color=ButtonColor::Primary>
 ///             "Open in Office"
