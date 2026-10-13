@@ -5,8 +5,8 @@
 use super::style::{
     AbsenceKind, BLOCK, CHIP, DATE_HEADING, DAY_BOX, DAY_BOX_LAYOUT, DAY_CLOSED, DAY_HOLIDAY,
     DAY_OUTSIDE, DAY_TODAY, DAY_WEEKEND, GRID_ONLY, LayoutClasses, ODD_HOUR, OUTSIDE_LAYOUT, ROOT,
-    RosterLayout, RosterZoom, TABLE, TABLE_BASE, TIMELINE_ROW, WEEK_COLUMNS, WEEK_HEAD,
-    WEEKDAY_HEAD,
+    RosterLayout, RosterZoom, TABLE, TABLE_BASE, TIMELINE_ROW, WEEK_BUTTON, WEEK_COLUMNS,
+    WEEK_HEAD, WEEKDAY_HEAD,
 };
 use super::texts::MonthRosterTexts;
 use super::types::*;
@@ -577,6 +577,7 @@ fn emitted_classes() -> Vec<&'static str> {
         TABLE_BASE,
         WEEKDAY_HEAD,
         WEEK_HEAD,
+        WEEK_BUTTON,
         DAY_BOX,
         DAY_OUTSIDE,
         DAY_CLOSED,
@@ -767,30 +768,35 @@ fn the_editing_controls_are_named_buttons_behind_their_callbacks() {
 // ---- ldui-on0i: contrast on the month grid ----------------------------------
 
 /// Office's axe (2026-10-12, 1440, its theme) found the week buttons at
-/// 1.06:1 and an adjacent month's chips at 4.4:1. The week column's cells
-/// paint the header fill, so they carry the header's content colour, and the
-/// ghost week button inherits it at rest; the button itself must NOT carry a
-/// text colour, or its light hover and focus fill would draw that white text
-/// on white. An adjacent month's days dim to /85, never the /75 that failed.
+/// 1.06:1 and an adjacent month's chips at 4.4:1. The week button carries
+/// the header's content colour itself and no daisyUI `btn` class, because
+/// a `btn-ghost`'s rest colour is daisyUI's to decide and builds disagree
+/// (ldui-u0yr: colouring only the cell fixed it here and not in Office). Its
+/// hover is translucent white, never the ghost's light fill under white
+/// text. An adjacent month's days dim to /85, never the /75 that failed.
 ///
-/// Deliberate break: drop `text-table-header-content` from `WEEK_HEAD` ->
-/// the first assertion fails. Revert; passes.
+/// Deliberate break: put `btn btn-ghost` back on the week button -> the
+/// source assertion fails. Revert; passes.
 #[test]
 fn the_week_column_and_adjacent_days_keep_readable_text() {
     let classes = |s: &'static str| s.split_whitespace().collect::<Vec<_>>();
     assert!(classes(WEEK_HEAD).contains(&"text-table-header-content"));
     assert!(classes(WEEK_HEAD).contains(&"bg-table-header"));
     assert!(classes(WEEKDAY_HEAD).contains(&"text-table-header-content"));
+    let button = classes(WEEK_BUTTON);
+    assert!(button.contains(&"text-table-header-content"));
+    assert!(button.contains(&"hover:bg-white/15"));
+    assert!(
+        !button.iter().any(|c| c.starts_with("btn")),
+        "a daisyUI btn decides its own colour: {WEEK_BUTTON}"
+    );
     let source = include_str!("component.rs");
     let at = source
         .find("data-month-roster-action=\"week\"")
         .expect("the week button");
     let tag = &source[at..at + source[at..].find("aria-label").expect("its label")];
-    assert!(tag.contains("btn-ghost"), "{tag}");
-    assert!(
-        !tag.contains(" text-"),
-        "the week button inherits the cell's colour: {tag}"
-    );
+    assert!(tag.contains("class=WEEK_BUTTON"), "{tag}");
+    assert!(tag.contains("data-pressable=\"true\""), "{tag}");
     assert!(classes(DAY_OUTSIDE).contains(&"text-base-content/85"));
     assert!(!DAY_OUTSIDE.contains("/75"), "4.4:1 on a chip's tint");
 }

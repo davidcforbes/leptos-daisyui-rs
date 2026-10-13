@@ -181,9 +181,11 @@ The look is the kit's: `table-fixed border-collapse border-table-grid`, header c
 `bg-base-200/60`, holiday `bg-accent/10`, weekend `bg-base-200/30`, and today
 `outline-2 -outline-offset-2 outline-primary`. The kit draws a `ring-2 ring-inset`; the roster
 uses an outline because a box-shadow ring is a DEPTH finding in the style audit. The weekend defaults to Saturday and Sunday (`weekend` prop). The
-week-button column's cells carry `text-table-header-content` with the header fill, and the ghost
-week button inherits it; giving the button its own text colour would put that light text on the
-ghost's light hover fill. Adjacent-month days dim their text to `/85`, not the crate's usual `/75`,
+week-button column's cells carry `text-table-header-content` with the header fill, and so does the
+week button itself, which uses no daisyUI `btn` class (`WEEK_BUTTON`, ldui-u0yr): a `btn-ghost`'s rest
+colour depends on the daisyUI build, and the build 4iiz-Office serves drew it in base-content on the
+navy header (1.06:1). Its hover is a translucent white (`hover:bg-white/15`), never a light fill
+under the light text. Adjacent-month days dim their text to `/85`, not the crate's usual `/75`,
 because a chip's 12px text sits on a tint over that surface (ldui-on0i, measured by Office at 4.4:1).
 The
 class list for `input.css` is in the component's rustdoc (`@source inline(...)`). A native test

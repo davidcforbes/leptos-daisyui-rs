@@ -1304,7 +1304,7 @@ async fn the_grid_text_is_readable_on_its_own_fills() {
     eval_json(
         &h,
         &format!(
-            "document.querySelectorAll('{EDIT} tbody th').forEach((th) => th.classList.remove('text-table-header-content')), true"
+            "document.querySelectorAll('{EDIT} tbody th, {EDIT} [data-month-roster-action=\"week\"]').forEach((el) => el.classList.remove('text-table-header-content')), true"
         ),
     )
     .await;
@@ -1319,7 +1319,7 @@ async fn the_grid_text_is_readable_on_its_own_fills() {
     eval_json(
         &h,
         &format!(
-            "document.querySelectorAll('{EDIT} tbody th').forEach((th) => th.classList.add('text-table-header-content')), document.querySelectorAll('{EDIT} td[data-outside]').forEach((td) => td.classList.replace('text-base-content/85', 'text-base-content/75')), true"
+            "document.querySelectorAll('{EDIT} tbody th, {EDIT} [data-month-roster-action=\"week\"]').forEach((el) => el.classList.add('text-table-header-content')), document.querySelectorAll('{EDIT} td[data-outside]').forEach((td) => td.classList.replace('text-base-content/85', 'text-base-content/75')), true"
         ),
     )
     .await;
@@ -1345,10 +1345,11 @@ async fn the_grid_text_is_readable_on_its_own_fills() {
 
 /// axe files a daisyUI button's text contrast as incomplete (`bgImage`,
 /// from the `.btn`'s `none, none` background image) and never fails it, so
-/// the shared gate re-measures those nodes. With the week buttons put back to
-/// the old base-content-on-navy colour and scrolled into view, the gate must
-/// name them; restored, it must be clean. axe's own violations stay empty
-/// throughout, which is the blind spot itself.
+/// the shared gate re-measures those nodes. The week buttons are put back to
+/// their pre-ldui-u0yr markup (a daisyUI ghost button that took its colour
+/// from the cell), with the cell's colour lost, and scrolled into view: the
+/// gate must name them. Restored, it must be clean. axe's own violations stay
+/// empty throughout, which is the blind spot itself.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires demo dev server (cargo xtask test-month-roster)"]
 async fn the_shared_axe_gate_judges_the_button_text_axe_cannot() {
@@ -1370,11 +1371,15 @@ async fn the_shared_axe_gate_judges_the_button_text_axe_cannot() {
             .cloned()
             .unwrap_or_default()
             .into_iter()
+            // Match on axe's selector: its `html` snippet truncates long
+            // attributes ("data-month-roster-ac...").
             .filter(|n| {
-                n["html"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .contains("data-month-roster-action=\"week\"")
+                n["target"].as_array().is_some_and(|t| {
+                    t.iter().any(|s| {
+                        s.as_str()
+                            .is_some_and(|s| s.contains("data-month-roster-action=\"week\""))
+                    })
+                })
             })
             .collect::<Vec<_>>()
     };
@@ -1386,7 +1391,7 @@ async fn the_shared_axe_gate_judges_the_button_text_axe_cannot() {
     eval_json(
         &h,
         &format!(
-            "document.querySelectorAll('{ROOT} tbody th').forEach((th) => th.classList.remove('text-table-header-content')), true"
+            "document.querySelectorAll('{ROOT} tbody th').forEach((th) => th.classList.remove('text-table-header-content')), document.querySelectorAll('{ROOT} [data-month-roster-action=\"week\"]').forEach((b) => {{ b.dataset.newClass = b.className; b.className = 'btn ld-eased ld-pressable ld-focus-ring btn-ghost btn-xs px-1'; }}), true"
         ),
     )
     .await;
@@ -1410,7 +1415,7 @@ async fn the_shared_axe_gate_judges_the_button_text_axe_cannot() {
     eval_json(
         &h,
         &format!(
-            "document.querySelectorAll('{ROOT} tbody th').forEach((th) => th.classList.add('text-table-header-content')), true"
+            "document.querySelectorAll('{ROOT} tbody th').forEach((th) => th.classList.add('text-table-header-content')), document.querySelectorAll('{ROOT} [data-month-roster-action=\"week\"]').forEach((b) => {{ b.className = b.dataset.newClass; }}), true"
         ),
     )
     .await;
@@ -1418,4 +1423,132 @@ async fn the_shared_axe_gate_judges_the_button_text_axe_cannot() {
     let restored = common::axe::axe_findings(&h, Some(ROOT)).await;
     assert_eq!(restored["unjudged"], json!([]), "{restored}");
     assert_no_browser_errors(&h, "shared axe gate").await;
+}
+
+// ---- ldui-u0yr: the week button in ANY daisyUI build --------------------------
+
+/// The rule the daisyUI build 4iiz-Office serves applies to a ghost button
+/// at rest: its colour is `--color-base-content`, never the inherited
+/// `currentColor` our 5.5.19 gives it. Injected unlayered, it outranks every
+/// layered rule, exactly as Office's layered rule outranked an inherited
+/// colour.
+const OFFICE_GHOST_CSS: &str = ".btn-ghost { color: var(--color-base-content); }";
+
+/// ldui-on0i coloured only the week column's CELL, and the week button stayed
+/// a `btn-ghost`. That read 9.89:1 here and 1.06:1 on Office staging, because
+/// the ghost's rest colour is daisyUI's and the two builds disagree. Under
+/// Office's ghost rule, the button now reads on the navy header at rest, on
+/// hover (a translucent white, never a light fill) and with keyboard focus.
+/// The old ghost markup, put back on one button, must fail, which proves the
+/// emulation bites.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires demo dev server (cargo xtask test-month-roster)"]
+async fn the_week_buttons_read_on_the_header_in_any_daisyui_build() {
+    let h = open().await;
+    h.set_viewport(ViewportSize::new(1440, 900))
+        .await
+        .expect("a wide grid");
+    set_theme(&h, "light").await;
+    let first =
+        format!("{ROOT} tr[data-month-week=\"2026-09-28\"] [data-month-roster-action=\"week\"]");
+    eval_json(
+        &h,
+        &format!(
+            "(() => {{ const s = document.createElement('style'); s.id = 'office-ghost'; s.textContent = '{OFFICE_GHOST_CSS}'; document.head.append(s); document.querySelector('{first}').scrollIntoView({{ block: 'center' }}); return true; }})()"
+        ),
+    )
+    .await;
+    settle().await;
+    let rest = contrast(&h, ROOT).await;
+    assert!(
+        lowest(&rest, "week") >= 4.5,
+        "at rest under Office's ghost rule: {}",
+        lowest(&rest, "week")
+    );
+
+    // Hover: a real pointer over the first week button.
+    let point = eval_json(
+        &h,
+        &format!(
+            "(() => {{ const r = document.querySelector('{first}').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }})()"
+        ),
+    )
+    .await;
+    let moved = DispatchMouseEventParams::builder()
+        .r#type(DispatchMouseEventType::MouseMoved)
+        .x(point[0].as_f64().expect("x"))
+        .y(point[1].as_f64().expect("y"))
+        .build()
+        .expect("mouse move params");
+    h.page().execute(moved).await.expect("hover");
+    settle().await;
+    let hovered = eval_json(
+        &h,
+        &format!(
+            "(() => {{ const b = document.querySelector('{first}'); return {{ hover: b.matches(':hover'), fill: getComputedStyle(b).backgroundColor }}; }})()"
+        ),
+    )
+    .await;
+    assert_eq!(
+        hovered["hover"],
+        json!(true),
+        "the pointer is not over it: {hovered}"
+    );
+    assert_ne!(
+        hovered["fill"],
+        json!("rgba(0, 0, 0, 0)"),
+        "the hover fill never applied, so this measured rest again: {hovered}"
+    );
+    let on_hover = contrast(&h, ROOT).await;
+    assert!(
+        lowest(&on_hover, "week") >= 4.5,
+        "on hover: {} ({hovered})",
+        lowest(&on_hover, "week")
+    );
+
+    // Keyboard focus.
+    eval_json(
+        &h,
+        &format!("document.querySelector('{first}').focus({{ focusVisible: true }}), true"),
+    )
+    .await;
+    settle().await;
+    let focused = contrast(&h, ROOT).await;
+    assert!(
+        lowest(&focused, "week") >= 4.5,
+        "with focus: {}",
+        lowest(&focused, "week")
+    );
+    common::axe::assert_axe_clean(&h, Some(ROOT), "week buttons under Office's ghost rule").await;
+
+    // Negative control: the ldui-on0i markup on one button fails under the rule.
+    eval_json(
+        &h,
+        &format!(
+            "(() => {{ const b = document.querySelector('{first}'); b.dataset.newClass = b.className; b.className = 'btn ld-eased ld-pressable ld-focus-ring btn-ghost btn-xs px-1'; b.blur(); return true; }})()"
+        ),
+    )
+    .await;
+    let mouse_away = DispatchMouseEventParams::builder()
+        .r#type(DispatchMouseEventType::MouseMoved)
+        .x(1.0)
+        .y(1.0)
+        .build()
+        .expect("mouse move params");
+    h.page().execute(mouse_away).await.expect("move away");
+    settle().await;
+    let old = contrast(&h, ROOT).await;
+    assert!(
+        lowest(&old, "week") < 3.0,
+        "the emulated Office rule did not reproduce the old 1.06:1 failure: {}",
+        lowest(&old, "week")
+    );
+    eval_json(
+        &h,
+        &format!(
+            "(() => {{ const b = document.querySelector('{first}'); b.className = b.dataset.newClass; document.getElementById('office-ghost').remove(); return true; }})()"
+        ),
+    )
+    .await;
+    assert_no_browser_errors(&h, "week buttons in any daisyUI build").await;
 }

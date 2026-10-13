@@ -97,12 +97,18 @@ pub const TABLE_BASE: &str = "table w-full table-fixed border-collapse border bo
 pub const WEEKDAY_HEAD: &str = "border border-table-grid bg-table-header px-1 py-1 text-center text-xs font-semibold text-table-header-content";
 
 /// The week-button column's cells. They paint the header fill, so they
-/// carry the header's content colour too, as [`WEEKDAY_HEAD`] does: the
-/// week button is `btn-ghost`, which draws in `currentColor` at rest
-/// (ldui-on0i; Office measured base-content on the navy header at 1.06:1).
-/// Its hover and focus fill is the ghost's own light one with base-content
-/// text, so the colour must stay on the cell, never on the button.
+/// carry the header's content colour too, as [`WEEKDAY_HEAD`] does.
 pub const WEEK_HEAD: &str = "w-10 border border-table-grid bg-table-header p-1 text-center align-top text-table-header-content";
+
+/// The week button on the header fill. It carries the header's content
+/// colour ITSELF and uses no daisyUI `btn` class (ldui-u0yr). A `btn-ghost`
+/// takes its rest colour from daisyUI, and daisyUI builds disagree: ours
+/// (5.5.19) draws the ghost in `currentColor`, while the build 4iiz-Office
+/// serves draws it in `--color-base-content`. That put base-content on the
+/// navy header at 1.06:1 again after ldui-on0i colour-coded only the cell.
+/// The hover is a translucent white, so the light text never sits on a
+/// light fill, as it would on the ghost's own hover.
+pub const WEEK_BUTTON: &str = "ld-eased ld-pressable ld-focus-ring cursor-pointer rounded-sm px-1 py-1 text-xs font-semibold text-table-header-content hover:bg-white/15 hover:underline";
 
 /// A date box.
 pub const DAY_BOX: &str = "h-28 border border-table-grid p-1 align-top print:h-auto";

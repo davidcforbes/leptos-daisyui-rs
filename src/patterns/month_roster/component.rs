@@ -2,7 +2,7 @@ use super::day::DayZoom;
 use super::style::{
     BLOCK, CHIP, DATE_HEADING, DAY_BOX, DAY_BOX_LAYOUT, DAY_CLOSED, DAY_HOLIDAY, DAY_OUTSIDE,
     DAY_TODAY, DAY_WEEKEND, GRID_ONLY, OUTSIDE_LAYOUT, ROOT, RosterLayout, RosterZoom, TABLE,
-    TABLE_BASE, WEEK_HEAD, WEEKDAY_HEAD,
+    TABLE_BASE, WEEK_BUTTON, WEEK_HEAD, WEEKDAY_HEAD,
 };
 use super::texts::{MonthRosterTexts, fill};
 use super::types::{
@@ -254,7 +254,7 @@ pub(super) fn day_pointerup(ctx: Ctx, day: i64, ev: web_sys::PointerEvent) {
 /// @source inline("@container flex w-full flex-col gap-3 items-center justify-between flex-wrap gap-1 gap-2 gap-x-2 gap-y-1 text-lg text-sm text-xs font-semibold");
 /// @source inline("table table-fixed border-collapse border border-table-grid bg-table-header text-table-header-content text-center px-1 py-1 p-1 p-2 align-top w-10 h-28 mt-1");
 /// @source inline("bg-base-200/40 text-base-content/75 text-base-content/85 bg-base-200/60 bg-accent/10 bg-base-200/30 outline-2 -outline-offset-2 outline-primary sr-only not-sr-only select-none");
-/// @source inline("touch-manipulation items-start min-w-0 flex-1 shrink-0 items-center gap-0");
+/// @source inline("touch-manipulation items-start min-w-0 flex-1 shrink-0 items-center gap-0 hover:bg-white/15");
 /// @source inline("rounded-sm border-l-4 leading-tight truncate break-words translate-x-0 -translate-x-1/2 -translate-x-full");
 /// @source inline("bg-success/15 bg-info/15 bg-warning/15 bg-secondary/15 bg-error/15 bg-accent/15 border-success border-info border-warning border-secondary border-error border-accent border-base-300 border-solid border-dashed");
 /// @source inline("peer peer-checked:not-sr-only peer-checked:flex focus-within:not-sr-only focus-within:flex peer-focus-visible:ring-2 peer-focus-visible:ring-primary");
@@ -636,7 +636,8 @@ fn MonthRow(ctx: Ctx, row_start: i64, span: Memo<(i64, i64)>) -> impl IntoView {
                                 tabindex="-1"
                                 data-month-roster-action="week"
                                 data-week-start=iso_date(row_start)
-                                class="btn ld-eased ld-pressable ld-focus-ring btn-ghost btn-xs px-1"
+                                data-pressable="true"
+                                class=WEEK_BUTTON
                                 aria-label=move || match week_label() {
                                     Some(text) => format!("{text}, {}", week_name()),
                                     None => week_name(),
