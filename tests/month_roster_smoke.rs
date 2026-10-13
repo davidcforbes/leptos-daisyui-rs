@@ -1434,13 +1434,52 @@ async fn the_shared_axe_gate_judges_the_button_text_axe_cannot() {
 /// colour.
 const OFFICE_GHOST_CSS: &str = ".btn-ghost { color: var(--color-base-content); }";
 
+/// The focused element's outline against the fill around it (its header
+/// cell's background, composited down to the first opaque one): whether
+/// `:focus-visible` matched, the outline style, and the contrast ratio.
+const RING_JS: &str = r#"(selector) => {
+    const ctx = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
+    const rgba = (css) => {
+        ctx.clearRect(0, 0, 1, 1);
+        ctx.fillStyle = 'rgba(0, 0, 0, 0)';
+        ctx.fillStyle = css;
+        ctx.fillRect(0, 0, 1, 1);
+        const d = ctx.getImageData(0, 0, 1, 1).data;
+        return [d[0], d[1], d[2], d[3] / 255];
+    };
+    const over = (top, under) => [0, 1, 2].map((i) => top[i] * top[3] + under[i] * (1 - top[3])).concat([1]);
+    const lum = (c) => c.slice(0, 3).map((v) => {
+        v /= 255;
+        return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    }).reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0);
+    const b = document.querySelector(selector);
+    const layers = [];
+    for (let n = b.parentElement; n; n = n.parentElement) {
+        const c = rgba(getComputedStyle(n).backgroundColor);
+        if (c[3] > 0) layers.push(c);
+        if (c[3] >= 1) break;
+    }
+    const fill = layers.reverse().reduce((under, top) => over(top, under), [255, 255, 255, 1]);
+    const s = getComputedStyle(b);
+    const ring = over(rgba(s.outlineColor), fill);
+    const [x, y] = [lum(ring), lum(fill)].sort((p, q) => q - p);
+    return {
+        focusVisible: b.matches(':focus-visible'),
+        style: s.outlineStyle,
+        width: s.outlineWidth,
+        color: s.outlineColor,
+        ratio: Math.round((x + 0.05) / (y + 0.05) * 100) / 100,
+    };
+}"#;
+
 /// ldui-on0i coloured only the week column's CELL, and the week button stayed
 /// a `btn-ghost`. That read 9.89:1 here and 1.06:1 on Office staging, because
 /// the ghost's rest colour is daisyUI's and the two builds disagree. Under
 /// Office's ghost rule, the button now reads on the navy header at rest, on
 /// hover (a translucent white, never a light fill) and with keyboard focus.
 /// The old ghost markup, put back on one button, must fail, which proves the
-/// emulation bites.
+/// emulation bites. The focused button's ring must also clear 3:1 against
+/// the header (ldui-fq9x), and fall below it without its colour hook.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires demo dev server (cargo xtask test-month-roster)"]
 async fn the_week_buttons_read_on_the_header_in_any_daisyui_build() {
@@ -1519,7 +1558,39 @@ async fn the_week_buttons_read_on_the_header_in_any_daisyui_build() {
         "with focus: {}",
         lowest(&focused, "week")
     );
+    // The focus ring itself: a focus indicator needs 3:1 against the fill
+    // beside it (WCAG 1.4.11). Primary on the navy measured about 1.4:1 in
+    // Office (ldui-fq9x); the week button takes the header's content colour.
+    let ring = eval_json(&h, &format!("({RING_JS})('{first}')")).await;
+    assert_eq!(ring["focusVisible"], json!(true), "{ring}");
+    assert_ne!(ring["style"], json!("none"), "no ring drawn: {ring}");
+    assert!(
+        ring["ratio"].as_f64() >= Some(3.0),
+        "the focus ring is too faint on the header: {ring}"
+    );
     common::axe::assert_axe_clean(&h, Some(ROOT), "week buttons under Office's ghost rule").await;
+
+    // Negative control for the ring: without the colour hook the ring is
+    // primary again and must fall below 3:1 on the navy.
+    let hook = "[--ld-focus-ring-color:var(--color-table-header-content)]";
+    let primary_ring = eval_json(
+        &h,
+        &format!(
+            "(() => {{ const b = document.querySelector('{first}'); b.blur(); b.classList.remove('{hook}'); b.focus({{ focusVisible: true }}); return ({RING_JS})('{first}'); }})()"
+        ),
+    )
+    .await;
+    assert!(
+        primary_ring["ratio"].as_f64() < Some(3.0),
+        "the primary ring was not faint here, so the ring check proves nothing: {primary_ring}"
+    );
+    eval_json(
+        &h,
+        &format!(
+            "(() => {{ const b = document.querySelector('{first}'); b.classList.add('{hook}'); return true; }})()"
+        ),
+    )
+    .await;
 
     // Negative control: the ldui-on0i markup on one button fails under the rule.
     eval_json(

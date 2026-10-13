@@ -787,6 +787,10 @@ fn the_week_column_and_adjacent_days_keep_readable_text() {
     assert!(button.contains(&"text-table-header-content"));
     assert!(button.contains(&"hover:bg-white/15"));
     assert!(
+        button.contains(&"[--ld-focus-ring-color:var(--color-table-header-content)]"),
+        "the focus ring must take the header's content colour (ldui-fq9x)"
+    );
+    assert!(
         !button.iter().any(|c| c.starts_with("btn")),
         "a daisyUI btn decides its own colour: {WEEK_BUTTON}"
     );

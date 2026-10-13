@@ -107,8 +107,10 @@ pub const WEEK_HEAD: &str = "w-10 border border-table-grid bg-table-header p-1 t
 /// serves draws it in `--color-base-content`. That put base-content on the
 /// navy header at 1.06:1 again after ldui-on0i colour-coded only the cell.
 /// The hover is a translucent white, so the light text never sits on a
-/// light fill, as it would on the ghost's own hover.
-pub const WEEK_BUTTON: &str = "ld-eased ld-pressable ld-focus-ring cursor-pointer rounded-sm px-1 py-1 text-xs font-semibold text-table-header-content hover:bg-white/15 hover:underline";
+/// light fill, as it would on the ghost's own hover. The focus ring takes the
+/// header's content colour too (ldui-fq9x): primary on navy measured about
+/// 1.4:1, and a focus indicator needs 3:1.
+pub const WEEK_BUTTON: &str = "ld-eased ld-pressable ld-focus-ring cursor-pointer rounded-sm px-1 py-1 text-xs font-semibold text-table-header-content hover:bg-white/15 hover:underline [--ld-focus-ring-color:var(--color-table-header-content)]";
 
 /// A date box.
 pub const DAY_BOX: &str = "h-28 border border-table-grid p-1 align-top print:h-auto";

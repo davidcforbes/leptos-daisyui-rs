@@ -439,8 +439,11 @@ fn focus_ring_colour_is_present_from_frame_zero_and_only_the_offset_animates() {
     let rule = &css[rule_start..];
     let rule = &rule[..rule.find('}').expect("unterminated focus-ring rule")];
     assert!(
-        rule.contains("outline: 2px solid var(--color-primary, currentColor);"),
-        "the ring colour must be declared on the rule, not faded in: {rule}"
+        rule.contains(
+            "outline: 2px solid var(--ld-focus-ring-color, var(--color-primary, currentColor));"
+        ),
+        "the ring colour must be declared on the rule, not faded in, and a control on a \
+         dark fill must be able to recolour it through --ld-focus-ring-color (ldui-fq9x): {rule}"
     );
     assert!(
         rule.contains("outline-offset: 2px;"),

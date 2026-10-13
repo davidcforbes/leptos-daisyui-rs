@@ -17,7 +17,9 @@
 ///   colour is present from frame 0; only `outline-offset` animates, growing
 ///   from 0 to 2px (`ld-focus-ring-in`). Never fade the colour in: a keyboard
 ///   user, or a probe reading the computed outline right after focus, must
-///   see the ring at every instant (ldui-reod).
+///   see the ring at every instant (ldui-reod). A control on a dark fill sets
+///   `--ld-focus-ring-color` on itself (ldui-fq9x): this rule is unlayered, so
+///   a `focus-visible:` utility cannot recolour it.
 ///
 /// Plus named entrance animations triggered by daisyUI's open-state classes:
 ///
@@ -177,9 +179,15 @@ dialog.modal[open]::backdrop {
    primary from the first frame and only `outline-offset` moves (0 -> 2px), so
    a probe and a person see the same thing at every instant.
    `prefers-reduced-motion` still removes the motion below; the ring itself is
-   present either way. */
+   present either way.
+
+   ldui-fq9x / Office (2026-10-12): primary on a dark fill is not a visible
+   ring. MonthRoster's week button sits on the navy table header, where
+   primary measured about 1.4:1 against the 3:1 a focus indicator needs. A
+   control on a dark fill sets `--ld-focus-ring-color` on itself (the week
+   button uses the header's content colour); everything else keeps primary. */
 .ld-focus-ring:focus-visible {
-    outline: 2px solid var(--color-primary, currentColor);
+    outline: 2px solid var(--ld-focus-ring-color, var(--color-primary, currentColor));
     outline-offset: 2px;
     animation: ld-focus-ring-in var(--ld-duration-fast) var(--ld-ease-decelerate);
 }

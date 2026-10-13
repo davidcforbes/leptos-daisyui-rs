@@ -583,7 +583,10 @@ Tailwind's own `shadow-*`; a bare `box-shadow:` on a component class silently
 discards a layered `ring-*` (ldui-xr7i). Selection rings are `outline`s — a
 box-shadow ring counts as a rogue DEPTH finding in the style audit — and
 keyboard focus is the framework's `ld-focus-ring`, which outranks any
-`focus-visible:` utility you add.
+`focus-visible:` utility you add. On a dark fill, set `--ld-focus-ring-color`
+on the control itself (MonthRoster's week button uses
+`[--ld-focus-ring-color:var(--color-table-header-content)]`, ldui-fq9x):
+primary on the navy table header measured about 1.4:1.
 
 ### Tooltip bubbles occupy layout at opacity 0 — measure edges, never index them
 
