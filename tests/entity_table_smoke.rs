@@ -1916,6 +1916,35 @@ async fn controlled_preferences_reorder_columns_and_compose_sort_clauses() {
     assert_eq!(resize_before["max"], json!("1200"));
     assert_eq!(resize_before["now"], resize_before["width"]);
     assert_eq!(resize_before["opacity"], json!("1"));
+    // ldui-lhcf (4iiz-Office audit): the focused handle's ring needs 3:1
+    // against the navy header around it and its own focused fill; primary
+    // measured 1.42:1 there. The old primary ring, put back inline, must fail.
+    let ring = common::focus_ring::ring(&harness, client_separator).await;
+    assert_eq!(ring["focused"], json!(true), "{ring}");
+    assert_ne!(ring["style"], json!("none"), "no ring drawn: {ring}");
+    assert!(
+        ring["outer"].as_f64() >= Some(3.0) && ring["inner"].as_f64() >= Some(3.0),
+        "the resize handle's ring is too faint on the header: {ring}"
+    );
+    eval_json(
+        &harness,
+        &format!(
+            "document.querySelector(\"{client_separator}\").style.outlineColor = 'var(--color-primary)', true"
+        ),
+    )
+    .await;
+    let primary_ring = common::focus_ring::ring(&harness, client_separator).await;
+    assert!(
+        primary_ring["outer"].as_f64() < Some(3.0),
+        "a primary ring was not faint here, so the ring check proves nothing: {primary_ring}"
+    );
+    eval_json(
+        &harness,
+        &format!(
+            "document.querySelector(\"{client_separator}\").style.removeProperty('outline-color'), true"
+        ),
+    )
+    .await;
     harness
         .press_key_sequence(&[Key::ArrowRight])
         .await

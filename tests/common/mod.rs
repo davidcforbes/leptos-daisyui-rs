@@ -23,6 +23,7 @@
 #![allow(dead_code)]
 
 pub mod axe;
+pub mod focus_ring;
 pub mod table_header_focus;
 
 use pixelproof_web::{Harness, HarnessConfig, ViewportSize};

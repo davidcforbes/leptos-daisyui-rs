@@ -221,7 +221,7 @@ pub fn DataTableHeader(
                                 })}
                                 {is_resizable.then(|| view! {
                                     <span
-                                        class="absolute top-0 right-0 z-10 h-full w-2 cursor-col-resize select-none opacity-0 hover:opacity-100 hover:bg-primary/50 focus:opacity-100 focus:bg-primary/50 focus:outline focus:outline-2 focus:outline-primary active:opacity-100 active:bg-primary/70"
+                                        class="absolute top-0 right-0 z-10 h-full w-2 cursor-col-resize select-none opacity-0 hover:opacity-100 hover:bg-primary/50 focus:opacity-100 focus:bg-primary/50 focus:outline focus:outline-2 focus:outline-table-header-content active:opacity-100 active:bg-primary/70"
                                         role="separator"
                                         tabindex="0"
                                         aria-orientation="vertical"
@@ -424,6 +424,35 @@ mod tests {
     fn active_sort_indicator_keeps_the_directional_arrow() {
         assert_eq!(sort_indicator_symbol(true, SortOrder::Asc), "↑");
         assert_eq!(sort_indicator_symbol(true, SortOrder::Desc), "↓");
+    }
+
+    /// ldui-lhcf (4iiz-Office audit): the column resize handle sits in the
+    /// navy table header, where a primary focus outline measured 1.42:1
+    /// against the 3:1 a focus indicator needs. Both tables' handles draw it
+    /// in the header's content colour, and stay identical.
+    ///
+    /// Deliberate break: put `focus:outline-primary` back on either handle ->
+    /// fails. Revert; passes.
+    #[test]
+    fn the_resize_handles_ring_reads_on_the_navy_header() {
+        let handle = |source: &'static str| {
+            let at = source
+                .find("cursor-col-resize select-none opacity-0")
+                .expect("a resize handle");
+            let start = source[..at].rfind("class=\"").expect("its class");
+            let end = at + source[at..].find('"').expect("class end");
+            &source[start..end]
+        };
+        let data_table = handle(include_str!("header.rs"));
+        let entity_table = handle(include_str!("../entity_table/component.rs"));
+        for class in [data_table, entity_table] {
+            assert!(
+                class.contains("focus:outline-table-header-content"),
+                "{class}"
+            );
+            assert!(!class.contains("focus:outline-primary"), "{class}");
+        }
+        assert_eq!(data_table, entity_table, "the two handles drifted apart");
     }
 
     /// ldui-vooa: the resize separator's accessible name must be built from

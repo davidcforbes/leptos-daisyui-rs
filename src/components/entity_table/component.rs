@@ -2961,7 +2961,7 @@ where
                                         })}
                                         {resizable.then(|| view! {
                                             <span
-                                                class="absolute top-0 right-0 z-10 h-full w-2 cursor-col-resize select-none opacity-0 hover:opacity-100 hover:bg-primary/50 focus:opacity-100 focus:bg-primary/50 focus:outline focus:outline-2 focus:outline-primary active:opacity-100 active:bg-primary/70"
+                                                class="absolute top-0 right-0 z-10 h-full w-2 cursor-col-resize select-none opacity-0 hover:opacity-100 hover:bg-primary/50 focus:opacity-100 focus:bg-primary/50 focus:outline focus:outline-2 focus:outline-table-header-content active:opacity-100 active:bg-primary/70"
                                                 role="separator"
                                                 tabindex="0"
                                                 aria-orientation="vertical"

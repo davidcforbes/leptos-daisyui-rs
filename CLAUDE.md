@@ -586,7 +586,10 @@ keyboard focus is the framework's `ld-focus-ring`, which outranks any
 `focus-visible:` utility you add. On a dark fill, set `--ld-focus-ring-color`
 on the control itself (MonthRoster's week button uses
 `[--ld-focus-ring-color:var(--color-table-header-content)]`, ldui-fq9x):
-primary on the navy table header measured about 1.4:1.
+primary on the navy table header measured about 1.4:1. The same goes for any
+control that draws its own outline there: the column resize handles use
+`focus:outline-table-header-content` (ldui-lhcf). Measure a ring with
+`common::focus_ring::ring`, which checks both the fill around it and its own.
 
 ### Tooltip bubbles occupy layout at opacity 0 — measure edges, never index them
 
