@@ -473,6 +473,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     href: "/components/mermaid_display",
                     value: "mermaid_display",
                 },
+                ComponentItem {
+                    name: "Rich Message",
+                    href: "/components/rich_message",
+                    value: "rich_message",
+                },
             ],
         },
         MenuCategory {

@@ -1015,6 +1015,23 @@ fn ld_pattern_step() -> Step {
     }
 }
 
+/// Focused browser proof for the rich-message components (ldui-g8hh):
+/// the picture-message and WhatsApp previews render media, extended
+/// characters, formatting and placeholders as the recipient sees them,
+/// preview buttons are inert, host-wired ones are live, the thread's failed
+/// picture falls back, and every section is axe-clean in the light and dark
+/// themes. Lives on the general demo app (`html_target: None`) and stays in
+/// its own file/step for the same reason as [`collapse_naming_step`].
+fn rich_message_step() -> Step {
+    Step {
+        name: "test-rich-message",
+        run: Run::BrowserSuite {
+            test: "rich_message_smoke",
+            html_target: None,
+        },
+    }
+}
+
 /// Focused browser proof that Mermaid renders through pele (ldui-qe72):
 /// `MermaidDisplay` draws `svg.pele` for four diagram types (Venn among
 /// them), broken source shows pele's message in the error box, a
@@ -1086,6 +1103,7 @@ fn full_steps() -> Vec<Step> {
     steps.push(server_cursor_footer_step());
     steps.push(ld_pattern_step());
     steps.push(mermaid_pele_step());
+    steps.push(rich_message_step());
     steps
 }
 
@@ -2921,6 +2939,7 @@ fn main() -> ExitCode {
         "test-server-cursor-footer" => run_steps(&[server_cursor_footer_step()]),
         "test-ld-pattern" => run_steps(&[ld_pattern_step(), ld_pattern_snapshot_step()]),
         "test-mermaid-pele" => run_steps(&[mermaid_pele_step()]),
+        "test-rich-message" => run_steps(&[rich_message_step()]),
         "capture-design" => run_steps(&[design_capture_step()]),
         "gen-tokens" => {
             let check = std::env::args().any(|a| a == "--check");
@@ -2936,7 +2955,7 @@ fn main() -> ExitCode {
         other => {
             eprintln!("xtask: unknown subcommand {other:?}");
             eprintln!(
-                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-week-planner|test-month-roster|test-selectable-summary|test-person-picker|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-snapshot-table-page-filter-actions|test-helpdesk|test-ai-chat|test-ai-chat-knowledge|test-server-table-column-tools|test-collapse-naming|test-data-table-fit|test-app-shell|test-field-context-scoping|test-entity-draft-row|test-softphone|test-help-hint|test-focus-ring|test-row-action-presets|test-server-cursor-footer|test-ld-pattern|test-mermaid-pele|capture-design|gen-tokens|check-sibling-tokens|clean-cache|bump>"
+                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-week-planner|test-month-roster|test-selectable-summary|test-person-picker|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-snapshot-table-page-filter-actions|test-helpdesk|test-ai-chat|test-ai-chat-knowledge|test-server-table-column-tools|test-collapse-naming|test-data-table-fit|test-app-shell|test-field-context-scoping|test-entity-draft-row|test-softphone|test-help-hint|test-focus-ring|test-row-action-presets|test-server-cursor-footer|test-ld-pattern|test-mermaid-pele|test-rich-message|capture-design|gen-tokens|check-sibling-tokens|clean-cache|bump>"
             );
             ExitCode::from(2)
         }
@@ -3559,6 +3578,21 @@ pub fn r() -> f32 { radius::CARD }
             assert!(!gate_steps().iter().any(|s| s.name == name), "{name}");
             assert!(full_steps().iter().any(|s| s.name == name), "{name}");
         }
+    }
+
+    #[test]
+    fn rich_message_step_is_in_process_and_full_only() {
+        let step = rich_message_step();
+        assert_eq!(step.name, "test-rich-message");
+        assert!(matches!(
+            step.run,
+            Run::BrowserSuite {
+                test: "rich_message_smoke",
+                html_target: None
+            }
+        ));
+        assert!(!gate_steps().iter().any(|s| s.name == "test-rich-message"));
+        assert!(full_steps().iter().any(|s| s.name == "test-rich-message"));
     }
 
     #[test]
