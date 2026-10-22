@@ -284,6 +284,11 @@ async fn thread(h: &pixelproof_web::Harness) {
                 fallback: list.querySelector('[data-media-fallback]').textContent,
                 brokenImg: !!list.querySelector('[data-media-fallback]')?.closest('[data-message-header]')?.querySelector('img'),
                 doc: list.querySelector('[data-message-header="document"]').textContent,
+                docLinks: [...list.querySelectorAll('[data-message-header="document"] a')]
+                    .map(a => a.getAttribute('href')),
+                scriptHrefs: [...document.querySelectorAll('[data-rich-message] [href]')]
+                    .map(a => a.getAttribute('href'))
+                    .filter(h => /^\s*javascript:/i.test(h)),
                 truncated: list.querySelector('[data-message-truncated]').textContent,
             };
         })()"#,
@@ -351,6 +356,13 @@ async fn thread(h: &pixelproof_web::Harness) {
         json!("Showing 240 of 4310 characters"),
         "{snap}"
     );
+    // The fixture's document src is `javascript:alert(document.domain)`.
+    assert_eq!(
+        snap["docLinks"],
+        json!([]),
+        "a document src with a script scheme must not become a link: {snap}"
+    );
+    assert_eq!(snap["scriptHrefs"], json!([]), "{snap}");
 }
 
 async fn live_buttons(h: &pixelproof_web::Harness) {

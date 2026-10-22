@@ -352,6 +352,45 @@ pub fn truncation_note(truncation: MessageTruncation, texts: &RichMessageTexts) 
         .replace("{total}", &truncation.true_len.to_string())
 }
 
+/// The URL with every ASCII whitespace and control character removed and
+/// lowercased: browsers ignore a tab or newline inside a scheme, so
+/// `java`, tab, `script:` is still a script URL.
+fn normalised_url(url: &str) -> String {
+    url.chars()
+        .filter(|c| !c.is_ascii_whitespace() && !c.is_ascii_control())
+        .collect::<String>()
+        .to_ascii_lowercase()
+}
+
+/// The URL's scheme, when it has one: text before a `:` that comes before
+/// any `/`, `?` or `#`.
+fn url_scheme(normalised: &str) -> Option<&str> {
+    let end = normalised.find([':', '/', '?', '#'])?;
+    normalised[end..]
+        .starts_with(':')
+        .then(|| &normalised[..end])
+}
+
+/// Whether `url` may become a link (`href`): `http`, `https`, `blob` or a
+/// relative URL. Header URLs come from inbound messages, so a `javascript:`,
+/// `vbscript:` or `data:` URL is refused rather than rendered (ldui-g8hh).
+pub fn is_safe_link_url(url: &str) -> bool {
+    let normalised = normalised_url(url);
+    !normalised.is_empty()
+        && url_scheme(&normalised).is_none_or(|scheme| matches!(scheme, "http" | "https" | "blob"))
+}
+
+/// Whether `url` may be a media `src` or `poster`: anything
+/// [`is_safe_link_url`] allows, plus inline `data:image/`, `data:video/`
+/// and `data:audio/` URLs. A refused URL shows the fallback tile.
+pub fn is_safe_media_url(url: &str) -> bool {
+    let normalised = normalised_url(url);
+    is_safe_link_url(url)
+        || ["data:image/", "data:video/", "data:audio/"]
+            .iter()
+            .any(|prefix| normalised.starts_with(prefix))
+}
+
 /// What a failed media header's fallback tile names: the alt text, else the
 /// file name at the end of `src` (query and fragment dropped), else `src`.
 pub fn media_fallback_name(src: &str, alt: &str) -> String {

@@ -426,6 +426,49 @@ fn media_fallback_names_alt_then_file_name() {
 }
 
 #[test]
+fn header_links_allow_only_web_blob_and_relative_urls() {
+    for ok in [
+        "https://cdn.example.org/terms.pdf",
+        "HTTP://example.org/a",
+        "blob:https://app.example.org/1234",
+        "/assets/terms.pdf",
+        "terms.pdf",
+        "//cdn.example.org/terms.pdf",
+        "?download=1",
+    ] {
+        assert!(is_safe_link_url(ok), "{ok:?}");
+    }
+    for bad in [
+        "javascript:alert(1)",
+        " JavaScript:alert(1)",
+        "java\tscript:alert(1)",
+        "java\nscript:alert(1)",
+        "\u{1}javascript:alert(1)",
+        "vbscript:msgbox(1)",
+        "data:text/html,<script>alert(1)</script>",
+        "data:image/png;base64,AAAA",
+        "file:///c:/secret",
+        "",
+        "   ",
+    ] {
+        assert!(!is_safe_link_url(bad), "{bad:?}");
+    }
+}
+
+#[test]
+fn media_urls_also_allow_inline_media_data_but_never_script() {
+    assert!(is_safe_media_url("data:image/svg+xml;utf8,%3Csvg%3E"));
+    assert!(is_safe_media_url("data:video/mp4;base64,AAAA"));
+    assert!(is_safe_media_url("https://cdn.example.org/a.png"));
+    assert!(is_safe_media_url("/missing/campaign-flyer.png"));
+    assert!(!is_safe_media_url("javascript:alert(1)"));
+    assert!(!is_safe_media_url(
+        "data:text/html,<script>alert(1)</script>"
+    ));
+    assert!(!is_safe_media_url(""));
+}
+
+#[test]
 fn every_header_kind_reports_whether_it_is_media() {
     let headers = [
         (MessageHeader::Text("Hi".into()), false),

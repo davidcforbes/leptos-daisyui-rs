@@ -2,7 +2,8 @@ use super::inline::{InlineStyle, Run, RunContent, inline_runs};
 use super::sms::{sms_indicator_text, sms_segments};
 use super::types::{
     MessageAction, MessageChannel, MessageDirection, MessageHeader, PlaceholderValues, RichMessage,
-    RichMessageTexts, media_fallback_name, message_label, truncation_note,
+    RichMessageTexts, is_safe_link_url, is_safe_media_url, media_fallback_name, message_label,
+    truncation_note,
 };
 use crate::merge_classes;
 use leptos::{html, prelude::*};
@@ -179,7 +180,7 @@ fn header_view(
             width,
             height,
         } => {
-            let failed = RwSignal::new(src.trim().is_empty());
+            let failed = RwSignal::new(!is_safe_media_url(&src));
             let label = texts.image_unavailable.clone();
             let name = media_fallback_name(&src, &alt);
             let width = width.map(|w| w.to_string());
@@ -209,8 +210,9 @@ fn header_view(
             .into_any()
         }
         MessageHeader::Video { src, poster, alt } => {
-            let failed = RwSignal::new(src.trim().is_empty());
+            let failed = RwSignal::new(!is_safe_media_url(&src));
             let label = texts.video_unavailable.clone();
+            let poster = poster.filter(|p| is_safe_media_url(p));
             let name = media_fallback_name(&src, &alt);
             view! {
                 <div data-message-header="video">
@@ -239,7 +241,7 @@ fn header_view(
         MessageHeader::Document { name, src } => {
             let prefix = format!("{}: ", texts.document);
             let opens = format!(" {}", texts.opens_new_tab);
-            let label = match src {
+            let label = match src.filter(|s| is_safe_link_url(s)) {
                 Some(src) => view! {
                     <a class="link break-all" href=src target="_blank" rel="noopener noreferrer">
                         {name}

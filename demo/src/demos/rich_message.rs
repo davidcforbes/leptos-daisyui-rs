@@ -106,9 +106,11 @@ fn thread() -> Vec<RichMessage> {
             direction: MessageDirection::Out,
             author: Some("Diener Law".into()),
             time: Some("Mon 9:20 AM".into()),
+            // A script URL, as a hostile inbound message could carry: the
+            // tile shows the name as plain text, never as a link.
             header: Some(MessageHeader::Document {
                 name: "intake-checklist.pdf".into(),
-                src: None,
+                src: Some("javascript:alert(document.domain)".into()),
             }),
             body: "Thanks! Please review the *intake checklist* before tomorrow.".into(),
             ..Default::default()

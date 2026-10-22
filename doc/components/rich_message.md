@@ -46,6 +46,13 @@ messages, CTM SMS/MMS, stored conversation rows) into one neutral
   described by a hint ("Preview only: this is the recipient's button") and
   titled with its target (URL, number or code). With `on_action`, a press
   reports the `MessageAction` and the host decides what happens.
+- **URL safety.** Header URLs can come from inbound messages. A document
+  `src` becomes a link only for `http`, `https`, `blob` or a relative URL
+  (`is_safe_link_url`). An image or video `src` or `poster` also accepts
+  inline `data:image/`, `data:video/` and `data:audio/` URLs
+  (`is_safe_media_url`). Anything else, `javascript:` included and whatever
+  tabs or control characters are hidden in it, shows the plain name or the
+  fallback tile.
 - **Links.** Off by default. `linkify=true` turns `http(s)://` URLs, `www.`
   hosts and email addresses into new-tab links (`rel="noopener noreferrer"`)
   and leaves trailing punctuation outside the link.
