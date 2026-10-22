@@ -43,8 +43,8 @@ resolver = "3"
   the library's browser suites, and of consumer apps that audit their own
   screens.
 
-The seven sibling path-deps (`table-rs`, `ui-tokens`, `ai-chat-core`,
-`editmark-mermaid`, `editmark-core`, `pixelproof-web`,
+The six sibling path-deps (`table-rs`, `ui-tokens`, `ai-chat-core`,
+`editmark-core`, `pixelproof-web`,
 `pixelproof-style-audit`) are **dependencies, not members** — they live outside
 this repo under `C:\dev`.
 

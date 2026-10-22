@@ -4,7 +4,8 @@
 //! 1. Parse + lay out the source via `editmark_core::build_layout`.
 //! 2. Render to an HTML string via `editmark_core::render_html`.
 //! 3. Hand the HTML to a `<div>` via `inner_html`.
-//! 4. Post-process the live DOM: replace mermaid placeholders with SVG,
+//! 4. Post-process the live DOM: replace mermaid placeholders with SVG
+//!    (via pele, lazy-loaded, so diagrams may land a moment later),
 //!    syntax-highlight code blocks, sanitize anchor hrefs, attach the
 //!    on_link_click intercept.
 //!
@@ -77,7 +78,7 @@ pub fn MarkdownView(
 }
 
 /// Walk the rendered DOM and:
-/// - Replace `<div class="mermaid">…</div>` placeholders with rendered SVG.
+/// - Replace `<div class="mermaid">…</div>` placeholders with pele's SVG.
 /// - Syntax-highlight `<code class="language-x">` blocks.
 /// - Drop unsafe anchor hrefs (`javascript:`, `data:` for arbitrary MIME, …).
 /// - Attach an on-click handler that fires `on_link_click` and prevents
@@ -89,10 +90,26 @@ fn post_process(host: &HtmlElement, on_link_click: Option<Callback<String>>) {
     super::math::render_math(host);
 }
 
+/// Render every `.mermaid` placeholder under `host` with pele.
+///
+/// Synchronous when pele is already loaded. Otherwise each placeholder shows
+/// its source in a `pre` (`data-pele-state="pending"` on that `pre`) while
+/// the bundle loads once per page ([`crate::pele::load_pele`]), and then
+/// draws. A placeholder that was detached in the meantime (the source
+/// changed and the host was re-rendered) is skipped, so the last render
+/// wins. On a pele error the source stays visible in a `pre` and pele's
+/// message, escaped, follows it in the `mermaid-error` box; a failed load
+/// is reported the same way and the next render retries it.
+///
+/// Also called by `MarkdownGraphicEditor`: there the placeholder is an
+/// atomic `contenteditable=false` widget whose markdown comes from
+/// `data-em-src`, so replacing its children late is display-only.
 pub(crate) fn process_mermaid(host: &HtmlElement) {
     let Ok(nodes) = host.query_selector_all(".mermaid") else {
         return;
     };
+    // Read every source before touching any placeholder's children.
+    let mut diagrams: Vec<(web_sys::Element, String)> = Vec::new();
     for i in 0..nodes.length() {
         let Some(node) = nodes.item(i) else { continue };
         let Ok(el) = node.dyn_into::<web_sys::Element>() else {
@@ -102,17 +119,60 @@ pub(crate) fn process_mermaid(host: &HtmlElement) {
         if source.trim().is_empty() {
             continue;
         }
-        let svg = match editmark_mermaid::render_text(&source) {
-            Ok(svg) => svg,
-            Err(_) => {
-                // Render error → leave the source visible inside a <pre>
-                // so the author can see what's wrong.
-                el.set_inner_html(&format!("<pre>{}</pre>", html_escape(&source)));
+        diagrams.push((el, source));
+    }
+    if diagrams.is_empty() {
+        return;
+    }
+
+    if crate::pele::pele_ready() {
+        for (el, source) in &diagrams {
+            draw_mermaid(el, source);
+        }
+        return;
+    }
+
+    for (el, source) in &diagrams {
+        el.set_inner_html(&format!(
+            "<pre data-pele-state=\"pending\" aria-busy=\"true\">{}</pre>",
+            html_escape(source)
+        ));
+    }
+    wasm_bindgen_futures::spawn_local(async move {
+        let loaded = crate::pele::load_pele().await;
+        for (el, source) in &diagrams {
+            if !el.is_connected() {
                 continue;
             }
-        };
-        el.set_inner_html(&svg);
+            if loaded {
+                draw_mermaid(el, source);
+            } else {
+                let err =
+                    crate::pele::PeleRenderError::load_failed(&crate::pele::pele_script_url());
+                el.set_inner_html(&mermaid_fallback_html(source, &err));
+            }
+        }
+    });
+}
+
+/// Draw one placeholder with the loaded pele, measuring labels in the
+/// placeholder's own font.
+fn draw_mermaid(el: &web_sys::Element, source: &str) {
+    let options = crate::pele::pele_options_for(Some(el));
+    match crate::pele::render(source, &options) {
+        Ok(drawn) => el.set_inner_html(&drawn.svg),
+        Err(err) => el.set_inner_html(&mermaid_fallback_html(source, &err)),
     }
+}
+
+/// The source, left visible so the author can see what is wrong, followed
+/// by pele's message. Both escaped.
+fn mermaid_fallback_html(source: &str, err: &crate::pele::PeleRenderError) -> String {
+    format!(
+        "<div class=\"mermaid-fallback\"><pre>{}</pre>{}</div>",
+        html_escape(source),
+        err.to_html()
+    )
 }
 
 fn process_code_blocks(host: &HtmlElement) {
@@ -176,14 +236,29 @@ fn process_links(host: &HtmlElement, on_link_click: Option<Callback<String>>) {
 }
 
 fn html_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        match c {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            c => out.push(c),
-        }
+    crate::pele::escape_html(s)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mermaid_fallback_html;
+    use crate::pele::PeleRenderError;
+
+    #[test]
+    fn fallback_keeps_the_source_visible_and_shows_pele_message_escaped() {
+        let err = PeleRenderError::new("syntax", "Unexpected '<b>'");
+        let html = mermaid_fallback_html("graph TD\n  A --> <b>", &err);
+        assert!(
+            html.starts_with(
+                "<div class=\"mermaid-fallback\"><pre>graph TD\n  A --&gt; &lt;b&gt;</pre>"
+            ),
+            "{html}"
+        );
+        assert!(html.contains("class=\"mermaid-error"), "{html}");
+        assert!(
+            html.contains("Diagram error: Unexpected &#39;&lt;b&gt;&#39;"),
+            "{html}"
+        );
+        assert!(!html.contains("<b>"), "{html}");
     }
-    out
 }

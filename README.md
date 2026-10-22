@@ -22,9 +22,9 @@ Why it is not on crates.io:
 
 - The crate name `leptos-daisyui-rs` (currently `0.0.3`) is **owned upstream**,
   so we cannot publish under the same name.
-- The fork pulls in **seven sibling path dependencies** that have no crates.io
+- The fork pulls in **six sibling path dependencies** that have no crates.io
   release of their own — `table-rs`, `ui-tokens`, `ai-chat-core`,
-  `editmark-mermaid`, `editmark-core`, `pixelproof-web`, and
+  `editmark-core`, `pixelproof-web`, and
   `pixelproof-style-audit` — so `cargo publish` (which requires every dependency
   to carry a version requirement) cannot succeed and there is no docs.rs story
   to maintain.

@@ -1186,7 +1186,9 @@ fn render_into(host: &HtmlElement, source: &str) {
     // contenteditable=false) live on the <div class="mermaid"> and survive the
     // inner-HTML swap; the double-click editor reads the source from the
     // data-em-src markdown range, not the div's DOM, so the injected SVG is
-    // display-only and editing still works. (Runs only on external source
+    // display-only and editing still works. pele may still be loading on the
+    // first render, so the swap can land a moment later; a placeholder that a
+    // newer render detached is skipped. (Runs only on external source
     // changes — see the is_self_set guard at the render_into call site — so it
     // is not a per-keystroke cost.)
     super::view::process_mermaid(host);

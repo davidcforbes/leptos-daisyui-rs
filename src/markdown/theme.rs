@@ -424,21 +424,29 @@ const BASE_STYLES: &str = r#"
 }
 .lds-root .mermaid { display: flex; justify-content: center; margin: 0.8em 0; }
 .lds-root .mermaid svg { max-width: 100%; height: auto; }
-/* editmark-mermaid hard-codes #333333 strokes that vanish in dark
-   themes.  Override edges + arrowhead strokes/fills only — leave node
-   fills and node text alone (they're light by default and the dark
-   text-on-light-node combination stays readable in any palette). */
-.lds-root .mermaid svg .edge,
-.lds-root .mermaid svg .edge-thickness-normal,
-.lds-root .mermaid svg .edge-thickness-thick,
-.lds-root .mermaid svg .flowchart-link {
-    stroke: #c0c8d4 !important;
+/* pele (src/pele.rs) takes every diagram colour from --pele-* variables, so
+   mapping them onto this palette recolours drawn diagrams on a theme switch
+   with no re-render. Declared on the SVG root (.pele) so var(--lds-*)
+   resolves at the diagram. Series colours are not set here: they come from
+   the daisyUI mapping in styles/tokens.css when the host imports it, and
+   from pele's own defaults otherwise. Fonts are left to the measured
+   container font (see pele_options_for). */
+.lds-root .pele {
+    --pele-bg: var(--lds-bg);
+    --pele-fg: var(--lds-text);
+    --pele-muted: var(--lds-blockquote-text);
+    --pele-line: var(--lds-text);
+    --pele-surface: var(--lds-code-block-bg);
+    --pele-surface-alt: color-mix(in srgb, var(--lds-code-block-bg) 88%, var(--lds-text));
+    --pele-border: color-mix(in srgb, var(--lds-text) 50%, var(--lds-bg));
+    --pele-accent: var(--lds-link);
 }
-.lds-root .mermaid svg .arrowheadPath,
-.lds-root .mermaid svg marker path,
-.lds-root .mermaid svg defs marker * {
-    stroke: #c0c8d4 !important;
-    fill: #c0c8d4 !important;
+.lds-root .mermaid-fallback { display: flex; flex-direction: column; gap: 0.5em; width: 100%; }
+.lds-root .mermaid-fallback > pre { margin: 0; }
+.lds-root .mermaid-error {
+    margin: 0;
+    white-space: pre-wrap;
+    border-left: 3px solid var(--lds-blockquote-bar, rgba(127,127,127,0.4));
 }
 .lds-root .markdown-alert {
     border-left-width: 4px;
@@ -751,6 +759,37 @@ mod tests {
     // non-wasm targets` — so `use_theme()` itself cannot be unit tested
     // here; that's exactly why the DOM-touching bits are isolated inside
     // the `init` closure passed to `get_or_init_theme_ctx`.
+
+    #[test]
+    fn base_styles_map_pele_colours_onto_the_markdown_palette() {
+        // ldui-qe72: diagrams inside MarkdownView follow the --lds-* palette
+        // (which tracks daisyUI's data-theme) with no re-render.
+        let start = BASE_STYLES
+            .find(".lds-root .pele {")
+            .expect("BASE_STYLES must map the pele colour variables");
+        let rule = &BASE_STYLES[start..];
+        let rule = &rule[..rule.find('}').expect("rule closes")];
+        for name in [
+            "--pele-bg",
+            "--pele-fg",
+            "--pele-muted",
+            "--pele-line",
+            "--pele-surface",
+            "--pele-surface-alt",
+            "--pele-border",
+            "--pele-accent",
+        ] {
+            let decl = rule
+                .lines()
+                .find(|l| l.trim_start().starts_with(&format!("{name}:")))
+                .unwrap_or_else(|| panic!("{name} missing from:\n{rule}"));
+            assert!(decl.contains("var(--lds-"), "{decl}");
+        }
+        assert!(
+            !BASE_STYLES.contains("#c0c8d4"),
+            "the old native-renderer stroke overrides must be gone"
+        );
+    }
 
     #[test]
     fn document_root_owner_has_no_parent_even_under_a_caller_owner() {

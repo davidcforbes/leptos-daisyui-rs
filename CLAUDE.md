@@ -71,6 +71,7 @@ cargo xtask test-focus-ring            # .ld-focus-ring colour present from fram
 cargo xtask test-row-action-presets    # row-action + Export presets: glyphs, names, tooltips, disabled_reason (ldui-bmqj, ldui-e6x8, ldui-p82h)
 cargo xtask test-server-cursor-footer  # ServerDataTable cursor mode: standard three-region footer with total+position, fallback without (ldui-q14c)
 cargo xtask test-ld-pattern            # data-ld-pattern on every catalogue pattern ROOT in the real DOM, both hosts (ldui-wra5)
+cargo xtask test-mermaid-pele          # MermaidDisplay/MarkdownView draw svg.pele, pele errors shown, theme switch recolours with no re-render (ldui-qe72; needs cdn.jsdelivr.net)
 cargo xtask gen-tokens [--check]     # regenerate styles/tokens.css from ui-tokens
 cargo xtask check-sibling-tokens     # preamble.rs's ui_tokens refs must exist on the sibling's DEFAULT branch
 cargo xtask test-person-picker       # PersonPicker listbox contract, wrapping, Unknown-vs-Offline, contrast
@@ -734,8 +735,8 @@ This is an **internal fork** of `noshishiRust/leptos-daisyui-rs` and is **not**
 published to crates.io (`publish = false` in `Cargo.toml`). It is consumed as a
 **path dependency** by sibling repos in the portfolio (EUC, Rust-DeskApp). Two
 reasons it cannot be published: the crate name `leptos-daisyui-rs` is owned
-upstream, and it depends on seven sibling path crates with no crates.io release
-(`table-rs`, `ui-tokens`, `ai-chat-core`, `editmark-mermaid`, `editmark-core`,
+upstream, and it depends on six sibling path crates with no crates.io release
+(`table-rs`, `ui-tokens`, `ai-chat-core`, `editmark-core`,
 `pixelproof-web`, `pixelproof-style-audit`), which makes `cargo publish`
 impossible. Do not attempt to add version pins or a docs.rs setup — the decision
 is to keep this a path-dep-only internal library.

@@ -1,6 +1,8 @@
 //! # Mermaid Diagram Display Component
 //!
-//! Renders mermaid diagram syntax as inline SVG using native Rust rendering.
+//! Renders Mermaid diagram source as inline SVG with pele, lazy-loaded in the
+//! browser (see [`crate::pele`]). Colours follow the daisyUI theme through
+//! the `--pele-*` CSS variables mapped in `styles/tokens.css`.
 
 mod component;
 mod style;

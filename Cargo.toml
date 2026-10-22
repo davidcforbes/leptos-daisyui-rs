@@ -122,7 +122,6 @@ send_wrapper = "0.6"
 # one product's CRM feed can (Office op-e6dsi). Already in the lock file
 # transitively, so this adds no download.
 unicode-segmentation = "1.13"
-editmark-mermaid = { path = "../editmark/editmark-mermaid" }
 editmark-core = { path = "../editmark/editmark-core" }
 
 [dev-dependencies]

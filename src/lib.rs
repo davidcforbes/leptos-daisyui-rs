@@ -7,6 +7,7 @@ pub mod components;
 pub mod markdown;
 pub mod motion;
 pub mod patterns;
+pub mod pele;
 #[cfg(feature = "test-mode")]
 pub mod test_mode;
 pub mod theme;

@@ -124,4 +124,26 @@
     --tw-shadow: var(--ld-card-shadow, var(--ld-elevation-4));
     box-shadow: var(--tw-inset-shadow, 0 0 #0000), var(--tw-inset-ring-shadow, 0 0 #0000), var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
   }
+  .pele {
+    --pele-bg: var(--color-base-100);
+    --pele-fg: var(--color-base-content);
+    --pele-muted: color-mix(in oklab, var(--color-base-content) 75%, var(--color-base-100));
+    --pele-line: var(--color-base-content);
+    --pele-surface: var(--color-base-200);
+    --pele-surface-alt: var(--color-base-300);
+    --pele-border: color-mix(in oklab, var(--color-base-content) 50%, var(--color-base-100));
+    --pele-accent: var(--color-primary);
+    --pele-critical: var(--color-error);
+    --pele-error: var(--color-error);
+    --pele-radius: var(--radius-field, 0.25rem);
+    --pele-title-weight: 600;
+    --pele-series-1: color-mix(in oklab, var(--color-primary) 60%, var(--color-base-content));
+    --pele-series-2: color-mix(in oklab, var(--color-secondary) 60%, var(--color-base-content));
+    --pele-series-3: color-mix(in oklab, var(--color-accent) 60%, var(--color-base-content));
+    --pele-series-4: color-mix(in oklab, var(--color-info) 60%, var(--color-base-content));
+    --pele-series-5: color-mix(in oklab, var(--color-success) 60%, var(--color-base-content));
+    --pele-series-6: color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content));
+    --pele-series-7: color-mix(in oklab, var(--color-error) 60%, var(--color-base-content));
+    --pele-series-8: color-mix(in oklab, var(--color-base-content) 60%, var(--color-base-100));
+  }
 }

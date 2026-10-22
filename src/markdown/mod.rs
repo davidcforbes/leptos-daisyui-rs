@@ -1,5 +1,6 @@
 //! Markdown rendering components, built on the canonical `editmark-core`
-//! pipeline (`build_layout` → `render_html`) plus `editmark-mermaid`.
+//! pipeline (`build_layout` → `render_html`), with Mermaid drawn by pele in
+//! the browser (see [`crate::pele`]).
 //!
 //! Moved here from editmark-leptos so any Leptos/daisyUI app can render
 //! markdown with the same view-only renderer, syntax highlighter, link

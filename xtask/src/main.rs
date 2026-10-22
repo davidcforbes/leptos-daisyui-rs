@@ -1015,6 +1015,24 @@ fn ld_pattern_step() -> Step {
     }
 }
 
+/// Focused browser proof that Mermaid renders through pele (ldui-qe72):
+/// `MermaidDisplay` draws `svg.pele` for four diagram types (Venn among
+/// them), broken source shows pele's message in the error box, a
+/// `MarkdownView` fenced block is drawn too, and a `data-theme` switch
+/// recolours a drawn diagram without re-rendering it. Lives on the general
+/// demo app (`html_target: None`) and stays in its own file/step for the
+/// same reason as [`collapse_naming_step`]. Needs network access to the
+/// pinned jsDelivr URL the demo loads pele from.
+fn mermaid_pele_step() -> Step {
+    Step {
+        name: "test-mermaid-pele",
+        run: Run::BrowserSuite {
+            test: "mermaid_pele_smoke",
+            html_target: None,
+        },
+    }
+}
+
 /// The same proof on the client-snapshot test host, the only entry point
 /// that mounts `SnapshotTablePage` and the dedicated-row `PageHeader`.
 fn ld_pattern_snapshot_step() -> Step {
@@ -1067,6 +1085,7 @@ fn full_steps() -> Vec<Step> {
     steps.push(row_action_presets_step());
     steps.push(server_cursor_footer_step());
     steps.push(ld_pattern_step());
+    steps.push(mermaid_pele_step());
     steps
 }
 
@@ -2157,6 +2176,52 @@ fn tokens_css() -> String {
     css.push_str(
         "  .ld-card-depth {\n    --tw-shadow: var(--ld-card-shadow, var(--ld-elevation-4));\n    box-shadow: var(--tw-inset-shadow, 0 0 #0000), var(--tw-inset-ring-shadow, 0 0 #0000), var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);\n  }\n",
     );
+
+    // ldui-qe72: pele's Mermaid SVG (MermaidDisplay, MarkdownView) reads
+    // every colour from a `--pele-*` custom property with a built-in
+    // fallback. Mapping them onto the daisyUI 5 theme variables HERE makes a
+    // diagram follow `data-theme` with no re-render, from this stylesheet
+    // alone -- the same reason the `.ld-text-*` rules live in this file.
+    //
+    // Declared on `.pele` (the class pele puts on every SVG root) so each
+    // `var()` resolves at the diagram itself, under whatever `[data-theme]`
+    // scope encloses it. A host overrides by targeting `.pele`: unlayered
+    // CSS outranks this layer. Without daisyUI the `var()`s are invalid at
+    // computed-value time, so pele's own fallback colours paint.
+    //
+    // Series colours are mixed 40% toward base-content: pele draws some
+    // labels in `--pele-bg` on a series fill, and the mix moves every hue
+    // away from base-100 in light and dark themes alike (raw daisyUI
+    // `warning` under a white label is about 1.5:1). Muted text is the /75
+    // step, the crate's AA floor. Fonts are deliberately absent: pele
+    // measures labels with the font the renderer hands it (the container's,
+    // see `src/pele.rs`), and a CSS font that differed would paint labels
+    // wider than their boxes. `src/components/mermaid_display/tests.rs`
+    // asserts this mapping against the generated file.
+    css.push_str(concat!(
+        "  .pele {\n",
+        "    --pele-bg: var(--color-base-100);\n",
+        "    --pele-fg: var(--color-base-content);\n",
+        "    --pele-muted: color-mix(in oklab, var(--color-base-content) 75%, var(--color-base-100));\n",
+        "    --pele-line: var(--color-base-content);\n",
+        "    --pele-surface: var(--color-base-200);\n",
+        "    --pele-surface-alt: var(--color-base-300);\n",
+        "    --pele-border: color-mix(in oklab, var(--color-base-content) 50%, var(--color-base-100));\n",
+        "    --pele-accent: var(--color-primary);\n",
+        "    --pele-critical: var(--color-error);\n",
+        "    --pele-error: var(--color-error);\n",
+        "    --pele-radius: var(--radius-field, 0.25rem);\n",
+        "    --pele-title-weight: 600;\n",
+        "    --pele-series-1: color-mix(in oklab, var(--color-primary) 60%, var(--color-base-content));\n",
+        "    --pele-series-2: color-mix(in oklab, var(--color-secondary) 60%, var(--color-base-content));\n",
+        "    --pele-series-3: color-mix(in oklab, var(--color-accent) 60%, var(--color-base-content));\n",
+        "    --pele-series-4: color-mix(in oklab, var(--color-info) 60%, var(--color-base-content));\n",
+        "    --pele-series-5: color-mix(in oklab, var(--color-success) 60%, var(--color-base-content));\n",
+        "    --pele-series-6: color-mix(in oklab, var(--color-warning) 60%, var(--color-base-content));\n",
+        "    --pele-series-7: color-mix(in oklab, var(--color-error) 60%, var(--color-base-content));\n",
+        "    --pele-series-8: color-mix(in oklab, var(--color-base-content) 60%, var(--color-base-100));\n",
+        "  }\n",
+    ));
     css.push_str("}\n");
 
     css
@@ -2855,6 +2920,7 @@ fn main() -> ExitCode {
         "test-row-action-presets" => run_steps(&[row_action_presets_step()]),
         "test-server-cursor-footer" => run_steps(&[server_cursor_footer_step()]),
         "test-ld-pattern" => run_steps(&[ld_pattern_step(), ld_pattern_snapshot_step()]),
+        "test-mermaid-pele" => run_steps(&[mermaid_pele_step()]),
         "capture-design" => run_steps(&[design_capture_step()]),
         "gen-tokens" => {
             let check = std::env::args().any(|a| a == "--check");
@@ -2870,7 +2936,7 @@ fn main() -> ExitCode {
         other => {
             eprintln!("xtask: unknown subcommand {other:?}");
             eprintln!(
-                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-week-planner|test-month-roster|test-selectable-summary|test-person-picker|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-snapshot-table-page-filter-actions|test-helpdesk|test-ai-chat|test-ai-chat-knowledge|test-server-table-column-tools|test-collapse-naming|test-data-table-fit|test-app-shell|test-field-context-scoping|test-entity-draft-row|test-softphone|test-help-hint|test-focus-ring|test-row-action-presets|test-server-cursor-footer|test-ld-pattern|capture-design|gen-tokens|check-sibling-tokens|clean-cache|bump>"
+                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-week-planner|test-month-roster|test-selectable-summary|test-person-picker|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-snapshot-table-page-filter-actions|test-helpdesk|test-ai-chat|test-ai-chat-knowledge|test-server-table-column-tools|test-collapse-naming|test-data-table-fit|test-app-shell|test-field-context-scoping|test-entity-draft-row|test-softphone|test-help-hint|test-focus-ring|test-row-action-presets|test-server-cursor-footer|test-ld-pattern|test-mermaid-pele|capture-design|gen-tokens|check-sibling-tokens|clean-cache|bump>"
             );
             ExitCode::from(2)
         }
@@ -3496,6 +3562,21 @@ pub fn r() -> f32 { radius::CARD }
     }
 
     #[test]
+    fn mermaid_pele_step_is_in_process_and_full_only() {
+        let step = mermaid_pele_step();
+        assert_eq!(step.name, "test-mermaid-pele");
+        assert!(matches!(
+            step.run,
+            Run::BrowserSuite {
+                test: "mermaid_pele_smoke",
+                html_target: None
+            }
+        ));
+        assert!(!gate_steps().iter().any(|s| s.name == "test-mermaid-pele"));
+        assert!(full_steps().iter().any(|s| s.name == "test-mermaid-pele"));
+    }
+
+    #[test]
     fn collapse_naming_step_is_in_process_and_full_only() {
         let step = collapse_naming_step();
         assert_eq!(step.name, "test-collapse-naming");
@@ -4057,9 +4138,11 @@ mod gen_tokens_tests {
                 }
                 let is_custom_property_decl = trimmed.starts_with("--") && trimmed.ends_with(';');
                 // Any authored `.ld-*` rule opener: the six type-ramp steps
-                // (ldui-h7tw) and `.ld-card-depth` (ldui-k4fn).
+                // (ldui-h7tw) and `.ld-card-depth` (ldui-k4fn), plus the
+                // `.pele` diagram-colour mapping (ldui-qe72), whose body is
+                // custom-property declarations only.
                 let is_class_selector_opener =
-                    trimmed.starts_with(".ld-") && trimmed.ends_with('{');
+                    (trimmed.starts_with(".ld-") && trimmed.ends_with('{')) || trimmed == ".pele {";
                 let is_plain_decl = (trimmed.starts_with("font-size:")
                     || trimmed.starts_with("line-height:")
                     || trimmed.starts_with("box-shadow:"))
@@ -4095,6 +4178,40 @@ mod gen_tokens_tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn pele_colours_map_onto_daisyui_theme_variables() {
+        // ldui-qe72: the `.pele` block gives every colour pele's Mermaid SVG
+        // reads a daisyUI 5 source, and leaves the fonts to the renderer's
+        // measured container font.
+        let css = tokens_css();
+        let start = css
+            .find("  .pele {")
+            .expect("tokens_css emits a .pele rule");
+        let rule = &css[start..];
+        let rule = &rule[..rule.find("  }").expect(".pele rule closes")];
+        let mut names = vec![
+            "--pele-bg".to_string(),
+            "--pele-fg".to_string(),
+            "--pele-muted".to_string(),
+            "--pele-line".to_string(),
+            "--pele-surface".to_string(),
+            "--pele-surface-alt".to_string(),
+            "--pele-border".to_string(),
+            "--pele-accent".to_string(),
+            "--pele-critical".to_string(),
+            "--pele-error".to_string(),
+        ];
+        names.extend((1..=8).map(|n| format!("--pele-series-{n}")));
+        for name in &names {
+            let decl = rule
+                .lines()
+                .find(|l| l.trim_start().starts_with(&format!("{name}:")))
+                .unwrap_or_else(|| panic!("{name} missing from the .pele rule:\n{rule}"));
+            assert!(decl.contains("var(--color-"), "{decl}");
+        }
+        assert!(!rule.contains("--pele-font"), "{rule}");
     }
 
     #[test]
