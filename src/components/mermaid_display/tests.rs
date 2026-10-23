@@ -71,21 +71,28 @@ fn pending_state_shows_the_source_escaped_and_muted() {
 
 #[test]
 fn outcome_maps_svg_to_rendered_and_errors_to_the_error_box() {
-    let (html, state) = outcome_html(Ok(PeleSvg {
+    let (html, state, stripped) = outcome_html(Ok(PeleSvg {
         svg: "<svg class=\"pele pele-flowchart\"></svg>".to_string(),
         width: 10.0,
         height: 20.0,
+        stripped: 2,
     }));
     assert_eq!(state, MermaidRenderState::Rendered);
     assert_eq!(html, "<svg class=\"pele pele-flowchart\"></svg>");
+    assert_eq!(stripped, Some(2));
 
-    let (html, state) = outcome_html(Err(PeleRenderError::new(
+    let (html, state, stripped) = outcome_html(Err(PeleRenderError::new(
         "syntax",
         "Expected '-->' but found \"<script>\"",
     )));
     assert_eq!(state, MermaidRenderState::Error);
     assert!(html.contains("class=\"mermaid-error"), "{html}");
     assert!(!html.contains("<script>"), "{html}");
+    assert_eq!(stripped, None);
+
+    let (html, state, _) = outcome_html(Err(PeleRenderError::timed_out()));
+    assert_eq!(state, MermaidRenderState::Error);
+    assert!(html.contains("data-pele-error=\"timeout\""), "{html}");
 }
 
 #[test]

@@ -6,37 +6,47 @@
 //! directives itself. It replaced the previous native Rust renderer here
 //! for the same reasons editmark replaced it (editmark ADR 0007, ldui-qe72).
 //!
-//! This module lazy-loads pele's browser bundle (`pele.global.js`, which
-//! defines a global `pele`) once per page and calls
-//! `pele.render(source, options)` through `js_sys::Reflect`, the same
-//! dynamic-global shape `markdown::math` uses for KaTeX.
+//! ## Where pele runs (ldui-o55o)
 //!
-//! ## Where the bundle comes from
+//! In a dedicated, same-origin Web Worker, never on the page's UI thread and
+//! never from a CDN. pele draws synchronously, and a security review of
+//! 1.8.0 found hostile inputs under its own 50 KB limit that run for 5 to
+//! 20+ seconds (a 663-byte Gantt chart takes 7 s or more; pele beads
+//! `pele-qd0`). So:
 //!
-//! By default, the exact pinned release on jsDelivr:
-//! `https://cdn.jsdelivr.net/npm/pele@1.8.0/dist/pele.global.js`
-//! ([`PELE_VERSION`] is the one pin). A host with a strict CSP (no CDN)
-//! copies that file next to its own assets and points the loader at it
-//! before the first diagram renders, the Rust counterpart of
-//! editmark-web's `editmarkConfigure({ assetBase })`:
+//! - the host serves `assets/pele/` (the verified bundle plus this crate's
+//!   `ldui-pele-worker.js`) from its own origin, at [`PELE_DEFAULT_ASSET_BASE`]
+//!   unless [`set_pele_asset_base`] says otherwise;
+//! - renders are queued and sent to the worker one at a time; a render that
+//!   overruns [`PELE_RENDER_TIMEOUT_MS`] terminates the worker, fails with a
+//!   `timeout` error, and the next render starts a fresh worker;
+//! - pele is called with remote images off and links limited to `https:`
+//!   and `mailto:`;
+//! - its SVG passes through an allow-list sanitiser ([`sanitize_svg_tree`])
+//!   before it reaches `inner_html`. The review found no injection path, and
+//!   this is the second layer it recommended.
+//!
+//! Under a CSP the worker needs only `script-src 'self'`; pele uses no
+//! `eval`, `new Function`, `fetch` or dynamic import. `assets/pele/README.md`
+//! records the bundle's provenance: SHA-256 [`PELE_BUNDLE_SHA256`], the npm
+//! integrity and attestation, and a byte-for-byte rebuild from tag `1.8.0`.
 //!
 //! ```no_run
-//! // Loads /vendor/pele.global.js instead of the CDN copy.
-//! leptos_daisyui_rs::pele::set_pele_asset_base(Some("/vendor"));
+//! // The host serves assets/pele/ at /static/pele/ instead of /pele/.
+//! leptos_daisyui_rs::pele::set_pele_asset_base(Some("/static/pele"));
 //! ```
 //!
-//! A page that already includes the script itself never triggers a load:
-//! an existing global `pele` is detected first.
+//! ## Contract
 //!
-//! ## Loading contract
-//!
-//! - One shared load per page: concurrent callers await the same Promise.
-//! - A failed or timed-out load ([`PELE_LOAD_TIMEOUT_MS`]) removes its
-//!   script element and clears the shared state, so a later render retries.
-//! - The JS-calling functions are browser-only. The pure helpers
-//!   ([`pele_script_url_for`], [`PeleRenderError`], [`escape_html`],
-//!   [`next_id_prefix`]) are what the native unit tests cover; never call
-//!   [`load_pele`] or [`render`] from a native test.
+//! - [`render_when_ready`] is the one entry point. It is asynchronous and
+//!   browser-only, and always resolves: a pele error, a worker that cannot
+//!   start, and a timeout all come back as a [`PeleRenderError`].
+//! - The pure helpers (URLs, [`PeleRenderError`], [`escape_html`],
+//!   [`next_id_prefix`], the sanitiser over [`SvgNode`]) are what the native
+//!   unit tests cover; never call a browser-only function from a native test.
+//! - The worker measures label text with `OffscreenCanvas`, which sees
+//!   installed fonts but not the page's web fonts, so with a web font the
+//!   label boxes can be slightly off.
 //!
 //! ## Colours
 //!
@@ -51,52 +61,63 @@
 //! [`pele_options_for`].
 
 use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
 use std::fmt;
-use std::rc::Rc;
 
-use js_sys::{Function, Object, Promise, Reflect};
+use js_sys::{Array, Function, Object, Promise, Reflect};
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 
 /// The pinned pele release. Exact, never a range: the SVG pele emits is what
-/// the `--pele-*` theme mapping and the browser lane target. Keep in step
-/// with editmark's `PELE_VERSION` (editmark-web/editmark-renderer.js).
+/// the `--pele-*` theme mapping, the sanitiser allow-list and the browser
+/// lane target. Keep in step with editmark's `PELE_VERSION`
+/// (editmark-web/editmark-renderer.js) and with [`PELE_BUNDLE_SHA256`].
 pub const PELE_VERSION: &str = "1.8.0";
 
-/// File name of pele's browser bundle inside its npm package (`dist/`) and
-/// under a host's asset base.
+/// SHA-256 of `assets/pele/pele.global.js`, the verified [`PELE_VERSION`]
+/// bundle. A unit test fails if the vendored file drifts from it.
+pub const PELE_BUNDLE_SHA256: &str =
+    "9bf34b3a9a19351dc69d0d238e365560331a8ae392c41656df7f5090653253d0";
+
+/// File name of pele's browser bundle under the asset base.
 pub const PELE_FILE: &str = "pele.global.js";
 
-/// npm CDN the default bundle URL is built on.
-pub const PELE_CDN: &str = "https://cdn.jsdelivr.net/npm";
+/// File name of this crate's worker script under the asset base.
+pub const PELE_WORKER_FILE: &str = "ldui-pele-worker.js";
 
-/// How long one load attempt may take before it is abandoned (and its
-/// script element removed) so a later render can retry.
-pub const PELE_LOAD_TIMEOUT_MS: i32 = 10_000;
+/// Where the host serves `assets/pele/` unless [`set_pele_asset_base`]
+/// names another directory. Same-origin; there is no CDN fallback.
+pub const PELE_DEFAULT_ASSET_BASE: &str = "/pele";
+
+/// How long one diagram may take in the worker before the worker is
+/// terminated and the render fails with a `timeout` error.
+pub const PELE_RENDER_TIMEOUT_MS: i32 = 2_000;
+
+/// Link schemes pele may emit (`linkSchemes`); the sanitiser enforces the
+/// same list.
+pub const PELE_LINK_SCHEMES: [&str; 2] = ["https", "mailto"];
+
+const SVG_NAMESPACE: &str = "http://www.w3.org/2000/svg";
 
 thread_local! {
     static ASSET_BASE: RefCell<Option<String>> = const { RefCell::new(None) };
-    static LOAD: RefCell<Option<PendingLoad>> = const { RefCell::new(None) };
-    static NEXT_LOAD: Cell<u64> = const { Cell::new(0) };
     static NEXT_DIAGRAM: Cell<u64> = const { Cell::new(0) };
-}
-
-/// The in-flight load every concurrent caller awaits.
-struct PendingLoad {
-    generation: u64,
-    promise: Promise,
+    static NEXT_JOB: Cell<u64> = const { Cell::new(0) };
+    static RENDERER: RefCell<Renderer> = RefCell::new(Renderer::default());
+    static HANDLERS: Handlers = Handlers::new();
 }
 
 // ── Pure configuration (native-testable) ────────────────────────────────────
 
-/// Load pele from a same-origin directory instead of the CDN.
+/// Serve pele from another same-origin directory than
+/// [`PELE_DEFAULT_ASSET_BASE`].
 ///
-/// `Some("/vendor")` loads `/vendor/pele.global.js`; trailing slashes are
-/// ignored. `None` restores the pinned jsDelivr URL. Call it before the
-/// first diagram renders: once the global `pele` exists, no further load
-/// happens. The host owns copying the file (the `dist/pele.global.js` of
-/// pele [`PELE_VERSION`]) into that directory.
+/// `Some("/static/pele")` loads `/static/pele/ldui-pele-worker.js`, which
+/// imports `/static/pele/pele.global.js`; trailing slashes are ignored.
+/// `None` restores the default. Call it before the first diagram renders: a
+/// running worker keeps the URL it started with. The host copies the files
+/// in this crate's `assets/pele/` into that directory.
 pub fn set_pele_asset_base(base: Option<&str>) {
     let normalised = base.map(|b| b.trim_end_matches('/').to_string());
     ASSET_BASE.with(|slot| *slot.borrow_mut() = normalised);
@@ -107,18 +128,30 @@ pub fn pele_asset_base() -> Option<String> {
     ASSET_BASE.with(|slot| slot.borrow().clone())
 }
 
-/// The bundle URL the loader will use right now.
+fn asset_url(asset_base: Option<&str>, file: &str) -> String {
+    let base = asset_base.unwrap_or(PELE_DEFAULT_ASSET_BASE);
+    format!("{}/{file}", base.trim_end_matches('/'))
+}
+
+/// The bundle URL right now.
 pub fn pele_script_url() -> String {
     pele_script_url_for(pele_asset_base().as_deref())
 }
 
-/// The bundle URL for a given asset base: `<base>/pele.global.js`, or the
-/// exact pinned CDN URL when there is none.
+/// The bundle URL for a given asset base: `<base>/pele.global.js`, with
+/// [`PELE_DEFAULT_ASSET_BASE`] when there is none.
 pub fn pele_script_url_for(asset_base: Option<&str>) -> String {
-    match asset_base {
-        Some(base) => format!("{}/{PELE_FILE}", base.trim_end_matches('/')),
-        None => format!("{PELE_CDN}/pele@{PELE_VERSION}/dist/{PELE_FILE}"),
-    }
+    asset_url(asset_base, PELE_FILE)
+}
+
+/// The worker URL right now.
+pub fn pele_worker_url() -> String {
+    pele_worker_url_for(pele_asset_base().as_deref())
+}
+
+/// The worker URL for a given asset base: `<base>/ldui-pele-worker.js`.
+pub fn pele_worker_url_for(asset_base: Option<&str>) -> String {
+    asset_url(asset_base, PELE_WORKER_FILE)
 }
 
 /// A fresh accessibility-ID prefix (`ldui-pele-<n>-`) for one diagram.
@@ -157,13 +190,15 @@ pub fn escape_html(s: &str) -> String {
 // ── Errors ──────────────────────────────────────────────────────────────────
 
 /// Why a diagram could not be drawn: pele's own `PeleError` fields, or a
-/// loader failure (`code == "load"`).
+/// failure around it (`load`, `timeout`, `render`, `sanitize`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PeleRenderError {
     /// Description of the problem. Contains diagram source: display as text.
     pub message: String,
     /// pele's error code (`syntax`, `semantic`, `unsupported-diagram`,
-    /// `limit`), or `load` / `render` for failures outside pele's parser.
+    /// `limit`), or `load` (the worker could not start), `timeout` (the
+    /// diagram overran [`PELE_RENDER_TIMEOUT_MS`]), `render` (anything else
+    /// pele threw) or `sanitize` (the SVG could not be parsed).
     pub code: String,
     /// 1-based line of the problem, `0` when there is no position.
     pub line: u32,
@@ -185,23 +220,27 @@ impl PeleRenderError {
         }
     }
 
-    /// The bundle at `url` could not be loaded (network, CSP, timeout).
+    /// The worker at `url` could not start or load pele (missing file, CSP).
     pub fn load_failed(url: &str) -> Self {
         Self::new(
             "load",
-            format!("could not load the Mermaid renderer (pele {PELE_VERSION}) from {url}"),
+            format!("could not start the Mermaid renderer (pele {PELE_VERSION}) from {url}"),
         )
     }
 
-    /// [`render`] was called before the global `pele` existed.
-    pub fn not_loaded() -> Self {
+    /// The diagram overran [`PELE_RENDER_TIMEOUT_MS`] and was stopped.
+    pub fn timed_out() -> Self {
         Self::new(
-            "load",
-            format!("the Mermaid renderer (pele {PELE_VERSION}) is not loaded"),
+            "timeout",
+            format!(
+                "the diagram took longer than {:.1} s to draw and was stopped",
+                f64::from(PELE_RENDER_TIMEOUT_MS) / 1000.0
+            ),
         )
     }
 
-    /// Read a value pele threw (a `PeleError`, or anything else).
+    /// Read an error object (a `PeleError`, the worker's error record, or
+    /// anything else that was thrown).
     pub fn from_js(thrown: &JsValue) -> Self {
         let field = |name: &str| Reflect::get(thrown, &JsValue::from_str(name)).ok();
         let text = |name: &str| field(name).and_then(|v| v.as_string()).unwrap_or_default();
@@ -245,7 +284,8 @@ impl PeleRenderError {
             text.push_str(&self.snippet);
         }
         format!(
-            "<pre class=\"mermaid-error whitespace-pre-wrap\">{}</pre>",
+            "<pre class=\"mermaid-error whitespace-pre-wrap\" data-pele-error=\"{}\">{}</pre>",
+            escape_html(&self.code),
             escape_html(&text)
         )
     }
@@ -259,10 +299,215 @@ impl fmt::Display for PeleRenderError {
 
 impl std::error::Error for PeleRenderError {}
 
+// ── Sanitiser (pure, native-testable) ───────────────────────────────────────
+
+/// Elements pele 1.8.0 emits with images off, per the review's scan of the
+/// 761-example docs corpus and of every renderer, plus the inert `line`
+/// (and its `x1`..`y2` attributes) so a diagram that draws one is not
+/// blanked. Anything else, including
+/// `foreignObject`, `image`, `style`, `script`, `use` and animation elements,
+/// is dropped together with its subtree.
+pub const SVG_ELEMENTS: [&str; 13] = [
+    "svg", "g", "path", "rect", "circle", "ellipse", "polygon", "text", "tspan", "title", "desc",
+    "a", "line",
+];
+
+/// Attributes kept on any allowed element. `id` (only on `title` and
+/// `desc`), `href`, `target` and `rel` (only on `a`) and `style` have their
+/// own rules in [`keep_svg_attribute`].
+pub const SVG_ATTRIBUTES: [&str; 43] = [
+    "xmlns",
+    "viewBox",
+    "width",
+    "height",
+    "x",
+    "y",
+    "x1",
+    "y1",
+    "x2",
+    "y2",
+    "cx",
+    "cy",
+    "r",
+    "rx",
+    "ry",
+    "d",
+    "points",
+    "transform",
+    "fill",
+    "fill-opacity",
+    "opacity",
+    "stroke",
+    "stroke-width",
+    "stroke-dasharray",
+    "stroke-linecap",
+    "stroke-linejoin",
+    "font-family",
+    "font-size",
+    "font-style",
+    "font-weight",
+    "text-anchor",
+    "xml:space",
+    "color",
+    "overflow",
+    "preserveAspectRatio",
+    "class",
+    "role",
+    "aria-roledescription",
+    "aria-labelledby",
+    "aria-describedby",
+    "data-id",
+    "data-icon",
+    "data-href",
+];
+
+/// Substrings that disqualify a whole `style` attribute (compared in lower
+/// case): anything that could load a resource or run script.
+const STYLE_FORBIDDEN: [&str; 7] = [
+    "url(",
+    "expression(",
+    "@import",
+    "javascript:",
+    "behavior",
+    "-moz-binding",
+    "\\",
+];
+
+/// One node of a parsed SVG: the sanitiser's input and output. The browser
+/// builds it from a `DOMParser` tree; tests build it by hand.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SvgNode {
+    /// An element in the SVG namespace.
+    Element {
+        /// Local name (`rect`, `tspan`).
+        name: String,
+        /// Attributes in document order, by qualified name (`xml:space`).
+        attrs: Vec<(String, String)>,
+        /// Child nodes in order.
+        children: Vec<SvgNode>,
+    },
+    /// Character data.
+    Text(String),
+}
+
+/// A link target the sanitiser keeps: an `https:` or `mailto:` URL, after
+/// removing the whitespace and control characters a browser ignores inside
+/// a scheme.
+pub fn is_allowed_svg_link(href: &str) -> bool {
+    let normalised: String = href
+        .chars()
+        .filter(|c| !c.is_ascii_whitespace() && !c.is_ascii_control())
+        .collect::<String>()
+        .to_ascii_lowercase();
+    PELE_LINK_SCHEMES
+        .iter()
+        .any(|scheme| normalised.starts_with(&format!("{scheme}:")))
+}
+
+/// Whether attribute `name="value"` survives on `element`.
+pub fn keep_svg_attribute(element: &str, name: &str, value: &str) -> bool {
+    if name.to_ascii_lowercase().starts_with("on") {
+        return false;
+    }
+    match name {
+        "id" => matches!(element, "title" | "desc"),
+        "href" => element == "a" && is_allowed_svg_link(value),
+        "target" | "rel" => element == "a",
+        "style" => {
+            let lower = value.to_ascii_lowercase();
+            !STYLE_FORBIDDEN.iter().any(|bad| lower.contains(bad))
+        }
+        _ => SVG_ATTRIBUTES.contains(&name),
+    }
+}
+
+/// The allow-listed copy of `root`, and how many elements and attributes
+/// were removed. `None` when the root is not an `<svg>` element. A removed
+/// element takes its whole subtree with it and counts once.
+pub fn sanitize_svg_tree(root: &SvgNode) -> Option<(SvgNode, usize)> {
+    match root {
+        SvgNode::Element { name, .. } if name == "svg" => {
+            let mut stripped = 0;
+            let clean = sanitize_node(root, &mut stripped)?;
+            Some((clean, stripped))
+        }
+        _ => None,
+    }
+}
+
+fn sanitize_node(node: &SvgNode, stripped: &mut usize) -> Option<SvgNode> {
+    match node {
+        SvgNode::Text(text) => Some(SvgNode::Text(text.clone())),
+        SvgNode::Element {
+            name,
+            attrs,
+            children,
+        } => {
+            if !SVG_ELEMENTS.contains(&name.as_str()) {
+                *stripped += 1;
+                return None;
+            }
+            let kept: Vec<(String, String)> = attrs
+                .iter()
+                .filter(|(attr, value)| keep_svg_attribute(name, attr, value))
+                .cloned()
+                .collect();
+            *stripped += attrs.len() - kept.len();
+            let children = children
+                .iter()
+                .filter_map(|child| sanitize_node(child, stripped))
+                .collect();
+            Some(SvgNode::Element {
+                name: name.clone(),
+                attrs: kept,
+                children,
+            })
+        }
+    }
+}
+
+/// Serialise a (sanitised) tree. Element and attribute names come from the
+/// allow-list; every attribute value and text node is escaped, so the
+/// markup is safe for `inner_html`.
+pub fn svg_markup(node: &SvgNode) -> String {
+    let mut out = String::new();
+    write_markup(node, &mut out);
+    out
+}
+
+fn write_markup(node: &SvgNode, out: &mut String) {
+    match node {
+        SvgNode::Text(text) => out.push_str(&escape_html(text)),
+        SvgNode::Element {
+            name,
+            attrs,
+            children,
+        } => {
+            out.push('<');
+            out.push_str(name);
+            for (attr, value) in attrs {
+                out.push(' ');
+                out.push_str(attr);
+                out.push_str("=\"");
+                out.push_str(&escape_html(value));
+                out.push('"');
+            }
+            out.push('>');
+            for child in children {
+                write_markup(child, out);
+            }
+            out.push_str("</");
+            out.push_str(name);
+            out.push('>');
+        }
+    }
+}
+
 // ── Rendering (browser-only) ────────────────────────────────────────────────
 
 /// Options passed to `pele.render`. Empty fields are omitted, so pele's own
-/// defaults apply.
+/// defaults apply. Images, link schemes and `rel` are always set (see the
+/// module doc) and are not options.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PeleOptions {
     /// Label font pele measures with (`fontFamily`).
@@ -276,33 +521,15 @@ pub struct PeleOptions {
 /// A drawn diagram.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PeleSvg {
-    /// The `<svg class="pele ...">` markup. Inert by construction: pele emits
-    /// no scripts, event handlers or HTML labels, and blocks `javascript:`
-    /// and `data:` links.
+    /// The sanitised `<svg class="pele ...">` markup.
     pub svg: String,
     /// Natural width in pixels.
     pub width: f64,
     /// Natural height in pixels.
     pub height: f64,
-}
-
-/// The global `pele` object and its `render` function, when loaded.
-fn pele_render_fn() -> Option<(JsValue, Function)> {
-    let window = web_sys::window()?;
-    let pele = Reflect::get(&window, &JsValue::from_str("pele")).ok()?;
-    if !pele.is_object() {
-        return None;
-    }
-    let render = Reflect::get(&pele, &JsValue::from_str("render"))
-        .ok()?
-        .dyn_into::<Function>()
-        .ok()?;
-    Some((pele, render))
-}
-
-/// Whether the global `pele` is present and usable. Browser-only.
-pub fn pele_ready() -> bool {
-    pele_render_fn().is_some()
+    /// Elements and attributes the sanitiser removed: `0` for everything
+    /// pele 1.8.0 is known to emit. Exposed as `data-pele-stripped`.
+    pub stripped: usize,
 }
 
 /// Render options for a diagram drawn inside `container`. Browser-only.
@@ -334,199 +561,420 @@ pub fn pele_options_for(container: Option<&web_sys::Element>) -> PeleOptions {
     }
 }
 
-/// Render `source` with the loaded global `pele`. Browser-only.
-///
-/// Synchronous; returns [`PeleRenderError::not_loaded`] when the bundle is
-/// not there yet (await [`load_pele`] first, or use [`render_when_ready`]).
-pub fn render(source: &str, options: &PeleOptions) -> Result<PeleSvg, PeleRenderError> {
-    let Some((pele, render)) = pele_render_fn() else {
-        return Err(PeleRenderError::not_loaded());
-    };
-    let opts = Object::new();
-    let set = |key: &str, value: Option<&String>| {
-        if let Some(v) = value.filter(|v| !v.trim().is_empty()) {
-            let _ = Reflect::set(&opts, &JsValue::from_str(key), &JsValue::from_str(v));
-        }
-    };
-    set("fontFamily", options.font_family.as_ref());
-    set("fontFamilyMono", options.font_family_mono.as_ref());
-    set("idPrefix", options.id_prefix.as_ref());
-
-    let result = render
-        .call2(&pele, &JsValue::from_str(source), opts.as_ref())
-        .map_err(|thrown| PeleRenderError::from_js(&thrown))?;
-    let number = |name: &str| {
-        Reflect::get(&result, &JsValue::from_str(name))
-            .ok()
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.0)
-    };
-    let svg = Reflect::get(&result, &JsValue::from_str("svg"))
-        .ok()
-        .and_then(|v| v.as_string())
-        .ok_or_else(|| PeleRenderError::new("render", "pele.render returned no SVG"))?;
-    Ok(PeleSvg {
-        svg,
-        width: number("width"),
-        height: number("height"),
-    })
-}
-
-/// Load pele if needed, then render `source` with options measured from
-/// `container`. Browser-only.
+/// Render `source` in the worker with options measured from `container`,
+/// then sanitise the SVG. Browser-only; always resolves.
 pub async fn render_when_ready(
     source: String,
     container: Option<web_sys::Element>,
 ) -> Result<PeleSvg, PeleRenderError> {
-    if !load_pele().await {
-        return Err(PeleRenderError::load_failed(&pele_script_url()));
-    }
-    render(&source, &pele_options_for(container.as_ref()))
+    render_with(source, pele_options_for(container.as_ref())).await
 }
 
-/// Ensure the global `pele` exists, loading the bundle once per page.
-/// Resolves `true` when pele is usable. Browser-only.
-///
-/// Concurrent callers share one script element and one Promise. A failure
-/// or timeout resolves `false`, removes the script and clears the shared
-/// state, so the next call starts a fresh attempt.
-pub async fn load_pele() -> bool {
-    if pele_ready() {
-        return true;
+/// [`render_when_ready`] with explicit options. Browser-only.
+pub async fn render_with(source: String, options: PeleOptions) -> Result<PeleSvg, PeleRenderError> {
+    let reply = JsFuture::from(enqueue(source, options))
+        .await
+        .map_err(|_| PeleRenderError::new("render", "the render was abandoned"))?;
+    let ok = Reflect::get(&reply, &JsValue::from_str("ok"))
+        .ok()
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if !ok {
+        let error = Reflect::get(&reply, &JsValue::from_str("error")).unwrap_or(JsValue::NULL);
+        return Err(PeleRenderError::from_js(&error));
     }
-    let in_flight = LOAD.with(|slot| slot.borrow().as_ref().map(|p| p.promise.clone()));
-    let promise = match in_flight {
-        Some(promise) => promise,
-        None => start_load(&pele_script_url()),
+    let number = |name: &str| {
+        Reflect::get(&reply, &JsValue::from_str(name))
+            .ok()
+            .and_then(|v| v.as_f64())
+            .filter(|n| n.is_finite())
+            .unwrap_or(0.0)
     };
-    match JsFuture::from(promise).await {
-        Ok(value) => value.as_bool().unwrap_or(false) && pele_ready(),
-        Err(_) => false,
+    let svg = Reflect::get(&reply, &JsValue::from_str("svg"))
+        .ok()
+        .and_then(|v| v.as_string())
+        .ok_or_else(|| PeleRenderError::new("render", "pele.render returned no SVG"))?;
+    let (svg, stripped) = sanitize_svg(&svg)?;
+    Ok(PeleSvg {
+        svg,
+        width: number("width"),
+        height: number("height"),
+        stripped,
+    })
+}
+
+/// Parse pele's SVG with `DOMParser` and run it through the allow-list.
+fn sanitize_svg(svg: &str) -> Result<(String, usize), PeleRenderError> {
+    let parse_error = || PeleRenderError::new("sanitize", "the drawn SVG could not be parsed");
+    let parser = web_sys::DomParser::new().map_err(|_| parse_error())?;
+    let doc = parser
+        .parse_from_string(svg, web_sys::SupportedType::ImageSvgXml)
+        .map_err(|_| parse_error())?;
+    if doc.get_elements_by_tag_name("parsererror").length() > 0 {
+        return Err(parse_error());
+    }
+    let root = doc.document_element().ok_or_else(parse_error)?;
+    let tree = svg_tree_from(root.as_ref()).ok_or_else(parse_error)?;
+    let (clean, stripped) = sanitize_svg_tree(&tree).ok_or_else(parse_error)?;
+    Ok((svg_markup(&clean), stripped))
+}
+
+/// The [`SvgNode`] for a DOM node: SVG-namespace elements and text only.
+/// A foreign-namespace element becomes a `#foreign` element, which no
+/// allow-list contains, so it is dropped and counted. Comments and
+/// processing instructions are dropped silently.
+fn svg_tree_from(node: &web_sys::Node) -> Option<SvgNode> {
+    match node.node_type() {
+        web_sys::Node::TEXT_NODE | web_sys::Node::CDATA_SECTION_NODE => {
+            Some(SvgNode::Text(node.text_content().unwrap_or_default()))
+        }
+        web_sys::Node::ELEMENT_NODE => {
+            let el = node.dyn_ref::<web_sys::Element>()?;
+            let name = if el.namespace_uri().as_deref() == Some(SVG_NAMESPACE) {
+                el.local_name()
+            } else {
+                "#foreign".to_string()
+            };
+            let attrs = el
+                .get_attribute_names()
+                .iter()
+                .filter_map(|n| n.as_string())
+                .map(|n| {
+                    let value = el.get_attribute(&n).unwrap_or_default();
+                    (n, value)
+                })
+                .collect();
+            let children = node.child_nodes();
+            let children = (0..children.length())
+                .filter_map(|i| children.item(i))
+                .filter_map(|child| svg_tree_from(&child))
+                .collect();
+            Some(SvgNode::Element {
+                name,
+                attrs,
+                children,
+            })
+        }
+        _ => None,
     }
 }
 
-/// One load attempt: owns exactly one script element and one timer, and
-/// settles exactly once.
-struct Attempt {
-    generation: u64,
-    settled: Cell<bool>,
-    script: RefCell<Option<web_sys::Element>>,
-    timer: Cell<Option<i32>>,
-    resolve: RefCell<Option<Function>>,
+/// One queued render.
+struct Job {
+    id: u64,
+    source: String,
+    options: PeleOptions,
+    /// Resolves the caller's Promise with the worker's reply object.
+    resolve: Function,
 }
 
-impl Attempt {
-    fn settle(&self, success: bool) {
-        if self.settled.replace(true) {
-            return;
-        }
-        if let (Some(handle), Some(window)) = (self.timer.take(), web_sys::window()) {
-            window.clear_timeout_with_handle(handle);
-        }
-        let script = self.script.borrow_mut().take();
-        if !success && let Some(script) = script {
-            script.remove();
-        }
-        LOAD.with(|slot| {
-            let mut slot = slot.borrow_mut();
-            if slot
-                .as_ref()
-                .is_some_and(|pending| pending.generation == self.generation)
-            {
-                *slot = None;
-            }
-        });
-        if let Some(resolve) = self.resolve.borrow_mut().take() {
-            let _ = resolve.call1(&JsValue::NULL, &JsValue::from_bool(success));
+/// The shared worker and its strictly serial queue.
+#[derive(Default)]
+struct Renderer {
+    worker: Option<web_sys::Worker>,
+    queue: VecDeque<Job>,
+    /// The job the worker is drawing, with its timeout handle.
+    current: Option<(Job, i32)>,
+}
+
+/// The worker's event handlers: created once per page and shared by every
+/// worker, so no closure is ever dropped while it is running. Each one
+/// checks that its event came from the current worker.
+struct Handlers {
+    message: Closure<dyn FnMut(web_sys::MessageEvent)>,
+    error: Closure<dyn FnMut(web_sys::Event)>,
+}
+
+impl Handlers {
+    fn new() -> Self {
+        Self {
+            message: Closure::new(on_worker_message),
+            error: Closure::new(on_worker_error),
         }
     }
 }
 
-/// Start a load and publish it as the shared in-flight Promise *before*
-/// touching the DOM, so a synchronous failure still clears the shared state.
-fn start_load(url: &str) -> Promise {
-    let generation = NEXT_LOAD.with(|g| {
-        let n = g.get().wrapping_add(1);
-        g.set(n);
-        n
-    });
-    let attempt = Rc::new(Attempt {
-        generation,
-        settled: Cell::new(false),
-        script: RefCell::new(None),
-        timer: Cell::new(None),
-        resolve: RefCell::new(None),
-    });
-    let promise = {
-        let attempt = Rc::clone(&attempt);
-        Promise::new(&mut move |resolve, _reject| {
-            *attempt.resolve.borrow_mut() = Some(resolve);
-        })
+fn is_current_worker(target: Option<web_sys::EventTarget>) -> bool {
+    RENDERER.with(|r| match (&r.borrow().worker, target) {
+        (Some(worker), Some(target)) => Object::is(worker.as_ref(), target.as_ref()),
+        _ => false,
+    })
+}
+
+/// A reply object in the worker's own shape, for failures outside it.
+fn failure_reply(id: u64, error: &PeleRenderError) -> JsValue {
+    let reply = Object::new();
+    let detail = Object::new();
+    let set = |obj: &Object, key: &str, value: JsValue| {
+        let _ = Reflect::set(obj, &JsValue::from_str(key), &value);
     };
-    LOAD.with(|slot| {
-        *slot.borrow_mut() = Some(PendingLoad {
-            generation,
-            promise: promise.clone(),
-        });
+    set(&detail, "message", JsValue::from_str(&error.message));
+    set(&detail, "code", JsValue::from_str(&error.code));
+    set(&reply, "id", JsValue::from_f64(id as f64));
+    set(&reply, "ok", JsValue::FALSE);
+    set(&reply, "error", detail.into());
+    reply.into()
+}
+
+fn settle(job: Job, reply: &JsValue) {
+    let _ = job.resolve.call1(&JsValue::NULL, reply);
+}
+
+fn enqueue(source: String, options: PeleOptions) -> Promise {
+    let id = NEXT_JOB.with(|n| {
+        let id = n.get().wrapping_add(1);
+        n.set(id);
+        id
     });
-    if attach_script(&attempt, url).is_none() {
-        attempt.settle(false);
-    }
+    let mut pending = Some((source, options));
+    let promise = Promise::new(&mut |resolve, _reject| {
+        if let Some((source, options)) = pending.take() {
+            RENDERER.with(|r| {
+                r.borrow_mut().queue.push_back(Job {
+                    id,
+                    source,
+                    options,
+                    resolve,
+                })
+            });
+        }
+    });
+    pump();
     promise
 }
 
-/// Append the script element with its load/error listeners and timeout.
-/// `None` when any DOM step fails; the caller settles the attempt.
-fn attach_script(attempt: &Rc<Attempt>, url: &str) -> Option<()> {
-    let window = web_sys::window()?;
-    let document = window.document()?;
-    let head = document.head()?;
-    let script = document.create_element("script").ok()?;
-    script.set_attribute("src", url).ok()?;
+/// Start the next job when the worker is idle. A job whose worker cannot
+/// start fails at once and the next one is tried.
+fn pump() {
+    loop {
+        let job = RENDERER.with(|r| {
+            let mut r = r.borrow_mut();
+            if r.current.is_some() {
+                None
+            } else {
+                r.queue.pop_front()
+            }
+        });
+        let Some(job) = job else { return };
+        match dispatch(&job) {
+            Ok(timer) => {
+                RENDERER.with(|r| r.borrow_mut().current = Some((job, timer)));
+                return;
+            }
+            Err(error) => {
+                let id = job.id;
+                settle(job, &failure_reply(id, &error));
+            }
+        }
+    }
+}
 
-    // One-shot closures: each frees itself when called. The ones that never
-    // fire (e.g. `error` after a `load`) are a few bytes per attempt.
-    let on_load = {
-        let attempt = Rc::clone(attempt);
-        Closure::once_into_js(move || attempt.settle(pele_ready()))
+/// The running worker, starting one when there is none.
+fn ensure_worker() -> Result<web_sys::Worker, PeleRenderError> {
+    if let Some(worker) = RENDERER.with(|r| r.borrow().worker.clone()) {
+        return Ok(worker);
+    }
+    let url = pele_worker_url();
+    let worker = web_sys::Worker::new(&url).map_err(|_| PeleRenderError::load_failed(&url))?;
+    HANDLERS.with(|h| {
+        worker.set_onmessage(Some(h.message.as_ref().unchecked_ref()));
+        worker.set_onerror(Some(h.error.as_ref().unchecked_ref()));
+    });
+    RENDERER.with(|r| r.borrow_mut().worker = Some(worker.clone()));
+    Ok(worker)
+}
+
+/// Post `job` to the worker and arm its timeout.
+fn dispatch(job: &Job) -> Result<i32, PeleRenderError> {
+    let worker = ensure_worker()?;
+    let set = |obj: &Object, key: &str, value: JsValue| {
+        let _ = Reflect::set(obj, &JsValue::from_str(key), &value);
     };
-    let on_error = {
-        let attempt = Rc::clone(attempt);
-        Closure::once_into_js(move || attempt.settle(false))
-    };
-    let on_timeout = {
-        let attempt = Rc::clone(attempt);
-        // A global that appeared despite a missing load event is usable.
-        Closure::once_into_js(move || attempt.settle(pele_ready()))
-    };
-    script
-        .add_event_listener_with_callback("load", on_load.unchecked_ref())
-        .ok()?;
-    script
-        .add_event_listener_with_callback("error", on_error.unchecked_ref())
-        .ok()?;
-    let timer = window
+    let options = Object::new();
+    for (key, value) in [
+        ("fontFamily", &job.options.font_family),
+        ("fontFamilyMono", &job.options.font_family_mono),
+        ("idPrefix", &job.options.id_prefix),
+    ] {
+        if let Some(v) = value.as_ref().filter(|v| !v.trim().is_empty()) {
+            set(&options, key, JsValue::from_str(v));
+        }
+    }
+    set(&options, "images", JsValue::FALSE);
+    set(&options, "imageSchemes", Array::new().into());
+    let schemes: Array = PELE_LINK_SCHEMES
+        .iter()
+        .map(|s| JsValue::from_str(s))
+        .collect();
+    set(&options, "linkSchemes", schemes.into());
+    set(
+        &options,
+        "linkRel",
+        JsValue::from_str("noopener noreferrer"),
+    );
+
+    let message = Object::new();
+    set(&message, "id", JsValue::from_f64(job.id as f64));
+    set(&message, "source", JsValue::from_str(&job.source));
+    set(&message, "options", options.into());
+    worker
+        .post_message(&message)
+        .map_err(|_| PeleRenderError::load_failed(&pele_worker_url()))?;
+
+    let id = job.id;
+    let on_timeout = Closure::once_into_js(move || on_job_timeout(id));
+    web_sys::window()
+        .ok_or_else(|| PeleRenderError::new("render", "no window"))?
         .set_timeout_with_callback_and_timeout_and_arguments_0(
             on_timeout.unchecked_ref(),
-            PELE_LOAD_TIMEOUT_MS,
+            PELE_RENDER_TIMEOUT_MS,
         )
-        .ok()?;
-    attempt.timer.set(Some(timer));
-    *attempt.script.borrow_mut() = Some(script.clone());
-    head.append_child(&script).ok()?;
-    Some(())
+        .map_err(|_| PeleRenderError::new("render", "could not arm the render timeout"))
+}
+
+/// Take the current job if `matches` accepts its id, clearing its timer.
+fn take_current(matches: impl FnOnce(u64) -> bool) -> Option<Job> {
+    let taken = RENDERER.with(|r| {
+        let mut r = r.borrow_mut();
+        if r.current.as_ref().is_some_and(|(job, _)| matches(job.id)) {
+            r.current.take()
+        } else {
+            None
+        }
+    });
+    let (job, timer) = taken?;
+    if let Some(window) = web_sys::window() {
+        window.clear_timeout_with_handle(timer);
+    }
+    Some(job)
+}
+
+/// Terminate the worker so a hung or broken one never serves another job.
+fn retire_worker() {
+    if let Some(worker) = RENDERER.with(|r| r.borrow_mut().worker.take()) {
+        worker.set_onmessage(None);
+        worker.set_onerror(None);
+        worker.terminate();
+    }
+}
+
+fn on_worker_message(event: web_sys::MessageEvent) {
+    if !is_current_worker(event.target()) {
+        return;
+    }
+    let reply = event.data();
+    let id = Reflect::get(&reply, &JsValue::from_str("id"))
+        .ok()
+        .and_then(|v| v.as_f64());
+    if let Some(job) = take_current(|current| Some(current as f64) == id) {
+        settle(job, &reply);
+    }
+    pump();
+}
+
+fn on_worker_error(event: web_sys::Event) {
+    if !is_current_worker(event.target()) {
+        return;
+    }
+    // Handled here: the failure is reported in the figure, not the console.
+    event.prevent_default();
+    retire_worker();
+    if let Some(job) = take_current(|_| true) {
+        let id = job.id;
+        settle(
+            job,
+            &failure_reply(id, &PeleRenderError::load_failed(&pele_worker_url())),
+        );
+    }
+    pump();
+}
+
+fn on_job_timeout(id: u64) {
+    let Some(job) = take_current(|current| current == id) else {
+        return;
+    };
+    retire_worker();
+    settle(job, &failure_reply(id, &PeleRenderError::timed_out()));
+    pump();
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sha2::{Digest, Sha256};
+    use std::path::Path;
+
+    fn asset(file: &str) -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("assets/pele")
+            .join(file)
+    }
+
+    fn sha256_hex(bytes: &[u8]) -> String {
+        Sha256::digest(bytes)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect()
+    }
 
     #[test]
-    fn default_url_is_the_exact_pinned_cdn_release() {
+    fn vendored_bundle_matches_the_verified_sha256_and_version() {
+        let bytes = std::fs::read(asset(PELE_FILE)).expect("read assets/pele/pele.global.js");
         assert_eq!(
-            pele_script_url_for(None),
-            "https://cdn.jsdelivr.net/npm/pele@1.8.0/dist/pele.global.js"
+            sha256_hex(&bytes),
+            PELE_BUNDLE_SHA256,
+            "assets/pele/pele.global.js is not the verified pele {PELE_VERSION} bundle \
+             (see assets/pele/README.md before changing either)"
         );
+        let header = format!("/*! Pele {PELE_VERSION} | MIT License");
+        assert!(bytes.starts_with(header.as_bytes()), "bundle header");
+        assert!(
+            !bytes.contains(&b'\r'),
+            "the bundle must stay LF (.gitattributes -text)"
+        );
+    }
+
+    #[test]
+    fn vendored_bundle_matches_editmarks_copy_when_present() {
+        let sibling = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../editmark/editmark-pele/vendor")
+            .join(PELE_FILE);
+        let Ok(theirs) = std::fs::read(&sibling) else {
+            return; // sibling not checked out: nothing to compare
+        };
+        let ours = std::fs::read(asset(PELE_FILE)).expect("read vendored bundle");
+        if theirs != ours {
+            // editmark moved to another pele: that is a version decision,
+            // not drift, so only a same-version mismatch fails.
+            let header = format!("/*! Pele {PELE_VERSION} ");
+            assert!(
+                !theirs.starts_with(header.as_bytes()),
+                "editmark's pele {PELE_VERSION} differs from ours byte for byte"
+            );
+        }
+    }
+
+    #[test]
+    fn worker_imports_the_bundle_by_its_file_name() {
+        let worker = std::fs::read_to_string(asset(PELE_WORKER_FILE)).expect("read worker");
+        assert!(
+            worker.contains(&format!("importScripts('{PELE_FILE}')")),
+            "the worker must import {PELE_FILE} relative to itself"
+        );
+        for banned in ["eval(", "new Function", "fetch(", "importScripts('http"] {
+            assert!(!worker.contains(banned), "worker must not use {banned}");
+        }
+        assert!(
+            asset("LICENSE-pele").exists(),
+            "pele's licence ships with it"
+        );
+    }
+
+    #[test]
+    fn default_urls_are_same_origin_with_no_cdn() {
+        assert_eq!(pele_script_url_for(None), "/pele/pele.global.js");
+        assert_eq!(pele_worker_url_for(None), "/pele/ldui-pele-worker.js");
+        assert!(!pele_script_url_for(None).contains("://"));
     }
 
     #[test]
@@ -539,33 +987,28 @@ mod tests {
                 .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit())),
             "PELE_VERSION must be an exact x.y.z pin, got {PELE_VERSION}"
         );
-        assert!(pele_script_url_for(None).contains(&format!("pele@{PELE_VERSION}/")));
     }
 
     #[test]
-    fn asset_base_builds_a_same_origin_url_ignoring_trailing_slashes() {
+    fn asset_base_builds_urls_ignoring_trailing_slashes() {
         assert_eq!(
             pele_script_url_for(Some("/vendor")),
             "/vendor/pele.global.js"
         );
         assert_eq!(
-            pele_script_url_for(Some("/vendor///")),
-            "/vendor/pele.global.js"
+            pele_worker_url_for(Some("/vendor///")),
+            "/vendor/ldui-pele-worker.js"
         );
         assert_eq!(pele_script_url_for(Some("/")), "/pele.global.js");
-        assert_eq!(
-            pele_script_url_for(Some("https://assets.example/pele/")),
-            "https://assets.example/pele/pele.global.js"
-        );
     }
 
     #[test]
     fn set_pele_asset_base_round_trips_and_resets() {
-        // thread_local: each test thread starts from the CDN default.
+        // thread_local: each test thread starts from the default.
         assert_eq!(pele_asset_base(), None);
         set_pele_asset_base(Some("/static/js/"));
         assert_eq!(pele_asset_base().as_deref(), Some("/static/js"));
-        assert_eq!(pele_script_url(), "/static/js/pele.global.js");
+        assert_eq!(pele_worker_url(), "/static/js/ldui-pele-worker.js");
         set_pele_asset_base(None);
         assert_eq!(pele_script_url(), pele_script_url_for(None));
     }
@@ -597,6 +1040,7 @@ mod tests {
         };
         let html = err.to_html();
         assert!(html.starts_with("<pre class=\"mermaid-error"), "{html}");
+        assert!(html.contains("data-pele-error=\"syntax\""), "{html}");
         assert!(!html.contains("<img"), "message must be escaped: {html}");
         assert!(!html.contains("<b>"), "snippet must be escaped: {html}");
         assert!(html.contains("Diagram error: Unexpected token"), "{html}");
@@ -608,20 +1052,229 @@ mod tests {
         let err = PeleRenderError::new("unsupported-diagram", "No diagram type detected");
         assert_eq!(
             err.to_html(),
-            "<pre class=\"mermaid-error whitespace-pre-wrap\">Diagram error: No diagram type detected</pre>"
+            "<pre class=\"mermaid-error whitespace-pre-wrap\" data-pele-error=\"unsupported-diagram\">Diagram error: No diagram type detected</pre>"
         );
         assert_eq!(err.to_string(), "Diagram error: No diagram type detected");
     }
 
     #[test]
-    fn load_failure_names_the_pin_and_the_url() {
-        let err = PeleRenderError::load_failed("/vendor/pele.global.js");
-        assert_eq!(err.code, "load");
-        assert!(err.message.contains(PELE_VERSION), "{}", err.message);
-        assert!(
-            err.message.contains("/vendor/pele.global.js"),
-            "{}",
-            err.message
+    fn load_and_timeout_errors_name_what_happened() {
+        let load = PeleRenderError::load_failed("/vendor/ldui-pele-worker.js");
+        assert_eq!(load.code, "load");
+        assert!(load.message.contains(PELE_VERSION), "{}", load.message);
+        assert!(load.message.contains("/vendor/ldui-pele-worker.js"));
+        let timeout = PeleRenderError::timed_out();
+        assert_eq!(timeout.code, "timeout");
+        assert!(timeout.message.contains("2.0 s"), "{}", timeout.message);
+    }
+
+    // ---- sanitiser ------------------------------------------------------
+
+    fn el(name: &str, attrs: &[(&str, &str)], children: Vec<SvgNode>) -> SvgNode {
+        SvgNode::Element {
+            name: name.into(),
+            attrs: attrs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            children,
+        }
+    }
+
+    fn text(s: &str) -> SvgNode {
+        SvgNode::Text(s.into())
+    }
+
+    #[test]
+    fn a_typical_pele_diagram_passes_untouched() {
+        let svg = el(
+            "svg",
+            &[
+                ("xmlns", SVG_NAMESPACE),
+                ("viewBox", "0 0 120 40"),
+                ("class", "pele pele-flowchart"),
+                ("role", "img"),
+                ("aria-labelledby", "ldui-pele-1-title"),
+                ("style", "--_fg:var(--pele-fg,#333);max-width:120px"),
+            ],
+            vec![
+                el("title", &[("id", "ldui-pele-1-title")], vec![text("Flow")]),
+                el(
+                    "g",
+                    &[("transform", "translate(4 4)"), ("data-id", "A")],
+                    vec![
+                        el(
+                            "rect",
+                            &[
+                                ("x", "0"),
+                                ("y", "0"),
+                                ("rx", "4"),
+                                ("width", "40"),
+                                ("height", "20"),
+                            ],
+                            vec![],
+                        ),
+                        el(
+                            "text",
+                            &[
+                                ("x", "20"),
+                                ("y", "14"),
+                                ("text-anchor", "middle"),
+                                ("xml:space", "preserve"),
+                            ],
+                            vec![el(
+                                "tspan",
+                                &[("font-weight", "bold")],
+                                vec![text("A & <B>")],
+                            )],
+                        ),
+                    ],
+                ),
+                el(
+                    "a",
+                    &[
+                        ("href", "https://example.org/"),
+                        ("target", "_blank"),
+                        ("rel", "noopener noreferrer"),
+                    ],
+                    vec![el(
+                        "path",
+                        &[("d", "M0 0L10 10"), ("stroke", "currentColor")],
+                        vec![],
+                    )],
+                ),
+            ],
         );
+        let (clean, stripped) = sanitize_svg_tree(&svg).expect("svg root");
+        assert_eq!(stripped, 0);
+        assert_eq!(clean, svg);
+        let markup = svg_markup(&clean);
+        assert!(
+            markup.starts_with("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 120 40\""),
+            "{markup}"
+        );
+        assert!(
+            markup.contains("<tspan font-weight=\"bold\">A &amp; &lt;B&gt;</tspan>"),
+            "{markup}"
+        );
+        assert!(markup.ends_with("</a></svg>"), "{markup}");
+    }
+
+    #[test]
+    fn dangerous_elements_go_with_their_subtrees() {
+        let svg = el(
+            "svg",
+            &[],
+            vec![
+                el("script", &[], vec![text("alert(1)")]),
+                el(
+                    "foreignObject",
+                    &[],
+                    vec![el("#foreign", &[("onerror", "x")], vec![])],
+                ),
+                el("style", &[], vec![text("*{background:url(//evil)}")]),
+                el(
+                    "image",
+                    &[("href", "https://tracker.example/p.gif")],
+                    vec![],
+                ),
+                el("use", &[("href", "#x")], vec![]),
+                el("animate", &[("attributeName", "href")], vec![]),
+                el("#foreign", &[], vec![text("html")]),
+                el("g", &[], vec![el("set", &[], vec![]), text("kept")]),
+            ],
+        );
+        let (clean, stripped) = sanitize_svg_tree(&svg).unwrap();
+        assert_eq!(stripped, 8);
+        assert_eq!(
+            clean,
+            el("svg", &[], vec![el("g", &[], vec![text("kept")])])
+        );
+    }
+
+    #[test]
+    fn event_handlers_ids_and_unknown_attributes_are_dropped() {
+        let svg = el(
+            "svg",
+            &[
+                ("onload", "alert(1)"),
+                ("id", "root"),
+                ("xlink:href", "javascript:alert(1)"),
+            ],
+            vec![
+                el(
+                    "rect",
+                    &[
+                        ("ONCLICK", "x"),
+                        ("width", "1"),
+                        ("href", "https://ok.example"),
+                    ],
+                    vec![],
+                ),
+                el("desc", &[("id", "d1")], vec![text("ok")]),
+            ],
+        );
+        let (clean, stripped) = sanitize_svg_tree(&svg).unwrap();
+        assert_eq!(stripped, 5);
+        assert_eq!(
+            clean,
+            el(
+                "svg",
+                &[],
+                vec![
+                    el("rect", &[("width", "1")], vec![]),
+                    el("desc", &[("id", "d1")], vec![text("ok")]),
+                ]
+            )
+        );
+    }
+
+    #[test]
+    fn links_keep_only_https_and_mailto() {
+        for ok in [
+            "https://example.org",
+            "HTTPS://x",
+            "mailto:a@b.example",
+            " https://x",
+        ] {
+            assert!(keep_svg_attribute("a", "href", ok), "{ok:?}");
+        }
+        for bad in [
+            "javascript:alert(1)",
+            "java\tscript:alert(1)",
+            "\u{1}javascript:alert(1)",
+            "http://plain.example",
+            "data:text/html,x",
+            "/relative",
+            "#frag",
+            "",
+        ] {
+            assert!(!keep_svg_attribute("a", "href", bad), "{bad:?}");
+        }
+        assert!(!keep_svg_attribute("text", "href", "https://example.org"));
+        assert!(!keep_svg_attribute("g", "target", "_blank"));
+    }
+
+    #[test]
+    fn style_is_dropped_whole_when_it_could_load_or_run_anything() {
+        assert!(keep_svg_attribute("svg", "style", "--_fg:#333;fill:red"));
+        for bad in [
+            "fill:url(#g)",
+            "background:URL(https://x)",
+            "width:expression(alert(1))",
+            "@import 'x'",
+            "x:javascript:1",
+            "behavior:url(x.htc)",
+            "-moz-binding:url(x)",
+            "content:'\\75rl(x)'",
+        ] {
+            assert!(!keep_svg_attribute("rect", "style", bad), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn a_root_that_is_not_svg_is_refused() {
+        assert_eq!(sanitize_svg_tree(&el("g", &[], vec![])), None);
+        assert_eq!(sanitize_svg_tree(&text("svg")), None);
     }
 }

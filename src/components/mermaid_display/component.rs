@@ -12,12 +12,14 @@ pub enum MermaidRenderState {
     /// No source (blank or whitespace): nothing is drawn.
     #[default]
     Empty,
-    /// The pele bundle is loading; the source is shown in a muted `pre`.
+    /// The diagram is being drawn in pele's worker; the source is shown in a
+    /// muted `pre`.
     Pending,
     /// The diagram is drawn (`svg.pele` inside the figure).
     Rendered,
-    /// pele rejected the source, or the bundle could not be loaded; the
-    /// `mermaid-error` box carries the message.
+    /// pele rejected the source, the worker could not start, or the diagram
+    /// overran its time limit; the `mermaid-error` box carries the message
+    /// and its `data-pele-error` code.
     Error,
 }
 
@@ -51,13 +53,18 @@ pub(crate) fn pending_html(src: &str) -> String {
     )
 }
 
-/// Map a render outcome to the figure's content and state.
+/// Map a render outcome to the figure's content, state, and the count of
+/// elements and attributes the sanitiser removed (`None` without an SVG).
 pub(crate) fn outcome_html(
     result: Result<PeleSvg, PeleRenderError>,
-) -> (String, MermaidRenderState) {
+) -> (String, MermaidRenderState, Option<usize>) {
     match result {
-        Ok(drawn) => (drawn.svg, MermaidRenderState::Rendered),
-        Err(err) => (err.to_html(), MermaidRenderState::Error),
+        Ok(drawn) => (
+            drawn.svg,
+            MermaidRenderState::Rendered,
+            Some(drawn.stripped),
+        ),
+        Err(err) => (err.to_html(), MermaidRenderState::Error, None),
     }
 }
 
@@ -71,15 +78,18 @@ pub(crate) fn outcome_html(
 /// `%%{init}%%` directives itself. HTML entities (`&lt;`, `&gt;`, `&amp;`,
 /// `&quot;`) in `source` are decoded first.
 ///
-/// ## Rendering is asynchronous
+/// ## Rendering is asynchronous, off the UI thread
 ///
-/// The first diagram on a page lazy-loads pele's bundle once (see
-/// [`crate::pele`]; [`crate::pele::set_pele_asset_base`] serves it
-/// same-origin). Until it arrives the figure shows the source in a muted
-/// `pre` (`data-mermaid-state="pending"`); then the SVG (`"rendered"`). A
-/// diagram pele rejects, or a failed load, shows pele's message, escaped,
-/// in the `mermaid-error` box (`"error"`); a later source change retries
-/// the load.
+/// pele runs in a same-origin Web Worker that the host serves from this
+/// crate's `assets/pele/` (see [`crate::pele`];
+/// [`crate::pele::set_pele_asset_base`] moves it). While a diagram is
+/// drawn the figure shows the source in a muted `pre`
+/// (`data-mermaid-state="pending"`); then the sanitised SVG (`"rendered"`,
+/// with `data-pele-stripped` counting what the sanitiser removed). A
+/// diagram pele rejects, a worker that cannot start, or a diagram that
+/// overruns [`crate::pele::PELE_RENDER_TIMEOUT_MS`] shows the message,
+/// escaped, in the `mermaid-error` box (`"error"`); a later source change
+/// tries again.
 ///
 /// ## Colours follow the daisyUI theme
 ///
@@ -127,6 +137,7 @@ pub fn MermaidDisplay(
 ) -> impl IntoView {
     let content = RwSignal::new(String::new());
     let state = RwSignal::new(MermaidRenderState::Empty);
+    let stripped = RwSignal::new(None::<usize>);
     // Last request wins: a load that finishes after a newer source (or after
     // unmount, when the stored value is gone) is dropped.
     let generation = StoredValue::new(0u64);
@@ -136,6 +147,7 @@ pub fn MermaidDisplay(
         let current = generation.get_value().wrapping_add(1);
         generation.set_value(current);
 
+        stripped.set(None);
         if src.trim().is_empty() {
             content.set(String::new());
             state.set(MermaidRenderState::Empty);
@@ -147,16 +159,6 @@ pub fn MermaidDisplay(
             .get_untracked()
             .map(|figure| figure.unchecked_into::<web_sys::Element>());
 
-        if pele::pele_ready() {
-            let (html, next) = outcome_html(pele::render(
-                &src,
-                &pele::pele_options_for(container.as_ref()),
-            ));
-            content.set(html);
-            state.set(next);
-            return;
-        }
-
         content.set(pending_html(&src));
         state.set(MermaidRenderState::Pending);
         spawn_local(async move {
@@ -164,9 +166,10 @@ pub fn MermaidDisplay(
             if generation.try_get_value() != Some(current) {
                 return;
             }
-            let (html, next) = outcome_html(result);
+            let (html, next, removed) = outcome_html(result);
             let _ = content.try_set(html);
             let _ = state.try_set(next);
+            let _ = stripped.try_set(removed);
         });
     });
 
@@ -180,6 +183,7 @@ pub fn MermaidDisplay(
             node_ref=node_ref
             attr:data-mermaid-state=move || state.get().as_str()
             attr:data-mermaid-theme=move || theme.get().as_str()
+            attr:data-pele-stripped=move || stripped.get().map(|n| n.to_string())
         />
     }
 }

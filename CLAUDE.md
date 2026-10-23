@@ -71,7 +71,7 @@ cargo xtask test-focus-ring            # .ld-focus-ring colour present from fram
 cargo xtask test-row-action-presets    # row-action + Export presets: glyphs, names, tooltips, disabled_reason (ldui-bmqj, ldui-e6x8, ldui-p82h)
 cargo xtask test-server-cursor-footer  # ServerDataTable cursor mode: standard three-region footer with total+position, fallback without (ldui-q14c)
 cargo xtask test-ld-pattern            # data-ld-pattern on every catalogue pattern ROOT in the real DOM, both hosts (ldui-wra5)
-cargo xtask test-mermaid-pele          # MermaidDisplay/MarkdownView draw svg.pele, pele errors shown, theme switch recolours with no re-render (ldui-qe72; needs cdn.jsdelivr.net)
+cargo xtask test-mermaid-pele          # MermaidDisplay/MarkdownView draw svg.pele, pele errors shown, theme switch recolours with no re-render (ldui-qe72); pele in a same-origin worker, no CDN, hostile Gantt times out with the page responsive (ldui-o55o)
 cargo xtask test-rich-message          # RichMessage SMS/MMS/WhatsApp: media fallback, formatting, placeholders, inert vs live buttons, axe light+dark (ldui-g8hh)
 cargo xtask gen-tokens [--check]     # regenerate styles/tokens.css from ui-tokens
 cargo xtask check-sibling-tokens     # preamble.rs's ui_tokens refs must exist on the sibling's DEFAULT branch

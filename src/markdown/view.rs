@@ -92,14 +92,15 @@ fn post_process(host: &HtmlElement, on_link_click: Option<Callback<String>>) {
 
 /// Render every `.mermaid` placeholder under `host` with pele.
 ///
-/// Synchronous when pele is already loaded. Otherwise each placeholder shows
-/// its source in a `pre` (`data-pele-state="pending"` on that `pre`) while
-/// the bundle loads once per page ([`crate::pele::load_pele`]), and then
-/// draws. A placeholder that was detached in the meantime (the source
-/// changed and the host was re-rendered) is skipped, so the last render
-/// wins. On a pele error the source stays visible in a `pre` and pele's
-/// message, escaped, follows it in the `mermaid-error` box; a failed load
-/// is reported the same way and the next render retries it.
+/// Each placeholder shows its source in a `pre` (`data-pele-state="pending"`
+/// on that `pre`) while pele draws it in its worker
+/// ([`crate::pele::render_when_ready`]), and then the sanitised SVG, with
+/// `data-pele-stripped` on the placeholder. A placeholder that was detached
+/// in the meantime (the source changed and the host was re-rendered) is
+/// skipped, so the last render wins. On a pele error, a worker that cannot
+/// start, or a diagram that overruns its time limit, the source stays
+/// visible in a `pre` and the message, escaped, follows it in the
+/// `mermaid-error` box; the next render tries again.
 ///
 /// Also called by `MarkdownGraphicEditor`: there the placeholder is an
 /// atomic `contenteditable=false` widget whose markdown comes from
@@ -125,44 +126,32 @@ pub(crate) fn process_mermaid(host: &HtmlElement) {
         return;
     }
 
-    if crate::pele::pele_ready() {
-        for (el, source) in &diagrams {
-            draw_mermaid(el, source);
-        }
-        return;
-    }
-
     for (el, source) in &diagrams {
+        let _ = el.remove_attribute("data-pele-stripped");
         el.set_inner_html(&format!(
             "<pre data-pele-state=\"pending\" aria-busy=\"true\">{}</pre>",
             html_escape(source)
         ));
     }
     wasm_bindgen_futures::spawn_local(async move {
-        let loaded = crate::pele::load_pele().await;
-        for (el, source) in &diagrams {
+        for (el, source) in diagrams {
             if !el.is_connected() {
                 continue;
             }
-            if loaded {
-                draw_mermaid(el, source);
-            } else {
-                let err =
-                    crate::pele::PeleRenderError::load_failed(&crate::pele::pele_script_url());
-                el.set_inner_html(&mermaid_fallback_html(source, &err));
+            // Measures labels in the placeholder's own font.
+            let result = crate::pele::render_when_ready(source.clone(), Some(el.clone())).await;
+            if !el.is_connected() {
+                continue;
+            }
+            match result {
+                Ok(drawn) => {
+                    el.set_inner_html(&drawn.svg);
+                    let _ = el.set_attribute("data-pele-stripped", &drawn.stripped.to_string());
+                }
+                Err(err) => el.set_inner_html(&mermaid_fallback_html(&source, &err)),
             }
         }
     });
-}
-
-/// Draw one placeholder with the loaded pele, measuring labels in the
-/// placeholder's own font.
-fn draw_mermaid(el: &web_sys::Element, source: &str) {
-    let options = crate::pele::pele_options_for(Some(el));
-    match crate::pele::render(source, &options) {
-        Ok(drawn) => el.set_inner_html(&drawn.svg),
-        Err(err) => el.set_inner_html(&mermaid_fallback_html(source, &err)),
-    }
 }
 
 /// The source, left visible so the author can see what is wrong, followed

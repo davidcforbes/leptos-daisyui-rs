@@ -1822,6 +1822,7 @@ dependencies = [
  "send_wrapper",
  "serde",
  "serde_json",
+ "sha2",
  "snapshot-core",
  "table-rs",
  "tokio",

@@ -1,3 +1,5 @@
 
 # Use bd merge for beads JSONL files
 .beads/issues.jsonl merge=beads
+# Vendored pele bundle: byte-exact, SHA-256 pinned in src/pele.rs (ldui-o55o).
+assets/pele/pele.global.js -text

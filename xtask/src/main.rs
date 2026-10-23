@@ -1038,8 +1038,9 @@ fn rich_message_step() -> Step {
 /// `MarkdownView` fenced block is drawn too, and a `data-theme` switch
 /// recolours a drawn diagram without re-rendering it. Lives on the general
 /// demo app (`html_target: None`) and stays in its own file/step for the
-/// same reason as [`collapse_naming_step`]. Needs network access to the
-/// pinned jsDelivr URL the demo loads pele from.
+/// same reason as [`collapse_naming_step`]. Since ldui-o55o pele runs in a
+/// same-origin worker the demo serves from `assets/pele/`; no network is
+/// needed, and the hostile-Gantt journey proves the worker time limit.
 fn mermaid_pele_step() -> Step {
     Step {
         name: "test-mermaid-pele",

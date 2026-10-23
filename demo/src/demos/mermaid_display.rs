@@ -13,10 +13,31 @@ const VENN_SOURCE: &str = r#"venn-beta
 /// Deliberately broken: pele's own message must appear in the error box.
 const BROKEN_SOURCE: &str = "flowchart LR\n  A[Start] --> B{Decision\n  B --> C";
 
+/// pele review repro pele-qd0.4: a 663-byte Gantt chart whose `W` date
+/// tokens keep pele busy for 7 s or more. It must time out in the worker
+/// while the page stays responsive.
+fn hostile_gantt() -> String {
+    format!(
+        "gantt\n  dateFormat {}\n  excludes weekends\n  A :a1, 2020-01-01, 2000000d",
+        ["W"; 300].join("-")
+    )
+}
+
 const MARKDOWN_SOURCE: &str = "The same engine draws fenced `mermaid` blocks in `MarkdownView`:\n\n```mermaid\nflowchart TD\n  Draft --> Review --> Done\n```\n";
 
 #[component]
 pub fn MermaidDisplayDemo() -> impl IntoView {
+    let (hostile, set_hostile) = signal(String::new());
+    let (after_hostile, set_after_hostile) = signal(String::new());
+    let start_hostile = move |_| {
+        set_hostile.set(hostile_gantt());
+        // Queued after the hostile render, so drawing it proves a fresh
+        // worker replaced the one the time limit terminated.
+        set_timeout(
+            move || set_after_hostile.set("flowchart LR\n  Timeout --> Recovered".to_string()),
+            std::time::Duration::from_millis(50),
+        );
+    };
     // No theme plumbing: pele takes every colour from --pele-* CSS variables,
     // which styles/tokens.css maps onto the daisyUI theme, so switching the
     // theme recolours these diagrams without re-rendering them.
@@ -71,6 +92,19 @@ pub fn MermaidDisplayDemo() -> impl IntoView {
                     "Invalid source shows pele's message in the error box instead of a diagram."
                 </p>
                 <MermaidDisplay attr:data-testid="mermaid-error" source=BROKEN_SOURCE />
+            </Section>
+
+            <Section title="Hostile diagram" col=true>
+                <p class="text-sm text-base-content/75">
+                    "pele runs in a worker with a time limit. This Gantt chart would keep pele busy for seconds; it times out, the page stays responsive, and the next diagram draws in a fresh worker."
+                </p>
+                <div>
+                    <Button attr:data-testid="mermaid-hostile-start" on_click=Callback::new(start_hostile)>
+                        "Draw the hostile diagram"
+                    </Button>
+                </div>
+                <MermaidDisplay attr:data-testid="mermaid-hostile" source=hostile />
+                <MermaidDisplay attr:data-testid="mermaid-after-hostile" source=after_hostile />
             </Section>
 
             <Section title="In MarkdownView" col=true>

@@ -12,17 +12,26 @@
 //!   it: the same SVG node stays mounted while the `--pele-*` colours it
 //!   resolves change (the daisyUI mapping in `styles/tokens.css`).
 //!
-//! The demo loads pele from the pinned jsDelivr URL, so this lane needs
-//! network access to `cdn.jsdelivr.net` (or a demo configured with
-//! `pele::set_pele_asset_base`). A load failure shows up as every figure in
-//! the `error` state with a "could not load the Mermaid renderer" message.
+//! And for the worker design (ldui-o55o):
+//! - pele never runs on the page's thread (`window.pele` is undefined) and
+//!   nothing is fetched from a CDN: the demo serves `assets/pele/` at
+//!   `/pele/`, same-origin;
+//! - the sanitiser removes nothing from pele's own output
+//!   (`data-pele-stripped="0"` on every drawn figure);
+//! - the pele review's 663-byte hostile Gantt chart (pele-qd0.4) times out
+//!   in the worker (`data-pele-error="timeout"`) while the page's event loop
+//!   keeps turning, and the diagram queued after it draws in a fresh worker.
+//!
+//! No network beyond the demo server is needed. A worker that cannot start
+//! shows up as every figure in the `error` state with
+//! `data-pele-error="load"`.
 //!
 //! Drives the general demo app (`html_target: None`). Kept in its own
 //! file/xtask step (`cargo xtask test-mermaid-pele`) rather than folded into
 //! `reactivity_smoke.rs`, whose check count is pinned.
 mod common;
 
-use common::{assert_no_browser_errors, begin_browser_error_capture, harness_at};
+use common::{assert_no_browser_errors, begin_browser_error_capture, click, harness_at};
 use serde_json::{Value, json};
 use std::time::{Duration, Instant};
 
@@ -56,6 +65,7 @@ async fn snapshot(h: &pixelproof_web::Harness) -> Value {
                     state: f.getAttribute('data-mermaid-state'),
                     svg: !!f.querySelector('svg.pele'),
                     error: err ? err.textContent : null,
+                    stripped: f.getAttribute('data-pele-stripped'),
                 };
             };
             const md = document.querySelector('[data-testid="mermaid-markdown"] .mermaid');
@@ -65,10 +75,14 @@ async fn snapshot(h: &pixelproof_web::Harness) -> Value {
             }
             out.markdown = md ? {
                 svg: !!md.querySelector('svg.pele'),
+                stripped: md.getAttribute('data-pele-stripped'),
                 pending: !!md.querySelector('[data-pele-state="pending"]'),
                 error: md.querySelector('.mermaid-error') ? md.querySelector('.mermaid-error').textContent : null,
             } : null;
             out.peleGlobal = typeof window.pele;
+            out.cdn = performance.getEntriesByType('resource')
+                .map(e => e.name)
+                .filter(n => /jsdelivr|unpkg|cdnjs/i.test(n));
             return out;
         })()"#,
     )
@@ -91,7 +105,7 @@ async fn settled_snapshot(h: &pixelproof_web::Harness) -> Value {
         }
         assert!(
             Instant::now() < deadline,
-            "pele never settled within 30 s (is cdn.jsdelivr.net reachable?): {snap}"
+            "pele never settled within 30 s (is /pele/ldui-pele-worker.js served?): {snap}"
         );
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
@@ -120,6 +134,84 @@ async fn colours_under(h: &pixelproof_web::Harness, theme: &str) -> Value {
     .await
 }
 
+/// Click the hostile fixture, sample the page's event loop while the
+/// worker grinds, then wait for the timeout and the recovery render.
+async fn hostile_diagram_times_out_without_freezing_the_page(h: &pixelproof_web::Harness) {
+    // Before the click: `click` itself waits the harness settle (~500 ms).
+    let started = Instant::now();
+    click(h, "[data-testid=\"mermaid-hostile-start\"]").await;
+    // The worker is busy on the hostile chart for this whole window (the
+    // settle plus 1.5 s ends before the 2 s limit plus the click's own
+    // latency): the timeout asserted below only fires after the full limit.
+    let gaps = eval_json(
+        h,
+        r#"(async () => {
+            const gaps = [];
+            let last = performance.now();
+            const until = last + 1500;
+            while (performance.now() < until) {
+                await new Promise((r) => setTimeout(r, 0));
+                const now = performance.now();
+                gaps.push(now - last);
+                last = now;
+            }
+            return { max: Math.max(...gaps), samples: gaps.length };
+        })()"#,
+    )
+    .await;
+    assert!(
+        gaps["max"].as_f64().is_some_and(|max| max < 250.0),
+        "the page's event loop stalled while pele drew the hostile chart: {gaps}"
+    );
+
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let outcome = loop {
+        let outcome = eval_json(
+            h,
+            r#"(() => {
+                const fig = (id) => document.querySelector('[data-testid="' + id + '"]');
+                const hostile = fig('mermaid-hostile');
+                const after = fig('mermaid-after-hostile');
+                const err = hostile.querySelector('.mermaid-error');
+                return {
+                    hostile: hostile.getAttribute('data-mermaid-state'),
+                    code: err ? err.getAttribute('data-pele-error') : null,
+                    message: err ? err.textContent : null,
+                    after: after.getAttribute('data-mermaid-state'),
+                    afterSvg: !!after.querySelector('svg.pele'),
+                };
+            })()"#,
+        )
+        .await;
+        if outcome["after"] != json!("pending") && outcome["hostile"] != json!("pending") {
+            break outcome;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the hostile render never settled: {outcome}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
+    assert_eq!(outcome["hostile"], json!("error"), "{outcome}");
+    assert_eq!(outcome["code"], json!("timeout"), "{outcome}");
+    assert!(
+        outcome["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("took longer than")),
+        "{outcome}"
+    );
+    assert!(
+        started.elapsed() >= Duration::from_secs(2),
+        "the time limit is 2 s, so the timeout cannot be earlier"
+    );
+    assert_eq!(
+        outcome["after"],
+        json!("rendered"),
+        "the next diagram must draw in a fresh worker: {outcome}"
+    );
+    assert_eq!(outcome["afterSvg"], json!(true), "{outcome}");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires demo dev server (cargo xtask test-mermaid-pele)"]
 async fn mermaid_renders_with_pele_and_follows_the_daisyui_theme() {
@@ -127,12 +219,26 @@ async fn mermaid_renders_with_pele_and_follows_the_daisyui_theme() {
     begin_browser_error_capture(&h).await;
 
     let snap = settled_snapshot(&h).await;
-    assert_eq!(snap["peleGlobal"], json!("object"), "pele global: {snap}");
+    assert_eq!(
+        snap["peleGlobal"],
+        json!("undefined"),
+        "pele must run in its worker, never on the page's thread: {snap}"
+    );
+    assert_eq!(
+        snap["cdn"],
+        json!([]),
+        "nothing may load from a CDN: {snap}"
+    );
 
     for id in DIAGRAMS {
         assert_eq!(snap[id]["state"], json!("rendered"), "{id}: {snap}");
         assert_eq!(snap[id]["svg"], json!(true), "{id} draws svg.pele: {snap}");
         assert_eq!(snap[id]["error"], Value::Null, "{id}: {snap}");
+        assert_eq!(
+            snap[id]["stripped"],
+            json!("0"),
+            "{id}: the sanitiser must not remove anything pele draws: {snap}"
+        );
     }
 
     // Broken source: pele's own message, escaped as text, and no diagram.
@@ -145,13 +251,14 @@ async fn mermaid_renders_with_pele_and_follows_the_daisyui_theme() {
         "the error box must carry pele's message: {snap}"
     );
     assert!(
-        !message.contains("could not load"),
-        "the error must come from pele's parser, not the loader: {snap}"
+        !message.contains("could not start"),
+        "the error must come from pele's parser, not the worker start: {snap}"
     );
 
     // MarkdownView's fenced block is drawn by the same engine.
     assert_eq!(snap["markdown"]["svg"], json!(true), "{snap}");
     assert_eq!(snap["markdown"]["error"], Value::Null, "{snap}");
+    assert_eq!(snap["markdown"]["stripped"], json!("0"), "{snap}");
 
     // Theme switch recolours without a re-render.
     let original: Value = eval_json(
@@ -190,6 +297,8 @@ async fn mermaid_renders_with_pele_and_follows_the_daisyui_theme() {
         None => "document.documentElement.removeAttribute('data-theme'), true".to_string(),
     };
     eval_json(&h, &restore).await;
+
+    hostile_diagram_times_out_without_freezing_the_page(&h).await;
 
     assert_no_browser_errors(&h, "mermaid pele rendering").await;
 }
