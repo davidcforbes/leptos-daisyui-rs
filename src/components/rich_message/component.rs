@@ -270,13 +270,15 @@ fn header_view(
 
 /// # Rich Message Component
 ///
-/// One SMS, MMS or WhatsApp message as the recipient sees it: an optional
-/// header (text, image, video or document, with a fallback tile when the
-/// media fails to load), the body with emoji and line breaks kept, a footer,
-/// and the message's buttons. Built on daisyUI's `chat` bubble.
+/// One SMS, MMS, WhatsApp or social direct message as the recipient sees
+/// it: an optional header (text, image, video or document, with a fallback
+/// tile when the media fails to load), the body with emoji and line breaks
+/// kept, a footer, and the message's buttons. Built on daisyUI's `chat`
+/// bubble.
 ///
 /// - **WhatsApp bodies** render `*bold*`, `_italic_`, `~strike~` and
-///   triple-backtick monospace by WhatsApp's rules; SMS bodies stay plain.
+///   triple-backtick monospace by WhatsApp's rules; SMS, MMS and social
+///   bodies stay plain.
 /// - **Placeholders** (`{{name}}`, `{{1}}`, `${Contacts.First Name}`) are
 ///   recognised in a preview, or whenever `placeholders` is set. A key with
 ///   a value renders as a highlighted value; a key without one renders as
@@ -337,7 +339,8 @@ pub fn RichMessageBubble(
     sendable: Signal<bool>,
 
     /// Show the SMS segment indicator. Unset: shown for an SMS or MMS
-    /// preview, hidden otherwise. Never shown for WhatsApp.
+    /// preview, hidden otherwise. Never shown for WhatsApp or social
+    /// messages, whatever this says.
     #[prop(optional, into)]
     show_sms_indicator: Option<Signal<bool>>,
 
@@ -480,7 +483,7 @@ pub fn RichMessageBubble(
             }
         });
 
-        let indicator_visible = !whatsapp
+        let indicator_visible = m.channel.is_sms()
             && show_sms_indicator.map_or(m.direction == MessageDirection::Preview, |s| s.get());
         let indicator = indicator_visible.then(|| {
             let info = sms_segments(&m.body);

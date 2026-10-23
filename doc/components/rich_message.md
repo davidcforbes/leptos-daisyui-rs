@@ -14,7 +14,7 @@ messages, CTM SMS/MMS, stored conversation rows) into one neutral
 
 | Field | Meaning |
 |---|---|
-| `channel` | `Sms`, `Mms` or `Whatsapp`; picks the text renderer |
+| `channel` | `Sms`, `Mms`, `Whatsapp` or `Social` (Facebook/Instagram DMs: plain text, no indicator, no formatting); picks the text renderer |
 | `direction` | `In` (start), `Out` (end, neutral bubble: the dark theme's primary fails AA for body text) or `Preview` (start, inert buttons, placeholders recognised) |
 | `author`, `time` | display strings; the component never reads a clock (no `std::time` in Wasm) |
 | `header` | `Text`, `Image { src, alt, width, height }`, `Video { src, poster, alt }` or `Document { name, src }` |

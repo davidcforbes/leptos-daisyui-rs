@@ -156,6 +156,35 @@ fn picture_message_is_an_mms_or_an_sms_with_media() {
     assert!(mms.is_picture_message());
 }
 
+#[test]
+fn only_sms_and_mms_are_sms_channels() {
+    let channels = [
+        (MessageChannel::Sms, "sms", true),
+        (MessageChannel::Mms, "mms", true),
+        (MessageChannel::Whatsapp, "whatsapp", false),
+        (MessageChannel::Social, "social", false),
+    ];
+    for (channel, name, sms) in channels {
+        assert_eq!(channel.as_str(), name);
+        assert_eq!(channel.is_sms(), sms, "{channel:?}");
+    }
+}
+
+#[test]
+fn a_social_message_with_media_is_never_a_picture_message() {
+    let social = RichMessage {
+        channel: MessageChannel::Social,
+        header: Some(MessageHeader::Image {
+            src: "a.png".into(),
+            alt: String::new(),
+            width: None,
+            height: None,
+        }),
+        ..Default::default()
+    };
+    assert!(!social.is_picture_message());
+}
+
 // ---- WhatsApp formatting ------------------------------------------------
 
 #[test]

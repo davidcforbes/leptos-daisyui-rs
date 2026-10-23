@@ -13,6 +13,8 @@
 //!   tile, whose sent messages sit at the end, and whose cut message says so;
 //! - host-wired buttons are live and report the press;
 //! - the composer indicator switches GSM-7 to UCS-2 when an emoji is typed;
+//! - a social DM preview (ldui-9lkm) stays plain text, keeps its asterisks
+//!   and shows no SMS indicator;
 //! - the Spanish table reaches the accessible names and the hint;
 //! - every section is axe-clean (WCAG 2.2 AA, through `common::axe`) in the
 //!   light AND dark themes, and the page has no component drift.
@@ -30,12 +32,13 @@ use serde_json::{Value, json};
 use std::time::{Duration, Instant};
 
 const PAGE: &str = "/components/rich_message";
-const SECTIONS: [&str; 6] = [
+const SECTIONS: [&str; 7] = [
     "rich-sms-preview",
     "rich-whatsapp-preview",
     "rich-thread",
     "rich-live",
     "rich-composer",
+    "rich-social",
     "rich-spanish",
 ];
 
@@ -426,6 +429,58 @@ async fn composer(h: &pixelproof_web::Harness) {
     );
 }
 
+async fn social(h: &pixelproof_web::Harness) {
+    let snap = eval_json(
+        h,
+        r#"(() => {
+            const root = document.querySelector('[data-testid="rich-social"] [data-rich-message]');
+            const body = root.querySelector('[data-message-body]');
+            return {
+                channel: root.dataset.channel,
+                direction: root.dataset.direction,
+                label: root.getAttribute('aria-label'),
+                // The unfilled chip is font-mono by design; only formatting counts.
+                strong: body.querySelectorAll('strong, em, s, .font-mono:not([data-placeholder])').length,
+                literal: body.textContent.includes('*Tuesday*'),
+                emoji: body.textContent.includes('🙏'),
+                chip: root.querySelector('[data-placeholder="first_name"]')?.dataset.placeholderState ?? null,
+                indicator: !!root.querySelector('[data-sms-indicator]'),
+                buttons: [...root.querySelectorAll('[data-message-action]')].map(b => b.getAttribute('aria-disabled')),
+            };
+        })()"#,
+    )
+    .await;
+    assert_eq!(snap["channel"], json!("social"), "{snap}");
+    assert_eq!(snap["direction"], json!("preview"), "{snap}");
+    assert_eq!(
+        snap["label"],
+        json!("Preview, Instagram · @maria.lopez, Tue 8:05 PM"),
+        "{snap}"
+    );
+    assert_eq!(
+        snap["strong"],
+        json!(0),
+        "a social body is never formatted: {snap}"
+    );
+    assert_eq!(
+        snap["literal"],
+        json!(true),
+        "asterisks stay literal: {snap}"
+    );
+    assert_eq!(snap["emoji"], json!(true), "{snap}");
+    assert_eq!(
+        snap["chip"],
+        json!("unfilled"),
+        "a preview still marks placeholders: {snap}"
+    );
+    assert_eq!(
+        snap["indicator"],
+        json!(false),
+        "a social preview has no SMS indicator: {snap}"
+    );
+    assert_eq!(snap["buttons"], json!(["true", "true"]), "{snap}");
+}
+
 async fn spanish(h: &pixelproof_web::Harness) {
     let snap = eval_json(
         h,
@@ -505,6 +560,7 @@ async fn rich_messages_render_what_the_recipient_sees_and_stay_accessible() {
     thread(&h).await;
     live_buttons(&h).await;
     composer(&h).await;
+    social(&h).await;
     spanish(&h).await;
 
     let original = eval_json(&h, "document.documentElement.getAttribute('data-theme')").await;

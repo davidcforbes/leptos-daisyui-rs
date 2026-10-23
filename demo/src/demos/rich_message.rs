@@ -229,6 +229,22 @@ pub fn RichMessageDemo() -> impl IntoView {
                 </div>
             </Section>
 
+            <Section title="Social direct message" col=true>
+                <p class="text-sm text-base-content/75">
+                    "A Facebook or Instagram DM preview: plain text, so asterisks stay literal, and no SMS segment indicator."
+                </p>
+                <div class="max-w-2xl" data-testid="rich-social">
+                    <RichMessageBubble message=RichMessage {
+                        channel: MessageChannel::Social,
+                        author: Some("Instagram · @maria.lopez".into()),
+                        time: Some("Tue 8:05 PM".into()),
+                        body: "Hi {{first_name}}! Is the *Tuesday* slot still open? 🙏".into(),
+                        quick_replies: vec!["Yes".into(), "No".into()],
+                        ..Default::default()
+                    } />
+                </div>
+            </Section>
+
             <Section title="Spanish" col=true>
                 <p class="text-sm text-base-content/75">
                     "The same preview with the Spanish text table."

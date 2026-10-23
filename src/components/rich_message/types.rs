@@ -8,9 +8,9 @@
 
 use std::collections::HashMap;
 
-/// Which network the message travels on. It picks the text renderer: SMS
-/// and MMS bodies are plain text, WhatsApp bodies use WhatsApp's inline
-/// formatting.
+/// Which network the message travels on. It picks the text renderer: SMS,
+/// MMS and social bodies are plain text, WhatsApp bodies use WhatsApp's
+/// inline formatting. Only SMS and MMS get the segment indicator.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum MessageChannel {
@@ -23,6 +23,10 @@ pub enum MessageChannel {
     /// WhatsApp message or template, with `*bold*`, `_italic_`, `~strike~`
     /// and triple-backtick monospace.
     Whatsapp,
+    /// A social-network direct message (Facebook Messenger, Instagram and
+    /// the like): plain text with no segment indicator and no formatting.
+    /// The host names the network in `author` or around the thread.
+    Social,
 }
 
 impl MessageChannel {
@@ -32,7 +36,13 @@ impl MessageChannel {
             Self::Sms => "sms",
             Self::Mms => "mms",
             Self::Whatsapp => "whatsapp",
+            Self::Social => "social",
         }
+    }
+
+    /// True for SMS and MMS, the channels the segment indicator describes.
+    pub fn is_sms(self) -> bool {
+        matches!(self, Self::Sms | Self::Mms)
     }
 }
 
@@ -214,7 +224,7 @@ impl RichMessage {
         match self.channel {
             MessageChannel::Mms => true,
             MessageChannel::Sms => self.header.as_ref().is_some_and(MessageHeader::is_media),
-            MessageChannel::Whatsapp => false,
+            MessageChannel::Whatsapp | MessageChannel::Social => false,
         }
     }
 }
