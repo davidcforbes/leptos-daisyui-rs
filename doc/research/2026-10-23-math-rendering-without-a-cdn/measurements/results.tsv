@@ -1,0 +1,257 @@
+mathcore	frac	OK len=268 6.4ms []	<math display="block"><mi>x</mi><mo>=</mo><mfrac><mrow><mo lspace="0" rspace="0">−</mo><mi>b</mi><mo>±</mo><msqrt><mrow><msup><mi>b</mi><mn>
+mathcore	align	OK len=480 0.5ms [STYLE]	<math display="block"><mtable displaystyle="true" scriptlevel="0"><mtr><mtd style="text-align: right;justify-items: end;padding-right: 0;"><
+mathcore	align_env	OK len=712 0.5ms [STYLE]	<math display="block"><mtable displaystyle="true" scriptlevel="0" style="width: 100%"><mtr><mtd style="width: 50%"></mtd><mtd style="text-al
+mathcore	pmatrix	OK len=222 0.4ms []	<math display="block"><mrow><mo>(</mo><mtable displaystyle="false" scriptlevel="0"><mtr><mtd><mn>1</mn></mtd><mtd><mn>2</mn></mtd></mtr><mtr
+mathcore	cases	OK len=643 0.1ms [STYLE]	<math display="block"><mi>f</mi><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo><mo>=</mo><mrow><mo>{</mo><mtable displaysty
+mathcore	array	OK len=405 1.0ms [STYLE]	<math display="block"><mrow><mo>[</mo><mtable displaystyle="false" scriptlevel="0"><mtr><mtd style="border-right: 0.05em solid currentcolor;
+mathcore	accents	OK len=487 0.1ms []	<math display="block"><mover accent="true"><mi>x</mi><mo stretchy="false">ˆ</mo></mover><mo>+</mo><mover accent="true"><mi>v</mi><mo stretch
+mathcore	operatorname	OK len=218 1.1ms []	<math display="block"><mrow><msub><mrow><mspace/><mi>argmax</mi></mrow><mi>x</mi></msub><mo lspace="0.1667em">&ApplyFunction;</mo><mi>f</mi>
+mathcore	fonts	OK len=141 0.3ms []	<math display="block"><mi>ℝ</mi><mrow><mspace/><mi>ℒ︀</mi></mrow><mi>𝔤</mi><mrow><mspace/><mi>ℱ︁</mi></mrow><mi>𝐯</mi></math>
+mathcore	text	OK len=93 0.3ms []	<math display="block"><mi>x</mi><mtext> if </mtext><mi>y</mi><mo>&gt;</mo><mn>0</mn></math>
+mathcore	leftright	OK len=147 0.1ms []	<math display="block"><mrow><mo>(</mo><mfrac><mi>a</mi><mi>b</mi></mfrac><mo>⟩</mo></mrow><mo stretchy="true" lspace="0" rspace="0">|</mo></
+mathcore	color	OK len=131 0.5ms [STYLE]	<math display="block"><mrow style="color:#FF0000;"><mi>x</mi><mo>+</mo><mrow style="color:#0000FF;"><mi>y</mi></mrow></mrow></math>
+mathcore	newcommand	OK len=36 0.2ms []	ERR This command is already defined.
+mathcore	sum_int	OK len=502 0.4ms []	<math display="block"><munderover><mo lspace="0">∑</mo><mrow><mi>i</mi><mo lspace="0" rspace="0">=</mo><mn>1</mn></mrow><mi>n</mi></munderov
+mathcore	binom_overset	OK len=283 0.1ms []	<math display="block"><mrow><mo>(</mo><mfrac linethickness="0"><mi>n</mi><mi>k</mi></mfrac><mo>)</mo></mrow><mover><mo>=</mo><mo form="postf
+mathcore	boxed_cancel	OK len=181 0.1ms []	<math display="block"><menclose notation="box"><mi>x</mi></menclose><menclose notation="updiagonalstrike"><mi>y</mi><mrow class="menclose-up
+mathcore	ce	OK len=26 0.2ms []	ERR Unknown command "\ce".
+mathcore	unknown_cmd	OK len=27 0.0ms []	ERR Unknown command "\foo".
+mathcore	unbalanced	OK len=57 0.1ms []	ERR Expected closing token "}", but reached end of input.
+mathcore	bad_env	OK len=55 0.1ms []	ERR Expected "\end{matrix}", but found "\end{pmatrix}".
+mathcore	href_js	OK len=28 0.0ms []	ERR Unknown command "\href".
+mathcore	url_js	OK len=27 0.0ms []	ERR Unknown command "\url".
+mathcore	htmlId	OK len=30 0.0ms []	ERR Unknown command "\htmlId".
+mathcore	raw_html_text	OK len=429 0.1ms []	<math display="block"><mtext>&lt;script&gt;alert(1)&lt;/script&gt;</mtext><mo>&lt;</mo><mi>i</mi><mi>m</mi><mi>g</mi><mi>s</mi><mi>r</mi><mi
+mathcore	includegraphics	OK len=39 0.0ms []	ERR Unknown command "\includegraphics".
+mathcore	macro_loop	OK len=81 2.2ms []	ERR Too many expansions of custom commands. A command may be expanding to itself.
+mathcore	macro_bomb	OK len=81 5.8ms []	ERR Too many expansions of custom commands. A command may be expanding to itself.
+mathcore	nest_braces_5k	TRAP 1.7ms RuntimeError: memory access out of bounds
+mathcore	nest_frac_2k	TRAP 1.6ms RuntimeError: memory access out of bounds
+mathcore	nest_sup_5k	TRAP 2.3ms RuntimeError: memory access out of bounds
+mathcore	nest_left_2k	TRAP 2.7ms RuntimeError: memory access out of bounds
+mathcore	nest_sqrt_10k	TRAP 1.6ms RuntimeError: memory access out of bounds
+pulldown	frac	OK len=246 6.9ms []	<math display="block"><mi>x</mi><mo>=</mo><mfrac><mrow><mi>−</mi><mi>b</mi><mo>±</mo><msqrt><mrow><msup><mi>b</mi><mn>2</mn></msup><mo>−</mo
+pulldown	align	OK len=226 1.1ms []	<math display="block"><mtable class="menv-alignlike menv-align"><mtr><mtd><mi>a</mi></mtd><mtd><mo>=</mo><mi>b</mi><mo>+</mo><mi>c</mi></mtd
+pulldown	align_env	OK len=220 0.2ms []	<math display="block"><mtable class="menv-alignlike menv-align menv-with-eqn"><mtr><mtd><mi>a</mi></mtd><mtd><mo>=</mo><mi>b</mi></mtd></mtr
+pulldown	pmatrix	OK len=240 0.2ms []	<math display="block"><mrow><mo stretchy="true">(</mo><mtable class="menv-arraylike"><mtr><mtd><mn>1</mn></mtd><mtd><mn>2</mn></mtd></mtr><m
+pulldown	cases	OK len=388 0.4ms []	<math display="block"><mi>f</mi><mo symmetric="false" stretchy="false">(</mo><mi>x</mi><mo symmetric="false" stretchy="false">)</mo><mo>=</m
+pulldown	array	OK len=309 0.6ms []	<math display="block"><mrow><mo stretchy="true">[</mo><mtable class="menv-arraylike"><mtr><mtd class="menv-right-solid"><mi>a</mi></mtd><mtd
+pulldown	accents	OK len=384 0.3ms []	<math display="block"><mover><mrow><mi>x</mi></mrow><mi>^</mi></mover><mo>+</mo><mover><mrow><mi>v</mi></mrow><mi>→</mi></mover><mo>+</mo><m
+pulldown	operatorname	OK len=216 0.1ms []	<math display="block"><msub><mi>argmax</mi><mi>x</mi></msub><mo>⁡</mo><mspace width="0.1667em" /><mi>f</mi><mo symmetric="false" stretchy="f
+pulldown	fonts	OK len=212 1.1ms []	ERR parsing error: unknown primitive command found
+╭─► context:
+│
+│…{g} \mathscr{F} \mathbf{
+│ ^^^^^^^^^^^^^^^^^^^^^^^^
+╰─────────────────────────
+pulldown	text	OK len=98 0.3ms []	<math display="block"><mi>x</mi><mtext>&nbsp;if&nbsp;</mtext><mi>y</mi><mo>></mo><mn>0</mn></math>
+pulldown	leftright	OK len=231 0.4ms []	<math display="block"><mrow><mo stretchy="true">(</mo><mfrac><mrow><mi>a</mi></mrow><mrow><mi>b</mi></mrow></mfrac><mo stretchy="true">⟩</mo
+pulldown	color	OK len=169 0.6ms [STYLE]	<math display="block"><mi style="color: rgb(255 0 0)">x</mi><mo style="color: rgb(255 0 0)">+</mo><mrow style="color: rgb(0 0 255)"><mrow><m
+pulldown	newcommand	OK len=351 0.3ms []	ERR parsing error: expected an argument
+╭─► context:
+│
+│…wcommand{\R}{\mathbb{R}}
+│ ^^^^^^^^^^^^^^^^^^^^^^^^
+╰─────────────────────────; parsing error: unknown 
+pulldown	sum_int	OK len=420 0.1ms []	<math display="block"><munderover><mo movablelimits="false">∑</mo><mrow><mi>i</mi><mo>=</mo><mn>1</mn></mrow><mi>n</mi></munderover><msubsup
+pulldown	binom_overset	OK len=364 0.2ms []	<math display="block"><mrow><mo stretchy="true">(</mo><mfrac linethickness="0em"><mrow><mi>n</mi></mrow><mrow><mi>k</mi></mrow></mfrac><mo s
+pulldown	boxed_cancel	OK len=180 0.1ms []	ERR parsing error: unknown primitive command found
+╭─► context:
+│
+│ \boxed{x} \cancel{
+│ ^^^^^^^^^^^^^^^^^^
+╰───────────────────
+pulldown	ce	OK len=130 0.1ms []	ERR parsing error: unknown primitive command found
+╭─► context:
+│
+│ \ce{H2O}
+│ ^^^^^^^^
+╰─────────
+pulldown	unknown_cmd	OK len=125 0.1ms []	ERR parsing error: unknown primitive command found
+╭─► context:
+│
+│ \foo{x}
+│ ^^^^^^^
+╰────────
+pulldown	unbalanced	OK len=151 0.1ms []	ERR parsing error: unbalanced group found, expected it to be closed with `}`
+╭─► context:
+│
+│ \frac{a
+│ ^^^^^^^
+╰────────
+pulldown	bad_env	OK len=189 0.2ms []	ERR parsing error: unbalanced group found, expected it to be closed with `\end{matrix}`
+╭─► context:
+│
+│…end{pmatrix}
+│ ^^^^^^^^^^^^
+╰─────────────
+pulldown	href_js	OK len=175 0.1ms [JS_URL]	ERR parsing error: unknown primitive command found
+╭─► context:
+│
+│ \href{javascript:
+│ ^^^^^^^^^^^^^^^^^
+╰──────────────────
+pulldown	url_js	OK len=170 0.1ms [JS_URL]	ERR parsing error: unknown primitive command found
+╭─► context:
+│
+│ \url{javascript:
+│ ^^^^^^^^^^^^^^^^
+╰─────────────────
+pulldown	htmlId	OK len=605 0.2ms []	ERR parsing error: unknown primitive command found
+╭─► context:
+│
+│ \htmlId{x}{y} \html
+│ ^^^^^^^^^^^^^^^^^^^
+╰────────────────────; parsing error: unknown prim
+pulldown	raw_html_text	OK len=451 0.2ms []	<math display="block"><mtext>&lt;script&gt;alert(1)&lt;/script&gt;</mtext><mo><</mo><mi>i</mi><mi>m</mi><mi>g</mi><mi>s</mi><mi>r</mi><mi>c<
+pulldown	includegraphics	OK len=212 0.1ms []	ERR parsing error: unknown primitive command found
+╭─► context:
+│
+│…ludegraphics{http://evil
+│ ^^^^^^^^^^^^^^^^^^^^^^^^
+╰─────────────────────────
+pulldown	macro_loop	OK len=686 0.1ms []	ERR parsing error: expected an argument
+╭─► context:
+│
+│…wcommand{\a}{\a\a} \a
+│ ^^^^^^^^^^^^^^^^^^^^^
+╰──────────────────────; parsing error: unknown primitive
+pulldown	macro_bomb	OK len=44639 3.1ms []	ERR parsing error: macro expansion depth limit exceeded (possible infinite recursion)
+╭─► context:
+│
+│ xxxxxxxxxx\a\a\a\a\a\a\b
+│ ^^^^^^^^^^^^^^^^^^^^^^^^
+├─► w
+pulldown	nest_braces_5k	OK len=65039 413.1ms []	<math display="block"><mrow><mrow><mrow><mrow><mrow><mrow><mrow><mrow><mrow><mrow><mrow><mrow><mrow><mrow><mrow><mrow><mrow><mrow><mrow><mro
+pulldown	nest_frac_2k	OK len=102039 407.9ms []	<math display="block"><mfrac><mrow><mfrac><mrow><mfrac><mrow><mfrac><mrow><mfrac><mrow><mfrac><mrow><mfrac><mrow><mfrac><mrow><mfrac><mrow><
+pulldown	nest_sup_5k	OK len=180039 990.0ms []	<math display="block"><msup><mi>x</mi><mrow><msup><mi>x</mi><mrow><msup><mi>x</mi><mrow><msup><mi>x</mi><mrow><msup><mi>x</mi><mrow><msup><m
+pulldown	nest_left_2k	OK len=130039 163.8ms []	<math display="block"><mrow><mo stretchy="true">(</mo><mrow><mo stretchy="true">(</mo><mrow><mo stretchy="true">(</mo><mrow><mo stretchy="tr
+pulldown	nest_sqrt_10k	OK len=280039 10695.7ms []	<math display="block"><msqrt><mrow><msqrt><mrow><msqrt><mrow><msqrt><mrow><msqrt><mrow><msqrt><mrow><msqrt><mrow><msqrt><mrow><msqrt><mrow><
+tex2math	frac	OK len=298 7.1ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mi>x</mi><mo>=</mo><mfrac><mrow><mo>-</mo><mi>b</mi><mo>±</mo><msqrt
+tex2math	align	OK len=286 2.0ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mtable columnalign="right left"><mtr><mtd><mi>a</mi></mtd><mtd><mrow><mo>=
+tex2math	align_env	OK len=266 0.3ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mtable columnalign="right left"><mtr><mtd><mi>a</mi></mtd><mtd><mrow><mo>=
+tex2math	pmatrix	OK len=281 0.1ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mo stretchy="true">(</mo><mtable columnalign="center"><mtr><mtd><mn>
+tex2math	cases	OK len=412 0.2ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mi>f</mi><mo>(</mo><mi>x</mi><mo>)</mo><mo>=</mo><mrow><mo stretchy=
+tex2math	array	OK len=338 0.6ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mo stretchy="true">[</mo><mrow><mtable columnalign="center center" c
+tex2math	accents	OK len=459 0.3ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mover accent="true"><mi>x</mi><mo>^</mo></mover><mo>+</mo><mover acc
+tex2math	operatorname	OK len=184 0.4ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><msub><mi mathvariant="normal">argmax</mi><mi>x</mi></msub><mi>f</mi>
+tex2math	fonts	OK len=310 0.2ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mstyle mathvariant="double-struck"><mi>R</mi></mstyle><mstyle mathva
+tex2math	text	OK len=147 0.1ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mi>x</mi><mtext> if </mtext><mi>y</mi><mo>&gt;</mo><mn>0</mn></mrow>
+tex2math	leftright	OK len=226 0.1ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mrow><mo stretchy="true">(</mo><mrow><mfrac><mi>a</mi><mi>b</mi></mf
+tex2math	color	OK len=182 0.1ms [ERRMARK]	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mstyle mathcolor="red"><mrow><mi>x</mi><mo>+</mo><mstyle mathcolor="blue">
+tex2math	newcommand	OK len=292 0.3ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mi>\newcommand</mi><mstyle mathvariant="double-struck"><mi>R</mi></m
+tex2math	sum_int	OK len=440 0.4ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><munderover><mo>∑</mo><mrow><mi>i</mi><mo>=</mo><mn>1</mn></mrow><mi>
+tex2math	binom_overset	OK len=321 0.2ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mrow><mo>(</mo><mfrac linethickness="0"><mi>n</mi><mi>k</mi></mfrac>
+tex2math	boxed_cancel	OK len=131 0.1ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mrow><mi>x</mi></mrow><mrow><mi>y</mi></mrow></mrow></math>
+tex2math	ce	OK len=140 0.1ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mi>\ce</mi><mrow><mi>H</mi><mn>2</mn><mi>O</mi></mrow></mrow></math>
+tex2math	unknown_cmd	OK len=108 0.1ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mi>\foo</mi><mi>x</mi></mrow></math>
+tex2math	unbalanced	OK len=313 0.2ms [ERRMARK]	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mfrac><mrow><mi>a</mi><merror><mtext mathcolor="red">Syntax Error: Missing
+tex2math	bad_env	OK len=346 0.9ms [ERRMARK]	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mtable columnalign="center"><mtr><mtd><mrow><mi>a</mi><mi>\end</mi><
+tex2math	href_js	OK len=365 0.2ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mi>\href</mi><mrow><mi>j</mi><mi>a</mi><mi>v</mi><mi>a</mi><mi>s</mi
+tex2math	url_js	OK len=301 0.2ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mi>\url</mi><mrow><mi>j</mi><mi>a</mi><mi>v</mi><mi>a</mi><mi>s</mi>
+tex2math	htmlId	OK len=292 0.2ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mi>\htmlId</mi><mi>x</mi><mi>y</mi><mi>\htmlClass</mi><mi>c</mi><mi>
+tex2math	raw_html_text	OK len=457 0.8ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mtext>&lt;script&gt;alert(1)&lt;/script&gt;</mtext><mo>&lt;</mo><mi>
+tex2math	includegraphics	OK len=293 0.2ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mi>\includegraphics</mi><mrow><mi>h</mi><mi>t</mi><mi>t</mi><mi>p</m
+tex2math	macro_loop	OK len=162 0.1ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mi>\newcommand</mi><mi>\a</mi><mrow><mi>\a</mi><mi>\a</mi></mrow><mi
+tex2math	macro_bomb	OK len=968 0.7ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mi>\def</mi><mi>\a</mi><mrow><mi>x</mi><mi>x</mi><mi>x</mi><mi>x</mi
+tex2math	nest_braces_5k	OK len=85 0.5ms []	ERR Parse error at byte offset 64 (NestingLimit): Maximum nesting depth (64) exceeded
+tex2math	nest_frac_2k	OK len=86 0.2ms []	ERR Parse error at byte offset 384 (NestingLimit): Maximum nesting depth (64) exceeded
+tex2math	nest_sup_5k	OK len=86 0.4ms []	ERR Parse error at byte offset 192 (NestingLimit): Maximum nesting depth (64) exceeded
+tex2math	nest_left_2k	OK len=86 0.3ms []	ERR Parse error at byte offset 384 (NestingLimit): Maximum nesting depth (64) exceeded
+tex2math	nest_sqrt_10k	OK len=86 0.2ms []	ERR Parse error at byte offset 384 (NestingLimit): Maximum nesting depth (64) exceeded
+l2m	frac	OK len=285 4.7ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mi>x</mi><mo>=</mo><mfrac><mrow><mo>-</mo><mi>b</mi><mo>±</mo><msqrt><mrow
+l2m	align	OK len=45 0.2ms []	ERR An unknown environment "aligned" is found
+l2m	align_env	OK len=232 0.1ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mtable columnalign=left><mtr><mtd><mi>a</mi></mtd><mtd><mo>=</mo><mi>b</mi
+l2m	pmatrix	OK len=289 0.1ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mo stretchy="true" form="prefix">(</mo><mtable><mtr><mtd><mn>1</mn><
+l2m	cases	OK len=43 0.4ms []	ERR An unknown environment "cases" is found
+l2m	array	OK len=43 0.0ms []	ERR An unknown environment "array" is found
+l2m	accents	OK len=443 0.2ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mover><mi>x</mi><mo accent="true">^</mo></mover><mo>+</mo><mover><mi>v</mi
+l2m	operatorname	OK len=150 0.2ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><msub><mi>argmax</mi><mi>x</mi></msub><mi>f</mi><mo>(</mo><mi>x</mi><mo>)</
+l2m	fonts	OK len=275 0.3ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mi mathvariant="double-struck">R</mi><mtext>[PARSE ERROR: Undefined("Comma
+l2m	text	OK len=129 0.0ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mi>x</mi><mtext>if</mtext><mi>y</mi><mo>></mo><mn>0</mn></math>
+l2m	leftright	OK len=232 0.1ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mo stretchy="true" form="prefix">(</mo><mfrac><mi>a</mi><mi>b</mi></
+l2m	color	OK len=324 0.1ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mtext>[PARSE ERROR: Undefined("Command(\"color\")")]</mtext><mrow><mi>r</m
+l2m	newcommand	OK len=312 0.2ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mtext>[PARSE ERROR: Undefined("Command(\"newcommand\")")]</mtext><mtext>[P
+l2m	sum_int	OK len=432 0.2ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><munderover><mo>∑</mo><mrow><mi>i</mi><mo>=</mo><mn>1</mn></mrow><mi>n</mi>
+l2m	binom_overset	OK len=353 0.3ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mo stretchy="true" form="prefix">(</mo><mfrac linethickness="0"><mi>
+l2m	boxed_cancel	OK len=215 0.1ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mtext>[PARSE ERROR: Undefined("Command(\"boxed\")")]</mtext><mi>x</mi><mte
+l2m	ce	OK len=173 0.1ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mtext>[PARSE ERROR: Undefined("Command(\"ce\")")]</mtext><mrow><mi>H</mi><
+l2m	unknown_cmd	OK len=141 0.0ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mtext>[PARSE ERROR: Undefined("Command(\"foo\")")]</mtext><mi>x</mi></math
+l2m	unbalanced	OK len=66 0.1ms []	ERR The token "RBrace" is expected, but the token "EOF" is found."
+l2m	bad_env	OK len=121 0.0ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mtable><mtr><mtd><mi>a</mi></mtd></mtr></mtable></math>
+l2m	href_js	OK len=398 0.1ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mtext>[PARSE ERROR: Undefined("Command(\"href\")")]</mtext><mrow><mi>j</mi
+l2m	url_js	OK len=334 0.1ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mtext>[PARSE ERROR: Undefined("Command(\"url\")")]</mtext><mrow><mi>j</mi>
+l2m	htmlId	OK len=417 0.1ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mtext>[PARSE ERROR: Undefined("Command(\"htmlId\")")]</mtext><mi>x</mi><mi
+l2m	raw_html_text	OK len=739 0.1ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mtext></mtext><mi>s</mi><mi>c</mi><mi>r</mi><mi>i</mi><mi>p</mi><mi>t</mi>
+l2m	includegraphics	OK len=326 0.0ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mtext>[PARSE ERROR: Undefined("Command(\"includegraphics\")")]</mtext><mro
+l2m	macro_loop	OK len=279 0.1ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mtext>[PARSE ERROR: Undefined("Command(\"newcommand\")")]</mtext><mi mathv
+l2m	macro_bomb	OK len=3578 0.5ms []	<math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mtext>[PARSE ERROR: Undefined("Command(\"def\")")]</mtext><mi mathvariant=
+l2m	nest_braces_5k	TRAP 1.0ms RuntimeError: memory access out of bounds
+l2m	nest_frac_2k	TRAP 1.6ms RuntimeError: memory access out of bounds
+l2m	nest_sup_5k	TRAP 1.3ms RuntimeError: memory access out of bounds
+l2m	nest_left_2k	TRAP 2.3ms RuntimeError: memory access out of bounds
+l2m	nest_sqrt_10k	TRAP 1.8ms RuntimeError: memory access out of bounds
+katexrs	frac	OK len=3848 24.6ms [STYLE]	<span class="katex-display"><span class="katex"><span class="katex-mathml"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+katexrs	align	OK len=2662 7.1ms [STYLE]	<span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block">
+katexrs	align_env	OK len=3095 2.8ms [STYLE]	<span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block">
+katexrs	pmatrix	OK len=2395 3.7ms [STYLE]	<span class="katex-display"><span class="katex"><span class="katex-mathml"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+katexrs	cases	OK len=3238 2.2ms [STYLE]	<span class="katex-display"><span class="katex"><span class="katex-mathml"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+katexrs	array	OK len=3237 2.8ms [STYLE]	<span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block">
+katexrs	accents	OK len=5729 2.7ms [STYLE]	<span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block">
+katexrs	operatorname	OK len=1399 3.2ms [STYLE]	<span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block">
+katexrs	fonts	OK len=878 2.0ms [STYLE]	<span class="katex-display"><span class="katex"><span class="katex-mathml"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+katexrs	text	OK len=945 2.4ms [STYLE]	<span class="katex-display"><span class="katex"><span class="katex-mathml"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+katexrs	leftright	OK len=54 2.0ms []	ERR KaTeX parse error: \middle without preceding \left
+katexrs	color	OK len=971 1.7ms [STYLE,ERRMARK]	<span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block">
+katexrs	newcommand	OK len=129 1.9ms []	ERR KaTeX parse error: Undefined control sequence: \newcommand at position 1: \̲n̲e̲w̲c̲o̲m̲m̲a̲n̲d̲{\R}{\mathbb{R}…
+katexrs	sum_int	OK len=4444 3.6ms [STYLE]	<span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block">
+katexrs	binom_overset	OK len=5086 3.4ms [STYLE]	<span class="katex-display"><span class="katex"><span class="katex-mathml"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+katexrs	boxed_cancel	OK len=2114 4.0ms [STYLE]	<span class="katex-display"><span class="katex"><span class="katex-mathml"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+katexrs	ce	OK len=84 1.1ms []	ERR KaTeX parse error: Undefined control sequence: \ce at position 1: \̲c̲e̲{H2O}
+katexrs	unknown_cmd	OK len=86 1.0ms []	ERR KaTeX parse error: Undefined control sequence: \foo at position 1: \̲f̲o̲o̲{x}
+katexrs	unbalanced	OK len=105 1.0ms []	ERR KaTeX parse error: Unexpected end of input in a macro argument, expected '}' at end of input: \frac{a
+katexrs	bad_env	OK len=74 1.0ms []	ERR KaTeX parse error: Mismatched: \begin{matrix} matched by \end{pmatrix}
+katexrs	href_js	OK len=615 2.1ms [JS_URL,STYLE]	<span class="katex-display"><span class="katex"><span class="katex-mathml"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+katexrs	url_js	OK len=605 1.8ms [JS_URL,STYLE]	<span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block">
+katexrs	htmlId	OK len=991 1.8ms [STYLE]	<span class="katex-display"><span class="katex"><span class="katex-mathml"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+katexrs	raw_html_text	OK len=3069 2.2ms [STYLE]	<span class="katex-display"><span class="katex"><span class="katex-mathml"><math display="block" xmlns="http://www.w3.org/1998/Math/MathML">
+katexrs	includegraphics	OK len=639 1.7ms [STYLE]	<span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block">
+katexrs	macro_loop	OK len=95 1.9ms []	ERR KaTeX parse error: Too many expansions: infinite loop or need to increase maxExpand setting
+katexrs	macro_bomb	OK len=95 40.8ms []	ERR KaTeX parse error: Too many expansions: infinite loop or need to increase maxExpand setting
+katexrs	nest_braces_5k	TRAP 2.7ms RuntimeError: memory access out of bounds
+katexrs	nest_frac_2k	TRAP 450.1ms RuntimeError: memory access out of bounds
+katexrs	nest_sup_5k	TRAP 2.6ms RuntimeError: memory access out of bounds
+katexrs	nest_left_2k	TRAP 3.1ms RuntimeError: memory access out of bounds
+katexrs	nest_sqrt_10k	TRAP 2.4ms RuntimeError: memory access out of bounds
+ratex	frac	OK len=2724 16.9ms []	<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 376.804978 111.05556" width="376.804978pt" height="111.05556pt"><text x="10" y="73.6155
+ratex	align	OK len=1460 6.6ms []	<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 177.8432 128" width="177.8432pt" height="128pt"><text x="10" y="43.6" font-family="KaTe
+ratex	align_env	OK len=2154 2.4ms []	<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 210.407822 128" width="210.407822pt" height="128pt"><text x="10" y="43.6" font-family="
+ratex	pmatrix	OK len=1119 2.7ms []	<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 158.8888 116.0012" width="158.8888pt" height="116.0012pt"><text x="10" y="68" font-fami
+ratex	cases	OK len=2502 2.3ms []	<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 339.612044 140.0012" width="339.612044pt" height="140.0012pt"><text x="10" y="80" font-
+ratex	array	OK len=1271 2.2ms []	<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 184.1856 116.0012" width="184.1856pt" height="116.0012pt"><text x="10" y="68" font-fami
+ratex	accents	OK len=4202 3.8ms []	<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 433.028489 63.1108" width="433.028489pt" height="63.1108pt"><text x="10" y="45.3332" fo
+ratex	operatorname	OK len=1944 2.5ms []	<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 252.642707 60" width="252.642707pt" height="60pt"><text x="10" y="40" font-family="KaTe
+ratex	fonts	OK len=950 1.9ms []	<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 162.8132 55.5624" width="162.8132pt" height="55.5624pt"><text x="10" y="38" font-family
+ratex	text	OK len=1149 2.1ms []	<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180.574622 55.5552" width="180.574622pt" height="55.5552pt"><text x="10" y="37.7776" fo
+ratex	leftright	OK len=55 1.4ms []	ERR ParseError: \middle must be within \left and \right
+ratex	color	OK len=637 5.9ms []	<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 112.796578 51.1108" width="112.796578pt" height="51.1108pt"><text x="10" y="33.3332" fo
+ratex	newcommand	OK len=76 0.5ms []	ERR ParseError: \newcommand{\R} attempting to redefine \R; use \renewcommand
+ratex	sum_int	OK len=3626 2.2ms []	<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 356.893742 143.56264" width="356.893742pt" height="143.56264pt"><text x="10" y="79.2556
+ratex	binom_overset	OK len=11437 3.4ms []	<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 243.4308 127.30888" width="243.4308pt" height="127.30888pt"><text x="10" y="68" font-fa
+ratex	boxed_cancel	OK len=880 1.9ms []	<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 91.1076 66.6" width="91.1076pt" height="66.6pt"><rect x="10" y="10" width="50.0612" hei
+ratex	ce	OK len=611 195.1ms []	<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 97.1112 53.3332" width="97.1112pt" height="53.3332pt"><text x="10" y="37.3332" font-fam
+ratex	unknown_cmd	OK len=62 1.0ms []	ERR ParseError at position 0: Undefined control sequence: \foo
+ratex	unbalanced	OK len=73 1.1ms []	ERR ParseError at position 7: Unexpected end of input in a macro argument
+ratex	bad_env	OK len=65 4.6ms []	ERR ParseError: Mismatch: \begin{matrix} matched by \end{pmatrix}
+ratex	href_js	OK len=1053 1.7ms []	<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 103.2068 53.5776" width="103.2068pt" height="53.5776pt"><text x="10" y="37.7776" font-f
+ratex	url_js	OK len=3656 3.1ms []	<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 419 57.4664" width="419pt" height="57.4664pt"><text x="10" y="37.7776" font-family="KaT
+ratex	htmlId	OK len=613 2.4ms []	<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 91.1208 45" width="91.1208pt" height="45pt"><text x="10" y="27.2224" font-family="KaTeX
+ratex	raw_html_text	OK len=9384 2.2ms []	<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1219.211289 60" width="1219.211289pt" height="60pt"><text x="10" y="40" font-family="Ka
+ratex	includegraphics	OK len=74 0.9ms []	ERR ParseError at position 0: Undefined control sequence: \includegraphics
+ratex	macro_loop	OK len=88 2.2ms []	ERR ParseError: Too many expansions: infinite loop or need to increase maxExpand setting
+ratex	macro_bomb	OK len=88 37.2ms []	ERR ParseError: Too many expansions: infinite loop or need to increase maxExpand setting
+ratex	nest_braces_5k	OK len=40 0.5ms []	ERR ParseError: Recursion limit exceeded
+ratex	nest_frac_2k	OK len=40 30.3ms []	ERR ParseError: Recursion limit exceeded
+ratex	nest_sup_5k	OK len=40 10.6ms []	ERR ParseError: Recursion limit exceeded
+ratex	nest_left_2k	OK len=40 1.4ms []	ERR ParseError: Recursion limit exceeded
+ratex	nest_sqrt_10k	OK len=40 0.9ms []	ERR ParseError: Recursion limit exceeded

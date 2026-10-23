@@ -1,0 +1,32 @@
+THRESH mathcore braces max_ok_depth=849 trap_at=850
+THRESH mathcore frac max_ok_depth=451 trap_at=452
+THRESH mathcore sup max_ok_depth=797 trap_at=798
+THRESH l2m braces max_ok_depth=1363 trap_at=1364
+THRESH l2m frac max_ok_depth=719 trap_at=720
+THRESH l2m sup max_ok_depth=1148 trap_at=1149
+THRESH katexrs braces max_ok_depth=498 trap_at=499
+THRESH katexrs frac max_ok_depth=203 trap_at=204
+THRESH katexrs sup max_ok_depth=224 trap_at=225
+THRESH pulldown braces >=20000 (no trap)
+THRESH pulldown frac >=20000 (no trap)
+THRESH pulldown sup >=20000 (no trap)
+PDTIME sqrt 500 23ms
+PDTIME sqrt 1000 81ms
+PDTIME sqrt 2000 280ms
+PDTIME sqrt 4000 1094ms
+VOCAB mathcore tags=math,mfrac,mi,mmultiscripts,mn,mo,mover,mphantom,mprescripts,mroot,mrow,mspace,msub,msubsup,msup,mtable,mtd,mtext,mtr,munder,munderover
+      attrs=accent,accentunder,display,displaystyle,form,linethickness,lspace,mathvariant,maxsize,minsize,rspace,scriptlevel,stretchy,style,width unescaped_lt_amp=0
+VOCAB pulldown tags=math,mfrac,mi,mn,mo,mover,mroot,mrow,mspace,msub,msubsup,msup,mtable,mtd,mtext,mtr,munder,munderover
+      attrs=class,display,displaystyle,linethickness,mathvariant,maxsize,minsize,movablelimits,scriptlevel,stretchy,style,symmetric,width unescaped_lt_amp=2
+VOCAB tex2math tags=math,mfrac,mi,mmultiscripts,mn,mo,mover,mphantom,mprescripts,mroot,mrow,mspace,mstyle,msub,msubsup,msup,mtable,mtd,mtext,mtr,munder,munderover,none
+      attrs=accent,columnalign,columnlines,columnspacing,display,linethickness,mathbackground,mathcolor,mathvariant,maxsize,minsize,rowlines,stretchy,width,xmlns unescaped_lt_amp=0
+VOCAB l2m tags=math,mfrac,mi,mn,mo,mover,mroot,mrow,mspace,msub,msubsup,msup,mtable,mtd,mtext,mtr,munder,munderover
+      attrs=accent,display,form,linethickness,mathvariant,stretchy,width,xmlns unescaped_lt_amp=1
+VOCAB katexrs tags=annotation,line,math,menclose,mfrac,mi,mn,mo,mover,mpadded,mphantom,mroot,mrow,mspace,mstyle,msub,msubsup,msup,mtable,mtd,mtext,mtr,munder,munderover,path,semantics,span,svg
+      attrs=accent,accentunder,aria-hidden,class,columnalign,columnlines,columnspacing,d,display,displaystyle,encoding,fence,height,linethickness,lspace,mathbackground,mathcolor,mathvariant,maxsize,minsize,notation,preserveAspectRatio,rowlines,rowspacing,rspace,scriptlevel,stretchy,stroke-width,style,viewBox,voffset,width,x1,x2,xmlns,y1,y2 unescaped_lt_amp=0
+VOCAB ratex tags=path,rect,svg,text
+      attrs=d,dominant-baseline,fill,fill-rule,font-family,font-size,font-style,font-weight,height,stroke,stroke-linecap,stroke-linejoin,stroke-width,viewBox,width,x,xmlns,y unescaped_lt_amp=0
+ESC mathcore <math display="block"><mi>a</mi><mo>&lt;</mo><mi>b</mi><mo>&amp;</mo><mi>c</mi></math>
+ESC pulldown <math display="block"><mi>a</mi><mo><</mo><mi>b</mi><mi>&</mi><mi>c</mi></math>
+ESC tex2math <math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mrow><mi>a</mi><mo>&lt;</mo><mi>b</mi><mi>&amp;</mi><mi>c</mi></mrow></math>
+ESC l2m <math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mi>a</mi><mo><</mo><mi>b</mi><mi mathvariant="normal">&</mi><mi>c</mi></math>

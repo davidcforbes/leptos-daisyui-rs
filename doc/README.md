@@ -25,6 +25,10 @@ Welcome to the comprehensive documentation for leptos-daisyui-rs - a type-safe, 
   primary-source research comparing embedded softphones, programmable voice SDKs
   and SIP integration, with a proposed opinionated LDUI calling workflow and
   verification contract. Component APIs are proposed, not implemented.
+- **[Math rendering without a CDN](./research/2026-10-23-math-rendering-without-a-cdn.md)** -
+  self-hosted KaTeX, Temml and MathJax 4 versus Rust LaTeX-to-MathML crates and
+  native MathML Core in 2026; recommended math-core, implemented in ldui-r0co
+  (`src/markdown/math/`).
 
 ## Component Documentation
 
