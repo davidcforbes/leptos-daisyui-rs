@@ -25,8 +25,10 @@
 //!   light and dark themes.
 //!
 //! Drives the general demo app (`html_target: None`) through
-//! `cargo xtask test-math`. The demo is a debug build, so this exercises
-//! the guard's debug limit, the tighter of the two.
+//! `cargo xtask test-math`. The lane builds the demo with `--release`, so
+//! the "at the limit" formula exercises the guard's release limit (64
+//! entries) in real wasm; the debug limit (20) rests on the native
+//! measurements in `src/markdown/math/guard.rs` and its 1 MiB-stack test.
 mod common;
 
 use common::axe::assert_axe_clean;
