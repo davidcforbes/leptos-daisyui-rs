@@ -26,7 +26,16 @@ ARITY = {
     "RaiseBox": 2, "Genfrac": 6, "MathChoice": 4, "Prescript": 3,
 }
 
+# Zero-argument kinds that print nothing (switches, spacing). The guard
+# never lets one of these complete another command's argument, so if
+# math-core skips them while reading arguments the guard over-counts.
+SILENT = {
+    "Relax", "Limits", "NoNumber", "Style", "TransformSwitch", "Shove",
+    "Space", "NonBreakingSpace", "NewLine", "HLine",
+}
+
 entries = {}
+silent = set()
 pat = re.compile(r'^\s*((?:"[^"]*"\s*\|\s*)*"[^"]*")\s*=>\s*([A-Za-z]+)(.*)$')
 # Join a block arm (`"name" => {` + body on the next line) onto one line.
 src = re.sub(r'=>\s*\{\s*\n\s*', '=> ', src)
@@ -48,10 +57,16 @@ for line in src.splitlines():
         n = 0
     else:
         n = 1
+    is_silent = kind in SILENT or (
+        kind == "MathOrTextMode" and re.match(r"\(&(Space|NonBreakingSpace)", rest)
+    )
     for name in names:
-        if not re.fullmatch(r"[A-Za-z]+", name) or n == 0:
+        if not re.fullmatch(r"[A-Za-z]+", name):
             continue
-        entries[name] = max(n, entries.get(name, 0))
+        if n > 0:
+            entries[name] = max(n, entries.get(name, 0))
+        elif is_silent:
+            silent.add(name)
 
 rows = sorted(entries.items())
 out = [
@@ -67,6 +82,14 @@ out = [
     "pub(super) const ARGUMENT_COMMANDS: &[(&str, u8)] = &[",
 ]
 out += [f'    ("{n}", {a}),' for n, a in rows]
+out += [
+    "];",
+    "",
+    r"/// Zero-argument words that print nothing (`\relax`, `\displaystyle`,",
+    r"/// `\quad`, ...), sorted. They never complete another command's argument.",
+    "pub(super) const SILENT_COMMANDS: &[&str] = &[",
+]
+out += [f'    "{n}",' for n in sorted(silent - set(entries))]
 out += ["];", ""]
 open(sys.argv[2], "w", encoding="utf-8", newline="\n").write("\n".join(out))
-print(len(rows), "commands;", sum(1 for _, a in rows if a > 1), "with 2+ arguments")
+print(len(rows), "commands;", sum(1 for _, a in rows if a > 1), "with 2+ arguments;", len(silent - set(entries)), "silent")

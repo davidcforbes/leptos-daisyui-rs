@@ -13,10 +13,18 @@
 //! generated from the pinned version), because unbraced arguments nest
 //! without a single brace: `\frac1\frac1\frac1x`, `\sqrt[\sqrt[…]]`,
 //! `\frac\left(x\right)\frac…`. A command whose arguments are all in
-//! closes its level and counts as one argument of the level below. Where
-//! the simulation could be unsure it over-counts (a stray `[`, a prime or
-//! `&` never completes an argument), so it can refuse a strange formula but
-//! never under-count a deep one.
+//! closes its level and counts as one argument of the level below.
+//!
+//! The scan must read the source the way math-core's lexer does, because
+//! any character it counts that math-core skips lets a deep formula look
+//! flat. So `%` comments run to the end of the line, a `[` opens a level
+//! only right after a command still waiting for its first argument, and a
+//! closer (`}`, `]`, `\right`, `\end`) only closes its own kind when that
+//! is the innermost open level, never unwinding levels it did not open.
+//! Where the simulation could be unsure it over-counts (a prime, `&`, a
+//! switch such as `\displaystyle` or a space such as `\,` never completes
+//! an argument), so it can refuse a strange formula but never under-count
+//! a deep one.
 //!
 //! How deep is safe depends on the build profile, because an unoptimised
 //! build spends far more stack per level. Measured on a 1 MiB stack
@@ -98,10 +106,13 @@ enum Level {
     Group,
     /// A command still waiting for `left` arguments. A finished command
     /// counts as one argument of the level below, except a script (`^`,
-    /// `_`), which attaches to a base that was already counted.
+    /// `_`), which attaches to a base that was already counted. `fresh`
+    /// until its first argument arrives: only then can a `[` open an
+    /// optional argument.
     Args {
         left: u8,
         counts: bool,
+        fresh: bool,
     },
 }
 
@@ -123,7 +134,13 @@ impl Scan<'_> {
 
     /// One argument-sized unit finished: feed it to the waiting command.
     fn argument_done(&mut self) {
-        while let Some(Level::Args { left, counts }) = self.stack.last_mut() {
+        while let Some(Level::Args {
+            left,
+            counts,
+            fresh,
+        }) = self.stack.last_mut()
+        {
+            *fresh = false;
             *left = left.saturating_sub(1);
             if *left > 0 {
                 return;
@@ -136,20 +153,38 @@ impl Scan<'_> {
         }
     }
 
-    /// Close the innermost `level`; false when none is open.
+    /// Close `level` only when it is the innermost structural level (any
+    /// commands above it were opened inside it). A closer that does not
+    /// match leaves the stack alone and returns false: math-core reads a
+    /// stray `]` as a character, so it must never unwind levels it did not
+    /// open (`[{{{…]` would otherwise reset the count).
     fn close(&mut self, level: Level) -> bool {
-        match self.stack.iter().rposition(|l| *l == level) {
-            Some(at) => {
+        let structural = self
+            .stack
+            .iter()
+            .rposition(|l| !matches!(l, Level::Args { .. }));
+        match structural {
+            Some(at) if self.stack[at] == level => {
                 self.stack.truncate(at);
                 true
             }
-            None => false,
+            _ => false,
         }
     }
 
+    /// Skip whitespace and `%` comments, as math-core's lexer does: a
+    /// comment runs to the end of its line, and the whitespace after it
+    /// goes too.
     fn skip_ws(&mut self) {
-        let rest = &self.s[self.i..];
-        self.i += rest.len() - rest.trim_start().len();
+        loop {
+            let rest = &self.s[self.i..];
+            let trimmed = rest.trim_start();
+            self.i += rest.len() - trimmed.len();
+            if !trimmed.starts_with('%') {
+                return;
+            }
+            self.i += trimmed.find('\n').map_or(trimmed.len(), |nl| nl + 1);
+        }
     }
 
     /// Skip one token: a control word, a control symbol or a character.
@@ -183,19 +218,26 @@ impl Scan<'_> {
     }
 
     fn run(&mut self) -> Result<(), GuardError> {
-        while let Some(c) = self.s[self.i..].chars().next() {
+        loop {
+            self.skip_ws();
+            let Some(c) = self.s[self.i..].chars().next() else {
+                return Ok(());
+            };
             self.i += c.len_utf8();
             match c {
-                c if c.is_whitespace() => {}
                 '\\' => self.control()?,
                 '{' => self.push(Level::Brace)?,
                 '}' => {
                     self.close(Level::Brace);
                     self.argument_done();
                 }
-                '[' => self.push(Level::Bracket)?,
+                // An optional argument opens only right after a command
+                // still waiting for its first argument (`\sqrt[3]`); any
+                // other `[` is an ordinary character (`[0, 1)`).
+                '[' if matches!(self.stack.last(), Some(Level::Args { fresh: true, .. })) => {
+                    self.push(Level::Bracket)?
+                }
                 ']' => {
-                    // An optional argument closes; a lone `]` is a character.
                     if !self.close(Level::Bracket) {
                         self.argument_done();
                     }
@@ -203,26 +245,35 @@ impl Scan<'_> {
                 '^' | '_' => self.push(Level::Args {
                     left: 1,
                     counts: false,
+                    fresh: true,
                 })?,
                 // Primes and column separators never finish an argument.
                 '\'' | '&' => {}
                 _ => self.argument_done(),
             }
         }
-        Ok(())
     }
 
     fn control(&mut self) -> Result<(), GuardError> {
         let rest = &self.s[self.i..];
         let len = rest.bytes().take_while(u8::is_ascii_alphabetic).count();
         if len == 0 {
-            // Control symbol (`\{`, `\\`, `\,`): one token.
-            self.i += rest.chars().next().map_or(0, char::len_utf8);
-            self.argument_done();
+            // Control symbol (`\{`, `\\`, `\,`): one token, except the
+            // spacing ones, which never complete an argument.
+            let c = rest.chars().next();
+            self.i += c.map_or(0, char::len_utf8);
+            if !matches!(c, Some(',' | ':' | ';' | '!' | '>' | ' ')) {
+                self.argument_done();
+            }
             return Ok(());
         }
         let name = &rest[..len];
         self.i += len;
+        // A starred form (`\operatorname*`, `\tag*`) is one command; skipping
+        // the star can only over-count.
+        if self.s[self.i..].starts_with('*') {
+            self.i += 1;
+        }
         if MACRO_DEFINITIONS.contains(&name) {
             return Err(GuardError::MacroDefinition(name.to_string()));
         }
@@ -251,11 +302,13 @@ impl Scan<'_> {
                 self.close(Level::Group);
                 self.argument_done();
             }
+            _ if super::arity::SILENT_COMMANDS.binary_search(&name).is_ok() => {}
             _ => match arguments(name) {
                 0 => self.argument_done(),
                 n => self.push(Level::Args {
                     left: n,
                     counts: true,
+                    fresh: true,
                 })?,
             },
         }
@@ -295,6 +348,19 @@ mod tests {
                 format!("{}x{}", r"\frac{1}{".repeat(n), "}".repeat(n)),
             ),
             ("brace", format!("{}x{}", "{".repeat(n), "}".repeat(n))),
+            // Second review: a stray `[` must not let `]` unwind the braces
+            // opened after it, and comments must be skipped as math-core
+            // skips them (the `}` and `ab` below are never seen by it).
+            (
+                "stray brackets",
+                format!("{}x{}", "[{".repeat(n), "]}".repeat(n)),
+            ),
+            (
+                "comment brace",
+                format!("{}x{}", "{%}\n".repeat(n), "}".repeat(n)),
+            ),
+            ("comment frac", format!("{}x", "\\frac%ab\n1".repeat(n))),
+            ("silent relax", format!("{}x", r"\frac\relax1".repeat(n))),
             ("sqrt chain", format!("{} x", r"\sqrt".repeat(n))),
             (
                 "superscript",
@@ -400,6 +466,33 @@ mod tests {
         }
         let braces = format!("{}x{}", "{".repeat(20_000), "}".repeat(20_000));
         assert_eq!(check_formula(&braces), Err(GuardError::TooLong(40_001)));
+        // The second review's exact shape: `]` must not unwind the braces.
+        let stray = format!("[{}]", "{".repeat(60)).repeat(60);
+        assert_eq!(check_formula(&stray), Err(GuardError::TooDeep));
+        // Inside a real optional argument, math-core reads a `]` within
+        // braces as a character; it must not unwind them either.
+        let optional = format!("{}x", r"\sqrt[{{{]".repeat(MAX_MATH_DEPTH / 2 + 1));
+        assert_eq!(check_formula(&optional), Err(GuardError::TooDeep));
+        // Comments hide a closing brace / the arguments from math-core.
+        let hidden = "{%}\n".repeat(MAX_MATH_DEPTH + 1);
+        assert_eq!(check_formula(&hidden), Err(GuardError::TooDeep));
+    }
+
+    #[test]
+    fn brackets_and_comments_read_like_math_core() {
+        for f in [
+            r"\sqrt[3]{x} + \sqrt[n]{\frac{a}{b}}",
+            r"\left[ x \right] + \left( y \right]",
+            r"\begin{aligned} a &= b \\[2pt] c &= d \end{aligned}",
+            "a % a comment with { and [ in it\n + b",
+        ] {
+            assert_eq!(check_formula(f), Ok(()), "{f}");
+        }
+        // Interval notation leaves `[` unclosed; it is just a character.
+        let intervals = r"[a, b) \cup ".repeat(200);
+        assert_eq!(check_formula(&intervals), Ok(()));
+        let closed = r"[a, b] \cup ".repeat(200);
+        assert_eq!(check_formula(&closed), Ok(()));
     }
 
     /// The guard's real job: anything it accepts converts on a 1 MiB stack
