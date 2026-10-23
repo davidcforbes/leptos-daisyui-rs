@@ -285,11 +285,17 @@ async fn hostile(h: &pixelproof_web::Harness) {
             const colour = els[4].querySelector('mi');
             return {
                 imgs: root.querySelectorAll('img').length,
-                markupText: markup.querySelector('mtext')?.textContent || null,
+                // math-core writes text-mode spaces as U+00A0.
+                markupText: (markup.querySelector('mtext')?.textContent || '').replace(/\u00a0/g, ' '),
                 hrefs: root.querySelectorAll('[href]').length,
-                colourOk: getComputedStyle(colour).color === getComputedStyle(root).color,
+                // \color pins the whole formula; MarkdownView's own text
+                // colour must win.
+                colourOk: getComputedStyle(colour).color
+                    === getComputedStyle(els[4].closest('.lds-root')).color,
                 spaceWidth: els[7].querySelector('math').getBoundingClientRect().width,
+                fontPx: parseFloat(getComputedStyle(els[7]).fontSize),
                 rootWidth: root.getBoundingClientRect().width,
+                viewport: document.documentElement.clientWidth,
             };
         })()"#,
     )
@@ -302,7 +308,7 @@ async fn hostile(h: &pixelproof_web::Harness) {
     assert!(
         probe["markupText"]
             .as_str()
-            .is_some_and(|t| t.contains("<img")),
+            .is_some_and(|t| t.contains("<img src=x onerror=alert(1)>")),
         "{probe}"
     );
     assert_eq!(probe["hrefs"], json!(0), "{probe}");
@@ -313,8 +319,13 @@ async fn hostile(h: &pixelproof_web::Harness) {
     );
     assert!(
         probe["spaceWidth"].as_f64().unwrap_or(f64::MAX)
-            < probe["rootWidth"].as_f64().unwrap_or(0.0),
-        "an author-chosen length must not push math past its container: {probe}"
+            < 25.0 * probe["fontPx"].as_f64().unwrap_or(0.0),
+        "a 100em \\hspace must be dropped, not drawn: {probe}"
+    );
+    assert!(
+        probe["rootWidth"].as_f64().unwrap_or(f64::MAX)
+            <= probe["viewport"].as_f64().unwrap_or(0.0),
+        "a refused formula's long source must wrap, not widen the page: {probe}"
     );
 
     // The wasm instance is still alive: a click still updates a signal.

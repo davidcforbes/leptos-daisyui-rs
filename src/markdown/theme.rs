@@ -453,6 +453,9 @@ const BASE_STYLES: &str = r#"
 .lds-root .math-display { display: block; margin: 0.8em 0; overflow-x: auto; overflow-y: hidden; }
 .lds-root merror { background: transparent; border: 1px solid currentColor; color: inherit; }
 .lds-root [data-math-state="error"] {
+    /* The source of a refused formula can be one 8 KB word; let it wrap
+       instead of widening the page. */
+    overflow-wrap: anywhere;
     text-decoration: underline dotted;
     text-underline-offset: 0.2em;
     cursor: help;
