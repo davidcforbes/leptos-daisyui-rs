@@ -394,10 +394,33 @@ pub const SVG_ATTRIBUTES: [&str; 48] = [
     "data-href",
 ];
 
-/// Substrings that disqualify a whole `style` attribute (compared in lower
-/// case). A backslash is here because CSS escapes can spell any function
-/// name; the rest are belt and braces behind [`SAFE_CSS_FUNCTIONS`].
-const STYLE_FORBIDDEN: [&str; 5] = ["@import", "javascript:", "behavior", "-moz-binding", "\\"];
+/// Substrings that disqualify a whole CSS value, a `style` attribute or a
+/// CSS-parsed presentation attribute (compared in lower case). A backslash
+/// is here because CSS escapes can spell any function name (`u\72l(`), and
+/// `/*` because a comment hides text from a substring or name match while
+/// CSS skips it (`/**/position:fixed`, ldui-t26t). The rest are belt and
+/// braces behind [`SAFE_CSS_FUNCTIONS`].
+const STYLE_FORBIDDEN: [&str; 6] = [
+    "@import",
+    "javascript:",
+    "behavior",
+    "-moz-binding",
+    "\\",
+    "/*",
+];
+
+/// Allow-listed attributes whose values are never parsed as CSS, so they
+/// skip [`is_safe_css_attribute`] (as do `data-*` and `aria-*`).
+const NON_CSS_ATTRIBUTES: [&str; 8] = [
+    "xmlns",
+    "viewBox",
+    "class",
+    "role",
+    "d",
+    "points",
+    "preserveAspectRatio",
+    "xml:space",
+];
 
 /// The only CSS functions a kept `style` may call: variables, arithmetic,
 /// colours and transforms. Anything else (`url(`, `image-set(`,
@@ -440,27 +463,48 @@ const STYLE_POSITIONING: [&str; 6] = ["position", "top", "right", "bottom", "lef
 /// function outside [`SAFE_CSS_FUNCTIONS`], and no positioning property.
 pub fn is_safe_svg_style(value: &str) -> bool {
     let lower = value.to_ascii_lowercase();
-    if STYLE_FORBIDDEN.iter().any(|bad| lower.contains(bad)) {
+    if STYLE_FORBIDDEN.iter().any(|bad| lower.contains(bad)) || !css_functions_are_safe(&lower) {
         return false;
     }
+    !lower.split(';').any(|declaration| {
+        let property = declaration.split(':').next().unwrap_or_default().trim();
+        STYLE_POSITIONING.contains(&property) || property.starts_with("inset")
+    })
+}
+
+/// Whether every function a lower-cased CSS value calls is in
+/// [`SAFE_CSS_FUNCTIONS`]. Callers reject backslashes and comments first,
+/// so the name before each `(` is the name CSS sees.
+fn css_functions_are_safe(lower: &str) -> bool {
     let bytes = lower.as_bytes();
-    for (i, b) in bytes.iter().enumerate() {
+    bytes.iter().enumerate().all(|(i, b)| {
         if *b != b'(' {
-            continue;
+            return true;
         }
         let start = bytes[..i]
             .iter()
             .rposition(|c| !(c.is_ascii_alphanumeric() || *c == b'-' || *c == b'_'))
             .map_or(0, |p| p + 1);
         let name = &lower[start..i];
-        if !name.is_empty() && !SAFE_CSS_FUNCTIONS.contains(&name) {
-            return false;
-        }
-    }
-    !lower.split(';').any(|declaration| {
-        let property = declaration.split(':').next().unwrap_or_default().trim();
-        STYLE_POSITIONING.contains(&property) || property.starts_with("inset")
+        name.is_empty() || SAFE_CSS_FUNCTIONS.contains(&name)
     })
+}
+
+/// Whether the value of a CSS-parsed presentation attribute (`fill`,
+/// `stroke`, `transform`, `font-family`, ...) is safe to keep. SVG parses
+/// these with CSS grammar, escapes and comments included, so they get the
+/// same checks as `style`: no forbidden substring, functions only from
+/// [`SAFE_CSS_FUNCTIONS`], and `url(` only as an [`is_fragment_paint`] on
+/// `fill` or `stroke`.
+pub fn is_safe_css_attribute(name: &str, value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    if STYLE_FORBIDDEN.iter().any(|bad| lower.contains(bad)) {
+        return false;
+    }
+    if lower.contains("url(") {
+        return matches!(name, "fill" | "stroke") && is_fragment_paint(value);
+    }
+    css_functions_are_safe(&lower)
 }
 
 /// A same-document paint reference with an optional fallback colour, the
@@ -526,10 +570,14 @@ pub fn keep_svg_attribute(element: &str, name: &str, value: &str) -> bool {
         "href" => element == "a" && is_allowed_svg_link(value),
         "target" | "rel" => element == "a",
         "style" => is_safe_svg_style(value),
-        _ if value.to_ascii_lowercase().contains("url(") => {
-            matches!(name, "fill" | "stroke") && is_fragment_paint(value)
+        _ if !SVG_ATTRIBUTES.contains(&name) => false,
+        _ if name.starts_with("data-")
+            || name.starts_with("aria-")
+            || NON_CSS_ATTRIBUTES.contains(&name) =>
+        {
+            true
         }
-        _ => SVG_ATTRIBUTES.contains(&name),
+        _ => is_safe_css_attribute(name, value),
     }
 }
 
@@ -1522,6 +1570,64 @@ mod tests {
         // An id stays off every other element.
         assert!(!keep_svg_attribute("rect", "id", "x"));
         assert!(!keep_svg_attribute("stop", "id", "x"));
+    }
+
+    #[test]
+    fn css_escapes_cannot_spell_a_function_in_a_presentation_attribute() {
+        // ldui-t26t: SVG parses these with CSS grammar, escapes included.
+        for (name, bad) in [
+            ("fill", r"u\72l(https://evil.example/p.svg#a)"),
+            ("stroke", r"\75rl(//evil.example/x)"),
+            ("fill", r"url(#a) \75rl(https://x)"),
+            ("transform", r"\74ranslate(1px)"),
+            ("font-family", r"x\,y"),
+            ("fill", "image-set(\"https://x\" 1x)"),
+            ("color", "cross-fade(red, blue)"),
+        ] {
+            assert!(!keep_svg_attribute("path", name, bad), "{name}={bad:?}");
+        }
+    }
+
+    #[test]
+    fn css_comments_are_refused_in_style_and_attributes() {
+        for bad in [
+            "/**/position:fixed",
+            "--_fg:#333;/* x */top:0",
+            "fill:red/**/",
+            "posi/**/tion:fixed",
+        ] {
+            assert!(!is_safe_svg_style(bad), "{bad:?}");
+        }
+        assert!(!keep_svg_attribute("path", "fill", "red/**/"));
+        assert!(!keep_svg_attribute("path", "fill", "url(#a) red/*x*/"));
+    }
+
+    #[test]
+    fn real_presentation_values_and_non_css_attributes_still_pass() {
+        for (name, ok) in [
+            ("fill", "var(--pele-series-1,#4c6ef5)"),
+            ("stroke", "color-mix(in srgb,var(--_a) 75%,var(--_bg))"),
+            ("transform", "translate(12.5 4) rotate(-90)"),
+            ("font-family", "\"Inter\", system-ui, sans-serif"),
+            ("stop-color", "var(--pele-series-2,#f59f00)"),
+            ("width", "calc(100% - 4px)"),
+            ("fill", "none"),
+        ] {
+            assert!(keep_svg_attribute("path", name, ok), "{name}={ok:?}");
+        }
+        // Never CSS-parsed: kept whatever their characters.
+        assert!(keep_svg_attribute(
+            "g",
+            "data-href",
+            "https://x.example/wiki/A_(b)"
+        ));
+        assert!(keep_svg_attribute("g", "data-id", "node(1)"));
+        assert!(keep_svg_attribute("path", "d", "M0 0L10 10Z"));
+        assert!(keep_svg_attribute(
+            "svg",
+            "aria-roledescription",
+            "flowchart (beta)"
+        ));
     }
 
     #[test]
