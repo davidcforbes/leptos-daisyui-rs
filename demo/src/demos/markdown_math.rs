@@ -35,6 +35,8 @@ fn nested_fracs(n: usize) -> String {
 fn hostile_markdown() -> String {
     // A braced \frac level is two guard entries (the command and its brace).
     let under = leptos_daisyui_rs::markdown::math::guard::MAX_MATH_DEPTH / 2;
+    let unbraced = format!("{}x", r"\frac1".repeat(500));
+    let optional = format!("{}x{}", r"\sqrt[".repeat(200), "]{y}".repeat(200));
     format!(
         "Nested {under} fractions: ${under_src}$\n\n\
          Nested 500 levels: ${deep}$\n\n\
@@ -46,8 +48,6 @@ fn hostile_markdown() -> String {
          A huge space: $a\\hspace{{100em}}b$\n",
         under_src = nested_fracs(under),
         deep = nested_fracs(500),
-        unbraced = format!("{}x", r"\frac1".repeat(500)),
-        optional = format!("{}x{}", r"\sqrt[".repeat(200), "]{y}".repeat(200)),
     )
 }
 

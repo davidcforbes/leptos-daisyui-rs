@@ -9,7 +9,7 @@
 //! The scan simulates how math-core nests, on one stack: every `{`, `[`,
 //! `\left`, `\begin` and `\begingroup` opens a level, and so does every
 //! command still waiting for arguments. How many arguments each command
-//! takes comes from math-core's own command table ([`super::arity`],
+//! takes comes from math-core's own command table (`arity.rs`,
 //! generated from the pinned version), because unbraced arguments nest
 //! without a single brace: `\frac1\frac1\frac1x`, `\sqrt[\sqrt[…]]`,
 //! `\frac\left(x\right)\frac…`. A command whose arguments are all in
