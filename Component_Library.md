@@ -667,7 +667,8 @@ CSS is namespaced `.lds-` to avoid collisions.
 
 `MarkdownView` / `MarkdownInline` (reactive parse → render → post-process,
 link-click interception), `highlight` (syntax token→span flattening),
-`sanitize` (`is_safe_href`), KaTeX `math`, the daisyUI `data-theme` ↔ scheme
+`sanitize` (`is_safe_href`), `math` (`$…$`/`$$…$$` to native MathML with the
+Rust math-core crate, compiled in: no KaTeX, no CDN, ldui-r0co), the daisyUI `data-theme` ↔ scheme
 bridge (`daisyui_theme_to_scheme`), document `outline` + `stats`, image
 parse/round-trip, find/help overlays, image dialog, and the editor cluster.
 Depends on `editmark-core`. Mermaid diagrams are drawn by

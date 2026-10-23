@@ -233,6 +233,8 @@ pub mod typography_customizer;
 pub use typography_customizer::*;
 pub mod component_customizer;
 pub use component_customizer::*;
+pub mod markdown_math;
+pub use markdown_math::*;
 pub mod mermaid_display;
 pub use mermaid_display::*;
 pub mod rich_message;

@@ -1032,6 +1032,24 @@ fn rich_message_step() -> Step {
     }
 }
 
+/// Focused browser proof that `MarkdownView` math renders as native MathML
+/// through math-core (ldui-r0co): no KaTeX and no CDN, every everyday
+/// formula rendered with its TeX annotation and nothing stripped, broken
+/// formulas keep their source with the reason, hostile nesting is refused
+/// by the guard with the page still responsive, math follows a
+/// `data-theme` switch with no re-render, and every section is axe-clean in
+/// the light and dark themes. Lives on the general demo app
+/// (`html_target: None`) in its own file/step like [`rich_message_step`].
+fn math_step() -> Step {
+    Step {
+        name: "test-math",
+        run: Run::BrowserSuite {
+            test: "markdown_math_smoke",
+            html_target: None,
+        },
+    }
+}
+
 /// Focused browser proof that Mermaid renders through pele (ldui-qe72):
 /// `MermaidDisplay` draws `svg.pele` for four diagram types (Venn among
 /// them), broken source shows pele's message in the error box, a
@@ -1105,6 +1123,7 @@ fn full_steps() -> Vec<Step> {
     steps.push(ld_pattern_step());
     steps.push(mermaid_pele_step());
     steps.push(rich_message_step());
+    steps.push(math_step());
     steps
 }
 
@@ -2941,6 +2960,7 @@ fn main() -> ExitCode {
         "test-ld-pattern" => run_steps(&[ld_pattern_step(), ld_pattern_snapshot_step()]),
         "test-mermaid-pele" => run_steps(&[mermaid_pele_step()]),
         "test-rich-message" => run_steps(&[rich_message_step()]),
+        "test-math" => run_steps(&[math_step()]),
         "capture-design" => run_steps(&[design_capture_step()]),
         "gen-tokens" => {
             let check = std::env::args().any(|a| a == "--check");
@@ -2956,7 +2976,7 @@ fn main() -> ExitCode {
         other => {
             eprintln!("xtask: unknown subcommand {other:?}");
             eprintln!(
-                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-week-planner|test-month-roster|test-selectable-summary|test-person-picker|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-snapshot-table-page-filter-actions|test-helpdesk|test-ai-chat|test-ai-chat-knowledge|test-server-table-column-tools|test-collapse-naming|test-data-table-fit|test-app-shell|test-field-context-scoping|test-entity-draft-row|test-softphone|test-help-hint|test-focus-ring|test-row-action-presets|test-server-cursor-footer|test-ld-pattern|test-mermaid-pele|test-rich-message|capture-design|gen-tokens|check-sibling-tokens|clean-cache|bump>"
+                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-week-planner|test-month-roster|test-selectable-summary|test-person-picker|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-snapshot-table-page-filter-actions|test-helpdesk|test-ai-chat|test-ai-chat-knowledge|test-server-table-column-tools|test-collapse-naming|test-data-table-fit|test-app-shell|test-field-context-scoping|test-entity-draft-row|test-softphone|test-help-hint|test-focus-ring|test-row-action-presets|test-server-cursor-footer|test-ld-pattern|test-mermaid-pele|test-rich-message|test-math|capture-design|gen-tokens|check-sibling-tokens|clean-cache|bump>"
             );
             ExitCode::from(2)
         }
@@ -3594,6 +3614,21 @@ pub fn r() -> f32 { radius::CARD }
         ));
         assert!(!gate_steps().iter().any(|s| s.name == "test-rich-message"));
         assert!(full_steps().iter().any(|s| s.name == "test-rich-message"));
+    }
+
+    #[test]
+    fn math_step_is_in_process_and_full_only() {
+        let step = math_step();
+        assert_eq!(step.name, "test-math");
+        assert!(matches!(
+            step.run,
+            Run::BrowserSuite {
+                test: "markdown_math_smoke",
+                html_target: None
+            }
+        ));
+        assert!(!gate_steps().iter().any(|s| s.name == "test-math"));
+        assert!(full_steps().iter().any(|s| s.name == "test-math"));
     }
 
     #[test]

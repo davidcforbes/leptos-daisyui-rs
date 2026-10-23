@@ -442,6 +442,21 @@ const BASE_STYLES: &str = r#"
     --pele-border: color-mix(in srgb, var(--lds-text) 50%, var(--lds-bg));
     --pele-accent: var(--lds-link);
 }
+/* Math (src/markdown/math, ldui-r0co) is native MathML from math-core. The
+   fonts are OpenType MATH fonts a system already has (Cambria Math on
+   Windows, STIX Two Math on macOS/iOS), or one the host self-hosts under
+   the first name. Colour is inherited, so a theme switch recolours math with
+   no re-render; math-core's \color is dropped by the sanitiser for the same
+   reason. A formula that could not render keeps its $...$ source, with the
+   reason in its title. */
+.lds-root math { font-family: "Latin Modern Math", "STIX Two Math", "Cambria Math", math; }
+.lds-root .math-display { display: block; margin: 0.8em 0; overflow-x: auto; overflow-y: hidden; }
+.lds-root merror { background: transparent; border: 1px solid currentColor; color: inherit; }
+.lds-root [data-math-state="error"] {
+    text-decoration: underline dotted;
+    text-underline-offset: 0.2em;
+    cursor: help;
+}
 .lds-root .mermaid-fallback { display: flex; flex-direction: column; gap: 0.5em; width: 100%; }
 .lds-root .mermaid-fallback > pre { margin: 0; }
 .lds-root .mermaid-error {

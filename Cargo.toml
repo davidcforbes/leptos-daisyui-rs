@@ -127,6 +127,11 @@ send_wrapper = "0.6"
 # transitively, so this adds no download.
 unicode-segmentation = "1.13"
 editmark-core = { path = "../editmark/editmark-core" }
+# LaTeX -> MathML Core for MarkdownView's $...$ / $$...$$ (src/markdown/math,
+# ldui-r0co). Pure Rust, no_std + alloc, no JavaScript and no CDN. Pinned
+# exactly: the sanitiser's allow-list is written against this version's
+# output vocabulary, and assets/math-core/mathmlfixes.css is this tag's copy.
+math-core = { version = "=0.9.0", default-features = false }
 
 [dev-dependencies]
 # SHA-256 pin of the vendored pele bundle (src/pele.rs, ldui-o55o). Already in

@@ -421,7 +421,7 @@ pub fn MarkdownGraphicEditor(
         let dirty_html = html_el.inner_html();
         let current = source.get_untracked();
         // Pass the canonical source so dom_to_markdown can substitute
-        // atomic-widget regions (mermaid SVG, KaTeX HTML, highlighted
+        // atomic-widget regions (mermaid SVG, MathML, highlighted
         // code) with their `data-em-src` slice instead of re-serializing
         // the rendered DOM (em-berj.4).
         let new_markdown = dom_to_markdown_with_source(&dirty_html, Some(&current));
@@ -1192,11 +1192,12 @@ fn render_into(host: &HtmlElement, source: &str) {
     // changes — see the is_self_set guard at the render_into call site — so it
     // is not a per-keystroke cost.)
     super::view::process_mermaid(host);
-    // Render block ($$...$$) math via KaTeX. Display math is also an atomic,
-    // contenteditable=false widget, so this is display-only + source-overlay
-    // editing, exactly like mermaid. Inline ($...$) math is deliberately left
-    // as editable source: it lives in editable text, and replacing it with
-    // KaTeX markup would corrupt the DOM->markdown round-trip on the next edit.
+    // Render block ($$...$$) math as MathML (math-core). Display math is also
+    // an atomic, contenteditable=false widget, so this is display-only +
+    // source-overlay editing, exactly like mermaid. Inline ($...$) math is
+    // deliberately left as editable source: it lives in editable text, and
+    // replacing it with MathML would corrupt the DOM->markdown round-trip on
+    // the next edit.
     super::math::render_math_display_only(host);
 }
 

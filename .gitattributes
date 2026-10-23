@@ -3,3 +3,5 @@
 .beads/issues.jsonl merge=beads
 # Vendored pele bundle: byte-exact, SHA-256 pinned in src/pele.rs (ldui-o55o).
 assets/pele/pele.global.js -text
+# Vendored math-core stylesheet: byte-exact, SHA-256 pinned in src/markdown/math/mod.rs (ldui-r0co).
+assets/math-core/mathmlfixes.css -text

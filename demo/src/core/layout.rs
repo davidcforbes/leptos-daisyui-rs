@@ -474,6 +474,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     value: "mermaid_display",
                 },
                 ComponentItem {
+                    name: "Markdown Math",
+                    href: "/components/markdown_math",
+                    value: "markdown_math",
+                },
+                ComponentItem {
                     name: "Rich Message",
                     href: "/components/rich_message",
                     value: "rich_message",

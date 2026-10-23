@@ -4,7 +4,8 @@
 //!
 //! Moved here from editmark-leptos so any Leptos/daisyUI app can render
 //! markdown with the same view-only renderer, syntax highlighter, link
-//! sanitizer, KaTeX math hook, and DaisyUI `data-theme` → palette bridge.
+//! sanitizer, math (native MathML via the Rust math-core crate, see
+//! [`math`]), and DaisyUI `data-theme` → palette bridge.
 //! editmark-leptos now consumes these from here and re-exports them for its
 //! existing consumers (e.g. llm-wiki), so its public surface is unchanged.
 //!
