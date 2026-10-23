@@ -422,7 +422,8 @@ const BASE_STYLES: &str = r#"
     border-top: 1px solid rgba(127,127,127,0.25);
     margin: 1.2em 0;
 }
-.lds-root .mermaid { display: flex; justify-content: center; margin: 0.8em 0; }
+/* contain: paint keeps a drawn diagram inside its box (ldui-o55o). */
+.lds-root .mermaid { display: flex; justify-content: center; margin: 0.8em 0; contain: paint; }
 .lds-root .mermaid svg { max-width: 100%; height: auto; }
 /* pele (src/pele.rs) takes every diagram colour from --pele-* variables, so
    mapping them onto this palette recolours drawn diagrams on a theme switch

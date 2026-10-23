@@ -678,8 +678,9 @@ Depends on `editmark-core`. Mermaid diagrams are drawn by
 ### `MermaidDisplay` and the `pele` worker
 
 `MermaidDisplay` renders Mermaid source (all 33 Mermaid 12 diagram types,
-frontmatter and `%%{init}%%` included) with pele 1.8.0, pinned in
-`pele::PELE_VERSION` and vendored, SHA-256 pinned, in `assets/pele/`.
+frontmatter and `%%{init}%%` included) with pele, vendored in `assets/pele/`
+and pinned by SHA-256: a build of upstream 1.9.0 plus the review's hang
+fixes (`pele::PELE_SOURCE`, `pele::PELE_BUNDLE_SHA256`).
 Rendering is asynchronous and happens in a same-origin Web Worker (ldui-o55o):
 the figure shows the source in a muted `pre` meanwhile, then the sanitised SVG.
 pele's error message, escaped, appears in the `mermaid-error` box for invalid

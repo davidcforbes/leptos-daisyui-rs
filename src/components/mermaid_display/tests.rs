@@ -90,7 +90,7 @@ fn outcome_maps_svg_to_rendered_and_errors_to_the_error_box() {
     assert!(!html.contains("<script>"), "{html}");
     assert_eq!(stripped, None);
 
-    let (html, state, _) = outcome_html(Err(PeleRenderError::timed_out()));
+    let (html, state, _) = outcome_html(Err(PeleRenderError::timed_out(2_000)));
     assert_eq!(state, MermaidRenderState::Error);
     assert!(html.contains("data-pele-error=\"timeout\""), "{html}");
 }

@@ -10,9 +10,11 @@
 //!
 //! In a dedicated, same-origin Web Worker, never on the page's UI thread and
 //! never from a CDN. pele draws synchronously, and a security review of
-//! 1.8.0 found hostile inputs under its own 50 KB limit that run for 5 to
-//! 20+ seconds (a 663-byte Gantt chart takes 7 s or more; pele beads
-//! `pele-qd0`). So:
+//! 1.8.0 found hostile inputs under its own 50 KB limit that ran for 5 to
+//! 20+ seconds (a 663-byte Gantt chart took 7 s or more; pele beads
+//! `pele-qd0`). The vendored build ([`PELE_SOURCE`]) fixes every one of
+//! them, so the worker and its time limit are now defence in depth against
+//! the hangs nobody has found yet. So:
 //!
 //! - the host serves `assets/pele/` (the verified bundle plus this crate's
 //!   `ldui-pele-worker.js`) from its own origin, at [`PELE_DEFAULT_ASSET_BASE`]
@@ -28,8 +30,8 @@
 //!
 //! Under a CSP the worker needs only `script-src 'self'`; pele uses no
 //! `eval`, `new Function`, `fetch` or dynamic import. `assets/pele/README.md`
-//! records the bundle's provenance: SHA-256 [`PELE_BUNDLE_SHA256`], the npm
-//! integrity and attestation, and a byte-for-byte rebuild from tag `1.8.0`.
+//! records the bundle's provenance: SHA-256 [`PELE_BUNDLE_SHA256`], rebuilt
+//! byte for byte from [`PELE_SOURCE`].
 //!
 //! ```no_run
 //! // The host serves assets/pele/ at /static/pele/ instead of /pele/.
@@ -69,16 +71,22 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 
-/// The pinned pele release. Exact, never a range: the SVG pele emits is what
-/// the `--pele-*` theme mapping, the sanitiser allow-list and the browser
-/// lane target. Keep in step with editmark's `PELE_VERSION`
-/// (editmark-web/editmark-renderer.js) and with [`PELE_BUNDLE_SHA256`].
-pub const PELE_VERSION: &str = "1.8.0";
+/// The pele version the vendored bundle's banner names. Exact, never a
+/// range: the SVG pele emits is what the `--pele-*` theme mapping, the
+/// sanitiser allow-list and the browser lane target. The bundle is not an
+/// npm release (see [`PELE_SOURCE`]), so pin it by [`PELE_BUNDLE_SHA256`].
+pub const PELE_VERSION: &str = "1.9.0";
 
-/// SHA-256 of `assets/pele/pele.global.js`, the verified [`PELE_VERSION`]
-/// bundle. A unit test fails if the vendored file drifts from it.
+/// Where the vendored bundle is built from: the `perf-fixes` branch of the
+/// owner's fork, 26 commits on upstream `1.9.0` (`e7f092a`) that fix every
+/// hostile-input hang of the pele review. Switch back to an npm release,
+/// with its attestation, once upstream ships these fixes.
+pub const PELE_SOURCE: &str = "https://github.com/davidcforbes/pele commit 4d3aaf68e87f7a4c9146c8300fbb14ec82d1af2a (perf-fixes)";
+
+/// SHA-256 of `assets/pele/pele.global.js`, rebuilt byte for byte from
+/// [`PELE_SOURCE`]. A unit test fails if the vendored file drifts from it.
 pub const PELE_BUNDLE_SHA256: &str =
-    "9bf34b3a9a19351dc69d0d238e365560331a8ae392c41656df7f5090653253d0";
+    "f2c82fb8abe4768937735692d6e2ca42ffad6371615a2d031f1f04c4bc686868";
 
 /// File name of pele's browser bundle under the asset base.
 pub const PELE_FILE: &str = "pele.global.js";
@@ -92,7 +100,7 @@ pub const PELE_DEFAULT_ASSET_BASE: &str = "/pele";
 
 /// How long one diagram may take in the worker before the worker is
 /// terminated and the render fails with a `timeout` error.
-pub const PELE_RENDER_TIMEOUT_MS: i32 = 2_000;
+pub const PELE_RENDER_TIMEOUT_MS: u32 = 2_000;
 
 /// Link schemes pele may emit (`linkSchemes`); the sanitiser enforces the
 /// same list.
@@ -228,14 +236,18 @@ impl PeleRenderError {
         )
     }
 
-    /// The diagram overran [`PELE_RENDER_TIMEOUT_MS`] and was stopped.
-    pub fn timed_out() -> Self {
+    /// The diagram overran its time limit of `limit_ms` and was stopped.
+    pub fn timed_out(limit_ms: u32) -> Self {
         Self::new(
             "timeout",
-            format!(
-                "the diagram took longer than {:.1} s to draw and was stopped",
-                f64::from(PELE_RENDER_TIMEOUT_MS) / 1000.0
-            ),
+            if limit_ms.is_multiple_of(1000) {
+                format!(
+                    "the diagram took longer than {} s to draw and was stopped",
+                    limit_ms / 1000
+                )
+            } else {
+                format!("the diagram took longer than {limit_ms} ms to draw and was stopped")
+            },
         )
     }
 
@@ -301,21 +313,42 @@ impl std::error::Error for PeleRenderError {}
 
 // ── Sanitiser (pure, native-testable) ───────────────────────────────────────
 
-/// Elements pele 1.8.0 emits with images off, per the review's scan of the
-/// 761-example docs corpus and of every renderer, plus the inert `line`
-/// (and its `x1`..`y2` attributes) so a diagram that draws one is not
-/// blanked. Anything else, including
-/// `foreignObject`, `image`, `style`, `script`, `use` and animation elements,
-/// is dropped together with its subtree.
-pub const SVG_ELEMENTS: [&str; 13] = [
-    "svg", "g", "path", "rect", "circle", "ellipse", "polygon", "text", "tspan", "title", "desc",
-    "a", "line",
+/// Elements the vendored pele emits with images off, per the review's scan
+/// of the 761-example docs corpus and of every renderer: the 1.8.0 set,
+/// plus `defs`, `linearGradient` and `stop` for the sankey gradients the
+/// 1.9.0 line draws whenever an `idPrefix` is passed (always, here), plus
+/// the inert `line` so a diagram that draws one is not blanked. Anything
+/// else, including `foreignObject`, `image`, `style`, `script`, `use` and
+/// animation elements, is dropped together with its subtree.
+pub const SVG_ELEMENTS: [&str; 16] = [
+    "svg",
+    "g",
+    "path",
+    "rect",
+    "circle",
+    "ellipse",
+    "polygon",
+    "text",
+    "tspan",
+    "title",
+    "desc",
+    "a",
+    "line",
+    "defs",
+    "linearGradient",
+    "stop",
 ];
 
-/// Attributes kept on any allowed element. `id` (only on `title` and
-/// `desc`), `href`, `target` and `rel` (only on `a`) and `style` have their
-/// own rules in [`keep_svg_attribute`].
-pub const SVG_ATTRIBUTES: [&str; 43] = [
+/// Attributes kept on any allowed element. `id` (only on `title`, `desc`
+/// and `linearGradient`), `href`, `target` and `rel` (only on `a`), `style`,
+/// and any value containing `url(` have their own rules in
+/// [`keep_svg_attribute`].
+pub const SVG_ATTRIBUTES: [&str; 48] = [
+    "text-decoration",
+    "baseline-shift",
+    "gradientUnits",
+    "offset",
+    "stop-color",
     "xmlns",
     "viewBox",
     "width",
@@ -362,16 +395,95 @@ pub const SVG_ATTRIBUTES: [&str; 43] = [
 ];
 
 /// Substrings that disqualify a whole `style` attribute (compared in lower
-/// case): anything that could load a resource or run script.
-const STYLE_FORBIDDEN: [&str; 7] = [
-    "url(",
-    "expression(",
-    "@import",
-    "javascript:",
-    "behavior",
-    "-moz-binding",
-    "\\",
+/// case). A backslash is here because CSS escapes can spell any function
+/// name; the rest are belt and braces behind [`SAFE_CSS_FUNCTIONS`].
+const STYLE_FORBIDDEN: [&str; 5] = ["@import", "javascript:", "behavior", "-moz-binding", "\\"];
+
+/// The only CSS functions a kept `style` may call: variables, arithmetic,
+/// colours and transforms. Anything else (`url(`, `image-set(`,
+/// `-webkit-image-set(`, `image(`, `cross-fade(`, `element(`, `src(`,
+/// `expression(`, ...) could load a resource, so the whole attribute goes.
+pub const SAFE_CSS_FUNCTIONS: [&str; 26] = [
+    "var",
+    "calc",
+    "min",
+    "max",
+    "clamp",
+    "rgb",
+    "rgba",
+    "hsl",
+    "hsla",
+    "hwb",
+    "lab",
+    "lch",
+    "oklab",
+    "oklch",
+    "color",
+    "color-mix",
+    "translate",
+    "translatex",
+    "translatey",
+    "rotate",
+    "scale",
+    "scalex",
+    "scaley",
+    "matrix",
+    "skewx",
+    "skewy",
 ];
+
+/// Properties that could lift a diagram out of its box and over the page
+/// (an overlay over the host's own controls). pele never sets them.
+const STYLE_POSITIONING: [&str; 6] = ["position", "top", "right", "bottom", "left", "z-index"];
+
+/// Whether a `style` value is safe to keep: no forbidden substring, no CSS
+/// function outside [`SAFE_CSS_FUNCTIONS`], and no positioning property.
+pub fn is_safe_svg_style(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    if STYLE_FORBIDDEN.iter().any(|bad| lower.contains(bad)) {
+        return false;
+    }
+    let bytes = lower.as_bytes();
+    for (i, b) in bytes.iter().enumerate() {
+        if *b != b'(' {
+            continue;
+        }
+        let start = bytes[..i]
+            .iter()
+            .rposition(|c| !(c.is_ascii_alphanumeric() || *c == b'-' || *c == b'_'))
+            .map_or(0, |p| p + 1);
+        let name = &lower[start..i];
+        if !name.is_empty() && !SAFE_CSS_FUNCTIONS.contains(&name) {
+            return false;
+        }
+    }
+    !lower.split(';').any(|declaration| {
+        let property = declaration.split(':').next().unwrap_or_default().trim();
+        STYLE_POSITIONING.contains(&property) || property.starts_with("inset")
+    })
+}
+
+/// A same-document paint reference with an optional fallback colour, the
+/// only `url(` an attribute may carry: `url(#ldui-pele-3-sankey-1a2b)` or
+/// `url(#id) var(--pele-series-1,#4c6ef5)`, as pele 1.9.0's sankey links
+/// emit. The fallback is a colour: it may contain spaces (`rgb(1, 2, 3)`
+/// from a user `style`), but only the [`SAFE_CSS_FUNCTIONS`] and no quotes.
+pub fn is_fragment_paint(value: &str) -> bool {
+    let Some(rest) = value.trim().strip_prefix("url(#") else {
+        return false;
+    };
+    let Some((id, fallback)) = rest.split_once(')') else {
+        return false;
+    };
+    let id_ok = !id.is_empty()
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+    let fallback = fallback.trim();
+    let fallback_ok =
+        fallback.is_empty() || (!fallback.contains(['"', '\'']) && is_safe_svg_style(fallback));
+    id_ok && fallback_ok
+}
 
 /// One node of a parsed SVG: the sanitiser's input and output. The browser
 /// builds it from a `DOMParser` tree; tests build it by hand.
@@ -410,12 +522,12 @@ pub fn keep_svg_attribute(element: &str, name: &str, value: &str) -> bool {
         return false;
     }
     match name {
-        "id" => matches!(element, "title" | "desc"),
+        "id" => matches!(element, "title" | "desc" | "linearGradient"),
         "href" => element == "a" && is_allowed_svg_link(value),
         "target" | "rel" => element == "a",
-        "style" => {
-            let lower = value.to_ascii_lowercase();
-            !STYLE_FORBIDDEN.iter().any(|bad| lower.contains(bad))
+        "style" => is_safe_svg_style(value),
+        _ if value.to_ascii_lowercase().contains("url(") => {
+            matches!(name, "fill" | "stroke") && is_fragment_paint(value)
         }
         _ => SVG_ATTRIBUTES.contains(&name),
     }
@@ -516,6 +628,9 @@ pub struct PeleOptions {
     pub font_family_mono: Option<String>,
     /// Accessibility-ID prefix (`idPrefix`); see [`next_id_prefix`].
     pub id_prefix: Option<String>,
+    /// Time limit for this render in milliseconds; `None` is
+    /// [`PELE_RENDER_TIMEOUT_MS`].
+    pub timeout_ms: Option<u32>,
 }
 
 /// A drawn diagram.
@@ -528,7 +643,7 @@ pub struct PeleSvg {
     /// Natural height in pixels.
     pub height: f64,
     /// Elements and attributes the sanitiser removed: `0` for everything
-    /// pele 1.8.0 is known to emit. Exposed as `data-pele-stripped`.
+    /// the vendored pele is known to emit. Exposed as `data-pele-stripped`.
     pub stripped: usize,
 }
 
@@ -558,6 +673,7 @@ pub fn pele_options_for(container: Option<&web_sys::Element>) -> PeleOptions {
         font_family: read("--pele-font").or_else(|| read("font-family")),
         font_family_mono: read("--pele-font-mono"),
         id_prefix: Some(next_id_prefix()),
+        timeout_ms: None,
     }
 }
 
@@ -822,12 +938,13 @@ fn dispatch(job: &Job) -> Result<i32, PeleRenderError> {
         .map_err(|_| PeleRenderError::load_failed(&pele_worker_url()))?;
 
     let id = job.id;
-    let on_timeout = Closure::once_into_js(move || on_job_timeout(id));
+    let limit = job.options.timeout_ms.unwrap_or(PELE_RENDER_TIMEOUT_MS);
+    let on_timeout = Closure::once_into_js(move || on_job_timeout(id, limit));
     web_sys::window()
         .ok_or_else(|| PeleRenderError::new("render", "no window"))?
         .set_timeout_with_callback_and_timeout_and_arguments_0(
             on_timeout.unchecked_ref(),
-            PELE_RENDER_TIMEOUT_MS,
+            i32::try_from(limit).unwrap_or(i32::MAX),
         )
         .map_err(|_| PeleRenderError::new("render", "could not arm the render timeout"))
 }
@@ -889,12 +1006,15 @@ fn on_worker_error(event: web_sys::Event) {
     pump();
 }
 
-fn on_job_timeout(id: u64) {
+fn on_job_timeout(id: u64, limit_ms: u32) {
     let Some(job) = take_current(|current| current == id) else {
         return;
     };
     retire_worker();
-    settle(job, &failure_reply(id, &PeleRenderError::timed_out()));
+    settle(
+        job,
+        &failure_reply(id, &PeleRenderError::timed_out(limit_ms)),
+    );
     pump();
 }
 
@@ -1063,9 +1183,11 @@ mod tests {
         assert_eq!(load.code, "load");
         assert!(load.message.contains(PELE_VERSION), "{}", load.message);
         assert!(load.message.contains("/vendor/ldui-pele-worker.js"));
-        let timeout = PeleRenderError::timed_out();
+        let timeout = PeleRenderError::timed_out(PELE_RENDER_TIMEOUT_MS);
         assert_eq!(timeout.code, "timeout");
-        assert!(timeout.message.contains("2.0 s"), "{}", timeout.message);
+        assert!(timeout.message.contains("than 2 s"), "{}", timeout.message);
+        let short = PeleRenderError::timed_out(250);
+        assert!(short.message.contains("than 250 ms"), "{}", short.message);
     }
 
     // ---- sanitiser ------------------------------------------------------
@@ -1270,6 +1392,136 @@ mod tests {
         ] {
             assert!(!keep_svg_attribute("rect", "style", bad), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn style_may_call_only_variable_arithmetic_colour_and_transform_functions() {
+        for ok in [
+            "--_fg:var(--pele-fg, #333)",
+            "width:calc(100% - 4px);max-width:min(100%, 40rem)",
+            "fill:rgb(1 2 3);stroke:oklch(70% 0.1 200)",
+            "fill:color-mix(in srgb, var(--a) 40%, transparent)",
+            "transform:translate(4px, 2px) rotate(45deg)",
+            "font-family:\"Inter\", sans-serif",
+        ] {
+            assert!(is_safe_svg_style(ok), "{ok:?}");
+        }
+        for bad in [
+            "background:image-set(\"https://x/p.png\" 1x)",
+            "background:-webkit-image-set(\"https://x/p.png\" 1x)",
+            "background:cross-fade(\"https://x/a.png\", red)",
+            "background:image(\"https://x/p.png\")",
+            "background:element(#x)",
+            "background:src(\"https://x\")",
+            "fill:URL(#g)",
+            "width:Expression(alert(1))",
+        ] {
+            assert!(!is_safe_svg_style(bad), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn style_may_not_position_a_diagram_over_the_page() {
+        for bad in [
+            "position:fixed",
+            "--_fg:#333; position : absolute",
+            "inset:0",
+            "inset-block-start:0",
+            "top:0",
+            "left:-10px",
+            "z-index:9999",
+        ] {
+            assert!(!is_safe_svg_style(bad), "{bad:?}");
+        }
+        assert!(is_safe_svg_style("--position:1;--_top:2"));
+    }
+
+    #[test]
+    fn url_in_an_attribute_must_be_a_fragment_paint_on_fill_or_stroke() {
+        for ok in [
+            "url(#ldui-pele-3-sankey-1a2b)",
+            "url(#g) #4c6ef5",
+            "url(#g_1) rgb(1,2,3)",
+            "url(#g) var(--pele-series-1,#4c6ef5)",
+            "url(#g) rgb(1, 2, 3)",
+        ] {
+            assert!(is_fragment_paint(ok), "{ok:?}");
+            assert!(keep_svg_attribute("path", "fill", ok), "{ok:?}");
+            assert!(keep_svg_attribute("path", "stroke", ok), "{ok:?}");
+        }
+        for bad in [
+            "url(https://evil.example/p.svg#a)",
+            "url(#a) url(https://x)",
+            "url(#a b)",
+            "url(#)",
+            "url(#a",
+            "URL(//evil.example/x)",
+            "url('#a')",
+            "url(#a) image-set(\"https://x\" 1x)",
+            "url(#a) red\\",
+        ] {
+            assert!(!keep_svg_attribute("path", "fill", bad), "{bad:?}");
+        }
+        assert!(!keep_svg_attribute("path", "color", "url(#a)"));
+        assert!(!keep_svg_attribute("text", "font-family", "url(#a)"));
+        assert!(keep_svg_attribute("path", "fill", "#4c6ef5"));
+    }
+
+    #[test]
+    fn sankey_gradients_survive() {
+        let svg = el(
+            "svg",
+            &[],
+            vec![
+                el(
+                    "defs",
+                    &[],
+                    vec![el(
+                        "linearGradient",
+                        &[
+                            ("id", "ldui-pele-3-sankey-1a2b"),
+                            ("gradientUnits", "userSpaceOnUse"),
+                            ("x1", "0"),
+                            ("x2", "100"),
+                        ],
+                        vec![
+                            el(
+                                "stop",
+                                &[("offset", "0%"), ("stop-color", "#4c6ef5")],
+                                vec![],
+                            ),
+                            el(
+                                "stop",
+                                &[("offset", "100%"), ("stop-color", "#f59f00")],
+                                vec![],
+                            ),
+                        ],
+                    )],
+                ),
+                el(
+                    "path",
+                    &[
+                        ("d", "M0 0"),
+                        ("fill", "url(#ldui-pele-3-sankey-1a2b) #4c6ef5"),
+                    ],
+                    vec![],
+                ),
+                el(
+                    "text",
+                    &[
+                        ("text-decoration", "underline"),
+                        ("baseline-shift", "super"),
+                    ],
+                    vec![text("x")],
+                ),
+            ],
+        );
+        let (clean, stripped) = sanitize_svg_tree(&svg).unwrap();
+        assert_eq!(stripped, 0);
+        assert_eq!(clean, svg);
+        // An id stays off every other element.
+        assert!(!keep_svg_attribute("rect", "id", "x"));
+        assert!(!keep_svg_attribute("stop", "id", "x"));
     }
 
     #[test]

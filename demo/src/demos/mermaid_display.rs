@@ -14,8 +14,8 @@ const VENN_SOURCE: &str = r#"venn-beta
 const BROKEN_SOURCE: &str = "flowchart LR\n  A[Start] --> B{Decision\n  B --> C";
 
 /// pele review repro pele-qd0.4: a 663-byte Gantt chart whose `W` date
-/// tokens keep pele busy for 7 s or more. It must time out in the worker
-/// while the page stays responsive.
+/// tokens kept pele 1.8.0 busy for 7 s or more. The vendored fixed build
+/// refuses it in milliseconds with a `limit` error.
 fn hostile_gantt() -> String {
     format!(
         "gantt\n  dateFormat {}\n  excludes weekends\n  A :a1, 2020-01-01, 2000000d",
@@ -23,16 +23,34 @@ fn hostile_gantt() -> String {
     )
 }
 
+/// A 120-node chain: ordinary, but far more than 1 ms of layout, so with a
+/// 1 ms limit it always times out in the worker.
+fn long_chain() -> String {
+    let mut source = String::from("flowchart LR");
+    for i in 0..120 {
+        source.push_str(&format!("\n  N{i} --> N{}", i + 1));
+    }
+    source
+}
+
+/// A sankey chart: pele draws its links with gradients (`defs`,
+/// `linearGradient`, `stop` and `fill="url(#id) colour"`), which the
+/// sanitiser must keep.
+const SANKEY_SOURCE: &str =
+    "sankey-beta\nSolar,Grid,60\nWind,Grid,40\nGrid,Homes,70\nGrid,Industry,30";
+
 const MARKDOWN_SOURCE: &str = "The same engine draws fenced `mermaid` blocks in `MarkdownView`:\n\n```mermaid\nflowchart TD\n  Draft --> Review --> Done\n```\n";
 
 #[component]
 pub fn MermaidDisplayDemo() -> impl IntoView {
     let (hostile, set_hostile) = signal(String::new());
+    let (limited, set_limited) = signal(String::new());
     let (after_hostile, set_after_hostile) = signal(String::new());
     let start_hostile = move |_| {
         set_hostile.set(hostile_gantt());
-        // Queued after the hostile render, so drawing it proves a fresh
-        // worker replaced the one the time limit terminated.
+        set_limited.set(long_chain());
+        // Queued after both, so drawing it proves a fresh worker replaced
+        // the one the time limit terminated.
         set_timeout(
             move || set_after_hostile.set("flowchart LR\n  Timeout --> Recovered".to_string()),
             std::time::Duration::from_millis(50),
@@ -87,6 +105,23 @@ pub fn MermaidDisplayDemo() -> impl IntoView {
                 <MermaidDisplay attr:data-testid="mermaid-venn" source=VENN_SOURCE />
             </Section>
 
+            <Section title="Nested subgraphs" col=true>
+                <p class="text-sm text-base-content/75">
+                    "An edge crosses nested cluster titles; pele haloes each title with a color-mix() stroke, which the SVG sanitiser keeps."
+                </p>
+                <MermaidDisplay
+                    attr:data-testid="mermaid-nested"
+                    source="flowchart TD\n  top --> leaf\n  subgraph L1[Level one title]\n    subgraph L2[Level two title]\n      subgraph L3[Level three title]\n        leaf\n      end\n    end\n  end"
+                />
+            </Section>
+
+            <Section title="Sankey" col=true>
+                <p class="text-sm text-base-content/75">
+                    "Links are drawn with gradients, which the SVG sanitiser keeps."
+                </p>
+                <MermaidDisplay attr:data-testid="mermaid-sankey" source=SANKEY_SOURCE />
+            </Section>
+
             <Section title="Error" col=true>
                 <p class="text-sm text-base-content/75">
                     "Invalid source shows pele's message in the error box instead of a diagram."
@@ -94,9 +129,9 @@ pub fn MermaidDisplayDemo() -> impl IntoView {
                 <MermaidDisplay attr:data-testid="mermaid-error" source=BROKEN_SOURCE />
             </Section>
 
-            <Section title="Hostile diagram" col=true>
+            <Section title="Hostile diagram and time limit" col=true>
                 <p class="text-sm text-base-content/75">
-                    "pele runs in a worker with a time limit. This Gantt chart would keep pele busy for seconds; it times out, the page stays responsive, and the next diagram draws in a fresh worker."
+                    "pele runs in a worker with a time limit. The first chart kept pele 1.8.0 busy for seconds; the vendored build refuses it at once. The second has a 1 ms limit, so it times out, and the third draws in a fresh worker."
                 </p>
                 <div>
                     <Button attr:data-testid="mermaid-hostile-start" on_click=Callback::new(start_hostile)>
@@ -104,6 +139,11 @@ pub fn MermaidDisplayDemo() -> impl IntoView {
                     </Button>
                 </div>
                 <MermaidDisplay attr:data-testid="mermaid-hostile" source=hostile />
+                <MermaidDisplay
+                    attr:data-testid="mermaid-time-limited"
+                    source=limited
+                    render_timeout_ms=Some(1)
+                />
                 <MermaidDisplay attr:data-testid="mermaid-after-hostile" source=after_hostile />
             </Section>
 

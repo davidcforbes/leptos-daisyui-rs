@@ -127,6 +127,12 @@ pub fn MermaidDisplay(
     #[prop(optional, into)]
     max_height: Signal<Option<f32>>,
 
+    /// Time limit for drawing this diagram, in milliseconds. Unset is
+    /// [`crate::pele::PELE_RENDER_TIMEOUT_MS`]. A diagram that overruns it
+    /// shows a `timeout` error and the worker is replaced.
+    #[prop(optional, into)]
+    render_timeout_ms: Signal<Option<u32>>,
+
     /// Additional CSS classes
     #[prop(optional, into)]
     class: &'static str,
@@ -159,10 +165,14 @@ pub fn MermaidDisplay(
             .get_untracked()
             .map(|figure| figure.unchecked_into::<web_sys::Element>());
 
+        let options = pele::PeleOptions {
+            timeout_ms: render_timeout_ms.get_untracked(),
+            ..pele::pele_options_for(container.as_ref())
+        };
         content.set(pending_html(&src));
         state.set(MermaidRenderState::Pending);
         spawn_local(async move {
-            let result = pele::render_when_ready(src, container).await;
+            let result = pele::render_with(src, options).await;
             if generation.try_get_value() != Some(current) {
                 return;
             }
@@ -184,6 +194,9 @@ pub fn MermaidDisplay(
             attr:data-mermaid-state=move || state.get().as_str()
             attr:data-mermaid-theme=move || theme.get().as_str()
             attr:data-pele-stripped=move || stripped.get().map(|n| n.to_string())
+            // Paint containment: nothing a diagram draws can paint outside
+            // the figure, the backstop behind the sanitiser (ldui-o55o).
+            attr:style="contain: paint"
         />
     }
 }
