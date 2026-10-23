@@ -423,8 +423,19 @@ fn is_integer(v: &str) -> bool {
     !digits.is_empty() && digits.len() <= 3 && digits.bytes().all(|b| b.is_ascii_digit())
 }
 
+/// Largest length kept, in em. `\hspace`, `\kern`, `\raisebox` and
+/// friends carry author-chosen lengths, and an unbounded one could push a
+/// formula's content far over the surrounding page (spoofing the text
+/// around it). math-core's own layout lengths are all well under 2em.
+pub const MAX_LENGTH_EM: f64 = 20.0;
+
+/// Most negative length kept, in em (`\!` is -0.1667em; a negative kern
+/// pulls glyphs together). Anything further would overlap neighbours.
+pub const MIN_LENGTH_EM: f64 = -2.0;
+
 /// A CSS length (`0`, `1.5em`, `-0.2ex`, `50%`, `3px`), as math-core and
-/// MathML Core write them. No functions, no keywords beyond `0`.
+/// MathML Core write them, between [`MIN_LENGTH_EM`] and [`MAX_LENGTH_EM`]
+/// (a percentage between 0 and 100). No functions, no keywords beyond `0`.
 pub fn is_length(v: &str) -> bool {
     let v = v.trim();
     if v == "0" {
@@ -435,15 +446,26 @@ pub fn is_length(v: &str) -> bool {
         .position(|b| !(b.is_ascii_digit() || b == b'.' || b == b'-' || b == b'+'))
         .unwrap_or(v.len());
     let (num, unit) = v.split_at(num_end);
-    let num = num.strip_prefix(['+', '-']).unwrap_or(num);
-    let is_number = !num.is_empty()
-        && num.len() <= 12
-        && num.bytes().filter(|b| *b == b'.').count() <= 1
-        && num.bytes().any(|b| b.is_ascii_digit())
-        && num.bytes().all(|b| b.is_ascii_digit() || b == b'.');
-    is_number
-        && matches!(unit, "em" | "ex" | "px" | "pt" | "%" | "rem" | "mu" | "")
-        && !(unit.is_empty() && num != "0")
+    let digits = num.strip_prefix(['+', '-']).unwrap_or(num);
+    let is_number = !digits.is_empty()
+        && digits.len() <= 12
+        && digits.bytes().filter(|b| *b == b'.').count() <= 1
+        && digits.bytes().any(|b| b.is_ascii_digit())
+        && digits.bytes().all(|b| b.is_ascii_digit() || b == b'.');
+    let Some(value) = is_number.then(|| num.parse::<f64>().ok()).flatten() else {
+        return false;
+    };
+    let per_em = match unit {
+        "em" | "rem" => 1.0,
+        "ex" => 0.5,
+        "mu" => 1.0 / 18.0,
+        "px" => 1.0 / 16.0,
+        "pt" => 1.0 / 12.0,
+        "%" => return (0.0..=100.0).contains(&value),
+        "" => return value == 0.0,
+        _ => return false,
+    };
+    (MIN_LENGTH_EM..=MAX_LENGTH_EM).contains(&(value * per_em))
 }
 
 /// Keep only the declarations math-core uses for layout, each value from
@@ -482,10 +504,23 @@ fn is_allowed_declaration(prop: &str, value: &str) -> bool {
         "text-align" => matches!(lower.as_str(), "left" | "right" | "center"),
         "justify-items" => matches!(lower.as_str(), "start" | "end" | "center"),
         "font-variant-caps" => lower == "small-caps",
-        "width" | "font-size" | "margin-left" | "margin-right" | "padding-top"
-        | "padding-bottom" | "padding-left" | "padding-right" => {
-            tokens.len() == 1 && is_length(tokens[0])
-        }
+        // math-core's text sizes (`\tiny`..`\Huge` inside `\text{}`).
+        "font-size" => matches!(
+            lower.as_str(),
+            "50%"
+                | "60%"
+                | "70%"
+                | "80%"
+                | "90%"
+                | "100%"
+                | "120%"
+                | "140%"
+                | "170%"
+                | "200%"
+                | "250%"
+        ),
+        "width" | "margin-left" | "margin-right" | "padding-top" | "padding-bottom"
+        | "padding-left" | "padding-right" => tokens.len() == 1 && is_length(tokens[0]),
         "padding" => (1..=4).contains(&tokens.len()) && tokens.iter().all(|t| is_length(t)),
         "border-top" | "border-bottom" | "border-left" | "border-right" => {
             tokens.len() == 3
@@ -625,6 +660,15 @@ mod tests {
             ("math", "display", "contents"),
             ("mspace", "width", "calc(100vw)"),
             ("mspace", "width", "1e9em"),
+            // Out-of-range lengths could push content over the page.
+            ("mspace", "width", "100em"),
+            ("mspace", "width", "21em"),
+            ("mspace", "width", "1000px"),
+            ("mspace", "width", "-5em"),
+            ("mspace", "width", "150%"),
+            ("mpadded", "voffset", "-50ex"),
+            ("mpadded", "voffset", "999999999999em"),
+            ("mo", "lspace", "400mu"),
             ("menclose", "notation", "box url"),
             ("mtd", "columnspan", "0"),
             ("mi", "class", "btn btn-primary"),
@@ -650,6 +694,10 @@ mod tests {
             ("mtable", "displaystyle", "true"),
             ("mi", "mathvariant", "normal"),
             ("mspace", "width", "-0.1667em"),
+            ("mspace", "width", "20em"),
+            ("mspace", "width", "18mu"),
+            ("mspace", "width", "-2em"),
+            ("mtd", "width", "100%"),
             ("mpadded", "voffset", "0.5ex"),
             (
                 "menclose",
@@ -694,6 +742,9 @@ mod tests {
             "width: 1\\30 px",
             "width: 1px /* x */",
             "behavior: url(x.htc)",
+            "margin-left: -50em",
+            "width: 500%",
+            "padding-top: 100em",
         ] {
             assert_eq!(clean_style(hostile), None, "{hostile}");
         }

@@ -13,11 +13,13 @@
 //! - a formula math-core rejects, and a macro definition the guard refuses,
 //!   keep their `$…$` source visible with `data-math-error` and a reason in
 //!   `title`;
-//! - hostile input: nesting just under the guard's limit renders, 500
+//! - hostile input: nesting at the guard's limit renders, 500
 //!   levels is refused by the guard (on wasm it would otherwise overflow
 //!   the stack and trap the whole app), a `\href{javascript:…}` is a LaTeX
-//!   error, markup in `\text{}` stays text, a `\color` is dropped, and the
-//!   page still answers a click afterwards;
+//!   error, markup in `\text{}` stays text, a `\color` is dropped, the
+//!   unbraced `\frac1\frac1…` and nested `\sqrt[` shapes are refused by the
+//!   guard, a `\hspace{100em}` is dropped rather than pushing math past its
+//!   container, and the page still answers a click afterwards;
 //! - a `data-theme` switch recolours math with no re-render;
 //! - every section is axe-clean (WCAG 2.2 AA, through `common::axe`) in the
 //!   light and dark themes.
@@ -222,7 +224,7 @@ async fn hostile(h: &pixelproof_web::Harness) {
         h,
         r#"(() => {
             const els = document.querySelectorAll('[data-testid="math-hostile"] .math-inline');
-            return els.length === 5 && [...els].every((el) => el.hasAttribute('data-math-state'));
+            return els.length === 8 && [...els].every((el) => el.hasAttribute('data-math-state'));
         })()"#,
         "hostile formulas to settle",
     )
@@ -230,6 +232,7 @@ async fn hostile(h: &pixelproof_web::Harness) {
     let list = formulas(h, "math-hostile").await;
     let list = list.as_array().expect("formula list");
     let (under, deep, link, markup, colour) = (&list[0], &list[1], &list[2], &list[3], &list[4]);
+    let (unbraced, optional, space) = (&list[5], &list[6], &list[7]);
     assert_eq!(
         under["state"],
         json!("rendered"),
@@ -254,6 +257,24 @@ async fn hostile(h: &pixelproof_web::Harness) {
         json!("0"),
         "the colour is stripped: {colour}"
     );
+    // The two shapes that got past the first guard (security review):
+    // unbraced arguments and optional-argument brackets nest too.
+    for (name, f) in [
+        (r"unbraced \frac1 x500", unbraced),
+        (r"\sqrt[ x200", optional),
+    ] {
+        assert_eq!(
+            f["error"],
+            json!("guard"),
+            "{name} never reaches math-core: {f}"
+        );
+    }
+    assert_eq!(space["state"], json!("rendered"), "{space}");
+    assert_ne!(
+        space["stripped"],
+        json!("0"),
+        "a 100em space is dropped: {space}"
+    );
 
     let probe = eval_json(
         h,
@@ -267,6 +288,8 @@ async fn hostile(h: &pixelproof_web::Harness) {
                 markupText: markup.querySelector('mtext')?.textContent || null,
                 hrefs: root.querySelectorAll('[href]').length,
                 colourOk: getComputedStyle(colour).color === getComputedStyle(root).color,
+                spaceWidth: els[7].querySelector('math').getBoundingClientRect().width,
+                rootWidth: root.getBoundingClientRect().width,
             };
         })()"#,
     )
@@ -287,6 +310,11 @@ async fn hostile(h: &pixelproof_web::Harness) {
         probe["colourOk"],
         json!(true),
         "a pinned colour must not survive: {probe}"
+    );
+    assert!(
+        probe["spaceWidth"].as_f64().unwrap_or(f64::MAX)
+            < probe["rootWidth"].as_f64().unwrap_or(0.0),
+        "an author-chosen length must not push math past its container: {probe}"
     );
 
     // The wasm instance is still alive: a click still updates a signal.

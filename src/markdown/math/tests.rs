@@ -266,7 +266,8 @@ fn macro_bombs_and_definitions_are_refused_before_conversion() {
 
 #[test]
 fn nesting_just_under_the_guard_converts() {
-    let n = guard::MAX_MATH_DEPTH - 1;
+    // A braced \frac level is two guard entries (the command, its brace).
+    let n = guard::MAX_MATH_DEPTH / 2;
     let latex = format!("{}x{}", "\\frac{1}{".repeat(n), "}".repeat(n));
     let math = convert_formula(&latex, true).unwrap();
     assert_eq!(math.stripped, 0);

@@ -9,6 +9,7 @@ There is no JavaScript, no CDN and no worker, and a host serves nothing.
 |---|---|
 | `mathmlfixes.css` | math-core's browser fixes for its MathML output: `mtd` padding, a Chromium `menclose` polyfill (`\cancel`, `\boxed`, `\phase`), accent spacing. Compiled in with `include_str!` and installed once as `<style id="ldui-mathmlfixes">` the first time a formula renders. |
 | `LICENSE-math-core` | math-core's MIT licence |
+| `gen_arity.py` | generates `src/markdown/math/arity.rs` (which commands take arguments, and how many) from the pinned version's `src/commands.rs`; the depth guard simulates nesting with it. Re-run on every math-core upgrade: `python -X utf8 assets/math-core/gen_arity.py <cargo registry>/math-core-<ver>/src/commands.rs src/markdown/math/arity.rs`, then `cargo fmt` |
 
 ## Provenance of `mathmlfixes.css` (2026-10-23)
 

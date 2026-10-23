@@ -37,6 +37,7 @@
 //! (`theme.rs`). A page that still loads KaTeX is unaffected:
 //! `window.katex` is no longer consulted.
 
+mod arity;
 pub mod guard;
 pub mod sanitize;
 

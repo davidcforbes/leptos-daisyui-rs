@@ -33,15 +33,21 @@ fn nested_fracs(n: usize) -> String {
 /// whole app; the guard must refuse it, while nesting just under the
 /// guard's limit still renders.
 fn hostile_markdown() -> String {
-    let under = leptos_daisyui_rs::markdown::math::guard::MAX_MATH_DEPTH - 1;
+    // A braced \frac level is two guard entries (the command and its brace).
+    let under = leptos_daisyui_rs::markdown::math::guard::MAX_MATH_DEPTH / 2;
     format!(
-        "Nested {under} levels: ${under_src}$\n\n\
+        "Nested {under} fractions: ${under_src}$\n\n\
          Nested 500 levels: ${deep}$\n\n\
          A javascript link: $\\href{{javascript:alert(1)}}{{x}}$\n\n\
          Markup in text: $\\text{{<img src=x onerror=alert(1)>}}$\n\n\
-         A pinned colour: $\\color{{red}}{{x}} + y$\n",
+         A pinned colour: $\\color{{red}}{{x}} + y$\n\n\
+         Unbraced nesting: ${unbraced}$\n\n\
+         Nested optional arguments: ${optional}$\n\n\
+         A huge space: $a\\hspace{{100em}}b$\n",
         under_src = nested_fracs(under),
         deep = nested_fracs(500),
+        unbraced = format!("{}x", r"\frac1".repeat(500)),
+        optional = format!("{}x{}", r"\sqrt[".repeat(200), "]{y}".repeat(200)),
     )
 }
 
