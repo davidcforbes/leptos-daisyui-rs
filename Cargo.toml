@@ -18,6 +18,14 @@ publish = false
 # module (query-string parsing + freeze-stylesheet injection). Off by
 # default; enabled by the demo (and any other consumer driving PixelProof).
 test-mode = []
+# Native MathML for MarkdownView's `$...$` / `$$...$$` through math-core
+# (ldui-r0co). OFF by default since ldui-dtm3: math-core 0.9.0 (and the
+# kstring it pulls) needs Rust 1.96, and the consumer 4iiz-Office builds on
+# 1.95. Without it the crate has no math-core dependency and a formula stays
+# as its `$...$` source text; the currency rule (`markdown::currency`) runs in
+# both builds. The demo and the gate enable it; `cargo xtask test-math` is
+# its browser proof.
+math = ["dep:math-core"]
 
 [workspace]
 members = [".", "xtask", "demo", "audit", "crates/ldui-design"]
@@ -131,7 +139,8 @@ editmark-core = { path = "../editmark/editmark-core" }
 # ldui-r0co). Pure Rust, no_std + alloc, no JavaScript and no CDN. Pinned
 # exactly: the sanitiser's allow-list is written against this version's
 # output vocabulary, and assets/math-core/mathmlfixes.css is this tag's copy.
-math-core = { version = "=0.9.0", default-features = false }
+# Optional behind the `math` feature (its rust-version is 1.96; ldui-dtm3).
+math-core = { version = "=0.9.0", default-features = false, optional = true }
 
 [dev-dependencies]
 # SHA-256 pin of the vendored pele bundle (src/pele.rs, ldui-o55o). Already in

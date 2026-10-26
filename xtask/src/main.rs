@@ -129,7 +129,10 @@ fn gate_steps() -> Vec<Step> {
         // `--features test-mode`: `src/test_mode.rs` is behind that feature,
         // so a default-feature clippy never lints it and a default-feature
         // `cargo test` never runs its unit tests — the module the browser
-        // suites depend on was invisible to the gate.
+        // suites depend on was invisible to the gate. `--features math`
+        // (ldui-dtm3): `src/markdown/math/` is behind that one, off by default
+        // for the Rust 1.95 consumer; the gate lints and tests it on stable.
+        // The default (math-less) build is what the `build` step compiles.
         cmd(
             "clippy-lib",
             "cargo",
@@ -140,6 +143,8 @@ fn gate_steps() -> Vec<Step> {
                 "--all-targets",
                 "--features",
                 "test-mode",
+                "--features",
+                "math",
                 "--",
                 "-D",
                 "warnings",
@@ -164,6 +169,8 @@ fn gate_steps() -> Vec<Step> {
                 "wasm32-unknown-unknown",
                 "--features",
                 "test-mode",
+                "--features",
+                "math",
                 "--",
                 "-D",
                 "warnings",
@@ -253,7 +260,9 @@ fn gate_steps() -> Vec<Step> {
             None,
         ),
         // `--features test-mode`, same reason as `clippy-lib` above: without
-        // it the 7 `test_mode` unit tests silently do not run.
+        // it the 7 `test_mode` unit tests silently do not run. `--features
+        // math` for the math module's native suite (corpus, guard,
+        // sanitiser), which the default build leaves out.
         cmd(
             "test-lib",
             "cargo",
@@ -264,6 +273,8 @@ fn gate_steps() -> Vec<Step> {
                 "--lib",
                 "--features",
                 "test-mode",
+                "--features",
+                "math",
             ],
             None,
         ),
@@ -430,6 +441,8 @@ fn gate_steps() -> Vec<Step> {
                 "--no-deps",
                 "--features",
                 "test-mode",
+                "--features",
+                "math",
             ],
             None,
             &[("RUSTDOCFLAGS", "-D warnings")],
@@ -3106,6 +3119,13 @@ mod tests {
                 args.get(i + 1).map(String::as_str),
                 Some("test-mode"),
                 "{name} must enable the test-mode feature: {args:?}"
+            );
+            // ldui-dtm3: the math module is behind `math`, off by default for
+            // the Rust 1.95 consumer; the gate must still lint and test it.
+            assert!(
+                args.windows(2)
+                    .any(|w| w[0] == "--features" && w[1] == "math"),
+                "{name} must enable the math feature: {args:?}"
             );
         }
     }

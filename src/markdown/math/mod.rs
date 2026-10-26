@@ -1,5 +1,10 @@
 //! Math rendering for `<MarkdownView>` and `<MarkdownGraphicEditor>`
-//! (ldui-r0co).
+//! (ldui-r0co). Compiled only with the `math` cargo feature (ldui-dtm3):
+//! math-core 0.9.0 needs Rust 1.96, and the consumer 4iiz-Office builds the
+//! library on 1.95, so the default build has no math-core dependency and
+//! `render_math` is a no-op there (the `$…$` source stays visible). Which
+//! `$…$` pairs count as math at all is decided before this module runs, in
+//! every build, by [`super::currency`].
 //!
 //! `editmark_core::render_html` emits math as:
 //! - inline:  `<span class="math-inline">$…$</span>`

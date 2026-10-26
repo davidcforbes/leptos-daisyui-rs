@@ -52,10 +52,7 @@ pub fn MarkdownView(
         let src = source.get();
         let Some(el) = host.get() else { return };
         let html_el: &HtmlElement = el.as_ref();
-        let measure = FixedTextMeasure::default();
-        let nodes = build_layout(&src, &measure, 900.0);
-        let html = render_html(&nodes);
-        html_el.set_inner_html(&html);
+        html_el.set_inner_html(&render_markdown_html(&src));
         post_process(html_el, on_link_click);
     });
 
@@ -75,6 +72,18 @@ pub fn MarkdownView(
     view! {
         <div class=class style=style node_ref=host></div>
     }
+}
+
+/// Steps 1-2 of the pipeline as one pure function: lay out `src`, render it
+/// to HTML, and hand back a price's `$…$` as literal text
+/// ([`super::currency::demote_currency_math`], ldui-dtm3) so only real
+/// formulas keep a `.math-inline` host for [`super::math::render_math`]
+/// (which converts them to MathML with the `math` feature on, and leaves the
+/// `$…$` source visible with it off).
+pub(crate) fn render_markdown_html(src: &str) -> String {
+    let measure = FixedTextMeasure::default();
+    let nodes = build_layout(src, &measure, 900.0);
+    super::currency::demote_currency_math(&render_html(&nodes))
 }
 
 /// Walk the rendered DOM and:
@@ -249,5 +258,53 @@ mod tests {
             "{html}"
         );
         assert!(!html.contains("<b>"), "{html}");
+    }
+}
+
+/// The MarkdownView half of ldui-dtm3: a price keeps every dollar sign and
+/// gets no `.math-inline` host, a formula still does.
+#[cfg(test)]
+mod currency_tests {
+    use super::render_markdown_html;
+
+    const PRICES: [&str; 3] = [
+        "Pay $300-$500",
+        "$300/$500",
+        "Collected $12,345.67 this week ($1,000 above plan)",
+    ];
+
+    #[test]
+    fn prices_render_as_literal_text_with_every_dollar_sign() {
+        for src in PRICES {
+            let html = render_markdown_html(src);
+            assert!(!html.contains("math-inline"), "{src}: {html}");
+            assert_eq!(
+                html.matches('$').count(),
+                src.matches('$').count(),
+                "{src}: {html}"
+            );
+            // Dropping the closing-$-before-digit rule hands these back to
+            // math: pulldown-cmark reads each as inline math first.
+            assert!(
+                editmark_core::render_html(&editmark_core::build_layout(
+                    src,
+                    &editmark_core::FixedTextMeasure::default(),
+                    900.0
+                ))
+                .contains("math-inline"),
+                "{src}: the parser no longer reads this price as math, so the rule is untested"
+            );
+        }
+    }
+
+    #[test]
+    fn a_formula_still_gets_its_inline_math_host() {
+        let html = render_markdown_html("The area is $x^2$ here.");
+        assert!(
+            html.contains("<span class=\"math-inline\">$x^2$</span>"),
+            "{html}"
+        );
+        let html = render_markdown_html("Energy: $E=mc^2$.");
+        assert!(html.contains("class=\"math-inline\""), "{html}");
     }
 }

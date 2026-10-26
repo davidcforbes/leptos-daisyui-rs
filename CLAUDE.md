@@ -276,7 +276,11 @@ the strip's PARENT a width; the component cannot supply it.
 (`-p leptos-daisyui-rs -p leptos-daisyui-showcase -p xtask -p ldui-audit`).
 `cargo clippy --workspace` fails on leptos-`csr` feature unification — clippy
 **per-crate**. The library's clippy/test steps pass `--features test-mode`;
-without it `src/test_mode.rs` is neither linted nor tested.
+without it `src/test_mode.rs` is neither linted nor tested. They also pass
+`--features math` (ldui-dtm3): `src/markdown/math/` and its math-core
+dependency are off by default because math-core 0.9.0 needs Rust 1.96 and
+4iiz-Office builds the library on 1.95; the default build renders `$…$` as
+its source text, and `markdown::currency` keeps prices out of math in both.
 
 **Windows `web-sys` + sccache is `os error 206`, not a rustc bug.** sccache
 0.17+ expands rustc `@argfile`s, so `web-sys`'s feature `--cfg` list exceeds

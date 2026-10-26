@@ -14,7 +14,7 @@ test = false
 bench = false
 
 [dependencies]
-leptos-daisyui-rs = { path = "../", features = ["test-mode"] }
+leptos-daisyui-rs = { path = "../", features = ["test-mode", "math"] }
 # The shared demo fixtures (ldui-rz43): the badge, button and alert variant
 # sections render `ldui_design::fixtures`, the lists 4iiz-kit's gallery
 # renders too. The variant enums are the library's own (it re-exports them).
