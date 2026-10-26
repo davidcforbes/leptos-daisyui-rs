@@ -1063,6 +1063,23 @@ fn math_step() -> Step {
     }
 }
 
+/// Focused browser proof for `UploadFile`'s caller-supplied strings and the
+/// `FileDropZone` (ldui-1ff4): Spanish prompts render where English was
+/// hard-coded, a dropped `application/pdf` reaches `on_files` while a file
+/// outside the accept list goes to `on_rejected`, the zone is one keyboard
+/// tab stop that opens the picker on Enter and Space and highlights under a
+/// drag, and the fixture is axe-clean. Lives on the general demo app
+/// (`html_target: None`) in its own file/step like [`collapse_naming_step`].
+fn upload_file_step() -> Step {
+    Step {
+        name: "test-upload-file",
+        run: Run::BrowserSuite {
+            test: "upload_file_smoke",
+            html_target: None,
+        },
+    }
+}
+
 /// Focused browser proof that Mermaid renders through pele (ldui-qe72):
 /// `MermaidDisplay` draws `svg.pele` for four diagram types (Venn among
 /// them), broken source shows pele's message in the error box, a
@@ -1137,6 +1154,7 @@ fn full_steps() -> Vec<Step> {
     steps.push(mermaid_pele_step());
     steps.push(rich_message_step());
     steps.push(math_step());
+    steps.push(upload_file_step());
     steps
 }
 
@@ -2974,6 +2992,7 @@ fn main() -> ExitCode {
         "test-mermaid-pele" => run_steps(&[mermaid_pele_step()]),
         "test-rich-message" => run_steps(&[rich_message_step()]),
         "test-math" => run_steps(&[math_step()]),
+        "test-upload-file" => run_steps(&[upload_file_step()]),
         "capture-design" => run_steps(&[design_capture_step()]),
         "gen-tokens" => {
             let check = std::env::args().any(|a| a == "--check");
@@ -2989,7 +3008,7 @@ fn main() -> ExitCode {
         other => {
             eprintln!("xtask: unknown subcommand {other:?}");
             eprintln!(
-                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-week-planner|test-month-roster|test-selectable-summary|test-person-picker|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-snapshot-table-page-filter-actions|test-helpdesk|test-ai-chat|test-ai-chat-knowledge|test-server-table-column-tools|test-collapse-naming|test-data-table-fit|test-app-shell|test-field-context-scoping|test-entity-draft-row|test-softphone|test-help-hint|test-focus-ring|test-row-action-presets|test-server-cursor-footer|test-ld-pattern|test-mermaid-pele|test-rich-message|test-math|capture-design|gen-tokens|check-sibling-tokens|clean-cache|bump>"
+                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-week-planner|test-month-roster|test-selectable-summary|test-person-picker|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-snapshot-table-page-filter-actions|test-helpdesk|test-ai-chat|test-ai-chat-knowledge|test-server-table-column-tools|test-collapse-naming|test-data-table-fit|test-app-shell|test-field-context-scoping|test-entity-draft-row|test-softphone|test-help-hint|test-focus-ring|test-row-action-presets|test-server-cursor-footer|test-ld-pattern|test-mermaid-pele|test-rich-message|test-math|test-upload-file|capture-design|gen-tokens|check-sibling-tokens|clean-cache|bump>"
             );
             ExitCode::from(2)
         }
@@ -3649,6 +3668,21 @@ pub fn r() -> f32 { radius::CARD }
         ));
         assert!(!gate_steps().iter().any(|s| s.name == "test-math"));
         assert!(full_steps().iter().any(|s| s.name == "test-math"));
+    }
+
+    #[test]
+    fn upload_file_step_is_in_process_and_full_only() {
+        let step = upload_file_step();
+        assert_eq!(step.name, "test-upload-file");
+        assert!(matches!(
+            step.run,
+            Run::BrowserSuite {
+                test: "upload_file_smoke",
+                html_target: None
+            }
+        ));
+        assert!(!gate_steps().iter().any(|s| s.name == "test-upload-file"));
+        assert!(full_steps().iter().any(|s| s.name == "test-upload-file"));
     }
 
     #[test]

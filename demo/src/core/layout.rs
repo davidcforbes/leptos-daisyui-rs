@@ -639,6 +639,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     value: "file_input",
                 },
                 ComponentItem {
+                    name: "Upload File",
+                    href: "/components/upload_file",
+                    value: "upload_file",
+                },
+                ComponentItem {
                     name: "Filter",
                     href: "/components/filter",
                     value: "filter",

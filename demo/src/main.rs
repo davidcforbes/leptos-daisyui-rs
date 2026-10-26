@@ -138,6 +138,7 @@ fn AppInner() -> impl IntoView {
                     <Route path=path!("/field-context-scope") view=FieldContextScopeDemo />
                     <Route path=path!("/fieldset") view=FieldsetDemo />
                     <Route path=path!("/file_input") view=FileInputDemo />
+                    <Route path=path!("/upload_file") view=UploadFileDemo />
                     <Route path=path!("/filter") view=FilterDemo />
                     <Route path=path!("/filter-sidebar") view=FilterSidebarDemo />
                     <Route path=path!("/footer") view=FooterDemo />

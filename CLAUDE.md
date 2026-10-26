@@ -74,6 +74,7 @@ cargo xtask test-ld-pattern            # data-ld-pattern on every catalogue patt
 cargo xtask test-mermaid-pele          # MermaidDisplay/MarkdownView draw svg.pele, pele errors shown, theme switch recolours with no re-render (ldui-qe72); pele in a same-origin worker, no CDN, hostile Gantt times out with the page responsive (ldui-o55o)
 cargo xtask test-rich-message          # RichMessage SMS/MMS/WhatsApp: media fallback, formatting, placeholders, inert vs live buttons, axe light+dark (ldui-g8hh)
 cargo xtask test-math                  # MarkdownView math as native MathML via math-core: no KaTeX/CDN, TeX annotation, errors keep source, depth guard vs hostile nesting, theme, axe light+dark (ldui-r0co)
+cargo xtask test-upload-file           # UploadFile caller-supplied strings (EN default, ES passed) + FileDropZone: dropped PDF reaches on_files, off-list file to on_rejected, one tab stop, Enter/Space open the picker, axe (ldui-1ff4)
 cargo xtask gen-tokens [--check]     # regenerate styles/tokens.css from ui-tokens
 cargo xtask check-sibling-tokens     # preamble.rs's ui_tokens refs must exist on the sibling's DEFAULT branch
 cargo xtask test-person-picker       # PersonPicker listbox contract, wrapping, Unknown-vs-Offline, contrast

@@ -268,7 +268,11 @@ toggle-naming browser proof (`test-collapse-naming`, ldui-3k00: the internal
 checkbox carries id/name and is named by its visible title, axe-clean), and
 the focused `DataTable` column-track fit proof (`test-data-table-fit`,
 ldui-qsqz: ten undeclared columns fit a 1280px container with auto tracks;
-declared tracks that cannot fit scroll the wrapper instead of spilling).
+declared tracks that cannot fit scroll the wrapper instead of spilling), and
+the focused `UploadFile`/`FileDropZone` proof (`test-upload-file`, ldui-1ff4:
+caller-supplied Spanish strings render, a dropped PDF reaches `on_files` and
+an off-list file `on_rejected`, the zone is one tab stop that opens the picker
+on Enter/Space, axe-clean).
 The controlled Softphone lane (`test-softphone`, ldui-xmhn) verifies simulated
 ClientCallWorkspace destination/contact-write guards, ambiguous dispatch,
 stale acknowledgment, call-record keyboard interaction, required semantics,
