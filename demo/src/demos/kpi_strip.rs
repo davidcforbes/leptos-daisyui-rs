@@ -303,6 +303,36 @@ pub fn KpiStripDemo() -> impl IntoView {
                 </div>
             </Section>
 
+            // 4iiz-Office 2026-10-28. Ten peer KPIs -- a results strip --
+            // through the typed balanced-five ladder. AutoEight would give
+            // eight then a ragged two and BalancedSix six then a ragged four;
+            // BalancedFive caps at five tracks, so ten peers are two even rows.
+            <Section title="Balanced five: ten peer KPIs as two rows of five">
+                <div class="flex flex-col gap-4" data-testid="kpi-strip-balanced-five">
+                    <p class="ld-text-small text-base-content/75">
+                        "A ten-card results strip. Five columns once the strip itself is 768px wide or more, stepping down through three and two -- container queries, so the strip responds to its own width and not the window's."
+                    </p>
+                    <KpiStrip
+                        items=Signal::derive(|| dashboard_kpis().into_iter().take(10).collect::<Vec<_>>())
+                        layout=KpiStripLayout::BalancedFive
+                        on_activate=on_activate
+                    />
+                </div>
+            </Section>
+
+            // The narrow-column case ldui-tnyq exists for, on the new
+            // profile: the same ten cards must step down here rather than
+            // asking how wide the window is.
+            <Section title="Balanced five in a narrow column">
+                <div class="w-full max-w-md" data-testid="kpi-strip-balanced-five-narrow">
+                    <KpiStrip
+                        items=Signal::derive(|| dashboard_kpis().into_iter().take(10).collect::<Vec<_>>())
+                        layout=KpiStripLayout::BalancedFive
+                        compact=true
+                    />
+                </div>
+            </Section>
+
             <Section title="Eight KPIs, wide-to-narrow responsive">
                 <div class="w-full" data-testid="kpi-strip-wide">
                     <KpiStrip items=Signal::derive(office_kpis) />

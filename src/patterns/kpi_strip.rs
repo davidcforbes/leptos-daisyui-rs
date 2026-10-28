@@ -913,7 +913,8 @@ pub struct KpiStripRung {
     pub prefix: &'static str,
     /// The container width in CSS px at or above which this rung applies.
     /// These are Tailwind v4's default container sizes: `@sm` 24rem/384px,
-    /// `@lg` 32rem/512px, `@4xl` 56rem/896px, `@5xl` 64rem/1024px.
+    /// `@lg` 32rem/512px, `@3xl` 48rem/768px, `@4xl` 56rem/896px,
+    /// `@5xl` 64rem/1024px.
     pub min_container_px: u32,
     /// Explicit column tracks at this rung.
     pub columns: u32,
@@ -991,6 +992,33 @@ const KPI_STRIP_PEER_THREE_LADDER: &[KpiStripRung] = &[
     },
 ];
 
+/// `2 / 3 / 5` -- the ten-card two-rows-of-five ladder (4iiz-Office,
+/// 2026-10-28).
+///
+/// The base and `@sm` rungs are the shared `AutoEight`/`BalancedSix` trunk,
+/// byte for byte. There is deliberately no 4-column rung: four does not
+/// divide ten, and between three and five it would only add a second
+/// ragged shape. The five-column rung sits at `@3xl` (768px), the narrowest
+/// Tailwind container size where five help-bearing cards still hold two
+/// label lines -- see [`KpiStripLayout`] for the arithmetic.
+const KPI_STRIP_BALANCED_FIVE_LADDER: &[KpiStripRung] = &[
+    KpiStripRung {
+        prefix: "",
+        min_container_px: 0,
+        columns: 2,
+    },
+    KpiStripRung {
+        prefix: "@sm:",
+        min_container_px: 384,
+        columns: 3,
+    },
+    KpiStripRung {
+        prefix: "@3xl:",
+        min_container_px: 768,
+        columns: 5,
+    },
+];
+
 /// Which column ladder a [`KpiStrip`] follows -- the typed layout choice
 /// (`ldui-k3ip`).
 ///
@@ -1018,6 +1046,9 @@ const KPI_STRIP_PEER_THREE_LADDER: &[KpiStripRung] = &[
 /// | `BalancedSix` | `@4xl` | 896px | 6 | 136.0px |
 /// | `PeerThree` | base | 320px | 2 | 152.0px |
 /// | `PeerThree` | `@lg` | 512px | 3 | 160.0px |
+/// | `BalancedFive` | base | 320px | 2 | 152.0px |
+/// | `BalancedFive` | `@sm` | 384px | 3 | 117.3px |
+/// | `BalancedFive` | `@3xl` | 768px | 5 | 140.8px |
 ///
 /// `@4xl` rather than `@3xl` (768px), and that choice is the whole reason
 /// the profile is a type: at 768px six columns are 114.7px, which clears
@@ -1038,6 +1069,19 @@ const KPI_STRIP_PEER_THREE_LADDER: &[KpiStripRung] = &[
 /// [`KPI_CARD_TWO_LINE_FLOOR_PX`] and [`KPI_CARD_HELP_FLOOR_PX`] with room
 /// to spare.
 ///
+/// `BalancedFive` follows the shared trunk through its base and `@sm`
+/// rungs, then steps from 3 columns straight to its widest rung, 5, with
+/// no 4-column rung between (four does not divide ten). The five-column
+/// rung is derived by the same rule that placed `BalancedSix`'s: the
+/// narrowest Tailwind container size at which the widest rung clears
+/// [`KPI_CARD_HELP_FLOOR_PX`]. `@2xl` (672px) gives 121.6px cards -- over
+/// the bare [`KPI_CARD_TWO_LINE_FLOOR_PX`], under the help floor (124.8px
+/// even with the compact gap). `@3xl` (768px) gives 140.8px, 15.8px of
+/// slack over the help floor, so the rung is `@3xl` rather than waiting
+/// for `@4xl` (896px), where `BalancedSix` reaches six: between 768px and
+/// 896px five cards already fit, and three columns would lay ten cards out
+/// as three, three, three and a ragged one.
+///
 /// ### What it does to the consumer's measured strip
 ///
 /// At the 1046px container `ldui-tnyq` measured on a 1680px window,
@@ -1056,6 +1100,12 @@ const KPI_STRIP_PEER_THREE_LADDER: &[KpiStripRung] = &[
 /// 1617.6px row -- the profile's widest rung is also its item count's
 /// natural column count, so three peers are never fewer than the tracks
 /// provided for them.
+///
+/// At the same 1046px container, a ten-card results strip through
+/// `AutoEight` lays out as eight then a ragged two, and through
+/// `BalancedSix` as six then a ragged four. Through `BalancedFive` it is
+/// two even rows of five 196.4px cards -- wider than either profile's
+/// cards at that width.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum KpiStripLayout {
     /// `2 / 3 / 4 / 8`. The default and the pre-`ldui-k3ip` behaviour: an
@@ -1071,6 +1121,10 @@ pub enum KpiStripLayout {
     /// half empty the way `AutoEight` and `BalancedSix` both leave it for a
     /// three-item strip (`ldui-orom`).
     PeerThree,
+    /// `2 / 3 / 5`. Ten peer cards -- a results strip -- read as two even
+    /// rows of five, where `AutoEight` gives eight then a ragged two and
+    /// `BalancedSix` six then a ragged four.
+    BalancedFive,
 }
 
 impl KpiStripLayout {
@@ -1083,6 +1137,7 @@ impl KpiStripLayout {
             Self::AutoEight => "auto-eight",
             Self::BalancedSix => "balanced-six",
             Self::PeerThree => "peer-three",
+            Self::BalancedFive => "balanced-five",
         }
     }
 
@@ -1092,6 +1147,7 @@ impl KpiStripLayout {
             Self::AutoEight => KPI_STRIP_AUTO_EIGHT_LADDER,
             Self::BalancedSix => KPI_STRIP_BALANCED_SIX_LADDER,
             Self::PeerThree => KPI_STRIP_PEER_THREE_LADDER,
+            Self::BalancedFive => KPI_STRIP_BALANCED_FIVE_LADDER,
         }
     }
 
@@ -1101,6 +1157,7 @@ impl KpiStripLayout {
             Self::AutoEight => 8,
             Self::BalancedSix => 6,
             Self::PeerThree => 3,
+            Self::BalancedFive => 5,
         }
     }
 
@@ -1216,6 +1273,12 @@ const fn kpi_strip_grid_class(layout: KpiStripLayout, compact: bool) -> &'static
         }
         (KpiStripLayout::PeerThree, false) => "grid grid-cols-2 @lg:grid-cols-3 gap-4",
         (KpiStripLayout::PeerThree, true) => "grid grid-cols-2 @lg:grid-cols-3 gap-3",
+        (KpiStripLayout::BalancedFive, false) => {
+            "grid grid-cols-2 @sm:grid-cols-3 @3xl:grid-cols-5 gap-4"
+        }
+        (KpiStripLayout::BalancedFive, true) => {
+            "grid grid-cols-2 @sm:grid-cols-3 @3xl:grid-cols-5 gap-3"
+        }
     }
 }
 
@@ -2060,12 +2123,35 @@ pub fn KpiCard(
 /// }
 /// ```
 ///
+/// ### Ten peer KPIs as two rows of five
+///
+/// A ten-card results strip through `AutoEight` is eight then a ragged
+/// two, and through `BalancedSix` six then a ragged four.
+/// [`KpiStripLayout::BalancedFive`] caps at five tracks, so ten peers read
+/// as two even rows of five once the strip is 768px wide or more:
+///
+/// ```rust
+/// use leptos::prelude::*;
+/// use leptos_daisyui_rs::patterns::{KpiItem, KpiStrip, KpiStripLayout};
+///
+/// #[component]
+/// fn Example() -> impl IntoView {
+///     let items = Signal::derive(|| {
+///         (0..10)
+///             .map(|n| KpiItem::new(format!("result-{n}"), format!("Result {n}"), "0"))
+///             .collect::<Vec<_>>()
+///     });
+///
+///     view! { <KpiStrip items=items layout=KpiStripLayout::BalancedFive /> }
+/// }
+/// ```
+///
 /// ### Add to `input.css`
 /// ```css
 /// @source inline("@container grid grid-cols-2 @sm:grid-cols-3 @lg:grid-cols-4 gap-3 gap-4 w-full");
-/// @source inline("@5xl:grid-cols-8 @4xl:grid-cols-6 @lg:grid-cols-3");
+/// @source inline("@5xl:grid-cols-8 @4xl:grid-cols-6 @lg:grid-cols-3 @3xl:grid-cols-5");
 /// ```
-/// The second line carries all three profiles' widest rungs. A consumer
+/// The second line carries all four profiles' widest rungs. A consumer
 /// that safelists only its own profile's rung gets a strip stuck at four
 /// columns the day it switches -- silently, since a missing utility is not
 /// an error.
@@ -2095,7 +2181,8 @@ pub fn KpiStrip(
     /// `2 / 3 / 4 / 8` grid every caller had before this prop existed.
     /// [`KpiStripLayout::BalancedSix`] is the balanced fixed-scorecard
     /// ladder. [`KpiStripLayout::PeerThree`] is the fixed three-peer-row
-    /// ladder (`ldui-orom`).
+    /// ladder (`ldui-orom`). [`KpiStripLayout::BalancedFive`] is the
+    /// ten-card two-rows-of-five ladder.
     #[prop(optional, into)]
     layout: Signal<KpiStripLayout>,
 
@@ -2725,6 +2812,7 @@ mod tests {
             KpiStripLayout::AutoEight,
             KpiStripLayout::BalancedSix,
             KpiStripLayout::PeerThree,
+            KpiStripLayout::BalancedFive,
         ] {
             assert!(kpi_card_body_class(false).contains("p-4"));
             assert!(kpi_strip_grid_class(layout, false).contains("gap-4"));
@@ -3533,6 +3621,7 @@ mod tests {
             KpiStripLayout::AutoEight,
             KpiStripLayout::BalancedSix,
             KpiStripLayout::PeerThree,
+            KpiStripLayout::BalancedFive,
         ] {
             for (compact, gap) in [(false, "gap-4"), (true, "gap-3")] {
                 let rungs: Vec<String> = layout
@@ -3559,6 +3648,7 @@ mod tests {
             KpiStripLayout::AutoEight,
             KpiStripLayout::BalancedSix,
             KpiStripLayout::PeerThree,
+            KpiStripLayout::BalancedFive,
         ] {
             for rung in layout.ladder() {
                 assert!(
@@ -3589,6 +3679,7 @@ mod tests {
             KpiStripLayout::AutoEight,
             KpiStripLayout::BalancedSix,
             KpiStripLayout::PeerThree,
+            KpiStripLayout::BalancedFive,
         ] {
             for rung in layout.ladder() {
                 let container = f64::from(rung.min_container_px).max(320.0);
@@ -3756,6 +3847,264 @@ mod tests {
         // this module. This test only adds the third profile.
     }
 
+    /// THE RUNG CHOICE for `BalancedFive`, with its arithmetic. Five
+    /// columns start at `@3xl` (768px), the narrowest Tailwind container
+    /// size where a help-bearing card still holds two label lines -- the
+    /// rule that put `BalancedSix`'s six-column rung at `@4xl`. `@2xl`
+    /// (672px) clears the bare two-line floor and fails the help floor, in
+    /// compact mode too.
+    #[test]
+    fn the_five_column_rung_sits_where_a_help_bearing_card_still_fits() {
+        let gap = kpi_strip_gap_px(false);
+        let shipped = kpi_strip_card_width_px(768.0, 5, gap);
+        assert!((shipped - 140.8).abs() < 1e-9, "{shipped}");
+        assert!(
+            shipped >= KPI_CARD_HELP_FLOOR_PX,
+            "the shipped five-column rung must hold a help-bearing label"
+        );
+
+        // The rung that was considered and rejected.
+        let rejected = kpi_strip_card_width_px(672.0, 5, gap);
+        assert!((rejected - 121.6).abs() < 1e-9, "{rejected}");
+        assert!(
+            rejected >= KPI_CARD_TWO_LINE_FLOOR_PX,
+            "@2xl clears the bare two-line floor ..."
+        );
+        assert!(
+            rejected < KPI_CARD_HELP_FLOOR_PX,
+            "... but not the help-bearing one, which is why the rung is @3xl"
+        );
+        let rejected_compact = kpi_strip_card_width_px(672.0, 5, kpi_strip_gap_px(true));
+        assert!(
+            rejected_compact < KPI_CARD_HELP_FLOOR_PX,
+            "@2xl fails the help floor even with the compact gap: {rejected_compact}"
+        );
+
+        let ladder = KpiStripLayout::BalancedFive.ladder();
+        assert_eq!(ladder.last().expect("a widest rung").min_container_px, 768);
+        // Below its five-column rung the profile IS the shared trunk.
+        assert_eq!(&ladder[..2], &KpiStripLayout::BalancedSix.ladder()[..2]);
+        assert_eq!(&ladder[..2], &KpiStripLayout::AutoEight.ladder()[..2]);
+    }
+
+    /// THE CONSUMER'S ASK (4iiz-Office owner, 2026-10-28), in numbers: a
+    /// ten-card results strip must read as two even rows of five. At the
+    /// 1046px container `ldui-tnyq` measured on a 1680px window,
+    /// `BalancedFive` lays ten cards out as two full rows of five 196.4px
+    /// cards spanning the strip.
+    ///
+    /// The second half is the NEGATIVE CONTROL: the same ten cards through
+    /// `AutoEight` are eight then a ragged two, and through `BalancedSix`
+    /// six then a ragged four. Neither existing profile can express it.
+    #[test]
+    fn ten_cards_are_two_rows_of_five_and_no_other_profile_can_be() {
+        const CONSUMER_CONTAINER_PX: f64 = 1046.0;
+        let gap = kpi_strip_gap_px(false);
+
+        let five = KpiStripLayout::BalancedFive.columns_at(CONSUMER_CONTAINER_PX);
+        assert_eq!(five, 5);
+        let fit = kpi_strip_row_fit(10, five);
+        assert_eq!(fit.full_rows, 2);
+        assert_eq!(fit.last_row, 0);
+        assert_eq!(fit.rows(), 2);
+        assert!(!fit.is_ragged(), "ten peers must be two even rows of five");
+        let card = kpi_strip_card_width_px(CONSUMER_CONTAINER_PX, five, gap);
+        assert!((card - 196.4).abs() < 1e-9, "{card}");
+        let spanned = card * 5.0 + gap * 4.0;
+        assert!(
+            (spanned - CONSUMER_CONTAINER_PX).abs() < 1e-9,
+            "five tracks must span the full strip: {spanned} vs {CONSUMER_CONTAINER_PX}"
+        );
+
+        // The reported shape: eight then a ragged two.
+        let auto = KpiStripLayout::AutoEight.columns_at(CONSUMER_CONTAINER_PX);
+        assert_eq!(auto, 8);
+        let auto_fit = kpi_strip_row_fit(10, auto);
+        // Two rows either way, which is why "two rows" alone is not the
+        // assertion: the property is two FULL rows of equal peers.
+        assert_eq!(auto_fit.rows(), 2);
+        assert_ne!(
+            auto_fit.full_rows, 2,
+            "the eight-column ladder cannot produce two full rows; if this ever \
+             passes, the balanced-five assertion above is measuring nothing"
+        );
+        assert_eq!(auto_fit.full_rows, 1);
+        assert_eq!(auto_fit.last_row, 2);
+        assert!(auto_fit.is_ragged(), "eight then two is the reported defect");
+
+        // BalancedSix cannot express it either: six then a ragged four.
+        let six = KpiStripLayout::BalancedSix.columns_at(CONSUMER_CONTAINER_PX);
+        assert_eq!(six, 6);
+        let six_fit = kpi_strip_row_fit(10, six);
+        assert_eq!(six_fit.full_rows, 1);
+        assert_eq!(six_fit.last_row, 4);
+        assert!(six_fit.is_ragged(), "six then four still ends ragged");
+
+        // And the cards get WIDER by choosing it, never narrower.
+        let auto_card = kpi_strip_card_width_px(CONSUMER_CONTAINER_PX, auto, gap);
+        let six_card = kpi_strip_card_width_px(CONSUMER_CONTAINER_PX, six, gap);
+        assert!(
+            card > auto_card && card > six_card,
+            "{card} vs {auto_card} / {six_card}"
+        );
+    }
+
+    /// Item counts through `BalancedFive`, landing deliberately: ten is two
+    /// full rows of five and five is one; a count that does not divide is a
+    /// ragged last row whose cards keep their fifth-width tracks.
+    #[test]
+    fn balanced_five_item_sets_land_deliberately() {
+        let ten = kpi_strip_row_fit(10, 5);
+        assert_eq!(ten.full_rows, 2);
+        assert_eq!(ten.last_row, 0);
+        assert_eq!(ten.rows(), 2);
+        assert!(!ten.is_ragged());
+
+        let five = kpi_strip_row_fit(5, 5);
+        assert_eq!(five.rows(), 1);
+        assert!(!five.is_ragged());
+
+        let seven = kpi_strip_row_fit(7, 5);
+        assert_eq!(seven.rows(), 2);
+        assert_eq!(seven.last_row, 2);
+        assert!(seven.is_ragged());
+
+        // Below `@3xl` the profile is on its three-column rung, and three
+        // does not divide ten: three, three, three and one. That is the
+        // narrow-host shape, the same trade every profile's `@sm` rung makes.
+        let narrow = KpiStripLayout::BalancedFive.columns_at(767.0);
+        assert_eq!(narrow, 3);
+        let narrow_fit = kpi_strip_row_fit(10, narrow);
+        assert_eq!(narrow_fit.full_rows, 3);
+        assert_eq!(narrow_fit.last_row, 1);
+
+        let empty = kpi_strip_row_fit(0, 5);
+        assert_eq!(empty.rows(), 0);
+        assert!(!empty.is_ragged());
+    }
+
+    /// The new profile's class strings, pinned as literals, with the three
+    /// existing profiles' strings pinned beside them so adding the fourth
+    /// provably moved none of them. `@3xl:grid-cols-5` is spelled exactly
+    /// like `@4xl:grid-cols-6` -- a literal in this source, which is what
+    /// Tailwind scans (and `SelectableSummary` already emits it).
+    #[test]
+    fn balanced_five_emits_its_own_literal_ladder_and_moves_no_other_profile() {
+        assert_eq!(
+            kpi_strip_grid_class(KpiStripLayout::BalancedFive, false),
+            "grid grid-cols-2 @sm:grid-cols-3 @3xl:grid-cols-5 gap-4"
+        );
+        assert_eq!(
+            kpi_strip_grid_class(KpiStripLayout::BalancedFive, true),
+            "grid grid-cols-2 @sm:grid-cols-3 @3xl:grid-cols-5 gap-3"
+        );
+        assert_eq!(
+            KpiStripLayout::BalancedFive.ladder(),
+            &[
+                KpiStripRung {
+                    prefix: "",
+                    min_container_px: 0,
+                    columns: 2,
+                },
+                KpiStripRung {
+                    prefix: "@sm:",
+                    min_container_px: 384,
+                    columns: 3,
+                },
+                KpiStripRung {
+                    prefix: "@3xl:",
+                    min_container_px: 768,
+                    columns: 5,
+                },
+            ]
+        );
+
+        // The existing three, character for character.
+        assert_eq!(
+            kpi_strip_grid_class(KpiStripLayout::AutoEight, false),
+            "grid grid-cols-2 @sm:grid-cols-3 @lg:grid-cols-4 @5xl:grid-cols-8 gap-4"
+        );
+        assert_eq!(
+            kpi_strip_grid_class(KpiStripLayout::AutoEight, true),
+            "grid grid-cols-2 @sm:grid-cols-3 @lg:grid-cols-4 @5xl:grid-cols-8 gap-3"
+        );
+        assert_eq!(
+            kpi_strip_grid_class(KpiStripLayout::BalancedSix, false),
+            "grid grid-cols-2 @sm:grid-cols-3 @lg:grid-cols-4 @4xl:grid-cols-6 gap-4"
+        );
+        assert_eq!(
+            kpi_strip_grid_class(KpiStripLayout::BalancedSix, true),
+            "grid grid-cols-2 @sm:grid-cols-3 @lg:grid-cols-4 @4xl:grid-cols-6 gap-3"
+        );
+        assert_eq!(
+            kpi_strip_grid_class(KpiStripLayout::PeerThree, false),
+            "grid grid-cols-2 @lg:grid-cols-3 gap-4"
+        );
+        assert_eq!(
+            kpi_strip_grid_class(KpiStripLayout::PeerThree, true),
+            "grid grid-cols-2 @lg:grid-cols-3 gap-3"
+        );
+    }
+
+    /// Exhaustive over every profile: each ladder starts at the shared
+    /// two-column base, rises strictly in both threshold and column count,
+    /// and ends at the profile's declared `max_columns`; every runtime
+    /// marker is unique.
+    #[test]
+    fn every_profile_ladder_is_monotonic_and_ends_at_its_max_columns() {
+        let layouts = [
+            KpiStripLayout::AutoEight,
+            KpiStripLayout::BalancedSix,
+            KpiStripLayout::PeerThree,
+            KpiStripLayout::BalancedFive,
+        ];
+        for layout in layouts {
+            // No wildcard: a new variant stops this match compiling, which
+            // is the reminder to add it to `layouts` above.
+            let declared_max = match layout {
+                KpiStripLayout::AutoEight => 8,
+                KpiStripLayout::BalancedSix => 6,
+                KpiStripLayout::PeerThree => 3,
+                KpiStripLayout::BalancedFive => 5,
+            };
+            assert_eq!(layout.max_columns(), declared_max, "{layout:?}");
+
+            let ladder = layout.ladder();
+            let base = ladder.first().expect("a base rung");
+            assert_eq!(base.prefix, "", "{layout:?}");
+            assert_eq!(base.min_container_px, 0, "{layout:?}");
+            assert_eq!(
+                base.columns, 2,
+                "{layout:?}: never a single full-bleed column"
+            );
+            for pair in ladder.windows(2) {
+                assert!(
+                    pair[1].min_container_px > pair[0].min_container_px,
+                    "{layout:?}: thresholds must rise: {pair:?}"
+                );
+                assert!(
+                    pair[1].columns > pair[0].columns,
+                    "{layout:?}: columns must rise: {pair:?}"
+                );
+            }
+            assert_eq!(
+                ladder.last().expect("a widest rung").columns,
+                layout.max_columns(),
+                "{layout:?}: max_columns must be the widest rung"
+            );
+        }
+
+        for (index, first) in layouts.iter().enumerate() {
+            for second in &layouts[index + 1..] {
+                assert_ne!(
+                    first.as_str(),
+                    second.as_str(),
+                    "{first:?} and {second:?} share a runtime marker"
+                );
+            }
+        }
+    }
+
     /// Six items are one full row of six; the AC's other counts land
     /// deliberately.
     #[test]
@@ -3802,10 +4151,11 @@ mod tests {
             KpiStripLayout::AutoEight,
             KpiStripLayout::BalancedSix,
             KpiStripLayout::PeerThree,
+            KpiStripLayout::BalancedFive,
         ] {
             for container in [
-                320.0_f64, 383.0, 384.0, 511.0, 512.0, 767.0, 895.0, 896.0, 1023.0, 1024.0, 1046.0,
-                1680.0, 2560.0,
+                320.0_f64, 383.0, 384.0, 511.0, 512.0, 671.0, 672.0, 767.0, 768.0, 895.0, 896.0,
+                1023.0, 1024.0, 1046.0, 1680.0, 2560.0,
             ] {
                 let columns = layout.columns_at(container);
                 assert!(
@@ -3841,6 +4191,16 @@ mod tests {
         // is the point of having two.
         assert_eq!(KpiStripLayout::BalancedSix.columns_at(960.0), 6);
         assert_eq!(KpiStripLayout::AutoEight.columns_at(960.0), 4);
+        // BalancedFive: the shared trunk's `@sm`, then its own `@3xl`.
+        assert_eq!(KpiStripLayout::BalancedFive.columns_at(383.0), 2);
+        assert_eq!(KpiStripLayout::BalancedFive.columns_at(384.0), 3);
+        assert_eq!(KpiStripLayout::BalancedFive.columns_at(767.0), 3);
+        assert_eq!(KpiStripLayout::BalancedFive.columns_at(768.0), 5);
+        assert_eq!(KpiStripLayout::BalancedFive.columns_at(1046.0), 5);
+        assert_eq!(KpiStripLayout::BalancedFive.columns_at(2560.0), 5);
+        // Between 768 and 896 it is the only profile at five.
+        assert_eq!(KpiStripLayout::BalancedFive.columns_at(800.0), 5);
+        assert_eq!(KpiStripLayout::BalancedSix.columns_at(800.0), 4);
     }
 
     /// `compact` is orthogonal: it moves padding and gap, never the column
@@ -3851,6 +4211,7 @@ mod tests {
             KpiStripLayout::AutoEight,
             KpiStripLayout::BalancedSix,
             KpiStripLayout::PeerThree,
+            KpiStripLayout::BalancedFive,
         ] {
             let normal: Vec<&str> = kpi_strip_grid_class(layout, false)
                 .split_whitespace()
@@ -3923,6 +4284,7 @@ mod tests {
         assert_eq!(KpiStripLayout::AutoEight.as_str(), "auto-eight");
         assert_eq!(KpiStripLayout::BalancedSix.as_str(), "balanced-six");
         assert_eq!(KpiStripLayout::PeerThree.as_str(), "peer-three");
+        assert_eq!(KpiStripLayout::BalancedFive.as_str(), "balanced-five");
         assert_ne!(
             KpiStripLayout::AutoEight.as_str(),
             KpiStripLayout::BalancedSix.as_str()
@@ -3930,6 +4292,10 @@ mod tests {
         assert_ne!(
             KpiStripLayout::BalancedSix.as_str(),
             KpiStripLayout::PeerThree.as_str()
+        );
+        assert_ne!(
+            KpiStripLayout::BalancedSix.as_str(),
+            KpiStripLayout::BalancedFive.as_str()
         );
         assert!(
             module_source().contains("data-kpi-strip-layout=move || layout.get().as_str()"),
@@ -3951,10 +4317,11 @@ mod tests {
             !module.contains("grid_class: &'static str") && !module.contains("grid_class: String"),
             "an arbitrary class fragment is not a composition contract either"
         );
-        // Three profiles today; the enum is what made the third additive.
+        // Four profiles today; the enum is what made each one additive.
         assert_eq!(KpiStripLayout::AutoEight.max_columns(), 8);
         assert_eq!(KpiStripLayout::BalancedSix.max_columns(), 6);
         assert_eq!(KpiStripLayout::PeerThree.max_columns(), 3);
+        assert_eq!(KpiStripLayout::BalancedFive.max_columns(), 5);
     }
 
     /// Degenerate inputs never divide by zero or panic.
