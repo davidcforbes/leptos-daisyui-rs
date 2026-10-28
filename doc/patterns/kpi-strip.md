@@ -241,7 +241,7 @@ while a card whose data moved is rebuilt.
 
 `KpiStrip` owns the responsive grid, and it asks how wide **the strip** is,
 never how wide the window is -- the steps are CSS container queries
-(`@sm`/`@lg`/`@4xl`/`@5xl`), because a strip in a 648px content column was
+(`@sm`/`@lg`/`@3xl`/`@4xl`/`@5xl`), because a strip in a 648px content column was
 rendering 67px cards the moment the *viewport* crossed 1280px (ldui-tnyq).
 Fewer items than columns simply leave the remaining explicit-column tracks
 empty -- CSS Grid does not stretch existing cards to fill them, so card size
@@ -254,6 +254,7 @@ stays equal regardless of count. The strip never scrolls horizontally.
 | `KpiStripLayout::AutoEight` (default) | 2 / 3 / 4 / 8 | an operational strip of short cards |
 | `KpiStripLayout::BalancedSix` | 2 / 3 / 4 / 6 | a balanced fixed dashboard scorecard |
 | `KpiStripLayout::PeerThree` | 2 / 3 | a fixed row of exactly three peer summaries (ldui-orom) |
+| `KpiStripLayout::BalancedFive` | 2 / 3 / 5 | ten peer KPIs, a results strip, as two even rows of five |
 
 ```rust
 view! { <KpiStrip items=items layout=KpiStripLayout::BalancedSix /> }
@@ -281,6 +282,9 @@ control, which costs the label 20px of its row (`ldui-yhvf`):
 | `BalancedSix` | `@4xl` | 896px | 6 | 136.0px |
 | `PeerThree` | base | 320px | 2 | 152.0px |
 | `PeerThree` | `@lg` | 512px | 3 | 160.0px |
+| `BalancedFive` | base | 320px | 2 | 152.0px |
+| `BalancedFive` | `@sm` | 384px | 3 | 117.3px |
+| `BalancedFive` | `@3xl` | 768px | 5 | 140.8px |
 
 Six columns start at `@4xl` rather than `@3xl` (768px) because at 768px six
 columns are 114.7px: enough for a bare two-line label, not enough for a
@@ -302,6 +306,22 @@ viewport), `AutoEight` renders 8 tracks of 188.2px cards occupying only the
 first 596.6px of the row, `BalancedSix` renders 6 tracks occupying roughly
 half of it, and `PeerThree` renders exactly 3 tracks of roughly 528.5px
 cards spanning the full row.
+
+`BalancedFive` (4iiz-Office, 2026-10-28) exists so a ten-card results strip
+reads as two even rows of five: through `AutoEight` the same ten cards are
+eight then a ragged two, and through `BalancedSix` six then a ragged four.
+It follows the shared trunk through its base and `@sm` rungs, then steps
+from 3 columns straight to 5, with no 4-column rung (four does not divide
+ten). The five-column rung follows the rule that placed `BalancedSix`'s:
+the narrowest container size at which a help-bearing card still holds two
+label lines. `@2xl` (672px) gives 121.6px cards -- enough for a bare
+two-line label, not for a help-bearing one (124.8px even with the compact
+gap) -- and `@3xl` (768px) gives 140.8px, so five columns start at `@3xl`
+rather than waiting for `@4xl`, where `BalancedSix` reaches six. Below
+768px the strip is on its three-column rung, and ten cards there are three,
+three, three and one: the narrow-host shape. At the 1046px container
+`ldui-tnyq` measured, `BalancedFive` gives two rows of five 196.4px cards,
+wider than either other profile's cards at that width.
 
 ### Item counts that do not divide
 
@@ -412,7 +432,7 @@ view! {
 
 ```css
 @source inline("@container grid grid-cols-2 @sm:grid-cols-3 @lg:grid-cols-4 gap-3 gap-4 w-full");
-@source inline("@5xl:grid-cols-8 @4xl:grid-cols-6");
+@source inline("@5xl:grid-cols-8 @4xl:grid-cols-6 @lg:grid-cols-3 @3xl:grid-cols-5");
 @source inline("rounded-box border border-base-300 bg-base-100 h-full min-w-0 overflow-hidden");
 @source inline("forced-colors:border-[CanvasText]");
 @source inline("h-(--border-width-accent) w-full");
