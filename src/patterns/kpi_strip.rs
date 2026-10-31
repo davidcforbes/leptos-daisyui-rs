@@ -3930,7 +3930,10 @@ mod tests {
         );
         assert_eq!(auto_fit.full_rows, 1);
         assert_eq!(auto_fit.last_row, 2);
-        assert!(auto_fit.is_ragged(), "eight then two is the reported defect");
+        assert!(
+            auto_fit.is_ragged(),
+            "eight then two is the reported defect"
+        );
 
         // BalancedSix cannot express it either: six then a ragged four.
         let six = KpiStripLayout::BalancedSix.columns_at(CONSUMER_CONTAINER_PX);
