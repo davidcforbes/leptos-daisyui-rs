@@ -5,7 +5,9 @@
 //! Moved here from editmark-leptos so any Leptos/daisyUI app can render
 //! markdown with the same view-only renderer, syntax highlighter, link
 //! sanitizer, math (native MathML via the Rust math-core crate, see
-//! [`math`]), and DaisyUI `data-theme` → palette bridge.
+//! [`math`]; behind the `math` cargo feature since ldui-dtm3, with
+//! [`currency`] keeping prices out of math in every build), and DaisyUI
+//! `data-theme` → palette bridge.
 //! editmark-leptos now consumes these from here and re-exports them for its
 //! existing consumers (e.g. llm-wiki), so its public surface is unchanged.
 //!
@@ -15,6 +17,7 @@
 //! component library.
 
 pub mod asset_upload;
+pub mod currency;
 #[allow(missing_docs)]
 pub mod editor;
 #[allow(missing_docs)]
@@ -43,7 +46,22 @@ pub mod highlight;
 pub mod image_dialog;
 pub mod image_parse;
 pub mod inline;
+#[cfg(feature = "math")]
 pub mod math;
+/// The `math` feature is off (the default since ldui-dtm3: math-core 0.9.0
+/// needs Rust 1.96 and 4iiz-Office builds on 1.95), so a `.math-inline` or
+/// `.math-display` host keeps its `$…$` source as visible text and nothing
+/// converts it. [`currency`] still decides which `$…$` pairs are math at all.
+#[cfg(not(feature = "math"))]
+pub mod math {
+    use web_sys::HtmlElement;
+
+    /// No-op without the `math` feature: every formula stays as source text.
+    pub fn render_math(_host: &HtmlElement) {}
+
+    /// No-op without the `math` feature: every formula stays as source text.
+    pub fn render_math_display_only(_host: &HtmlElement) {}
+}
 pub mod outline;
 pub mod sanitize;
 pub mod stats;

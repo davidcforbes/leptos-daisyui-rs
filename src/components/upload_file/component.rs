@@ -1,10 +1,57 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use crate::merge_classes;
 use leptos::{html::Div, prelude::*};
+
+static NEXT_UPLOAD_FILE_ID: AtomicU64 = AtomicU64::new(0);
+
+/// A process-unique id for one upload's prompt (`ld-upload-file-0`, ...),
+/// which names the file input through `aria-labelledby`. A monotonic
+/// counter, like `Collapse`'s.
+fn next_upload_file_id() -> String {
+    format!(
+        "ld-upload-file-{}",
+        NEXT_UPLOAD_FILE_ID.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
+/// The visible strings of [`UploadFile`], supplied by the caller so a page
+/// renders them in its own language (ldui-1ff4). [`Default`] is the English
+/// the component showed while the strings were hard-coded.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UploadFileText {
+    /// The prompt above the input ("Click to upload").
+    pub prompt: String,
+    /// The prefix before the chosen file's name ("Selected: ").
+    pub selected: String,
+}
+
+impl UploadFileText {
+    /// Both strings at once.
+    pub fn new(prompt: impl Into<String>, selected: impl Into<String>) -> Self {
+        Self {
+            prompt: prompt.into(),
+            selected: selected.into(),
+        }
+    }
+}
+
+impl Default for UploadFileText {
+    fn default() -> Self {
+        Self::new("Click to upload", "Selected: ")
+    }
+}
 
 /// # UploadFile Component
 ///
 /// A file upload component with styled file input.
 /// Built on daisyUI's file-input styling.
+///
+/// Every visible string comes from the `text` prop ([`UploadFileText`]), so a
+/// caller rendering in another language passes its own words; the default is
+/// the English shown before. The prompt is also the input's accessible name
+/// (`aria-labelledby`). For a drag-and-drop target see
+/// [`FileDropZone`](super::FileDropZone).
 ///
 /// ### Add to `input.css`
 /// ```css
@@ -31,6 +78,10 @@ pub fn UploadFile(
     #[prop(optional, into)]
     disabled: Signal<bool>,
 
+    /// The visible strings; English when omitted (ldui-1ff4)
+    #[prop(optional, into)]
+    text: Signal<UploadFileText>,
+
     /// Additional CSS classes
     #[prop(optional, into)]
     class: &'static str,
@@ -40,6 +91,8 @@ pub fn UploadFile(
     node_ref: NodeRef<Div>,
 ) -> impl IntoView {
     let (selected_file, set_selected_file) = signal(String::new());
+    let prompt_id = next_upload_file_id();
+    let labelled_by = prompt_id.clone();
 
     view! {
         <div node_ref=node_ref class=move || merge_classes!("flex flex-col gap-2", class)>
@@ -51,6 +104,7 @@ pub fn UploadFile(
                         fill="none"
                         viewBox="0 0 24 24"
                         stroke="currentColor"
+                        aria-hidden="true"
                     >
                         <path
                             stroke-linecap="round"
@@ -61,14 +115,15 @@ pub fn UploadFile(
                     </svg>
 
                     <div class="text-center">
-                        <p class="text-lg font-semibold">"Click to upload"</p>
+                        <p id=prompt_id class="text-lg font-semibold">{move || text.get().prompt}</p>
                         {move || {
                             let file = selected_file.get();
                             if !file.is_empty() {
+                                let selected = text.get().selected;
                                 view! {
                                     <div class="mt-2">
                                         <p class="text-sm text-base-content/75">
-                                            "Selected: " {file}
+                                            {selected} {file}
                                         </p>
                                     </div>
                                 }
@@ -83,6 +138,7 @@ pub fn UploadFile(
                     <input
                         type="file"
                         class="file-input file-input-bordered w-full max-w-xs"
+                        aria-labelledby=labelled_by
                         multiple=move || multiple.get()
                         accept=move || {
                             let a = accept.get();
