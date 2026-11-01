@@ -163,11 +163,34 @@ fn media_fallback(label: String, name: String) -> impl IntoView {
     }
 }
 
+/// Opt-in behaviour of an image header beyond showing the picture
+/// (ldui-mhur). The default is the original bubble: no placeholder, no
+/// enlarge button.
+#[derive(Clone, Default)]
+struct ImageHeaderOptions {
+    /// Cover the picture with a skeleton until it has loaded.
+    placeholder: bool,
+    /// Make the picture a button that reports its header, with this
+    /// accessible-name prefix.
+    open: Option<(Callback<MessageHeader>, String)>,
+}
+
+/// The accessible name of an image header's enlarge button: the prefix and
+/// the alt text, colon separated, skipping whichever is blank.
+pub fn image_open_label(prefix: &str, alt: &str) -> String {
+    match (prefix.trim(), alt.trim()) {
+        ("", alt) => alt.to_string(),
+        (prefix, "") => prefix.to_string(),
+        (prefix, alt) => format!("{prefix}: {alt}"),
+    }
+}
+
 fn header_view(
     header: MessageHeader,
     placeholders: bool,
     values: Option<&PlaceholderValues>,
     texts: &RichMessageTexts,
+    image: &ImageHeaderOptions,
 ) -> AnyView {
     match header {
         MessageHeader::Text(text) => {
@@ -180,29 +203,75 @@ fn header_view(
             width,
             height,
         } => {
+            let opened = MessageHeader::Image {
+                src: src.clone(),
+                alt: alt.clone(),
+                width,
+                height,
+            };
             let failed = RwSignal::new(!is_safe_media_url(&src));
+            let loaded = RwSignal::new(false);
+            let placeholder = image.placeholder;
+            let open = image.open.clone();
             let label = texts.image_unavailable.clone();
             let name = media_fallback_name(&src, &alt);
             let width = width.map(|w| w.to_string());
             let height = height.map(|h| h.to_string());
+            let loading = move || placeholder && !loaded.get() && !failed.get();
             view! {
-                <div data-message-header="image">
+                <div
+                    data-message-header="image"
+                    class=move || if loading() { "relative min-h-32" } else { "relative" }
+                    aria-busy=move || loading().then_some("true")
+                >
                     {move || {
                         if failed.get() {
-                            media_fallback(label.clone(), name.clone()).into_any()
-                        } else {
-                            view! {
-                                <img
-                                    class="block h-auto max-w-full rounded-field"
-                                    src=src.clone()
-                                    alt=alt.clone()
-                                    width=width.clone()
-                                    height=height.clone()
-                                    decoding="async"
-                                    on:error=move |_| failed.set(true)
-                                />
+                            return media_fallback(label.clone(), name.clone()).into_any();
+                        }
+                        let picture = view! {
+                            <img
+                                class="block h-auto max-w-full rounded-field"
+                                src=src.clone()
+                                alt=alt.clone()
+                                width=width.clone()
+                                height=height.clone()
+                                decoding="async"
+                                on:load=move |_| loaded.set(true)
+                                on:error=move |_| failed.set(true)
+                            />
+                        };
+                        let skeleton = placeholder
+                            .then(|| {
+                                view! {
+                                    <Show when=move || !loaded.get()>
+                                        <div
+                                            class="skeleton pointer-events-none absolute inset-0 rounded-field"
+                                            data-media-loading="true"
+                                            aria-hidden="true"
+                                        ></div>
+                                    </Show>
+                                }
+                            });
+                        match open.clone() {
+                            Some((callback, prefix)) => {
+                                let opened = opened.clone();
+                                let name = image_open_label(&prefix, &alt);
+                                view! {
+                                    <button
+                                        type="button"
+                                        data-pressable="true"
+                                        class="ld-focus-ring block cursor-zoom-in rounded-field"
+                                        aria-label=name
+                                        data-message-image-open="true"
+                                        on:click=move |_| callback.run(opened.clone())
+                                    >
+                                        {picture}
+                                    </button>
+                                    {skeleton}
+                                }
+                                .into_any()
                             }
-                            .into_any()
+                            None => view! { {picture} {skeleton} }.into_any(),
                         }
                     }}
                 </div>
@@ -354,6 +423,24 @@ pub fn RichMessageBubble(
     #[prop(optional)]
     on_action: Option<Callback<MessageAction>>,
 
+    /// Cover an image header with a loading skeleton (`data-media-loading`)
+    /// until the picture has loaded; the header is `aria-busy` meanwhile.
+    /// Off by default.
+    #[prop(optional, into)]
+    image_placeholder: Signal<bool>,
+
+    /// Makes an image header a button (`data-message-image-open`) that
+    /// reports the header, so the host can show it enlarged. Unset, the
+    /// picture is a plain image. A picture that failed to load is never a
+    /// button.
+    #[prop(optional)]
+    on_image_open: Option<Callback<MessageHeader>>,
+
+    /// Accessible-name prefix of the enlarge button ("Enlarge picture"); the
+    /// picture's alt text follows it. Used only with `on_image_open`.
+    #[prop(optional, into)]
+    image_open_label: Signal<String>,
+
     /// Additional CSS classes for the root `<article>`.
     #[prop(optional, into)]
     class: &'static str,
@@ -402,10 +489,14 @@ pub fn RichMessageBubble(
             }
         });
 
+        let image = ImageHeaderOptions {
+            placeholder: image_placeholder.get(),
+            open: on_image_open.map(|callback| (callback, image_open_label.get())),
+        };
         let header = m
             .header
             .clone()
-            .map(|h| header_view(h, recognise, values.as_ref(), &t));
+            .map(|h| header_view(h, recognise, values.as_ref(), &t, &image));
         let body = (!m.body.is_empty()).then(|| {
             let runs = runs_view(
                 &m.body,

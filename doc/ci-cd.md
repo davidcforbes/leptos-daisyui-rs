@@ -272,7 +272,12 @@ declared tracks that cannot fit scroll the wrapper instead of spilling), and
 the focused `UploadFile`/`FileDropZone` proof (`test-upload-file`, ldui-1ff4:
 caller-supplied Spanish strings render, a dropped PDF reaches `on_files` and
 an off-list file `on_rejected`, the zone is one tab stop that opens the picker
-on Enter/Space, axe-clean).
+on Enter/Space, axe-clean), and the focused `MessageViewer` proof
+(`test-message-viewer`, ldui-mhur: WhatsApp and SMS/MMS chrome, the picture's
+alt or "{channel} picture", the broken-picture tile, the language / picture /
+template switches keeping focus, click-to-enlarge, the dialog opened from an
+EntityTable eye action with focus kept inside and returned, axe light+dark,
+no component drift).
 The controlled Softphone lane (`test-softphone`, ldui-xmhn) verifies simulated
 ClientCallWorkspace destination/contact-write guards, ambiguous dispatch,
 stale acknowledgment, call-record keyboard interaction, required semantics,

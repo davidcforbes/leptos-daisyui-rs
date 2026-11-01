@@ -483,6 +483,11 @@ fn get_menu_categories() -> Vec<MenuCategory> {
                     href: "/components/rich_message",
                     value: "rich_message",
                 },
+                ComponentItem {
+                    name: "Message Viewer",
+                    href: "/components/message_viewer",
+                    value: "message_viewer",
+                },
             ],
         },
         MenuCategory {

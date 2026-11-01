@@ -216,6 +216,7 @@ fn AppInner() -> impl IntoView {
                     <Route path=path!("/mermaid_display") view=MermaidDisplayDemo />
                     <Route path=path!("/markdown_math") view=MarkdownMathDemo />
                     <Route path=path!("/rich_message") view=RichMessageDemo />
+                    <Route path=path!("/message_viewer") view=MessageViewerDemo />
                     <Route path=path!("/validator") view=ValidatorDemo />
                     <Route path=path!("/vertical-steps") view=VerticalStepsDemo />
                     <Route path=path!("/week-view") view=WeekViewDemo />

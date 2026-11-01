@@ -626,3 +626,15 @@ fn spanish_texts_cover_every_field() {
     }
     assert!(es.truncated.contains("{shown}") && es.truncated.contains("{total}"));
 }
+
+// ---- enlarge button (ldui-mhur) -------------------------------------------
+
+#[test]
+fn the_enlarge_button_is_named_by_its_prefix_and_the_alt() {
+    assert_eq!(
+        image_open_label("Enlarge picture", "Office flyer"),
+        "Enlarge picture: Office flyer"
+    );
+    assert_eq!(image_open_label("  ", "Office flyer"), "Office flyer");
+    assert_eq!(image_open_label("Ampliar imagen", " "), "Ampliar imagen");
+}

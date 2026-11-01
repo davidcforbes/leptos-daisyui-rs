@@ -1080,6 +1080,23 @@ fn upload_file_step() -> Step {
     }
 }
 
+/// Focused browser proof for `MessageViewer`, `MessageViewerDialog` and the
+/// eye row action (ldui-mhur): WhatsApp/SMS/MMS chrome, the picture's alt (or
+/// "{channel} picture"), the broken-picture tile, the language / picture /
+/// template switches, status, reach and replies, click-to-enlarge, the dialog
+/// opened from an EntityTable row with focus kept inside and returned on
+/// close, axe light+dark and no component drift. Lives on the general demo
+/// app (`html_target: None`) in its own file/step like [`upload_file_step`].
+fn message_viewer_step() -> Step {
+    Step {
+        name: "test-message-viewer",
+        run: Run::BrowserSuite {
+            test: "message_viewer_smoke",
+            html_target: None,
+        },
+    }
+}
+
 /// Focused browser proof that Mermaid renders through pele (ldui-qe72):
 /// `MermaidDisplay` draws `svg.pele` for four diagram types (Venn among
 /// them), broken source shows pele's message in the error box, a
@@ -1155,6 +1172,7 @@ fn full_steps() -> Vec<Step> {
     steps.push(rich_message_step());
     steps.push(math_step());
     steps.push(upload_file_step());
+    steps.push(message_viewer_step());
     steps
 }
 
@@ -2993,6 +3011,7 @@ fn main() -> ExitCode {
         "test-rich-message" => run_steps(&[rich_message_step()]),
         "test-math" => run_steps(&[math_step()]),
         "test-upload-file" => run_steps(&[upload_file_step()]),
+        "test-message-viewer" => run_steps(&[message_viewer_step()]),
         "capture-design" => run_steps(&[design_capture_step()]),
         "gen-tokens" => {
             let check = std::env::args().any(|a| a == "--check");
@@ -3008,7 +3027,7 @@ fn main() -> ExitCode {
         other => {
             eprintln!("xtask: unknown subcommand {other:?}");
             eprintln!(
-                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-week-planner|test-month-roster|test-selectable-summary|test-person-picker|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-snapshot-table-page-filter-actions|test-helpdesk|test-ai-chat|test-ai-chat-knowledge|test-server-table-column-tools|test-collapse-naming|test-data-table-fit|test-app-shell|test-field-context-scoping|test-entity-draft-row|test-softphone|test-help-hint|test-focus-ring|test-row-action-presets|test-server-cursor-footer|test-ld-pattern|test-mermaid-pele|test-rich-message|test-math|test-upload-file|capture-design|gen-tokens|check-sibling-tokens|clean-cache|bump>"
+                "usage: cargo xtask <verify|verify-full|verify-pattern <name> <--inner|--browser>|fmt-check|clippy|build|check-demo|test|test-client-snapshot|test-reactivity|test-layout|test-style|test-keyed-result-list|test-modal-close-proposal|test-bar-chart-divergence|test-heatmap-matrix|test-week-planner|test-month-roster|test-selectable-summary|test-person-picker|test-section-heading|test-search-picker-dialog|test-page-quick-actions|test-admin-workbench|test-snapshot-table-delta|test-snapshot-table-page-controls|test-snapshot-table-page-filter-actions|test-helpdesk|test-ai-chat|test-ai-chat-knowledge|test-server-table-column-tools|test-collapse-naming|test-data-table-fit|test-app-shell|test-field-context-scoping|test-entity-draft-row|test-softphone|test-help-hint|test-focus-ring|test-row-action-presets|test-server-cursor-footer|test-ld-pattern|test-mermaid-pele|test-rich-message|test-math|test-upload-file|test-message-viewer|capture-design|gen-tokens|check-sibling-tokens|clean-cache|bump>"
             );
             ExitCode::from(2)
         }
@@ -3668,6 +3687,21 @@ pub fn r() -> f32 { radius::CARD }
         ));
         assert!(!gate_steps().iter().any(|s| s.name == "test-math"));
         assert!(full_steps().iter().any(|s| s.name == "test-math"));
+    }
+
+    #[test]
+    fn message_viewer_step_is_in_process_and_full_only() {
+        let step = message_viewer_step();
+        assert_eq!(step.name, "test-message-viewer");
+        assert!(matches!(
+            step.run,
+            Run::BrowserSuite {
+                test: "message_viewer_smoke",
+                html_target: None
+            }
+        ));
+        assert!(!gate_steps().iter().any(|s| s.name == "test-message-viewer"));
+        assert!(full_steps().iter().any(|s| s.name == "test-message-viewer"));
     }
 
     #[test]

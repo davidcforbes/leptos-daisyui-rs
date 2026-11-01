@@ -241,5 +241,7 @@ pub mod mermaid_display;
 pub use mermaid_display::*;
 pub mod rich_message;
 pub use rich_message::*;
+pub mod message_viewer;
+pub use message_viewer::*;
 pub mod svg_display;
 pub use svg_display::*;
