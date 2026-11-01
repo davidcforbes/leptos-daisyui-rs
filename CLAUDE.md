@@ -165,6 +165,14 @@ the query returned the *status filter* while still passing. Use stable data
 hooks (`data-entity-page-size-control`, `data-entity-row-range`,
 `data-kpi-strip-layout`, `data-heatmap-cell`).
 
+**A native modal `<dialog>` is not a focus trap.** `showModal()` makes the
+rest of the page inert, but Tab past the last control leaves for the browser
+chrome (`document.activeElement` becomes `body`), and the house `Modal` adds
+nothing. A dialog that promises a trap owns one: `MessageViewerDialog`'s
+`trap_tab` wraps within the innermost `dialog[open]` and skips
+`visibility: hidden` controls (ldui-mhur). Prove it by pressing Tab in a lane;
+a native test cannot see it.
+
 **A rect is not "rendered".** daisyUI's closed `.modal` is `display: grid;
 position: fixed; inset: 0; visibility: hidden` -- it overrides the native
 `dialog:not([open]) { display: none }` so the close can animate -- and
@@ -311,6 +319,10 @@ A bare `<word>` in `///` text (a placeholder like `<engine>`) is an unclosed
 HTML tag to rustdoc, and only the gate's LAST step (`doc-lib`) fails on it:
 put it in a code span. `RUSTDOCFLAGS="-D warnings" cargo doc -p
 leptos-daisyui-rs --no-deps` checks it without the whole gate.
+If `doc-lib` instead dies with `memory allocation of <N> bytes failed` and the
+same N on every run, move `target/doc` aside and re-run before suspecting RAM
+or code: rustdoc merges into the existing output, and a stale one made it
+request 7 GiB on 2026-10-31 with 26 GB free.
 
 **Running the demo needs `npm install` in `demo/` first** (`node_modules` is not
 committed). Without it, trunk's Tailwind pre-build hook fails and trunk serves a

@@ -89,6 +89,7 @@ Each component documentation follows a consistent structure:
 - [AppShell](./components/app_shell.md) - Full-height application frame with optional pinned top/status regions and responsive start/center/end top-bar composition
 - [ResultList / KeyedResultList](./components/result_list.md) - Flat, ranked, keyboard-navigable results picker; `KeyedResultList<T>` tracks selection/activation by stable key and typed payload instead of index or display text
 - [AiAssistantWorkspace](./components/ai_assistant_workspace.md) - Provider-independent controlled assistant projections with fail-closed typed intents, evidence, artifacts, settings and governance sections
+- [MessageViewer](./components/message_viewer.md) - Read-only view of a sent WhatsApp/SMS/MMS message as the recipient saw it (phone chrome, picture, language/picture/template switches, delivery status, replies), its dialog with a Tab trap, and the EntityTable eye row action
 
 ### Layout Components
 - [Accordion](./components/accordion.md) - Collapsible content sections
