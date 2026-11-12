@@ -48,13 +48,11 @@ fn test_capacity_bar_color_error() {
 }
 
 #[test]
-fn test_capacity_bar_color_clone_and_debug() {
+fn test_capacity_bar_color_copy_and_debug() {
     let c1 = CapacityBarColor::Warning;
-    // Explicit Clone::clone (not `.clone()`): the enum is gaining a Copy
-    // derive in-flight, and clippy's clone_on_copy would fail the gate on a
-    // method-syntax clone of a Copy type while this still must compile (and
-    // exercise Clone) before that derive lands.
-    let c2 = Clone::clone(&c1);
+    // The enum is Copy (ldui-design), so a plain binding copies it and `c1`
+    // stays usable; any clone call here trips clippy::clone_on_copy.
+    let c2 = c1;
     assert_eq!(c1, c2);
     assert!(format!("{:?}", c1).contains("Warning"));
 }
