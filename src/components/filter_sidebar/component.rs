@@ -113,6 +113,97 @@ pub(crate) fn filter_sidebar_title_actions_wrapper(
     })
 }
 
+/// The default maximized width (ldui-kq3w): 90% of the nearest
+/// `container-type: inline-size` ancestor, or of the viewport when there is
+/// none (CSS Containment L3: a `cq*` unit with no eligible container falls
+/// back to the small viewport unit). Put `@container` on the row that holds
+/// the panel and the page content and "90%" means 90% of THAT region -- the
+/// space the panel actually shares -- rather than of the whole window.
+pub const FILTER_SIDEBAR_MAXIMIZED_WIDTH: &str = "w-[90cqw] min-w-[90cqw]";
+
+/// The `<aside>`'s width classes for one state. Collapsing always wins: a
+/// collapsed panel is the 44px rail whether or not it was maximized, and
+/// re-expanding it returns to whichever width `maximized` still names.
+/// `maximized` only counts when the panel offers the toggle at all, so a
+/// caller that never wires `on_maximize_toggle` cannot be widened by a stray
+/// signal.
+pub(crate) fn filter_sidebar_width_class(
+    collapsed: bool,
+    maximizable: bool,
+    maximized: bool,
+    expanded_width: &str,
+    maximized_width: &str,
+) -> String {
+    if collapsed {
+        "w-[44px] min-w-[44px]".to_string()
+    } else if maximizable && maximized {
+        maximized_width.to_string()
+    } else {
+        expanded_width.to_string()
+    }
+}
+
+/// Builds the optional maximize toggle (ldui-kq3w): a `<<` / `>>` button
+/// beside the collapse toggle that widens the panel to its maximized width
+/// and back. `None` (no `on_maximize_toggle`) emits nothing, so every
+/// existing panel keeps its markup byte-for-byte.
+///
+/// A toggle button, so it carries `aria-pressed` and ONE constant label:
+/// a label that flipped between "Expand" and "Restore" would contradict the
+/// pressed state a screen reader already announces. `title` repeats the
+/// label for pointer users. Collapsing hides, zeroes and `inert`s its wrapper
+/// exactly like `header_actions` (`ldui-8hba`): widening a 44px rail means
+/// nothing, and a hidden control must not stay reachable.
+pub(crate) fn filter_sidebar_maximize_button(
+    on_maximize_toggle: Option<Callback<()>>,
+    maximized: Signal<bool>,
+    maximize_label: Signal<String>,
+    collapsed: Signal<bool>,
+    side: Signal<SidebarSide>,
+) -> Option<impl IntoView> {
+    on_maximize_toggle.map(|on_maximize_toggle| {
+        view! {
+            <div
+                class=move || {
+                    format!(
+                        "flex items-center transition-opacity duration-[150ms] {}",
+                        // The gap faces the collapse toggle, which sits on
+                        // the panel's INNER edge: right of this button on a
+                        // left panel, left of it on a right panel (the
+                        // header row is `flex-row-reverse` there).
+                        match (collapsed.get(), side.get()) {
+                            (true, _) => "w-0 overflow-hidden opacity-0 pointer-events-none",
+                            (false, SidebarSide::Left) => "mr-2 shrink-0 opacity-100",
+                            // `SidebarSide` is `#[non_exhaustive]`.
+                            (false, _) => "ml-2 shrink-0 opacity-100",
+                        },
+                    )
+                }
+                inert=move || collapsed.get()
+                aria-hidden=move || collapsed.get().to_string()
+                data-filter-sidebar-maximize-wrapper="true"
+            >
+                <button
+                    type="button"
+                    aria-label=move || maximize_label.get()
+                    title=move || maximize_label.get()
+                    aria-pressed=move || maximized.get().to_string()
+                    class="btn btn-square btn-xs size-7 shrink-0 rounded-md \
+                           border border-black/[.12] bg-base-100 text-base-content/75 \
+                           font-mono text-[12px] font-bold shadow-none \
+                           hover:bg-black/[.06] hover:text-base-content"
+                    on:click=move |_| on_maximize_toggle.run(())
+                    data-filter-sidebar-maximize="true"
+                >
+                    <span aria-hidden="true">
+                        {move || side.get().maximize_glyph(maximized.get())}
+                    </span>
+                </button>
+            </div>
+        }
+    })
+}
+
 /// Renders the ONE toggle-button markup shared by [`FilterSidebar`]'s own
 /// internal header toggle and the externally placed [`FilterSidebarToggle`]
 /// (`ldui-vshu`) -- a single source of truth so the two can never drift
@@ -317,7 +408,20 @@ pub fn FilterSidebarToggle(
 /// @source inline("opacity-0 opacity-100 pointer-events-none");
 /// @source inline("border-r border-l flex-row-reverse rotate-180");
 /// @source inline("[writing-mode:vertical-rl] [text-orientation:mixed]");
+/// @source inline("w-[90cqw] min-w-[90cqw] ml-2 mr-2 font-mono");
 /// ```
+///
+/// ## Maximize toggle (ldui-kq3w)
+///
+/// Pass `on_maximize_toggle` (and the controlled `maximized` signal it
+/// flips) and the header gains a `<<` / `>>` button beside the collapse
+/// toggle: it widens the panel to [`FILTER_SIDEBAR_MAXIMIZED_WIDTH`] -- 90%
+/// of the region it shares -- and restores `expanded_width`. Built for an
+/// assistant panel whose conversation sometimes needs the room. Put
+/// `@container` (`container-type: inline-size`) on the row holding the panel
+/// and the page content so "90%" is measured against that row; that row
+/// must have a definite width of its own (`w-full`, a flex item with
+/// `flex-1`), never be content-sized, or the container query collapses it.
 ///
 /// The last two lines are the [`SidebarSide::Right`] half of every mirrored
 /// pair. A project that scans this crate's sources already picks them up —
@@ -426,6 +530,27 @@ pub fn FilterSidebar(
     /// exactly as the type docs require for this crate's own.
     #[prop(default = String::from("w-[220px] min-w-[220px]"), into)]
     expanded_width: String,
+    /// Whether the panel is maximized (ldui-kq3w). CONTROLLED like
+    /// `collapsed`; read only when `on_maximize_toggle` is supplied.
+    /// Defaults to `false`.
+    #[prop(optional, into)]
+    maximized: Signal<bool>,
+    /// Fired by the `<<` / `>>` maximize toggle; the consumer flips
+    /// `maximized`. `None` (the default) renders no maximize toggle at all,
+    /// so every existing call site is unchanged.
+    #[prop(optional, into)]
+    on_maximize_toggle: Option<Callback<()>>,
+    /// Accessible name (and `title` tooltip) of the maximize toggle. ONE
+    /// constant label: the button reports its state through `aria-pressed`.
+    /// Localise it. Defaults to `"Expand panel"`.
+    #[prop(into, default = Signal::stored(String::from("Expand panel")))]
+    maximize_label: Signal<String>,
+    /// Maximized width classes. Defaults to
+    /// [`FILTER_SIDEBAR_MAXIMIZED_WIDTH`] (90% of the nearest `@container`,
+    /// or of the viewport). Same full-class-pair contract as
+    /// `expanded_width`.
+    #[prop(default = String::from(FILTER_SIDEBAR_MAXIMIZED_WIDTH), into)]
+    maximized_width: String,
     /// Reference to the panel element
     /// ([HTMLElement](https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement)).
     #[prop(optional)]
@@ -435,12 +560,15 @@ pub fn FilterSidebar(
     /// offers is application knowledge, not a property of the panel.
     children: Children,
 ) -> impl IntoView {
+    let maximizable = on_maximize_toggle.is_some();
     let width_class = move || {
-        if collapsed.get() {
-            "w-[44px] min-w-[44px]".to_string()
-        } else {
-            expanded_width.clone()
-        }
+        filter_sidebar_width_class(
+            collapsed.get(),
+            maximizable,
+            maximized.get(),
+            &expanded_width,
+            &maximized_width,
+        )
     };
     // `opacity-0 pointer-events-none` rather than unmounting — see the type docs.
     let hidden_when_collapsed = move || {
@@ -463,6 +591,11 @@ pub fn FilterSidebar(
     view! {
         <aside
             node_ref=node_ref
+            // Present only on a panel that offers the toggle, so a panel
+            // without one keeps its markup byte-for-byte.
+            data-filter-sidebar-maximized=move || {
+                maximizable.then(|| (maximized.get() && !collapsed.get()).to_string())
+            }
             // `overflow-hidden` is load-bearing: the 220px content must be
             // CLIPPED during the collapse, not reflowed, or the transition
             // visibly reflows text on every frame.
@@ -526,6 +659,15 @@ pub fn FilterSidebar(
                     .into_any(),
                 }}
                 {filter_sidebar_header_actions_wrapper(header_actions, collapsed)}
+                // ldui-kq3w: beside the collapse toggle, on the panel's inner
+                // edge, so both width controls sit together.
+                {filter_sidebar_maximize_button(
+                    on_maximize_toggle,
+                    maximized,
+                    maximize_label,
+                    collapsed,
+                    side,
+                )}
                 // `ldui-vshu`: rendered only for the default
                 // `Internal` placement -- `External` omits this node
                 // entirely, not merely hides it, so there is no

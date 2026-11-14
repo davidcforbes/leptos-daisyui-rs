@@ -8,7 +8,9 @@
 //! object.
 
 use super::component::{
-    filter_sidebar_header_actions_wrapper, filter_sidebar_title_actions_wrapper,
+    FILTER_SIDEBAR_MAXIMIZED_WIDTH, filter_sidebar_header_actions_wrapper,
+    filter_sidebar_maximize_button, filter_sidebar_title_actions_wrapper,
+    filter_sidebar_width_class,
 };
 use super::style::{FilterSidebarTogglePlacement, SidebarSide, join_side_class};
 use leptos::prelude::*;
@@ -814,4 +816,109 @@ fn collapsed_title_actions_claim_zero_width_and_are_inert() {
             "collapsed title actions must carry {needle} (ldui-8hba's rule)"
         );
     }
+}
+
+// ── maximize toggle (ldui-kq3w) ─────────────────────────────────────────────
+//
+// The owner asked for a `<<` / `>>` toggle on the assistant panel that widens
+// it to 90% of the available window and restores the normal side-panel width.
+
+#[test]
+fn maximize_toggle_is_absent_unless_the_consumer_wires_it() {
+    let owner = Owner::new();
+    owner.with(|| {
+        let f = Signal::stored(false);
+        assert!(
+            filter_sidebar_maximize_button(
+                None,
+                f,
+                Signal::stored(String::from("Expand panel")),
+                f,
+                Signal::stored(SidebarSide::Right),
+            )
+            .is_none(),
+            "no on_maximize_toggle must emit no node, so existing panels keep              their markup byte-for-byte"
+        );
+        assert!(
+            filter_sidebar_maximize_button(
+                Some(Callback::new(|()| {})),
+                f,
+                Signal::stored(String::from("Expand panel")),
+                f,
+                Signal::stored(SidebarSide::Right),
+            )
+            .is_some()
+        );
+    });
+}
+
+#[test]
+fn maximized_width_is_ninety_percent_and_collapse_always_wins() {
+    assert_eq!(FILTER_SIDEBAR_MAXIMIZED_WIDTH, "w-[90cqw] min-w-[90cqw]");
+    let normal = "w-[280px] min-w-[280px]";
+    let wide = FILTER_SIDEBAR_MAXIMIZED_WIDTH;
+    // (collapsed, maximizable, maximized) -> expected
+    let cases = [
+        ((false, true, false), normal),
+        ((false, true, true), wide),
+        ((true, true, true), "w-[44px] min-w-[44px]"),
+        ((true, true, false), "w-[44px] min-w-[44px]"),
+        // A stray `maximized` cannot widen a panel that offers no toggle.
+        ((false, false, true), normal),
+    ];
+    for ((collapsed, maximizable, maximized), want) in cases {
+        assert_eq!(
+            filter_sidebar_width_class(collapsed, maximizable, maximized, normal, wide),
+            want,
+            "collapsed={collapsed} maximizable={maximizable} maximized={maximized}"
+        );
+    }
+}
+
+#[test]
+fn maximize_glyph_points_where_the_inner_edge_would_go() {
+    assert_eq!(SidebarSide::Right.maximize_glyph(false), "<<");
+    assert_eq!(SidebarSide::Right.maximize_glyph(true), ">>");
+    assert_eq!(SidebarSide::Left.maximize_glyph(false), ">>");
+    assert_eq!(SidebarSide::Left.maximize_glyph(true), "<<");
+}
+
+#[test]
+fn maximize_toggle_is_a_pressed_toggle_with_one_label_hidden_when_collapsed() {
+    let body = VIEW_SRC
+        .split("pub(crate) fn filter_sidebar_maximize_button(")
+        .nth(1)
+        .expect("the maximize builder must exist")
+        .split("/// Renders the ONE toggle-button markup")
+        .next()
+        .unwrap();
+    for needle in [
+        "type=\"button\"",
+        "aria-pressed=move || maximized.get().to_string()",
+        "aria-label=move || maximize_label.get()",
+        "inert=move || collapsed.get()",
+        "data-filter-sidebar-maximize=\"true\"",
+    ] {
+        assert!(body.contains(needle), "maximize toggle lost `{needle}`");
+    }
+}
+
+#[test]
+fn maximize_toggle_sits_between_header_actions_and_the_collapse_toggle() {
+    let header = VIEW_SRC
+        .split("pub fn FilterSidebar(")
+        .nth(1)
+        .expect("FilterSidebar must exist")
+        .split("── expanded content")
+        .next()
+        .unwrap();
+    let actions = header
+        .find("filter_sidebar_header_actions_wrapper(header_actions, collapsed)")
+        .unwrap();
+    let maximize = header.find("filter_sidebar_maximize_button(").unwrap();
+    let toggle = header.find("filter_sidebar_toggle_button(").unwrap();
+    assert!(
+        actions < maximize && maximize < toggle,
+        "both width controls must sit together on the panel's inner edge"
+    );
 }

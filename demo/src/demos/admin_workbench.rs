@@ -315,6 +315,9 @@ pub fn AdminWorkbenchDemo() -> impl IntoView {
     let table_search = RwSignal::new(String::new());
     let table_status = RwSignal::new(String::new());
     let assistant_collapsed = RwSignal::new(false);
+    // ldui-kq3w: the `<<` / `>>` toggle widens the assistant to 90% of the
+    // row it shares with the content column and back to 280px.
+    let assistant_maximized = RwSignal::new(false);
     // ldui-ztgo: the KPI activation callback receives only the stable
     // `KpiItem::id`. Synthetic, like `action_count` -- the showcase has no
     // detail route to launch into.
@@ -378,7 +381,12 @@ pub fn AdminWorkbenchDemo() -> impl IntoView {
                         view! { <WorkbenchTopBar search_query=topbar_search /> }.into_any()
                     })>
                         <AppShellContent class="p-0">
-                            <div class="flex h-full min-h-0 w-full">
+                            // `@container` makes this row the measure for
+                            // the assistant's maximized `90cqw` width
+                            // (ldui-kq3w). Safe here: the row is `w-full`,
+                            // not content-sized, so containment cannot
+                            // collapse it.
+                            <div class="@container flex h-full min-h-0 w-full">
                                 // `contain: layout` scopes the Help FAB's `.fab`
                                 // `position: fixed` to THIS column (CSS
                                 // Containment L1 sec.2: layout containment makes
@@ -492,6 +500,11 @@ pub fn AdminWorkbenchDemo() -> impl IntoView {
                                         title="Assistant"
                                         toggle_label="Toggle the assistant panel"
                                         expanded_width="w-[280px] min-w-[280px]"
+                                        maximized=assistant_maximized
+                                        on_maximize_toggle=Callback::new(move |()| {
+                                            assistant_maximized.update(|maximized| *maximized = !*maximized);
+                                        })
+                                        maximize_label="Expand the assistant panel"
                                         attr:data-testid="admin-workbench-assistant"
                                     >
                                         <div class="flex flex-col gap-3" data-testid="admin-workbench-assistant-body">

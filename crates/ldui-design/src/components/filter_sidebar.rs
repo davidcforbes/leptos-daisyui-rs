@@ -89,6 +89,24 @@ impl SidebarSide {
         }
     }
 
+    /// Text glyph for the maximize toggle (ldui-kq3w), given whether the
+    /// panel is currently maximized.
+    ///
+    /// Same rule as [`chevron_name`](Self::chevron_name): the arrows point
+    /// where the panel's inner edge would GO. A right-docked panel widens
+    /// leftwards, so at its normal width it shows `<<` and, maximized, `>>`
+    /// to shrink back. A left panel is the exact mirror. Plain text rather
+    /// than a sprite icon because the icon sprite is host-owned and has no
+    /// double chevron.
+    pub fn maximize_glyph(&self, maximized: bool) -> &'static str {
+        match (self, maximized) {
+            (SidebarSide::Left, false) => ">>",
+            (SidebarSide::Left, true) => "<<",
+            (SidebarSide::Right, false) => "<<",
+            (SidebarSide::Right, true) => ">>",
+        }
+    }
+
     /// Flex-direction class for the 52px header row, so the toggle button
     /// lands on the panel's inner edge and the title takes the outer one.
     ///

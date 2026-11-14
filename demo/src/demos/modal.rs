@@ -268,6 +268,57 @@ pub fn ModalDemo() -> impl IntoView {
                     </ModalBox>
                 </Modal>
             </Section>
+
+            // ldui-kq3w: the standard floating assistant frame. The body is a
+            // stand-in; a real host mounts `AiChatWorkspace` (Rail layout).
+            <Section title="AI assistant dialog">
+                <AiAssistantDialogDemo />
+            </Section>
         </ContentLayout>
+    }
+}
+
+#[component]
+fn AiAssistantDialogDemo() -> impl IntoView {
+    let open = RwSignal::new(false);
+    let maximized = RwSignal::new(false);
+    view! {
+        <div class="flex flex-wrap items-center gap-4">
+            <Button
+                color=ButtonColor::Primary
+                on_click=Callback::new(move |_| open.set(true))
+                attr:aria-controls="demo-ai-assistant-dialog"
+                attr:data-testid="ai-assistant-dialog-launcher"
+            >
+                "Open assistant"
+            </Button>
+            <span class="text-sm text-base-content/75" data-testid="ai-assistant-dialog-size">
+                {move || if maximized.get() { "Maximized (90% of the window)" } else { "Normal size" }}
+            </span>
+        </div>
+        <AiAssistantDialog
+            open=open
+            on_close_request=Callback::new(move |_| open.set(false))
+            title="Assistant"
+            maximized=maximized
+            panel_id="demo-ai-assistant-dialog"
+            header_actions=Box::new(|| {
+                view! {
+                    <Button style=ButtonStyle::Outline size=ButtonSize::Xs class="border-base-300">
+                        "New session"
+                    </Button>
+                }
+                .into_any()
+            })
+        >
+            <div class="flex flex-col gap-3 p-1">
+                <p class="text-sm">
+                    "Press << to widen the assistant to 90% of the window, and >> to return it to its docked size."
+                </p>
+                <p class="text-sm text-base-content/75">
+                    "Escape, the backdrop and the close button each propose a close; the page accepts it."
+                </p>
+            </div>
+        </AiAssistantDialog>
     }
 }

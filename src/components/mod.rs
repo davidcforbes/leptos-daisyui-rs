@@ -1,6 +1,7 @@
 //! daisyUI components
 
 mod accordion;
+mod ai_assistant_dialog;
 pub mod ai_assistant_workspace;
 // `pub`, not `mod`: acceptance for ldui-iilm.1 needs the fully-qualified
 // `components::ai_chat::wire::…` path (the wire types shared with the
@@ -130,6 +131,7 @@ mod vertical_steps;
 mod week_view;
 
 pub use accordion::*;
+pub use ai_assistant_dialog::*;
 pub use ai_chat::*;
 pub use alert::*;
 pub use app_shell::*;
