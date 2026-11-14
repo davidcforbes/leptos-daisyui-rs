@@ -343,6 +343,23 @@ fn gate_steps() -> Vec<Step> {
             ],
             None,
         ),
+        // ldui-kcs7: `demo/icons.svg` must define every symbol `Icon` maps
+        // to, and `demo/index.html` must inline it. Without the sprite every
+        // showcase `Icon` drew an empty box with no error anywhere. A pure
+        // file scan, browser-free, and its own step for the same reason as
+        // the three above.
+        cmd(
+            "test-demo-icon-sprite",
+            "cargo",
+            &[
+                "test",
+                "-p",
+                "leptos-daisyui-rs",
+                "--test",
+                "demo_icon_sprite",
+            ],
+            None,
+        ),
         // ldui-iilm.1: `tests/ai_assistant_workspace_contract.rs` (8 tests)
         // was registered in no lane -- `test-lib` is `--lib` only, so an
         // integration test not named as its own step runs nowhere, same
@@ -3125,6 +3142,7 @@ mod tests {
                 "test-daisyui5",
                 "test-svg-paint",
                 "test-ld-class-coverage",
+                "test-demo-icon-sprite",
                 "test-ai-assistant-contract",
                 "test-bare-buttons",
                 "test-muted-text",
@@ -3471,6 +3489,24 @@ pub fn r() -> f32 { radius::CARD }
             args.iter().any(|a| a == "ld_class_stylesheet_coverage"),
             "{args:?}"
         );
+        assert!(args.iter().any(|a| a == "--test"), "{args:?}");
+    }
+
+    /// ldui-kcs7: the showcase sprite guard must be a native GATE step --
+    /// `test-lib` is `--lib` only, so `tests/demo_icon_sprite.rs` would
+    /// otherwise run nowhere.
+    #[test]
+    fn demo_icon_sprite_is_a_native_gate_step() {
+        let gate = gate_steps();
+        let step = gate
+            .iter()
+            .find(|s| s.name == "test-demo-icon-sprite")
+            .expect("test-demo-icon-sprite must be in the native gate");
+        let Run::Cmd { program, args, .. } = &step.run else {
+            panic!("test-demo-icon-sprite must be a native cargo command");
+        };
+        assert_eq!(*program, "cargo");
+        assert!(args.iter().any(|a| a == "demo_icon_sprite"), "{args:?}");
         assert!(args.iter().any(|a| a == "--test"), "{args:?}");
     }
 
@@ -4095,6 +4131,7 @@ pub fn r() -> f32 { radius::CARD }
                 "test-daisyui5",
                 "test-svg-paint",
                 "test-ld-class-coverage",
+                "test-demo-icon-sprite",
                 "test-ai-assistant-contract",
                 "test-bare-buttons",
                 "test-muted-text",
