@@ -2,8 +2,9 @@
 //! (ldui-ynmd.3): one standard `AppShellTopBar`, one borderless base-page
 //! `PageHeader` with seven icon quick actions, independent `KpiStrip` cards,
 //! an `EntityTable` whose typed text/select filters live in its own aligned
-//! filter row (no external filter bar duplicating it), a right-docked
-//! `FilterSidebar` assistant whose collapse returns width to the table, and
+//! filter row (no external filter bar duplicating it), the standard floating
+//! `AiAssistantDialog` that opens OVER the page without resizing it
+//! (ldui-fa0q, which replaced a right-docked `FilterSidebar` assistant), and
 //! a blue `Fab` Help button anchored bottom-right (ldui-0qro).
 //!
 //! Drives the general demo app (`html_target: None`, like
@@ -53,7 +54,10 @@ async fn snapshot(h: &pixelproof_web::Harness) -> Value {
             const entityTables = fixture.querySelectorAll('[data-entity-table]');
             const headerFilterRow = fixture.querySelector('[data-entity-filter-control]');
             const externalFilterBar = fixture.querySelector('[data-filter-bar]');
-            const assistant = fixture.querySelector('[data-testid="admin-workbench-assistant"]');
+            // The dialog box sits in a `<dialog>` that may be portalled or
+            // top-layered, so it is found by id, not inside the fixture.
+            const assistant = document.getElementById('admin-workbench-assistant');
+            const launcher = fixture.querySelector('[data-testid="admin-workbench-assistant-launcher"]');
             return {
                 topBarCount: topBars.length,
                 headerCount: headers.length,
@@ -67,6 +71,10 @@ async fn snapshot(h: &pixelproof_web::Harness) -> Value {
                 hasAlignedFilterRow: headerFilterRow !== null,
                 hasExternalFilterBar: externalFilterBar !== null,
                 assistantPresent: assistant !== null,
+                assistantState: assistant ? assistant.getAttribute('data-ai-assistant-dialog') : null,
+                launcherControls: launcher ? launcher.getAttribute('aria-controls') : null,
+                // No docked assistant column is left to take width.
+                dockedSidebar: fixture.querySelector('[data-filter-sidebar-toggle]') !== null,
             };
         })()"#,
     )
@@ -122,6 +130,21 @@ async fn wide_viewport_matches_the_intended_single_hierarchy() {
         "no external FilterBar duplicating the table's filters: {s}"
     );
     assert_eq!(s["assistantPresent"], json!(true), "assistant renders: {s}");
+    assert_eq!(
+        s["assistantState"],
+        json!("closed"),
+        "the floating assistant starts closed: {s}"
+    );
+    assert_eq!(
+        s["launcherControls"],
+        json!("admin-workbench-assistant"),
+        "the Assistant quick action controls the dialog box: {s}"
+    );
+    assert_eq!(
+        s["dockedSidebar"],
+        json!(false),
+        "the assistant floats; no docked side panel remains (ldui-fa0q): {s}"
+    );
 
     assert_no_browser_errors(&h, "admin-workbench wide viewport").await;
 }
@@ -242,11 +265,46 @@ async fn table_width(h: &pixelproof_web::Harness) -> f64 {
     .expect("table width")
 }
 
-/// Collapsing the right assistant returns its freed width to the table --
-/// the exact behavior the bead calls out by name.
+/// `{ state, visible, maximized, width, height, launcherExpanded,
+/// focusOnLauncher }` for the floating assistant. `visible` uses
+/// `checkVisibility({ visibilityProperty: true })`: a CLOSED daisyUI modal
+/// is `visibility: hidden` but still reports a full rect, so a rect alone
+/// would call it shown.
+async fn assistant_state(h: &pixelproof_web::Harness) -> Value {
+    eval_json(
+        h,
+        r#"(() => {
+            const box = document.getElementById('admin-workbench-assistant');
+            const launcher = document.querySelector('[data-testid="admin-workbench-assistant-launcher"]');
+            const r = box.getBoundingClientRect();
+            return {
+                state: box.getAttribute('data-ai-assistant-dialog'),
+                visible: box.checkVisibility({ visibilityProperty: true }),
+                maximized: box.getAttribute('data-ai-assistant-dialog-maximized'),
+                width: r.width,
+                height: r.height,
+                viewportWidth: window.innerWidth,
+                viewportHeight: window.innerHeight,
+                launcherExpanded: launcher.getAttribute('aria-expanded'),
+                focusOnLauncher: document.activeElement === launcher,
+            };
+        })()"#,
+    )
+    .await
+}
+
+/// ldui-fa0q: the assistant FLOATS. Opening it, and maximizing it to 90% of
+/// the window, leaves the table's width exactly where it was -- the
+/// property the owner chose the floating dialog for, and the one the old
+/// docked `FilterSidebar` broke (maximized, it squeezed this page into a
+/// 122px column). Escape closes it and focus returns to the launcher.
+///
+/// The negative control is built in: the dialog really is open and really
+/// is 90% wide when the width is compared, so an unchanged table cannot
+/// come from a dialog that never opened.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires demo dev server (cargo xtask test-admin-workbench)"]
-async fn assistant_collapse_returns_width_to_the_table() {
+async fn assistant_dialog_floats_over_the_page_without_resizing_it_ldui_fa0q() {
     let h = harness_at(PAGE).await;
     begin_browser_error_capture(&h).await;
 
@@ -254,23 +312,72 @@ async fn assistant_collapse_returns_width_to_the_table() {
         .await
         .expect("set wide viewport");
 
-    let expanded_width = table_width(&h).await;
+    let before = table_width(&h).await;
+    let closed = assistant_state(&h).await;
+    assert_eq!(closed["state"], json!("closed"), "starts closed: {closed}");
+    assert_eq!(
+        closed["visible"],
+        json!(false),
+        "closed is hidden: {closed}"
+    );
+    assert_eq!(closed["launcherExpanded"], json!("false"), "{closed}");
+
+    click(&h, ASSISTANT_LAUNCHER).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let open = assistant_state(&h).await;
+    assert_eq!(
+        open["state"],
+        json!("open"),
+        "the launcher opens it: {open}"
+    );
+    assert_eq!(open["visible"], json!(true), "open is shown: {open}");
+    assert_eq!(open["launcherExpanded"], json!("true"), "{open}");
+    let opened = table_width(&h).await;
+    assert!(
+        (opened - before).abs() < 0.5,
+        "opening the assistant must not resize the page: before={before} open={opened}"
+    );
 
     click(
         &h,
-        "[data-testid=\"admin-workbench-assistant\"] button[aria-expanded]",
+        "#admin-workbench-assistant [data-ai-assistant-dialog-maximize]",
     )
     .await;
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-
-    let collapsed_width = table_width(&h).await;
-
+    // The box transitions its width over 250ms.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let max = assistant_state(&h).await;
+    assert_eq!(max["maximized"], json!("true"), "<< maximizes: {max}");
+    let ratio = max["width"].as_f64().expect("width") / max["viewportWidth"].as_f64().expect("vw");
     assert!(
-        collapsed_width > expanded_width,
-        "collapsing the assistant must widen the table: expanded={expanded_width} collapsed={collapsed_width}"
+        (ratio - 0.9).abs() < 0.01,
+        "maximized is 90% of the window wide: ratio={ratio} {max}"
+    );
+    let maximized = table_width(&h).await;
+    assert!(
+        (maximized - before).abs() < 0.5,
+        "maximizing the assistant must not resize the page either: \
+         before={before} maximized={maximized}"
     );
 
-    assert_no_browser_errors(&h, "admin-workbench assistant collapse").await;
+    h.press_key_sequence(&[Key::Escape])
+        .await
+        .expect("Escape in the assistant");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let after = assistant_state(&h).await;
+    assert_eq!(after["state"], json!("closed"), "Escape closes it: {after}");
+    assert_eq!(after["visible"], json!(false), "{after}");
+    assert_eq!(
+        after["focusOnLauncher"],
+        json!(true),
+        "closing returns focus to the launcher: {after}"
+    );
+    assert_eq!(
+        after["maximized"],
+        json!("true"),
+        "the size the person left survives a close: {after}"
+    );
+
+    assert_no_browser_errors(&h, "admin-workbench floating assistant").await;
 }
 
 /// At a compact mobile viewport, nothing in the reference escapes the page
@@ -322,9 +429,9 @@ async fn compact_viewport_wraps_without_horizontal_overflow() {
 // The reference must render the blue Help floating action button anchored
 // bottom-right, built from the existing `Fab`, at both viewports; it must
 // have an accessible name and a visible focus treatment; it must not
-// overlap the table's pagination footer or the right assistant panel in
-// either assistant state; and collapsing/expanding the assistant must not
-// strand or hide it.
+// overlap the table's pagination footer; and opening and closing the
+// floating assistant must not move or hide it (ldui-fa0q; it once had to
+// clear a docked assistant panel, which no longer exists).
 
 /// A DOM element's viewport-relative bounding rect, or `null` if the
 /// selector matches nothing.
@@ -362,7 +469,7 @@ fn rects_overlap(a: &Value, b: &Value) -> bool {
 }
 
 const HELP_FAB_TRIGGER: &str = "[data-testid=\"admin-workbench-help-fab-trigger\"]";
-const ASSISTANT_PANEL: &str = "[data-testid=\"admin-workbench-assistant\"]";
+const ASSISTANT_LAUNCHER: &str = "[data-testid=\"admin-workbench-assistant-launcher\"]";
 const TABLE_PAGINATION: &str = "[data-testid=\"admin-workbench-table\"] .join";
 
 /// `{ ariaLabel, hasFocusRing }` for the Help FAB's trigger button.
@@ -383,8 +490,8 @@ async fn help_fab_a11y(h: &pixelproof_web::Harness) -> Value {
 
 /// The Help FAB renders, is anchored to the bottom-right quadrant of the
 /// reference, carries an accessible name and the shared visible-focus
-/// treatment, does not overlap the table's pagination footer or the
-/// (expanded) assistant panel, and its click callback is wired -- caller-
+/// treatment, does not overlap the table's pagination footer, and its click
+/// callback is wired -- caller-
 /// owned activation, exactly like the reference's other actions.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires demo dev server (cargo xtask test-admin-workbench)"]
@@ -421,12 +528,7 @@ async fn wide_viewport_help_fab_present_placed_and_accessible() {
         "Help FAB must be anchored in the bottom-right quadrant: fab={fab} workbench={workbench}"
     );
 
-    let assistant = rect_of(&h, ASSISTANT_PANEL).await;
     let pagination = rect_of(&h, TABLE_PAGINATION).await;
-    assert!(
-        !rects_overlap(&fab, &assistant),
-        "Help FAB must not overlap the (expanded) assistant panel: fab={fab} assistant={assistant}"
-    );
     assert!(
         !rects_overlap(&fab, &pagination),
         "Help FAB must not overlap the table's pagination footer: fab={fab} pagination={pagination}"
@@ -455,12 +557,13 @@ async fn wide_viewport_help_fab_present_placed_and_accessible() {
     assert_no_browser_errors(&h, "admin-workbench help FAB wide viewport").await;
 }
 
-/// Collapsing and re-expanding the assistant must not strand or hide the
-/// Help FAB: it stays rendered with a real size and never overlaps the
-/// assistant panel or the table's pagination footer in either state.
+/// Opening and closing the floating assistant must not strand, hide or
+/// move the Help FAB (ldui-fa0q): the dialog takes no layout space, so the
+/// FAB's rect after a close is the rect it had before the open, and it
+/// still clears the table's pagination footer.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires demo dev server (cargo xtask test-admin-workbench)"]
-async fn assistant_collapse_does_not_strand_the_help_fab() {
+async fn assistant_dialog_does_not_move_the_help_fab() {
     let h = harness_at(PAGE).await;
     begin_browser_error_capture(&h).await;
 
@@ -468,77 +571,55 @@ async fn assistant_collapse_does_not_strand_the_help_fab() {
         .await
         .expect("set wide viewport");
 
-    let assert_fab_visible_and_clear = |label: &'static str,
-                                        fab: Value,
-                                        assistant: Value,
-                                        pagination: Value| {
-        let width = fab["width"].as_f64().unwrap_or(0.0);
-        let height = fab["height"].as_f64().unwrap_or(0.0);
-        assert!(
-            width > 0.0 && height > 0.0,
-            "Help FAB must stay visible with the assistant {label}: fab={fab}"
-        );
-        assert!(
-            !rects_overlap(&fab, &assistant),
-            "Help FAB must not overlap the assistant panel while {label}: fab={fab} assistant={assistant}"
-        );
-        assert!(
-            !rects_overlap(&fab, &pagination),
-            "Help FAB must not overlap the table's pagination footer while the assistant is {label}: \
-             fab={fab} pagination={pagination}"
-        );
-    };
+    let fab_before = rect_of(&h, HELP_FAB_TRIGGER).await;
+    let width = fab_before["width"].as_f64().unwrap_or(0.0);
+    let height = fab_before["height"].as_f64().unwrap_or(0.0);
+    assert!(
+        width > 0.0 && height > 0.0,
+        "Help FAB must render: fab={fab_before}"
+    );
 
-    let fab_expanded = rect_of(&h, HELP_FAB_TRIGGER).await;
-    let assistant_expanded = rect_of(&h, ASSISTANT_PANEL).await;
-    let pagination_expanded = rect_of(&h, TABLE_PAGINATION).await;
-    assert_fab_visible_and_clear(
-        "expanded",
-        fab_expanded,
-        assistant_expanded,
-        pagination_expanded,
+    click(&h, ASSISTANT_LAUNCHER).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let open = assistant_state(&h).await;
+    assert_eq!(open["visible"], json!(true), "the assistant opened: {open}");
+    let fab_open = rect_of(&h, HELP_FAB_TRIGGER).await;
+    assert_eq!(
+        fab_open, fab_before,
+        "opening the assistant must not move the Help FAB"
     );
 
     click(
         &h,
-        "[data-testid=\"admin-workbench-assistant\"] button[aria-expanded]",
+        "#admin-workbench-assistant [data-ai-assistant-dialog-close]",
     )
     .await;
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-
-    let fab_collapsed = rect_of(&h, HELP_FAB_TRIGGER).await;
-    let assistant_collapsed = rect_of(&h, ASSISTANT_PANEL).await;
-    let pagination_collapsed = rect_of(&h, TABLE_PAGINATION).await;
-    assert_fab_visible_and_clear(
-        "collapsed",
-        fab_collapsed,
-        assistant_collapsed,
-        pagination_collapsed,
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let closed = assistant_state(&h).await;
+    assert_eq!(
+        closed["state"],
+        json!("closed"),
+        "close button closes: {closed}"
     );
 
-    click(
-        &h,
-        "[data-testid=\"admin-workbench-assistant\"] button[aria-expanded]",
-    )
-    .await;
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-
-    let fab_re_expanded = rect_of(&h, HELP_FAB_TRIGGER).await;
-    let assistant_re_expanded = rect_of(&h, ASSISTANT_PANEL).await;
-    let pagination_re_expanded = rect_of(&h, TABLE_PAGINATION).await;
-    assert_fab_visible_and_clear(
-        "re-expanded",
-        fab_re_expanded,
-        assistant_re_expanded,
-        pagination_re_expanded,
+    let fab_after = rect_of(&h, HELP_FAB_TRIGGER).await;
+    let pagination = rect_of(&h, TABLE_PAGINATION).await;
+    assert_eq!(
+        fab_after, fab_before,
+        "the Help FAB must be where it was after the assistant closes"
+    );
+    assert!(
+        !rects_overlap(&fab_after, &pagination),
+        "Help FAB must not overlap the table's pagination footer: \
+         fab={fab_after} pagination={pagination}"
     );
 
-    assert_no_browser_errors(&h, "admin-workbench help FAB assistant collapse").await;
+    assert_no_browser_errors(&h, "admin-workbench help FAB floating assistant").await;
 }
 
 /// At a compact mobile viewport the Help FAB still renders with an
 /// accessible name, stays inside the reference (no horizontal escape), and
-/// still clears the assistant panel and the table's pagination footer.
+/// still clears the table's pagination footer.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires demo dev server (cargo xtask test-admin-workbench)"]
 async fn compact_viewport_help_fab_present_placed_and_accessible() {
@@ -569,17 +650,12 @@ async fn compact_viewport_help_fab_present_placed_and_accessible() {
     );
 
     let fab = rect_of(&h, HELP_FAB_TRIGGER).await;
-    let assistant = rect_of(&h, ASSISTANT_PANEL).await;
     let pagination = rect_of(&h, TABLE_PAGINATION).await;
     let width = fab["width"].as_f64().unwrap_or(0.0);
     let height = fab["height"].as_f64().unwrap_or(0.0);
     assert!(
         width > 0.0 && height > 0.0,
         "Help FAB must render at compact width: fab={fab}"
-    );
-    assert!(
-        !rects_overlap(&fab, &assistant),
-        "Help FAB must not overlap the assistant panel at compact width: fab={fab} assistant={assistant}"
     );
     assert!(
         !rects_overlap(&fab, &pagination),

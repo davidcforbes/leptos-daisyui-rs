@@ -6,9 +6,14 @@
 //! [`PageHeader`] (no back slot) with a greeting/subtitle and seven
 //! [`PageQuickActions`], [`KpiStrip`] with eight varied cards, [`EntityTable`]
 //! with typed text/select filters in its own aligned filter row (no external
-//! filter bar), a right-docked [`FilterSidebar`] with assistant content and
-//! controlled collapse, and a blue [`Fab`] Help button anchored bottom-right
-//! (ldui-0qro).
+//! filter bar), the standard floating [`AiAssistantDialog`] opened from the
+//! header's Assistant action (ldui-fa0q), and a blue [`Fab`] Help button
+//! anchored bottom-right (ldui-0qro).
+//!
+//! The assistant floats OVER the page rather than docking beside it (owner,
+//! 2026-11-13): a docked side panel takes its width from the content, and
+//! maximized it squeezed this page into a 122px column, while the floating
+//! dialog leaves the page's layout untouched in every state.
 //!
 //! Every part here is an EXISTING component, reused exactly as published --
 //! this file composes them, it does not extend or wrap any of them into a
@@ -179,13 +184,14 @@ fn workbench_kpis() -> Vec<KpiItem> {
 /// The seven icon quick actions inside the borderless [`PageHeader`]'s
 /// `actions` slot. Every action is a plain synthetic callback -- no route,
 /// no HTTP form, no domain logic -- except "Reports", an in-page anchor
-/// jump, and "Assistant", which ties the header directly to the right
-/// [`FilterSidebar`]'s controlled collapse to demonstrate real composition
-/// rather than a decorative row.
+/// jump, and "Assistant", which opens the floating [`AiAssistantDialog`]
+/// (controlled `open`) to demonstrate real composition rather than a
+/// decorative row. It is the dialog's launcher, so the native `<dialog>`
+/// returns focus to it on close.
 #[component]
 fn WorkbenchQuickActions(
     action_count: RwSignal<usize>,
-    assistant_collapsed: RwSignal<bool>,
+    assistant_open: RwSignal<bool>,
 ) -> impl IntoView {
     view! {
         <PageQuickActions label="Workbench actions">
@@ -232,10 +238,11 @@ fn WorkbenchQuickActions(
                 style=ButtonStyle::Outline
                 size=ButtonSize::Sm
                 color=ButtonColor::Secondary
-                attr:aria-expanded=move || (!assistant_collapsed.get()).to_string()
-                on_click=Callback::new(move |_| {
-                    assistant_collapsed.update(|collapsed| *collapsed = !*collapsed);
-                })
+                attr:aria-haspopup="dialog"
+                attr:aria-controls=ASSISTANT_PANEL_ID
+                attr:aria-expanded=move || assistant_open.get().to_string()
+                attr:data-testid="admin-workbench-assistant-launcher"
+                on_click=Callback::new(move |_| assistant_open.set(true))
             >
                 <PageQuickActionContent icon="message-square" label="Assistant" />
             </Button>
@@ -308,22 +315,23 @@ fn WorkbenchTopBar(search_query: RwSignal<String>) -> impl IntoView {
     }
 }
 
+/// The assistant dialog box's DOM id, for the launcher's `aria-controls`.
+const ASSISTANT_PANEL_ID: &str = "admin-workbench-assistant";
+
 #[component]
 pub fn AdminWorkbenchDemo() -> impl IntoView {
     let topbar_search = RwSignal::new(String::new());
     let action_count = RwSignal::new(0_usize);
     let table_search = RwSignal::new(String::new());
     let table_status = RwSignal::new(String::new());
-    let assistant_collapsed = RwSignal::new(false);
-    // ldui-kq3w: the `<<` / `>>` toggle widens the assistant to 90% of the
-    // row it shares with the content column and back to 280px.
-    let assistant_maximized = RwSignal::new(false);
+    // Controlled open (ldui-fa0q): Escape, the backdrop and the dialog's
+    // close button each PROPOSE a close; the page accepts by clearing it.
+    let assistant_open = RwSignal::new(false);
     // ldui-ztgo: the KPI activation callback receives only the stable
     // `KpiItem::id`. Synthetic, like `action_count` -- the showcase has no
     // detail route to launch into.
     let kpi_activated = RwSignal::new(String::new());
     let on_kpi_activate = Callback::new(move |id: String| kpi_activated.set(id));
-    let assistant_unread = RwSignal::new(2_usize);
     let assistant_draft = RwSignal::new(String::new());
     let assistant_messages = RwSignal::new(vec![
         "2 SLA breaches need review before end of day.".to_owned(),
@@ -359,13 +367,12 @@ pub fn AdminWorkbenchDemo() -> impl IntoView {
         }
         assistant_messages.update(|messages| messages.push(draft.clone()));
         assistant_draft.set(String::new());
-        assistant_unread.update(|unread| *unread += 1);
     });
 
     view! {
         <ContentLayout
             title="Admin Workbench (Composition Reference)"
-            description="A deliberately small reference proving the intended opinionated hierarchy: one standard AppShellTopBar, one borderless base-page PageHeader with icon quick actions, independent KpiStrip cards, an EntityTable with its own aligned filter row (no external filter bar), and a right-docked assistant whose collapse returns width to the table. Resize the browser to review wide-desktop and compact-mobile wrapping; the assistant toggle exercises expanded/collapsed."
+            description="A deliberately small reference proving the intended opinionated hierarchy: one standard AppShellTopBar, one borderless base-page PageHeader with icon quick actions, independent KpiStrip cards, an EntityTable with its own aligned filter row (no external filter bar), and the standard floating assistant dialog, which opens over the page without resizing it. Resize the browser to review wide-desktop and compact-mobile wrapping; the header's Assistant action opens the dialog, and its << / >> toggle widens it to 90% of the window and back."
         >
             <Section title="Full composition" col=true>
                 <p class="text-sm text-base-content/70">
@@ -381,23 +388,18 @@ pub fn AdminWorkbenchDemo() -> impl IntoView {
                         view! { <WorkbenchTopBar search_query=topbar_search /> }.into_any()
                     })>
                         <AppShellContent class="p-0">
-                            // `@container` makes this row the measure for
-                            // the assistant's maximized `90cqw` width
-                            // (ldui-kq3w). Safe here: the row is `w-full`,
-                            // not content-sized, so containment cannot
-                            // collapse it.
-                            <div class="@container flex h-full min-h-0 w-full">
+                            <div class="flex h-full min-h-0 w-full">
                                 // `contain: layout` scopes the Help FAB's `.fab`
                                 // `position: fixed` to THIS column (CSS
                                 // Containment L1 sec.2: layout containment makes
                                 // an element the containing block for its fixed-
                                 // and absolutely-positioned descendants). That is
-                                // structural, not incidental: the column is a flex
-                                // sibling of the right-docked assistant panel, so
-                                // a FAB anchored to the column's own bottom-right
-                                // corner can never render past the column's right
-                                // edge into the assistant panel, collapsed or
-                                // expanded -- no per-state offset math needed. The
+                                // structural, not incidental: a FAB anchored to
+                                // the column's own bottom-right corner can never
+                                // render past the column's right edge, whatever
+                                // shares the row with it. The assistant floats in
+                                // the top layer (ldui-fa0q), so it takes no width
+                                // from this column in any state. The
                                 // extra `pb-24` (96px, on the canonical spacing
                                 // scale) reserves clearance below the table's own
                                 // pagination footer so the FAB -- pinned 1rem from
@@ -416,7 +418,7 @@ pub fn AdminWorkbenchDemo() -> impl IntoView {
                                             view! {
                                                 <WorkbenchQuickActions
                                                     action_count=action_count
-                                                    assistant_collapsed=assistant_collapsed
+                                                    assistant_open=assistant_open
                                                 />
                                             }
                                                 .into_any()
@@ -479,78 +481,63 @@ pub fn AdminWorkbenchDemo() -> impl IntoView {
                                         </Button>
                                     </Fab>
                                 </div>
-
-                                // Docked beside the content only from `lg` up.
-                                // The panel's 280px min-width is not negotiable
-                                // in a flex row, so at 390px it took 280 of the
-                                // row's 340 and left the content column 60px --
-                                // which starved the KpiStrip to 12px and clipped
-                                // every card (ldui-kwup). A right-docked
-                                // assistant is a desktop affordance; on a phone
-                                // the Help FAB is the way in, so below `lg` it
-                                // does not compete with the content for width.
-                                <div class="hidden h-full lg:flex">
-                                    <FilterSidebar
-                                        side=SidebarSide::Right
-                                        collapsed=assistant_collapsed
-                                        on_toggle=Callback::new(move |()| {
-                                            assistant_collapsed.update(|collapsed| *collapsed = !*collapsed);
-                                        })
-                                        active_count=Signal::derive(move || assistant_unread.get())
-                                        title="Assistant"
-                                        toggle_label="Toggle the assistant panel"
-                                        expanded_width="w-[280px] min-w-[280px]"
-                                        maximized=assistant_maximized
-                                        on_maximize_toggle=Callback::new(move |()| {
-                                            assistant_maximized.update(|maximized| *maximized = !*maximized);
-                                        })
-                                        maximize_label="Expand the assistant panel"
-                                        attr:data-testid="admin-workbench-assistant"
-                                    >
-                                        <div class="flex flex-col gap-3" data-testid="admin-workbench-assistant-body">
-                                            <p class="ld-text-caption text-base-content/75">
-                                                "Suggestions based on what's on your desk today."
-                                            </p>
-                                            <ul class="flex flex-col gap-2">
-                                                <For
-                                                    each=move || {
-                                                        assistant_messages
-                                                            .get()
-                                                            .into_iter()
-                                                            .enumerate()
-                                                            .collect::<Vec<_>>()
-                                                    }
-                                                    key=|(index, _)| *index
-                                                    children=move |(_, message)| {
-                                                        view! {
-                                                            <li class="rounded-box border border-base-300 bg-base-200/60 p-2 ld-text-caption">
-                                                                {message}
-                                                            </li>
-                                                        }
-                                                    }
-                                                />
-                                            </ul>
-                                            <label class="flex flex-col gap-1">
-                                                <span class="sr-only">"Ask the assistant"</span>
-                                                <Input
-                                                    size=InputSize::Sm
-                                                    placeholder="Ask the assistant"
-                                                    value=assistant_draft
-                                                    on_input=Callback::new(move |value| assistant_draft.set(value))
-                                                />
-                                            </label>
-                                            <Button
-                                                size=ButtonSize::Sm
-                                                color=ButtonColor::Primary
-                                                attr:data-testid="admin-workbench-assistant-ask"
-                                                on_click=ask_assistant
-                                            >
-                                                "Ask"
-                                            </Button>
-                                        </div>
-                                    </FilterSidebar>
-                                </div>
                             </div>
+
+                            // The standard floating assistant (ldui-fa0q). It
+                            // lives in the native `<dialog>`'s top layer, so
+                            // opening it -- or maximizing it to 90% of the
+                            // window -- moves nothing on the page beneath. It
+                            // was a right-docked `FilterSidebar` before, which
+                            // took 280px from the content column and, at a
+                            // phone width, starved the KpiStrip (ldui-kwup).
+                            <AiAssistantDialog
+                                open=assistant_open
+                                on_close_request=Callback::new(move |_| assistant_open.set(false))
+                                title="Assistant"
+                                panel_id=ASSISTANT_PANEL_ID
+                            >
+                                <div class="flex flex-col gap-3" data-testid="admin-workbench-assistant-body">
+                                    <p class="ld-text-caption text-base-content/75">
+                                        "Suggestions based on what's on your desk today."
+                                    </p>
+                                    <ul class="flex flex-col gap-2">
+                                        <For
+                                            each=move || {
+                                                assistant_messages
+                                                    .get()
+                                                    .into_iter()
+                                                    .enumerate()
+                                                    .collect::<Vec<_>>()
+                                            }
+                                            key=|(index, _)| *index
+                                            children=move |(_, message)| {
+                                                view! {
+                                                    <li class="rounded-box border border-base-300 bg-base-200/60 p-2 ld-text-caption">
+                                                        {message}
+                                                    </li>
+                                                }
+                                            }
+                                        />
+                                    </ul>
+                                    <label class="flex flex-col gap-1">
+                                        <span class="sr-only">"Ask the assistant"</span>
+                                        <Input
+                                            size=InputSize::Sm
+                                            placeholder="Ask the assistant"
+                                            value=assistant_draft
+                                            on_input=Callback::new(move |value| assistant_draft.set(value))
+                                        />
+                                    </label>
+                                    <Button
+                                        size=ButtonSize::Sm
+                                        color=ButtonColor::Primary
+                                        attr:data-testid="admin-workbench-assistant-ask"
+                                        on_click=ask_assistant
+                                    >
+                                        "Ask"
+                                    </Button>
+                                </div>
+                            </AiAssistantDialog>
                         </AppShellContent>
                     </AppShell>
                 </div>
